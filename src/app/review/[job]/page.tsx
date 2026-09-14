@@ -4,6 +4,7 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, reviewList, reviewRequirements, type ReviewDecision } from "@/lib/review";
 import { recordReview } from "../actions";
+import { primeStore } from "@/data/prime";
 
 const CHOICES: { value: ReviewDecision; label: string; on: string }[] = [
   { value: "shortlist", label: "Shortlist", on: "bg-brand text-white border-brand" },
@@ -23,6 +24,7 @@ const REASONS = [
 ];
 
 export default async function ReviewJob({ params }: { params: Promise<{ job: string }> }) {
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const job = Number((await params).job);
   const ids = reviewList(job);

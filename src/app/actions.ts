@@ -24,6 +24,7 @@ import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
+import { primeStore } from "@/data/prime";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -105,6 +106,7 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
 }
 
 export async function moveStage(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const stage = String(formData.get("stage")) as Stage;
@@ -140,6 +142,7 @@ export async function moveStage(formData: FormData) {
 }
 
 export async function claimCandidate(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -153,6 +156,7 @@ export async function claimCandidate(formData: FormData) {
  * not taken.
  */
 export async function confirmShortlist(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("appId").map(String);
@@ -174,6 +178,7 @@ export async function confirmShortlist(formData: FormData) {
 }
 
 export async function logCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -190,6 +195,7 @@ export async function logCall(formData: FormData) {
 }
 
 export async function addLink(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const url = String(formData.get("url") ?? "").trim();
@@ -198,6 +204,7 @@ export async function addLink(formData: FormData) {
 }
 
 export async function toggleEyeMark(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   repo.toggleEyeMark(String(formData.get("entryId")));
@@ -243,6 +250,7 @@ function readExtract(f: FormData): ExtractedBrief {
  * booking several off a single client call).
  */
 export async function createOpeningStep1(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
   const clientId = String(formData.get("clientId") ?? "");
@@ -326,6 +334,7 @@ export async function createOpeningStep1(formData: FormData) {
 
 /** Screen two — the TA saves their notes before generating from them. */
 export async function saveBriefNotes(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const notes = String(formData.get("notes") ?? "");
@@ -347,6 +356,7 @@ export async function saveBriefNotes(formData: FormData) {
  */
 /** Spec §5.2 — the TA reads the JD and approves it; only then is it live. */
 export async function approveJd(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const jd = String(formData.get("jdMarkdown") ?? "");
@@ -389,6 +399,7 @@ export async function approveJd(formData: FormData) {
  * means; the change is stamped so the record still shows when it last moved.
  */
 export async function amendJd(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
@@ -401,6 +412,7 @@ export async function amendJd(formData: FormData) {
 }
 
 export async function addJobPost(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const title = String(formData.get("title") ?? "").trim();
@@ -413,6 +425,7 @@ export async function addJobPost(formData: FormData) {
 }
 
 export async function updatePost(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "postId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const postId = String(formData.get("postId"));
@@ -427,6 +440,7 @@ export async function updatePost(formData: FormData) {
 }
 
 export async function setPostStatus(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "postId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const postId = String(formData.get("postId"));
@@ -437,6 +451,7 @@ export async function setPostStatus(formData: FormData) {
 
 /** Spec §6.1 — one click moves a paused post's CVs onto the live one. */
 export async function transferCvs(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "fromPostId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const from = String(formData.get("fromPostId"));
@@ -449,6 +464,7 @@ export async function transferCvs(formData: FormData) {
 // ─── Phase 7: backups and add-ons ────────────────────────────────────────────
 
 export async function declineOffer(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -463,6 +479,7 @@ export async function declineOffer(formData: FormData) {
 }
 
 export async function toggleAddOn(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -474,6 +491,7 @@ export async function toggleAddOn(formData: FormData) {
 // ─── Link vault (spec §4.5) ──────────────────────────────────────────────────
 
 export async function updateLink(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const entryId = String(formData.get("entryId"));
@@ -488,6 +506,7 @@ export async function updateLink(formData: FormData) {
 }
 
 export async function logOutreach(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const entryId = String(formData.get("entryId"));
@@ -501,6 +520,7 @@ export async function logOutreach(formData: FormData) {
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
 
 export async function setOpeningStatus(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const status = String(formData.get("status")) as "open" | "on_hold" | "closed" | "filled";
@@ -518,6 +538,7 @@ export async function setOpeningStatus(formData: FormData) {
  * be invisible to the desk that is supposed to be filling it.
  */
 export async function setOpeningTeam(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("memberId").map(String);
@@ -548,6 +569,7 @@ export async function setOpeningTeam(formData: FormData) {
 }
 
 export async function addClient(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "client.manage");
   const name = String(formData.get("name") ?? "").trim();
   const industry = String(formData.get("industry") ?? "").trim() || "—";
@@ -572,6 +594,7 @@ export async function addClient(formData: FormData) {
 }
 
 export async function updateClient(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const name = String(formData.get("name") ?? "").trim();
@@ -587,6 +610,7 @@ export async function updateClient(formData: FormData) {
 }
 
 export async function deleteClient(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const res = repo.deleteClient(clientId);
@@ -598,6 +622,7 @@ export async function deleteClient(formData: FormData) {
 
 /** Contacts arrive as parallel arrays from the repeatable rows. */
 export async function saveContacts(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const names = formData.getAll("contactName").map(String);
@@ -620,6 +645,7 @@ export async function saveContacts(formData: FormData) {
 // ─── Deletes and edits (12 Sep sweep) ────────────────────────────────────────
 
 export async function deleteOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   // Deleting a whole role and everything under it is a desk decision, not one
   // recruiter's.
@@ -637,6 +663,7 @@ export async function deleteOpening(formData: FormData) {
  * the band or adds a second location is the normal case, not the exception.
  */
 export async function updateOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const list = (v: FormDataEntryValue | null) =>
@@ -674,6 +701,7 @@ export async function updateOpening(formData: FormData) {
 }
 
 export async function deleteJobPost(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "postId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   repo.deleteJobPost(String(formData.get("postId")));
@@ -681,6 +709,7 @@ export async function deleteJobPost(formData: FormData) {
 }
 
 export async function deleteLink(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   repo.deleteLink(String(formData.get("entryId")));
@@ -688,6 +717,7 @@ export async function deleteLink(formData: FormData) {
 }
 
 export async function removeApplication(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { application: "appId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = repo.removeApplication(String(formData.get("appId")));
@@ -698,6 +728,7 @@ export async function removeApplication(formData: FormData) {
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
   const openingId = String(formData.get("openingId"));
   const field = String(formData.get("field")) as "email" | "phone";
@@ -718,6 +749,7 @@ export async function updateCandidateContact(formData: FormData) {
  * morning after. A stage with no date is a stage nobody can act on.
  */
 export async function scheduleInterview(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
@@ -749,6 +781,7 @@ export async function scheduleInterview(formData: FormData) {
 }
 
 export async function confirmInterview(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
   repo.confirmInterview(String(formData.get("interviewId")));
   revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
@@ -757,6 +790,7 @@ export async function confirmInterview(formData: FormData) {
 
 /** How it went, which is a different fact from whether they turned up. */
 export async function setInterviewResult(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
   const rating = String(formData.get("clientRating") ?? "").trim();
   repo.setInterviewResult(String(formData.get("interviewId")), {
@@ -772,6 +806,7 @@ export async function setInterviewResult(formData: FormData) {
 }
 
 export async function setInterviewOutcome(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
   repo.setInterviewOutcome(
     String(formData.get("interviewId")),
@@ -790,6 +825,7 @@ export async function setInterviewOutcome(formData: FormData) {
  * month shows next month's numbers rather than a snapshot nobody can date.
  */
 export async function saveReport(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "report.read");
   const name = String(formData.get("name") ?? "").trim();
   const spec = String(formData.get("spec") ?? "");
@@ -817,6 +853,7 @@ export async function saveReport(formData: FormData) {
  * allowed to return the answer itself.
  */
 export async function askReport(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "report.read");
   const question = String(formData.get("question") ?? "").trim();
   if (!question) return;
@@ -836,6 +873,7 @@ export async function askReport(formData: FormData) {
 }
 
 export async function deleteReport(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "report.read");
   repo.deleteReport(String(formData.get("reportId")), user.id);
   revalidatePath("/reports");
@@ -845,6 +883,7 @@ export async function deleteReport(formData: FormData) {
 // ─── People (finding 11) ─────────────────────────────────────────────────────
 
 export async function addUser(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const actor = await getCurrentUser();
   if (actor.role !== "admin" && actor.role !== "director") return;
@@ -861,6 +900,7 @@ export async function addUser(formData: FormData) {
 }
 
 export async function updateUser(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const actor = await getCurrentUser();
   if (actor.role !== "admin" && actor.role !== "director") return;
@@ -875,6 +915,7 @@ export async function updateUser(formData: FormData) {
 }
 
 export async function setUserActive(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const actor = await getCurrentUser();
   if (actor.role !== "admin" && actor.role !== "director") return;
@@ -883,6 +924,7 @@ export async function setUserActive(formData: FormData) {
 }
 
 export async function signOut() {
+  await primeStore({ allApplications: true });
   const { cookies } = await import("next/headers");
   (await cookies()).delete(SESSION_COOKIE);
   redirect("/signin");
@@ -893,6 +935,7 @@ export async function signOut() {
  * a deliberate act, so that signing out stays signed out.
  */
 export async function signInAs(formData: FormData) {
+  await primeStore({ allApplications: true });
   const id = String(formData.get("userId") ?? "");
   const user = repo.users().find((u) => u.id === id);
   if (!user || !user.isActive) redirect("/signin");
@@ -911,6 +954,7 @@ export async function signInAs(formData: FormData) {
 
 /** Run a search: the sentence goes in the URL, the parser does the rest. */
 export async function runDatabaseSearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
   const q = String(formData.get("q") ?? "").trim();
   const mode = String(formData.get("mode") ?? "natural");
@@ -923,6 +967,7 @@ export async function runDatabaseSearch(formData: FormData) {
 }
 
 export async function saveSearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "database.read");
   const query = String(formData.get("q") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim() || query.slice(0, 60);
@@ -935,6 +980,7 @@ export async function saveSearch(formData: FormData) {
 }
 
 export async function deleteSearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
   repo.deleteSearch(String(formData.get("searchId")));
   revalidatePath("/database", "layout");
@@ -942,6 +988,7 @@ export async function deleteSearch(formData: FormData) {
 
 /** Put a database candidate onto an opening — lands at Matched, unclaimed. */
 export async function addToOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
@@ -973,6 +1020,7 @@ function contextFor(openingId: string): OpeningContext | null {
 }
 
 export async function runResearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const res = await researchOpening(openingId, user.id);
@@ -981,6 +1029,7 @@ export async function runResearch(formData: FormData) {
 }
 
 export async function runBenchmark(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
@@ -1010,6 +1059,7 @@ export async function runBenchmark(formData: FormData) {
 }
 
 export async function pickBenchmark(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { benchmark: "entryId", opening: "openingId" });
   repo.toggleBenchmark(String(formData.get("entryId")));
   revalidatePath(`/openings/${String(formData.get("openingId"))}/hh`, "layout");
@@ -1061,6 +1111,7 @@ async function sourceFor(openingId: string, forUserId?: string): Promise<{ found
 }
 
 export async function runSuggestions(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = await sourceFor(openingId, user.id);
@@ -1076,6 +1127,7 @@ export async function runSuggestions(formData: FormData) {
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
 export async function keepSuggestion(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const id = String(formData.get("suggestionId"));
@@ -1090,6 +1142,7 @@ export async function keepSuggestion(formData: FormData) {
 }
 
 export async function dismissSuggestion(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
   repo.setSuggestionStatus(String(formData.get("suggestionId")), "dismissed", "not_relevant");
   revalidatePath(`/openings/${String(formData.get("openingId"))}/hh/suggestions`);
@@ -1149,6 +1202,7 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
 }
 
 export async function generateJdWithModel(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const res = await draftJd(openingId);
@@ -1164,6 +1218,7 @@ export async function generateJdWithModel(formData: FormData) {
 
 /** A TA correcting a generated field. Marked, so regeneration leaves it alone. */
 export async function editResearchField(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const key = String(formData.get("field"));
@@ -1192,6 +1247,7 @@ export async function editResearchField(formData: FormData) {
  *   SEARCH — go and find more. Spends one of the three rounds.
  */
 export async function sendChatMessage(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const body = String(formData.get("body") ?? "").trim();
@@ -1310,6 +1366,7 @@ function intakeBack(id: string, msg?: string) {
 }
 
 export async function admitIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.admitIntake(id, user.id, {
@@ -1324,6 +1381,7 @@ export async function admitIntake(formData: FormData) {
 }
 
 export async function mergeIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.mergeIntake(id, String(formData.get("candidateId")), user.id);
@@ -1334,6 +1392,7 @@ export async function mergeIntake(formData: FormData) {
 }
 
 export async function rejectIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   repo.rejectIntake(String(formData.get("itemId")), user.id, String(formData.get("note") ?? ""));
   revalidatePath("/intake");
@@ -1342,6 +1401,7 @@ export async function rejectIntake(formData: FormData) {
 
 /** Correcting a mis-read field before it can become a dedup key. */
 export async function editIntakeParsed(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const s = (k: string) => {
@@ -1363,6 +1423,7 @@ export async function editIntakeParsed(formData: FormData) {
 }
 
 export async function recheckIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   repo.recheckIntake(id);
@@ -1376,6 +1437,7 @@ export async function recheckIntake(formData: FormData) {
  * else's CV.
  */
 export async function dropIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "intake.handle");
   await getCurrentUser();
   const text = String(formData.get("rawText") ?? "").trim();
@@ -1400,6 +1462,7 @@ export async function dropIntake(formData: FormData) {
 // number are switched on.
 
 export async function recordFollowUpAttempt(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const f = repo.followUp(appId);
@@ -1434,6 +1497,7 @@ export async function recordFollowUpAttempt(formData: FormData) {
 
 /** How a follow-up call went: no answer, answered, call back at…, will send by…, not interested. */
 export async function recordFollowUpCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1456,6 +1520,7 @@ export async function recordFollowUpCall(formData: FormData) {
 
 /** Answers to the opening's own follow-up questions, and the standard three. */
 export async function saveFollowUpAnswers(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1479,6 +1544,7 @@ export async function saveFollowUpAnswers(formData: FormData) {
 
 /** The opening's own follow-up questions, one per line. */
 export async function setOpeningQuestions(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const existing = repo.opening(openingId)?.followUpQuestions ?? [];
@@ -1498,6 +1564,7 @@ export async function setOpeningQuestions(formData: FormData) {
 }
 
 export async function setAutoShortlistScore(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const n = Math.round(Number(formData.get("score")));
   if (!Number.isFinite(n) || n < 40 || n > 100) await back("Pick a score between 40 and 100.");
@@ -1509,6 +1576,7 @@ export async function setAutoShortlistScore(formData: FormData) {
 // ─── Database matches (13 September) ────────────────────────────────────────
 
 export async function findMatchesNow(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = await findDatabaseMatches(openingId, "manual");
@@ -1521,6 +1589,7 @@ export async function findMatchesNow(formData: FormData) {
 
 /** The desk's standard questions — which are asked, and how they read. */
 export async function setFollowUpStandard(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const rows = repo.followUpStandard().map((q) => ({
     id: q.id,
@@ -1533,6 +1602,7 @@ export async function setFollowUpStandard(formData: FormData) {
 }
 
 export async function logFollowUpReply(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1573,6 +1643,7 @@ const day = (fd: FormData, k: string): number | null => {
 };
 
 export async function makeOffer(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1593,6 +1664,7 @@ export async function makeOffer(formData: FormData) {
 }
 
 export async function respondToOffer(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", offer: "offerId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1610,6 +1682,7 @@ export async function respondToOffer(formData: FormData) {
 }
 
 export async function recordPlacement(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1636,6 +1709,7 @@ export async function recordPlacement(formData: FormData) {
 // a TA on the phone typing what they hear; the voice agent is built and off.
 
 export async function startCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1651,6 +1725,7 @@ export async function startCall(formData: FormData) {
 }
 
 export async function recordConsent(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", call: "callId", opening: "openingId" });
   await getCurrentUser();
   const appId = String(formData.get("applicationId"));
@@ -1666,6 +1741,7 @@ export async function recordConsent(formData: FormData) {
 }
 
 export async function recordCallAnswer(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", call: "callId", opening: "openingId" });
   await getCurrentUser();
   const appId = String(formData.get("applicationId"));
@@ -1682,6 +1758,7 @@ export async function recordCallAnswer(formData: FormData) {
 }
 
 export async function finishCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", call: "callId", opening: "openingId" });
   await getCurrentUser();
   const appId = String(formData.get("applicationId"));
@@ -1715,6 +1792,7 @@ export async function finishCall(formData: FormData) {
 // reply landing.
 
 export async function sendEod(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
@@ -1811,6 +1889,7 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
 }
 
 export async function readEodReply(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") === "client" ? "client" : "director";
@@ -1822,6 +1901,7 @@ export async function readEodReply(formData: FormData) {
 
 /** The one shortlist-replies box, changed by a director without a deploy. */
 export async function setShortlistInbox(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const actor = await getCurrentUser();
   if (actor.role !== "admin" && actor.role !== "director") return;
@@ -1848,6 +1928,7 @@ export async function setShortlistInbox(formData: FormData) {
  * will make when the mailbox is connected.
  */
 export async function readInboundReply(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { opening: "openingId" });
   await getCurrentUser();
   const openingId = String(formData.get("openingId"));
@@ -1924,6 +2005,7 @@ export async function probeConvexAsCurrentUser(): Promise<
     }
   | { ok: false; reason: string }
 > {
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   // Reading is the least this can be. Anything that writes through this bridge
   // must ask `authorize` first, exactly as every other action here does.

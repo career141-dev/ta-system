@@ -3,6 +3,7 @@ import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
 import { signInAs } from "@/app/actions";
 import { ROLE_LABEL } from "@/data/types";
+import { primeStore } from "@/data/prime";
 
 /**
  * The sign-in screen.
@@ -14,6 +15,7 @@ import { ROLE_LABEL } from "@/data/types";
  * made the account menu's "Sign out" a button that did nothing.
  */
 export default async function SignInPage() {
+  await primeStore({ allApplications: true });
   if (await currentUser()) redirect("/");
   const users = repo.users().filter((u) => u.isActive);
 

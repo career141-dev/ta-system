@@ -3,8 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, saveReviewDecision, type ReviewDecision } from "@/lib/review";
+import { primeStore } from "@/data/prime";
 
 export async function recordReview(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const job = Number(formData.get("job"));
   const candidateId = String(formData.get("candidateId") ?? "");

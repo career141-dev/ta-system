@@ -5,6 +5,7 @@ import { JdScreen } from "@/components/JdScreen";
 import { JdRead } from "./JdRead";
 import { ProjectHeader } from "../ProjectHeader";
 import { dateAt } from "@/lib/format";
+import { primeStore } from "@/data/prime";
 
 export default async function JdPage({
   params,
@@ -15,6 +16,7 @@ export default async function JdPage({
 }) {
   const { id } = await params;
   const { msg } = await searchParams;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();

@@ -11,6 +11,7 @@ import { ResultRow, type RowApp } from "@/components/db/ResultRow";
 import { saveSearch } from "@/app/actions";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearest } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
+import { primeStore } from "@/data/prime";
 
 const PAGE = 25;
 
@@ -20,6 +21,7 @@ export default async function ResultsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
+  await primeStore({ allApplications: true });
   await pageUser("database.read");
   const q = typeof sp.q === "string" ? sp.q : "";
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";

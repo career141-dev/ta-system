@@ -5,6 +5,7 @@ import { relDays } from "@/lib/format";
 import { AddClient } from "@/components/AddClient";
 import { ClientCard } from "@/components/ClientCard";
 import { pageUser } from "@/lib/session";
+import { primeStore } from "@/data/prime";
 
 export default async function ClientsPage({
   searchParams,
@@ -12,6 +13,7 @@ export default async function ClientsPage({
   searchParams: Promise<{ held?: string }>;
 }) {
   const { held } = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await pageUser("database.read");
   const clients = repo.clients();
   const openings = repo.openings();

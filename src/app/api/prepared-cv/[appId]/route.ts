@@ -4,12 +4,14 @@ import { buildPreparedCv, preparedCvFileName } from "@/lib/pdf";
 import { currentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { seatFor } from "@/lib/visibility";
+import { primeStore } from "@/data/prime";
 
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ appId: string }> },
 ) {
   const { appId } = await params;
+  await primeStore({ allApplications: true });
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "signed_out" }, { status: 401 });
   const app = repo.application(appId);

@@ -6,6 +6,7 @@ import { STAGE_LABEL } from "@/data/types";
 import { addToOpening } from "@/app/actions";
 import { dateAt } from "@/lib/format";
 import { allows } from "@/lib/auth";
+import { primeStore } from "@/data/prime";
 
 /**
  * A person, on their own — not through an opening.
@@ -24,6 +25,7 @@ export default async function CandidatePage({
 }) {
   const { id } = await params;
   const { msg } = await searchParams;
+  await primeStore({ candidateIds: [id] });
   const user = await pageUser("database.read");
   const c = repo.candidate(id);
   if (!c) notFound();

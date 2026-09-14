@@ -76,6 +76,34 @@ export const listForOpening = query({
   },
 });
 
+/**
+ * Every application on the desk, a page at a time.
+ *
+ * The dashboards and reports genuinely need the lot. Convex caps a query's
+ * returned array at 8,192 rows and the desk is already past that, so this
+ * pages rather than truncating — a list that looks complete and is short by
+ * two hundred is worse than one that takes two round trips.
+ */
+export const listAll = query({
+  args: {
+    actorId: v.optional(v.string()),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await optionalActor(ctx, args.actorId);
+    const page = await ctx.db.query("applications").paginate({
+      numItems: Math.min(args.limit ?? 4000, 4000),
+      cursor: args.cursor ?? null,
+    });
+    return {
+      applications: page.page.map(projectApplication),
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
+    };
+  },
+});
+
 export const get = query({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {

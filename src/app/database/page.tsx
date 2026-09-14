@@ -6,6 +6,7 @@ import { Suggestion } from "@/components/db/Suggestion";
 import { Illustration } from "@/components/db/Illustration";
 import { deleteSearch } from "@/app/actions";
 import { relDays } from "@/lib/format";
+import { primeStore } from "@/data/prime";
 
 /**
  * The Database, before you have asked it anything — spec §6D.1.
@@ -19,6 +20,7 @@ export default async function DatabaseHome({
 }: {
   searchParams: Promise<{ q?: string }>;
 }) {
+  await primeStore({ allApplications: true });
   // A link that carries a query has to run it. The intake screen's "find this
   // person in the database" arrived here with ?q= and dropped the visitor on
   // an empty box, looking like the link was broken.

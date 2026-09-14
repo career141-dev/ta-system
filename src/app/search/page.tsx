@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
+import { primeStore } from "@/data/prime";
 
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const { q = "" } = await searchParams;
+  await primeStore({ allApplications: true });
   await pageUser("database.read");
   const { openings, candidates } = repo.search(q);
   const clients = repo.clients();

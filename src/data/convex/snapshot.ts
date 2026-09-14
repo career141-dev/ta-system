@@ -1,5 +1,3 @@
-import "server-only";
-
 /**
  * A short-lived in-process cache in front of the backend.
  *

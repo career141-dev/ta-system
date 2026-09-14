@@ -32,6 +32,7 @@ import {
   type BackendOpening,
   type BackendUser,
   type LiveCandidate,
+  type MappedOpening,
 } from "./map";
 
 /**
@@ -66,7 +67,7 @@ export async function actorForEmail(email: string): Promise<Actor & { user: User
 
 // ─── Openings ────────────────────────────────────────────────────────────────
 
-export async function openings(actor: Actor, opts: { status?: string; mineOnly?: boolean } = {}): Promise<Opening[]> {
+export async function openings(actor: Actor, opts: { status?: string; mineOnly?: boolean } = {}): Promise<MappedOpening[]> {
   const rows = await convexQuery<BackendOpening[]>("ta/openings:list", {
     actorId: actor.id ?? undefined,
     status: opts.status,
@@ -116,6 +117,28 @@ export async function applications(
     limit: 1000,
   });
   return rows.map(mapApplication);
+}
+
+/**
+ * Every application, paged.
+ *
+ * Convex caps a single query's array at 8,192 and the desk is past that, so
+ * the cap is handled here rather than surfacing as a truncated list that looks
+ * complete. `pages` is returned so a caller can see what it cost.
+ */
+export async function allApplications(actor: Actor): Promise<{ applications: Application[]; pages: number }> {
+  const out: Application[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  for (;;) {
+    const res: { applications: BackendApplication[]; isDone: boolean; continueCursor: string | null } =
+      await convexQuery("ta/applications:listAll", { actorId: actor.id ?? undefined, cursor });
+    out.push(...res.applications.map(mapApplication));
+    pages++;
+    if (res.isDone || !res.continueCursor || pages > 50) break;
+    cursor = res.continueCursor;
+  }
+  return { applications: out, pages };
 }
 
 export interface ApplicationDetail extends Application {

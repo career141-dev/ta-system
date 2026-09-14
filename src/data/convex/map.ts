@@ -87,8 +87,15 @@ export interface BackendOpening {
   [k: string]: unknown;
 }
 
-export function mapOpening(o: BackendOpening): Opening {
+/** The legacy free-text client fields ride along: the clients table does not
+ *  exist in the backend yet, so it is derived from these until the backfill
+ *  (plan step 5) writes real rows. */
+export type MappedOpening = Opening & { clientName: string; clientIndustry: string };
+
+export function mapOpening(o: BackendOpening): MappedOpening {
   return {
+    clientName: o.clientName,
+    clientIndustry: o.clientIndustry ?? "",
     id: o.id,
     clientId: o.clientId ?? "",
     title: o.title,
@@ -323,8 +330,17 @@ export function mapJobPost(p: BackendJobPost, openingId: Id): JobPost {
   };
 }
 
-/** For a candidate read straight from the backend rather than through the
- *  resume feed — the common case now that most text lives in R2. */
+/**
+ * A candidate read straight from the backend.
+ *
+ * The shared mapper comes from `lib/live/mapLive`, which exists for the
+ * read-only MIRROR — it prefixes every id with `lv_` so a copied row cannot be
+ * confused with one of this platform's own. That is right for a mirror and
+ * wrong here: these rows ARE the record, and an application refers to them by
+ * their bare Convex id. Left prefixed, `candidate.id` reads `lv_j972…` while
+ * `application.candidateId` reads `j972…`, so no candidate ever matches the
+ * application that names them — every list renders empty and nothing errors.
+ */
 export function mapCandidateDoc(doc: LiveCandidate): Candidate {
-  return mapCandidate(doc, null);
+  return { ...mapCandidate(doc, null), id: doc._id };
 }
