@@ -23,7 +23,7 @@
 
 import { repo } from "@/data/store";
 import type { Candidate, MatchRun } from "@/data/types";
-import { candidateEmbedText, candidateVector, cosine, embedModel, ensureVectors, isMeaningBased, nearest, openingEmbedText, openingVector } from "./embed";
+import { candidateEmbedText, candidateVector, cosine, embedModel, ensureVectors, isMeaningBased, nearestCandidates, openingEmbedText, openingVector } from "./embed";
 import { locationFit } from "./places";
 import { ASSESSMENT_VERSION, assess, requirementsFor } from "./assessment";
 import { FIT_BANDS, titleScore, yearsFromHistory } from "./scoring";
@@ -121,7 +121,7 @@ export async function findDatabaseMatches(
 
   const onOpening = new Set(repo.applications(o.id).map((a) => a.candidateId));
   const excluded = repo.matchExcluded(o.id);
-  const near = nearest(jobVec, LIMITS.nearest, (id) => !onOpening.has(id) && !excluded.has(id));
+  const near = await nearestCandidates(jobVec, LIMITS.nearest, (id) => !onOpening.has(id) && !excluded.has(id));
 
   // 1b. And by title, so nobody whose job IS this job is missed because 300
   // closer CVs filled the list first — a common role has more than 300 people

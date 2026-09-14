@@ -153,7 +153,11 @@ globalThis.fetch = (async (input: any, init?: any) => {
   if (String(input).includes("openrouter.ai/api/v1/embeddings")) {
     embedCalls++;
     const n = JSON.parse(init.body).input.length;
-    return new Response(JSON.stringify({ data: Array.from({ length: n }, (_, i) => ({ index: i, embedding: vec(i + 1, 1536) })), usage: { total_tokens: n * 1000 } }), { status: 200, headers: { "content-type": "application/json" } });
+    // 1,024, because the request asks for `dimensions: 1024` and a provider
+    // that honours it returns exactly that. It used to return 1,536 here and
+    // the code cut it down — which produced a vector in a different space from
+    // the index, since `dimensions` re-normalises and a slice does not.
+    return new Response(JSON.stringify({ data: Array.from({ length: n }, (_, i) => ({ index: i, embedding: vec(i + 1, 1024) })), usage: { total_tokens: n * 1000 } }), { status: 200, headers: { "content-type": "application/json" } });
   }
   return realFetch(input, init);
 }) as typeof fetch;

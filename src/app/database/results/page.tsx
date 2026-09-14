@@ -9,7 +9,7 @@ import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
 import { saveSearch } from "@/app/actions";
-import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearest } from "@/lib/embed";
+import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 
@@ -50,7 +50,15 @@ export default async function ResultsPage({
     const vectors = await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
     if (query.ok) {
-      similarity = new Map(nearest(query.vectors[0], Number.MAX_SAFE_INTEGER).map((n) => [n.id, n.similarity]));
+      // Bounded, not the whole index. Asking for every vector's similarity was
+      // affordable against a file of 755; against 77,000 in Qdrant it is a
+      // request for the entire database. The page shows 25 at a time and the
+      // spotlight counts describe the matches, so a deep-but-finite list is
+      // the same answer for far less work.
+      const hits = await nearestCandidates(query.vectors[0], 1000);
+      similarity = new Map(hits.map((n) => [n.id, n.similarity]));
+      // The rows have to be in the working set before `repo` can read them.
+      await primeStore({ candidateIds: hits.map((h) => h.id) });
     } else {
       meaningProblem = `Search by meaning could not run (${query.reason}), so these are ranked on the words.`;
     }
