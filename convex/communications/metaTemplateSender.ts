@@ -2,8 +2,17 @@ import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 
-const DEFAULT_META_ACCESS_TOKEN = "EAAVsiEb3mHEBSIuLifLIqEvWVh9P0EkUnxKufE7fFRgay0IwCTZAPOTjv3gYxSk4iC2mNOKs8JTT3Qb0ZAdTHsP4WbZCiNZAiw4WOj5vLPQ9CSI4uiivAWKDhLnVzN6toTXdfvMRkZAUibXh3Rgg2bJkFOQ7YUbZAp005nlKdX9fbM7sZBcyZBjWBIzUST8t2QZDZD";
-// Primary Career141 WhatsApp Business Phone Number ID (+94 74 219 7476)
+// The access token is a live credential and is read from the deployment's
+// environment only. It used to sit here as a literal fallback, which meant a
+// working WhatsApp Business token was in source control and in every clone of
+// the repository. Set it with `npx convex env set META_ACCESS_TOKEN …`.
+//
+// With no token configured, sending fails closed and says so — which is the
+// right behaviour for a machine that was never meant to message candidates.
+
+// Primary Career141 WhatsApp Business Phone Number ID (+94 74 219 7476).
+// An identifier rather than a credential: it names the sending number and
+// grants nothing on its own, so it stays here as a default.
 const DEFAULT_META_PHONE_ID = "965783109962872";
 
 export const sendMetaTemplate = internalAction({
@@ -15,7 +24,7 @@ export const sendMetaTemplate = internalAction({
     templateType: v.union(v.literal("initial_outreach"), v.literal("reengagement")),
   },
   handler: async (ctx, args) => {
-    const metaAccessToken = process.env.META_ACCESS_TOKEN || DEFAULT_META_ACCESS_TOKEN;
+    const metaAccessToken = process.env.META_ACCESS_TOKEN;
     if (!metaAccessToken) {
       console.error("[Meta Template Sender] META_ACCESS_TOKEN is not configured.");
       throw new Error("META_ACCESS_TOKEN is missing");

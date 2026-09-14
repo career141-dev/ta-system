@@ -17,9 +17,16 @@ const sizeMB = (stats.size / (1024 * 1024)).toFixed(2);
 console.log(`Found production backup: ${backupPath} (${sizeMB} MB)`);
 console.log("Restoring into local Convex (http://127.0.0.1:3210)...");
 
-const adminKey =
-  process.env.CONVEX_SELF_HOSTED_ADMIN_KEY ||
-  "convex-self-hosted|0120afbc2cee5c518972267bca0e283c9ddc23e3d9eebc8f2bbe278e5a49256dbed5d4aa39";
+// Read from the environment only. The key used to be a literal fallback here,
+// which put a working admin key — one that can read and rewrite the whole
+// database — into source control. It lives in .env.local, which is gitignored.
+const adminKey = process.env.CONVEX_SELF_HOSTED_ADMIN_KEY;
+if (!adminKey) {
+  console.error(
+    "CONVEX_SELF_HOSTED_ADMIN_KEY is not set. Put it in .env.local (gitignored) and try again.",
+  );
+  process.exit(1);
+}
 
 // On Windows cmd.exe, the | character in adminKey must be quoted to prevent pipe interpretation
 const res = spawnSync(
