@@ -1888,3 +1888,87 @@ export async function readInboundReply(formData: FormData) {
   const o = repo.opening(round.openingId);
   back(`${o?.title ?? "That job"} (${round.kind}): ${await readReplyFor(round.openingId, round.kind, body, round.id)}`);
 }
+
+// ─── Convex bridge (proof of concept) ────────────────────────────────────────
+
+/**
+ * Read this deployment's live jobs as the signed-in TA.
+ *
+ * The first thing in this app to go through the Convex backend rather than the
+ * JSON store, and deliberately the smallest one: it proves the whole chain
+ * without changing a screen or writing anything.
+ *
+ *   signed cookie → TA user → Convex user (by email) → call with `actorId`
+ *
+ * Two calls go out, because they prove different halves and only one of them
+ * is worth trusting on its own:
+ *
+ *   `jobs/jobs:getActiveJobsBasicInfo` has NO auth check — it is a plain query.
+ *   A reply proves the transport, the admin key and the URL, and nothing at all
+ *   about whether the actor was understood.
+ *
+ *   `ta/actor:whoami` goes through `requireUser`, which is the gate the other
+ *   thirteen modules call. A reply naming the right person, with
+ *   `source: "actor_id"`, is what proves the dual-mode adapter works for a
+ *   cookie session with no Clerk identity anywhere.
+ *
+ * Returns a result rather than throwing: this is a probe, and a failure is
+ * something to display, not a 500.
+ */
+export async function probeConvexAsCurrentUser(): Promise<
+  | {
+      ok: true;
+      actor: { taUserId: string; email: string; convexUserId: string; role: string };
+      whoami: { userId: string; email: string; fullName: string; role: string; source: string };
+      jobs: { total: number; sample: { title: string; keyword: string; clientName: string }[] };
+    }
+  | { ok: false; reason: string }
+> {
+  const user = await getCurrentUser();
+  // Reading is the least this can be. Anything that writes through this bridge
+  // must ask `authorize` first, exactly as every other action here does.
+  if (!can(user, "database.read").ok) return { ok: false, reason: "You cannot read the database." };
+
+  const { convexActorForEmail, convexQuery, ConvexCallError } = await import("@/lib/convexServer");
+
+  try {
+    const actor = await convexActorForEmail(user.email);
+    if (!actor) {
+      return {
+        ok: false,
+        reason: `${user.email} has no account in the Convex backend, so there is nobody to act as. Create one there, or sign in as a TA who has one.`,
+      };
+    }
+    if (!actor.isActive) return { ok: false, reason: `${actor.email} is deactivated in the backend.` };
+
+    // The adapter's own test: no Clerk identity, an explicit actor.
+    const whoami = await convexQuery<{
+      userId: string;
+      email: string;
+      fullName: string;
+      role: string;
+      source: string;
+    }>("ta/actor:whoami", { actorId: actor._id });
+
+    const jobs = await convexQuery<
+      { _id: string; title: string; keyword: string; clientName: string }[]
+    >("jobs/jobs:getActiveJobsBasicInfo", {});
+
+    return {
+      ok: true,
+      actor: { taUserId: user.id, email: user.email, convexUserId: actor._id, role: actor.role },
+      whoami,
+      jobs: {
+        total: jobs.length,
+        sample: jobs.slice(0, 5).map((j) => ({
+          title: j.title,
+          keyword: j.keyword,
+          clientName: j.clientName,
+        })),
+      },
+    };
+  } catch (e) {
+    if (e instanceof ConvexCallError) return { ok: false, reason: e.message };
+    throw e;
+  }
+}

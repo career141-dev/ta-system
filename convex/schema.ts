@@ -33,8 +33,29 @@ export default defineSchema({
       whatsapp: v.boolean(),
       inApp: v.boolean(),
     })),
+
+    // ── TA platform ───────────────────────────────────────────────────────
+    /**
+     * The mailbox this TA's job adverts point at — one per TA, not one per
+     * job. This is the whole basis of the new inbound routing: the address
+     * says which TA, the subject headline says which of that TA's adverts.
+     * See src/lib/routing.ts.
+     */
+    routingEmail: v.optional(v.union(v.string(), v.null())),
+    initials: v.optional(v.string()),
+    /** The new platform's role vocabulary, mapped from `role` above. */
+    taRole: v.optional(v.union(
+      v.literal("admin"),
+      v.literal("director"),
+      v.literal("ta_lead"),
+      v.literal("ta"),
+      v.literal("ops"),
+      v.literal("client"),
+      v.literal("viewer"),
+    )),
   })
     .index("by_token", ["tokenIdentifier"])
+    .index("by_routingEmail", ["routingEmail"])
     .index("by_clerkUserId", ["clerkUserId"])
     .index("by_email", ["email"])
     .index("by_role", ["role"])
@@ -362,6 +383,46 @@ export default defineSchema({
     // AI Embedding (set async after creation)
     embedding: v.optional(v.array(v.number())),
 
+    // ── TA platform: a `jobs` row IS an Opening ────────────────────────────
+    // Added for the new UI. All optional, so every existing row stays valid
+    // and the old modules are untouched. `clientName` remains the legacy free
+    // text; `clientId` is the normalised record the new Clients screen reads.
+    clientId: v.optional(v.id("clients")),
+    positionCode: v.optional(v.string()),
+    jobOrderNumber: v.optional(v.string()),
+    /** The new platform gates scoring on an approved JD — see lib/assessment. */
+    jdStatus: v.optional(v.union(
+      v.literal("draft"),
+      v.literal("pending_ta_approval"),
+      v.literal("approved"),
+    )),
+    jdApprovedBy: v.optional(v.id("users")),
+    jdApprovedAt: v.optional(v.number()),
+    briefId: v.optional(v.id("briefs")),
+    /** P1–P5, driving the "day N of target" counters. */
+    priorityTier: v.optional(v.string()),
+    /** The Master Sheet column, kept in step with `status`. */
+    positionStatus: v.optional(v.string()),
+    /** Whose passport, not where the job is. */
+    targetNationalities: v.optional(v.array(v.string())),
+    targetGender: v.optional(v.union(v.string(), v.null())),
+    headcount: v.optional(v.number()),
+    /** The TA's own follow-up questions for this opening. */
+    followUpQuestions: v.optional(v.array(v.object({
+      id: v.string(),
+      label: v.string(),
+    }))),
+    taLeadId: v.optional(v.id("users")),
+    /** Denormalised mirror of jobAssignments, as the new UI reads it. */
+    assignedTaIds: v.optional(v.array(v.id("users"))),
+    // Commercial pipeline value — Master Sheet columns.
+    valueOnProgressing: v.optional(v.number()),
+    valueOfPlacement: v.optional(v.number()),
+    valueLost: v.optional(v.number()),
+    requirementReceivedAt: v.optional(v.number()),
+    assignedAt: v.optional(v.number()),
+    closedAt: v.optional(v.number()),
+
     // Timestamps
     createdAt: v.string(),
     publishedAt: v.optional(v.string()),
@@ -372,6 +433,7 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_recruiter", ["primaryRecruiterId"])
     .index("by_client", ["clientName"])
+    .index("by_clientId", ["clientId"])
     .index("by_createdAt", ["createdAt"])
     .searchIndex("search_title", {
       searchField: "title",
@@ -863,6 +925,37 @@ export default defineSchema({
     rejectReason: v.optional(v.string()),
     placedAt: v.optional(v.number()),
     placedBy: v.optional(v.id("users")),
+
+    // ── TA platform ───────────────────────────────────────────────────────
+    // `currentStage` above stays the one stored stage, so the follow-up cron,
+    // the state machine and the Meta events keep working untouched. The new
+    // UI translates it through src/lib/stageMap.ts.
+    /** Which advert under the opening this application came through. */
+    jobPostId: v.optional(v.id("jobPosts")),
+    /** First TA to shortlist owns it — the collision lock. Set in the same
+     *  write as `shortlistedAt`. */
+    ownerTaId: v.optional(v.id("users")),
+    shortlistedAt: v.optional(v.number()),
+    /** Five or more closes a set, per opening per recruiter. */
+    setNumber: v.optional(v.union(v.number(), v.null())),
+    /** Answers to the opening's own follow-up questions, by question id. */
+    answers: v.optional(v.record(v.string(), v.string())),
+    /** The Guidelines tab's channel code: DA | IM | FB | E | L | HH | SCOOP.
+     *  Kept beside the legacy free-text `sourceChannel`, never replacing it. */
+    taSourcingChannel: v.optional(v.string()),
+    /** A profile worked beyond the assigned scope of the role. */
+    isAddOn: v.optional(v.boolean()),
+    addedOnAt: v.optional(v.number()),
+    /** Cover for someone who declined, and the decline that started the search. */
+    backupForApplicationId: v.optional(v.id("applications")),
+    offerDeclinedAt: v.optional(v.number()),
+    offerDeclineReason: v.optional(v.string()),
+    // Parked, carried so no migration is needed when they are defined.
+    rankTier: v.optional(v.union(v.string(), v.null())),
+    rankWeight: v.optional(v.union(v.number(), v.null())),
+    statusA: v.optional(v.union(v.string(), v.null())),
+    statusB: v.optional(v.union(v.string(), v.null())),
+    droppedOutReason: v.optional(v.string()),
   })
     .index("by_jobId", ["jobId"])
     .index("by_job_stage", ["jobId", "currentStage"])
@@ -873,7 +966,9 @@ export default defineSchema({
     .index("by_job_stage_changed", ["jobId", "lastStageChangedAt"])
     .index("by_candidate_job", ["candidateId", "jobId"])
     .index("by_stage", ["currentStage"])
-    .index("by_active", ["isActive"]),
+    .index("by_active", ["isActive"])
+    .index("by_jobPostId", ["jobPostId"])
+    .index("by_owner", ["ownerTaId"]),
 
   pipelineEvents: defineTable({
     applicationId: v.optional(v.id("applications")),
@@ -1172,6 +1267,26 @@ export default defineSchema({
     coordinatedBy: v.optional(v.id("users")),
     createdAt: v.number(),
     completedAt: v.optional(v.number()),
+
+    // ── TA platform ───────────────────────────────────────────────────────
+    // The legacy `outcome` enum conflates two different facts, so a candidate
+    // who attended and was turned down cannot be recorded. These split it:
+    // `taOutcome` is whether they turned up, `taResult` is how it went.
+    taOutcome: v.optional(v.union(
+      v.literal("pending"), v.literal("attended"),
+      v.literal("no_show"), v.literal("cancelled"),
+    )),
+    taResult: v.optional(v.union(
+      v.literal("pending"), v.literal("passed"),
+      v.literal("failed"), v.literal("on_hold"),
+    )),
+    timezone: v.optional(v.string()),
+    location: v.optional(v.string()),
+    round: v.optional(v.number()),
+    interviewers: v.optional(v.array(v.string())),
+    durationMins: v.optional(v.number()),
+    /** Set when the candidate confirms, which is what stops the escalation. */
+    confirmedAt: v.optional(v.number()),
   })
     .index("by_applicationId", ["applicationId"])
     .index("by_jobId", ["jobId"])
@@ -1192,6 +1307,16 @@ export default defineSchema({
     taConfirmedAt: v.optional(v.number()),
     createdAt: v.number(),
     loopActionTaken: v.optional(v.union(v.literal("restart_from_new_cvs"), v.literal("return_to_client_review"))),
+
+    // ── TA platform ───────────────────────────────────────────────────────
+    /** Salaries here are quoted monthly, fees charged on the year. Storing
+     *  which one a number is stops the 12x error at the source. */
+    salaryBasis: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
+    /** A timestamp, not the legacy `offeredStartDate` string — nothing can
+     *  sort, compare or fire a reminder off text. */
+    startDateMs: v.optional(v.number()),
+    declineReason: v.optional(v.string()),
+    madeBy: v.optional(v.id("users")),
   })
     .index("by_applicationId", ["applicationId"])
     .index("by_jobId", ["jobId"])
@@ -1222,11 +1347,35 @@ export default defineSchema({
     joinConfirmedAt: v.optional(v.number()),
     placementSnippetSent: v.boolean(),
     createdAt: v.number(),
+
+    // ── TA platform ───────────────────────────────────────────────────────
+    // `invoiceAmount` above is a bare number: it cannot be checked, cannot be
+    // recomputed when the salary is corrected, and cannot be reported on as a
+    // realised rate. The basis is kept here instead. Both the rate and the
+    // guarantee are SNAPSHOTTED at placement — terms get renegotiated, and a
+    // placement made in March must keep March's terms.
+    clientId: v.optional(v.id("clients")),
+    applicationIdRef: v.optional(v.id("applications")),
+    salaryBasis: v.optional(v.union(v.literal("monthly"), v.literal("annual"))),
+    /** A timestamp, not the legacy `joinDate` string. */
+    joinDateMs: v.optional(v.number()),
+    /** Null means a flat fee was agreed instead. */
+    feePercent: v.optional(v.union(v.number(), v.null())),
+    flatFee: v.optional(v.union(v.number(), v.null())),
+    invoiceNumber: v.optional(v.string()),
+    invoicePaidAt: v.optional(v.number()),
+    /** Days from the join date. Why `placed` is not a terminal stage here. */
+    guaranteeDays: v.optional(v.number()),
+    fellThroughAt: v.optional(v.number()),
+    fellThroughReason: v.optional(v.string()),
+    taSourcingChannel: v.optional(v.string()),
+    notes: v.optional(v.string()),
   })
     .index("by_jobId", ["jobId"])
     .index("by_placedBy", ["placedBy"])
     .index("by_sourceChannel", ["sourceChannel"])
-    .index("by_invoiceSent_joinDate", ["invoiceSent", "joinDate"]),
+    .index("by_invoiceSent_joinDate", ["invoiceSent", "joinDate"])
+    .index("by_clientId", ["clientId"]),
 
   rejectionLoopEvents: defineTable({
     jobId: v.id("jobs"),
@@ -1336,11 +1485,23 @@ export default defineSchema({
     slaBreached: v.boolean(),
     notes: v.optional(v.string()),
     createdAt: v.number(),
+
+    // ── TA platform ───────────────────────────────────────────────────────
+    /** Keyed to the client RECORD, not the spelling of its name. Two spellings
+     *  of one company were two separate agreement histories, neither complete. */
+    clientId: v.optional(v.id("clients")),
+    /** What was agreed, and what every placement under it inherits. */
+    feePercent: v.optional(v.union(v.number(), v.null())),
+    guaranteeDays: v.optional(v.number()),
+    /** When it has to be back by. Breach is derived from this, never stored. */
+    dueAt: v.optional(v.number()),
+    documentName: v.optional(v.string()),
   })
     .index("by_client", ["clientName"])
     .index("by_job", ["jobId"])
     .index("by_client_status", ["clientName", "status"])
-    .index("by_slaBreached", ["slaBreached"]),
+    .index("by_slaBreached", ["slaBreached"])
+    .index("by_clientId", ["clientId"]),
 
   documents: defineTable({
     fileHash: v.optional(v.string()),
@@ -1943,6 +2104,364 @@ export default defineSchema({
     lastTickAt: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_key", ["key"]),
+
+  // ══ TA PLATFORM TABLES ══════════════════════════════════════════════════
+  //
+  // Concepts the new UI has and the old backend never did. Everything above
+  // this line is the old system's, unchanged apart from optional fields.
+  // Shapes mirror src/data/types.ts, which stays the contract.
+
+  /**
+   * A client record, rather than `jobs.clientName` free text. Two spellings of
+   * one company ("DirectFN", "DIRECTFN") are one client here.
+   */
+  clients: defineTable({
+    name: v.string(),
+    /** Lowercased, punctuation-stripped. The dedup key. */
+    nameKey: v.string(),
+    industry: v.string(),
+    contacts: v.array(v.object({
+      name: v.string(),
+      title: v.string(),
+      email: v.string(),
+      isPrimary: v.boolean(),
+    })),
+    esaSignedAt: v.optional(v.union(v.number(), v.null())),
+    status: v.union(v.literal("active"), v.literal("dormant"), v.literal("archived")),
+    createdAt: v.number(),
+  })
+    .index("by_nameKey", ["nameKey"])
+    .index("by_status", ["status"]),
+
+  /**
+   * One advert. Many posts sit under one opening and share its candidate pool
+   * — the distinction the old `jobs` table could not make.
+   */
+  jobPosts: defineTable({
+    openingId: v.id("jobs"),
+    title: v.string(),
+    /** Titles this advert carried before it was edited. Applicants who clicked
+     *  before the edit still arrive under the old title. */
+    previousTitles: v.array(v.string()),
+    aliasKeywords: v.array(v.string()),
+    country: v.optional(v.union(v.string(), v.null())),
+    city: v.optional(v.union(v.string(), v.null())),
+    channel: v.string(),
+    /** Ties a campaign reply to this post when no headline is available. */
+    campaignCode: v.string(),
+    routingEmailAlias: v.string(),
+    assignedTaId: v.optional(v.union(v.id("users"), v.null())),
+    externalUrl: v.optional(v.union(v.string(), v.null())),
+    postedAt: v.optional(v.union(v.number(), v.null())),
+    status: v.union(
+      v.literal("draft"), v.literal("live"),
+      v.literal("paused"), v.literal("closed"),
+    ),
+    cvCountToday: v.number(),
+    createdAt: v.number(),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_assignedTa", ["assignedTaId"])
+    .index("by_campaignCode", ["campaignCode"])
+    .index("by_status", ["status"]),
+
+  /** The management→lead download, or the lead→TA handoff, and what was read
+   *  out of it. Nothing is committed to an opening without a human saving it. */
+  briefs: defineTable({
+    clientId: v.optional(v.union(v.id("clients"), v.null())),
+    openingId: v.optional(v.union(v.id("jobs"), v.null())),
+    kind: v.union(v.literal("management_to_lead"), v.literal("lead_to_ta")),
+    capturedBy: v.id("users"),
+    capturedAt: v.number(),
+    method: v.union(v.literal("recording"), v.literal("notes"), v.literal("both")),
+    notesMarkdown: v.string(),
+    transcript: v.optional(v.union(v.string(), v.null())),
+    transcriptStatus: v.union(
+      v.literal("none"), v.literal("pending"),
+      v.literal("ready"), v.literal("unavailable"),
+    ),
+    recordingKey: v.optional(v.union(v.string(), v.null())),
+    recordingDurationMs: v.optional(v.union(v.number(), v.null())),
+    /** Consent is given when record is pressed, and the wording as it stood
+     *  that day is stored with it. A later edit must not rewrite it. */
+    consentAcknowledgedBy: v.optional(v.union(v.id("users"), v.null())),
+    consentAcknowledgedAt: v.optional(v.union(v.number(), v.null())),
+    consentText: v.optional(v.union(v.string(), v.null())),
+    extracted: v.any(),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_client", ["clientId"]),
+
+  /**
+   * One CV waiting at the door. Not a candidate yet.
+   *
+   * The old pipeline writes straight through extraction into `candidates` and
+   * nobody sees what dedup got wrong. Holding the arrival as its own record is
+   * what makes "we received 40 and kept 6" answerable.
+   */
+  intakeItems: defineTable({
+    source: v.string(),
+    receivedFrom: v.optional(v.union(v.string(), v.null())),
+    receivedAt: v.number(),
+    fileName: v.optional(v.union(v.string(), v.null())),
+    /** SHA-256 of the file. The first and cheapest dedup factor. */
+    fileHash: v.optional(v.union(v.string(), v.null())),
+    sizeBytes: v.optional(v.union(v.number(), v.null())),
+    rawText: v.optional(v.union(v.string(), v.null())),
+    /** Where the file itself is, so admitting it can reuse the upload. */
+    s3Key: v.optional(v.union(v.string(), v.null())),
+    cvUploadId: v.optional(v.union(v.id("cvUploads"), v.null())),
+    parsed: v.optional(v.any()),
+    match: v.optional(v.any()),
+    status: v.union(
+      v.literal("received"), v.literal("parsed"), v.literal("ready"),
+      v.literal("needs_review"), v.literal("admitted"),
+      v.literal("merged"), v.literal("rejected"),
+    ),
+    /** The address it arrived at, which says whose mailbox and so which TA's
+     *  adverts it can possibly belong to. */
+    toAddress: v.optional(v.union(v.string(), v.null())),
+    subject: v.optional(v.union(v.string(), v.null())),
+    openingId: v.optional(v.union(v.id("jobs"), v.null())),
+    jobPostId: v.optional(v.union(v.id("jobPosts"), v.null())),
+    /** Other openings the same advert serves — the CV is filed to each. */
+    alsoFiledTo: v.optional(v.array(v.object({
+      postId: v.id("jobPosts"),
+      openingId: v.id("jobs"),
+    }))),
+    routedToTaId: v.optional(v.union(v.id("users"), v.null())),
+    routeNote: v.optional(v.union(v.string(), v.null())),
+    routeConfidence: v.optional(v.union(v.string(), v.null())),
+    candidateId: v.optional(v.union(v.id("candidates"), v.null())),
+    handledBy: v.optional(v.union(v.id("users"), v.null())),
+    handledAt: v.optional(v.union(v.number(), v.null())),
+    note: v.optional(v.union(v.string(), v.null())),
+    problems: v.array(v.string()),
+  })
+    .index("by_status", ["status"])
+    .index("by_fileHash", ["fileHash"])
+    .index("by_opening", ["openingId"])
+    .index("by_routedTa", ["routedToTaId"])
+    .index("by_receivedAt", ["receivedAt"]),
+
+  /** LinkedIn profiles worth approaching — people we do not hold a CV for. */
+  linkVault: defineTable({
+    openingId: v.id("jobs"),
+    addedBy: v.id("users"),
+    linkedinUrl: v.string(),
+    name: v.optional(v.union(v.string(), v.null())),
+    title: v.optional(v.union(v.string(), v.null())),
+    company: v.optional(v.union(v.string(), v.null())),
+    isEyeMarked: v.boolean(),
+    phoneNumber: v.optional(v.union(v.string(), v.null())),
+    phoneSource: v.optional(v.union(v.string(), v.null())),
+    sourcingChannel: v.string(),
+    outcome: v.string(),
+    candidateId: v.optional(v.union(v.id("candidates"), v.null())),
+    conversationLog: v.array(v.object({
+      at: v.number(),
+      channel: v.string(),
+      note: v.string(),
+      by: v.id("users"),
+    })),
+    createdAt: v.number(),
+    /** What the browser extension read off a profile the TA had open. One at a
+     *  time, by a person — there is no crawl here and must never be one. */
+    capture: v.optional(v.union(v.any(), v.null())),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_addedBy", ["addedBy"])
+    .index("by_url", ["linkedinUrl"]),
+
+  /** Company research for an opening. Cached rather than regenerated per view:
+   *  searches cost money and four tab opens should not pay four times. */
+  researchReports: defineTable({
+    openingId: v.id("jobs"),
+    clientId: v.optional(v.union(v.id("clients"), v.null())),
+    fields: v.any(),
+    /** Hand-edited fields, so a regeneration does not overwrite them. */
+    editedFields: v.array(v.string()),
+    markdown: v.string(),
+    sources: v.array(v.object({
+      url: v.string(),
+      title: v.string(),
+      quote: v.string(),
+    })),
+    searches: v.number(),
+    model: v.string(),
+    generatedBy: v.id("users"),
+    generatedAt: v.number(),
+  }).index("by_opening", ["openingId"]),
+
+  /** Who holds this role now, who held it before, who holds it at competitors. */
+  benchmarks: defineTable({
+    openingId: v.id("jobs"),
+    name: v.optional(v.union(v.string(), v.null())),
+    title: v.string(),
+    company: v.string(),
+    linkedinUrl: v.optional(v.union(v.string(), v.null())),
+    kind: v.union(
+      v.literal("incumbent"), v.literal("predecessor"), v.literal("competitor"),
+    ),
+    confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    note: v.string(),
+    sourceUrl: v.optional(v.union(v.string(), v.null())),
+    sourceTitle: v.optional(v.union(v.string(), v.null())),
+    /** The TA's pick. What Suggestions searches against. */
+    isSelected: v.boolean(),
+    generatedAt: v.number(),
+  }).index("by_opening", ["openingId"]),
+
+  profileSuggestions: defineTable({
+    openingId: v.id("jobs"),
+    name: v.string(),
+    headline: v.string(),
+    company: v.optional(v.union(v.string(), v.null())),
+    location: v.optional(v.union(v.string(), v.null())),
+    linkedinUrl: v.optional(v.union(v.string(), v.null())),
+    tier: v.union(v.literal("priority"), v.literal("screen")),
+    why: v.string(),
+    /** What does not fit, where something does not. Never left flattering. */
+    concern: v.optional(v.union(v.string(), v.null())),
+    sourceUrl: v.optional(v.union(v.string(), v.null())),
+    status: v.union(v.literal("new"), v.literal("kept"), v.literal("dismissed")),
+    feedback: v.optional(v.union(v.string(), v.null())),
+    round: v.number(),
+    generatedAt: v.number(),
+    generatedFor: v.optional(v.union(v.id("users"), v.null())),
+    /** Keeping a profile is the claim — see src/lib/visibility.ts. */
+    keptBy: v.optional(v.union(v.id("users"), v.null())),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_opening_status", ["openingId", "status"]),
+
+  /** The sourcing assistant conversation on an opening. `refine` re-reads what
+   *  was already found and is free; `search` spends a round and credits. */
+  sourcingChat: defineTable({
+    openingId: v.id("jobs"),
+    role: v.union(v.literal("user"), v.literal("assistant")),
+    body: v.string(),
+    action: v.optional(v.union(v.string(), v.null())),
+    affected: v.number(),
+    sources: v.array(v.object({
+      url: v.string(),
+      title: v.string(),
+      quote: v.string(),
+    })),
+    byUserId: v.optional(v.union(v.id("users"), v.null())),
+    at: v.number(),
+  }).index("by_opening", ["openingId"]),
+
+  savedSearches: defineTable({
+    name: v.string(),
+    query: v.string(),
+    mode: v.union(v.literal("natural"), v.literal("boolean"), v.literal("meaning")),
+    ownerId: v.id("users"),
+    openingId: v.optional(v.union(v.id("jobs"), v.null())),
+    createdAt: v.number(),
+    lastRunAt: v.optional(v.union(v.number(), v.null())),
+    /** The count when it was last run, so "12 new since Tuesday" is possible. */
+    lastResultCount: v.optional(v.union(v.number(), v.null())),
+  }).index("by_owner", ["ownerId"]),
+
+  /** The spec is stored, never the numbers, so a reopened report is current. */
+  savedReports: defineTable({
+    name: v.string(),
+    ownerId: v.id("users"),
+    shared: v.boolean(),
+    spec: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_shared", ["shared"]),
+
+  /** One database-match run, and what it did. The audit behind the list. */
+  matchRuns: defineTable({
+    openingId: v.id("jobs"),
+    at: v.number(),
+    trigger: v.union(
+      v.literal("jd_approved"), v.literal("nightly"), v.literal("manual"),
+    ),
+    /** Nearest by meaning, before any rule. */
+    considered: v.number(),
+    afterRules: v.number(),
+    added: v.number(),
+    embedModel: v.string(),
+    assessmentVersion: v.optional(v.string()),
+    note: v.optional(v.union(v.string(), v.null())),
+  }).index("by_opening", ["openingId"]),
+
+  /** Someone taken off an opening's matches is not matched to it again. */
+  matchExclusions: defineTable({
+    openingId: v.id("jobs"),
+    candidateId: v.id("candidates"),
+    at: v.number(),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_opening_candidate", ["openingId", "candidateId"]),
+
+  /**
+   * A set of CVs sent out for a decision, and the decision that came back.
+   *
+   * The token is what makes the match reliable: it goes out in the subject and
+   * comes back on the reply, so an inbound email can be tied to exactly the
+   * round it answers even when a forward loses the thread headers.
+   */
+  reviewRounds: defineTable({
+    openingId: v.id("jobs"),
+    kind: v.union(v.literal("director"), v.literal("client")),
+    token: v.string(),
+    /** The provider's id for the mail that went out. A reply's In-Reply-To
+     *  names it exactly — the only signal that survives a rewritten subject. */
+    messageId: v.optional(v.union(v.string(), v.null())),
+    setNumber: v.optional(v.union(v.number(), v.null())),
+    applicationIds: v.array(v.id("applications")),
+    sentBy: v.id("users"),
+    sentAt: v.number(),
+    sentTo: v.string(),
+    trackedAt: v.optional(v.union(v.string(), v.null())),
+    subject: v.string(),
+    dispatch: v.union(v.literal("held"), v.literal("sent")),
+    status: v.union(
+      v.literal("awaiting"), v.literal("partial"), v.literal("returned"),
+    ),
+    returnedAt: v.optional(v.union(v.number(), v.null())),
+    /** The reply as received, kept so a parse can be re-read or disputed. */
+    replyBody: v.optional(v.union(v.string(), v.null())),
+    decisions: v.array(v.object({
+      applicationId: v.id("applications"),
+      outcome: v.union(
+        v.literal("shortlisted"), v.literal("rejected"), v.literal("hold"),
+      ),
+      note: v.union(v.string(), v.null()),
+      /** True when a person confirmed it, not the parse alone. */
+      confirmed: v.boolean(),
+    })),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_token", ["token"])
+    .index("by_opening_kind", ["openingId", "kind"]),
+
+  /** What was said on a call, structured where it could be read. */
+  callFeedback: defineTable({
+    applicationId: v.id("applications"),
+    kind: v.union(
+      v.literal("pre_interview"), v.literal("post_interview"),
+      v.literal("post_offer"), v.literal("ad_hoc"),
+    ),
+    outcome: v.union(
+      v.literal("reached"), v.literal("no_answer"),
+      v.literal("rescheduled"), v.literal("declined"),
+    ),
+    body: v.string(),
+    structured: v.optional(v.union(v.any(), v.null())),
+    source: v.union(
+      v.literal("manual"), v.literal("ai_call"),
+      v.literal("whatsapp"), v.literal("email"),
+    ),
+    recordedBy: v.id("users"),
+    recordedAt: v.number(),
+  }).index("by_application", ["applicationId"]),
 
 }, { schemaValidation: false });
 
