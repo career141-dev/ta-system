@@ -13,7 +13,10 @@
     "bench": "node --max-old-space-size=12000 --import ./tests/alias.mjs tests/benchmark.ts",
     "live:check": "node --import ./tests/alias.mjs scripts/live-check.ts",
     "live:sync": "node --max-old-space-size=12000 --import ./tests/alias.mjs scripts/live-sync.ts",
-    "db:restore": "node scripts/restore-local.mjs"
+    "db:restore": "node scripts/restore-local.mjs",
+    "convex:dev": "node scripts/convex-local-only.mjs dev --once",
+    "convex:codegen": "node scripts/convex-local-only.mjs codegen",
+    "convex:import": "node scripts/convex-local-only.mjs import"
   },
   "dependencies": {
     "convex": "^1.45.0",
