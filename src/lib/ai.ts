@@ -1,0 +1,551 @@
+/**
+ * The only file in the app that talks to a model — spec §8A.
+ *
+ * Everything above it asks for *content*, never for an API call, which is what
+ * makes the provider swappable and the no-key path honest. Three rules hold
+ * everywhere downstream:
+ *
+ *   1. **No key is a supported state, not an error.** Every caller gets a
+ *      structured `unavailable` result and falls back to the deterministic
+ *      output that already exists. The app never breaks because a key is absent.
+ *   2. **Claims about the world carry sources.** `research` and `benchmark` ask
+ *      about real companies and real people; a model with no web access will
+ *      invent both confidently. Those calls go through `searchWeb`, and a line
+ *      with no citation is dropped before it reaches the screen.
+ *   3. **Nothing is presented as fact that the system did not fetch.** Where a
+ *      thing could not be verified, the page says so.
+ */
+
+import { capActive, maxModelCost, modelCost, reserve, SpendCapError } from "./spend";
+
+export type AiFailure =
+  | "no_key"
+  | "rate_limited"
+  | "refused"
+  | "bad_response"
+  | "network"
+  | "search_disabled"
+  | "spend_cap";
+
+export interface Source {
+  url: string;
+  title: string;
+  /** Up to ~150 characters of the sentence the claim came from. */
+  quote: string;
+}
+
+export type AiResult =
+  | { ok: true; text: string; sources: Source[]; searches: number; provider: string; usage?: Usage }
+  | { ok: false; reason: AiFailure; detail?: string };
+
+// ─── Configuration ───────────────────────────────────────────────────────────
+
+const ANTHROPIC_VERSION = "2023-06-01";
+const DEFAULT_MODEL = "claude-sonnet-5";
+
+function anthropicKey() {
+  return (process.env.ANTHROPIC_API_KEY ?? "").trim();
+}
+function openaiKey() {
+  return (process.env.OPENAI_API_KEY ?? "").trim();
+}
+function googleKey() {
+  return (process.env.GOOGLE_API_KEY ?? "").trim();
+}
+function openrouterKey() {
+  return (process.env.OPENROUTER_API_KEY ?? "").trim();
+}
+
+/**
+ * Model per task, because the four jobs are not the same work — spec §8B.
+ * Writing wants the best writer; filtering snippets wants something cheap and
+ * fast. Each is overridable from .env.local so a disappointing result is a
+ * one-line change rather than a rebuild.
+ */
+export type Task = "jd" | "research" | "rank" | "extract" | "plan" | "parse" | "assist";
+
+/**
+ * One key, several models. OpenRouter's ids are `vendor/model`; the direct APIs
+ * take the bare name. Both are kept because the choice of route is the user's,
+ * and the only thing that differs is who bills the search.
+ */
+const OPENROUTER_MODEL: Record<Task, string> = {
+  jd: "anthropic/claude-opus-5",
+  extract: "anthropic/claude-sonnet-5",
+  research: "google/gemini-3.1-pro-preview",
+  rank: "google/gemini-3.6-flash",
+  plan: "google/gemini-3.6-flash",
+  parse: "google/gemini-2.5-flash-lite",
+  // The desk assistant: someone is waiting for the answer. Measured 13 September
+  // through OpenRouter, "Say OK." took 0.7 s here against 1.6–3.9 s on Gemini
+  // Flash Lite, at a similar price.
+  assist: "openai/gpt-4o-mini",
+};
+
+const DIRECT_MODEL: Record<Task, string> = {
+  jd: "claude-opus-5",
+  extract: "claude-sonnet-5",
+  research: "gemini-3.1-pro-preview",
+  rank: "gemini-3.6-flash",
+  plan: "gemini-3.6-flash",
+  parse: "gemini-2.5-flash-lite",
+  assist: "gpt-4o-mini",
+};
+
+const TASK_ENV: Record<Task, string> = {
+  jd: "C141_MODEL_JD",
+  research: "C141_MODEL_RESEARCH",
+  rank: "C141_MODEL_RANK",
+  extract: "C141_MODEL_EXTRACT",
+  plan: "C141_MODEL_RANK",
+  parse: "C141_MODEL_PARSE",
+  assist: "C141_MODEL_ASSIST",
+};
+
+export function viaOpenRouter(): boolean {
+  return openrouterKey().length > 0;
+}
+
+export function modelFor(task: Task): string {
+  const override = (process.env[TASK_ENV[task]] ?? "").trim();
+  if (override) return override;
+  return viaOpenRouter() ? OPENROUTER_MODEL[task] : DIRECT_MODEL[task];
+}
+
+/** Gemini reports thinking tokens separately and bills them as output. */
+export interface Usage {
+  inputTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+}
+
+/**
+ * Gemini. Used for everything that is filtering or grounded retrieval: its
+ * search grounding does not bill retrieved pages as input tokens, which for
+ * search-heavy work is worth more than any per-token price.
+ */
+/**
+ * OpenRouter — an OpenAI-shaped endpoint in front of every vendor.
+ *
+ * `plugins: [{ id: "web", engine: "native" }]` asks it to use the *provider's own*
+ * grounding rather than its Exa fallback. That matters for cost as much as
+ * quality: Google does not bill the pages it retrieves, where Exa's results
+ * arrive as input tokens you pay for. The same rule that made Gemini cheaper
+ * than Anthropic's web search still decides it here.
+ */
+async function callOpenRouter(
+  task: Task,
+  prompt: string,
+  opts: { maxTokens?: number; temperature?: number; search?: boolean } = {},
+): Promise<AiResult & { usage?: Usage }> {
+  const key = openrouterKey();
+  if (!key) return { ok: false, reason: "no_key" };
+  const model = modelFor(task);
+  // The test's hard stop: reserve the most this call could cost, or do not make it.
+  let settle: (usd: number) => void;
+  try {
+    settle = reserve(`${task} · ${model}`, maxModelCost(model, prompt.length, opts.maxTokens ?? 8000, opts.search));
+  } catch (e) {
+    if (e instanceof SpendCapError) return { ok: false, reason: "spend_cap", detail: e.message };
+    throw e;
+  }
+  // A failed request's charge is unknown, not zero: it keeps its full reservation (NaN settles at the maximum).
+  let cost = Number.NaN;
+  try {
+    const r = await openRouterRequest(key, model, task, prompt, opts);
+    if (r.ok) cost = r.cost ?? modelCost(model, r.usage?.inputTokens ?? 0, r.usage?.outputTokens ?? 0);
+    const { cost: _c, ...rest } = r as typeof r & { cost?: number };
+    return rest;
+  } finally {
+    settle(cost);
+  }
+}
+
+async function openRouterRequest(
+  key: string,
+  model: string,
+  task: Task,
+  prompt: string,
+  opts: { maxTokens?: number; temperature?: number; search?: boolean },
+): Promise<(AiResult & { usage?: Usage; cost?: number })> {
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${key}`,
+          "content-type": "application/json",
+          "HTTP-Referer": "https://career141.com",
+          "X-Title": "Career141 TA Platform",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: opts.maxTokens ?? 8000,
+          temperature: opts.temperature ?? 0.2,
+          messages: [{ role: "user", content: prompt }],
+          // Ask for the real charge, so the spending ledger records it rather than an estimate.
+          usage: { include: true },
+          ...(opts.search ? { plugins: [{ id: "web", engine: "native" }] } : {}),
+          // Only providers that keep nothing and train on nothing — set on every
+          // request, not left to the account settings (13 September: with the
+          // account switches on, requests still went to first-party endpoints).
+          // Someone is watching a spinner on "assist": the fastest such provider.
+          provider: { zdr: true, data_collection: "deny", ...(task === "assist" ? { sort: "latency" } : {}) },
+        }),
+      });
+    } catch (e) {
+      return { ok: false, reason: "network", detail: String(e) };
+    }
+
+    if (res.status === 429) {
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 2 ** attempt * 1500));
+        continue;
+      }
+      return { ok: false, reason: "rate_limited" };
+    }
+    if (res.status >= 500) {
+      await new Promise((r) => setTimeout(r, 2 ** attempt * 500));
+      continue;
+    }
+    if (!res.ok) {
+      return { ok: false, reason: "bad_response", detail: `${res.status} ${(await res.text()).slice(0, 300)}` };
+    }
+
+    const json = (await res.json()) as {
+      choices?: {
+        message?: {
+          content?: string;
+          annotations?: { type?: string; url_citation?: { url?: string; title?: string; content?: string } }[];
+        };
+      }[];
+      usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number };
+    };
+    const msg = json.choices?.[0]?.message;
+    const text = msg?.content ?? "";
+    if (!text.trim()) return { ok: false, reason: "bad_response", detail: "empty" };
+
+    const sources: Source[] = [];
+    for (const a of msg?.annotations ?? []) {
+      const c = a.url_citation;
+      if (a.type === "url_citation" && c?.url) {
+        sources.push({ url: c.url, title: c.title ?? c.url, quote: (c.content ?? "").slice(0, 200) });
+      }
+    }
+    const seen = new Set<string>();
+    return {
+      ok: true,
+      text,
+      sources: sources.filter((x) => (seen.has(x.url) ? false : (seen.add(x.url), true))),
+      searches: sources.length,
+      provider: model,
+      usage: {
+        inputTokens: json.usage?.prompt_tokens ?? 0,
+        outputTokens: json.usage?.completion_tokens ?? 0,
+        thinkingTokens: 0,
+      },
+      cost: typeof json.usage?.cost === "number" ? json.usage.cost : undefined,
+    };
+  }
+  return { ok: false, reason: "network", detail: "gave up after retries" };
+}
+
+export async function gemini(
+  task: Task,
+  prompt: string,
+  opts: { maxTokens?: number; temperature?: number } = {},
+): Promise<AiResult & { usage?: Usage }> {
+  if (viaOpenRouter()) return callOpenRouter(task, prompt, opts);
+  if (capActive()) return { ok: false, reason: "spend_cap", detail: "The capped test only spends through OpenRouter, where every call is metered." };
+  const key = googleKey();
+  if (!key) return { ok: false, reason: "no_key" };
+  const model = modelFor(task);
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: opts.temperature ?? 0.2,
+      maxOutputTokens: opts.maxTokens ?? 8000,
+    },
+  };
+
+  // 503s from this endpoint are common and transient; a bounded backoff turns a
+  // failed generation into a slower one.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      );
+    } catch (e) {
+      return { ok: false, reason: "network", detail: String(e) };
+    }
+    if (res.status === 429) {
+      const detail = await res.text().catch(() => "");
+      // limit: 0 means the model is not served on this tier at all. Waiting
+      // cannot fix that, so it fails immediately with the reason.
+      if (/limit:\s*0\b/.test(detail)) {
+        return { ok: false, reason: "rate_limited", detail: `${model} needs billing enabled on the Google key` };
+      }
+      // Otherwise it is a per-minute ceiling, and the response says how long to
+      // wait. Honouring that turns a failed run into a slower one — which
+      // matters most on the free tier, where 20/min is reached by two openings.
+      const m = detail.match(/retry in ([\d.]+)s/i);
+      const waitMs = Math.min((m ? Number(m[1]) : 30) * 1000 + 1500, 70_000);
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      return { ok: false, reason: "rate_limited", detail: "still limited after waiting" };
+    }
+    if (res.status >= 500) {
+      await new Promise((r) => setTimeout(r, 2 ** attempt * 500));
+      continue;
+    }
+    if (!res.ok) {
+      return { ok: false, reason: "bad_response", detail: `${res.status} ${(await res.text()).slice(0, 240)}` };
+    }
+    const json = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
+    };
+    const text = (json.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? "").join("");
+    if (!text.trim()) return { ok: false, reason: "bad_response", detail: "empty" };
+    const u = json.usageMetadata ?? {};
+    return {
+      ok: true,
+      text,
+      sources: [],
+      searches: 0,
+      provider: model,
+      usage: {
+        inputTokens: u.promptTokenCount ?? 0,
+        outputTokens: u.candidatesTokenCount ?? 0,
+        thinkingTokens: u.thoughtsTokenCount ?? 0,
+      },
+    };
+  }
+  return { ok: false, reason: "network", detail: "gave up after retries" };
+}
+
+export function aiStatus(): {
+  configured: boolean;
+  provider: "anthropic" | "openai" | null;
+  google: boolean;
+  webSearch: boolean;
+  model: string;
+} {
+  const provider = anthropicKey() ? "anthropic" : openaiKey() ? "openai" : null;
+  return {
+    configured: provider !== null || googleKey().length > 0 || viaOpenRouter(),
+    provider,
+    google: googleKey().length > 0 || viaOpenRouter(),
+    // Only Anthropic's server-side web search is wired up. OpenAI without it
+    // would have to answer company questions from memory, which is the exact
+    // failure this feature cannot have.
+    // Through OpenRouter, grounding rides on the request itself — there is no
+    // separate switch to forget to turn on.
+    webSearch: viaOpenRouter() || (provider === "anthropic" && (process.env.C141_WEB_SEARCH ?? "off").toLowerCase() === "on"),
+    model: (process.env.C141_MODEL ?? "").trim() || DEFAULT_MODEL,
+  };
+}
+
+// ─── Anthropic ───────────────────────────────────────────────────────────────
+
+interface Block {
+  type: string;
+  text?: string;
+  citations?: {
+    type: string;
+    url?: string;
+    title?: string;
+    cited_text?: string;
+  }[];
+  content?: unknown;
+}
+
+/** Sri Lanka, so "who runs this company" returns the Colombo one. */
+const USER_LOCATION = {
+  type: "approximate",
+  city: "Colombo",
+  country: "LK",
+  timezone: "Asia/Colombo",
+};
+
+async function callAnthropic(opts: {
+  system: string;
+  prompt: string;
+  maxTokens: number;
+  search: boolean;
+  maxSearches: number;
+}): Promise<AiResult> {
+  const key = anthropicKey();
+  if (!key) return { ok: false, reason: "no_key" };
+  const model = aiStatus().model;
+
+  const tools = opts.search
+    ? [
+        {
+          type: "web_search_20250305",
+          name: "web_search",
+          max_uses: opts.maxSearches,
+          user_location: USER_LOCATION,
+        },
+      ]
+    : undefined;
+
+  // The turn can pause mid-search; the documented continuation is to send the
+  // assistant message back untouched. Bounded so a loop cannot run away.
+  const messages: { role: string; content: unknown }[] = [{ role: "user", content: opts.prompt }];
+  let searches = 0;
+  const sources: Source[] = [];
+  let text = "";
+
+  for (let turn = 0; turn < 4; turn++) {
+    let res: Response;
+    try {
+      res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": key,
+          "anthropic-version": ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: opts.maxTokens,
+          system: opts.system,
+          messages,
+          ...(tools ? { tools } : {}),
+        }),
+      });
+    } catch (e) {
+      return { ok: false, reason: "network", detail: String(e) };
+    }
+
+    if (res.status === 429) return { ok: false, reason: "rate_limited" };
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      // Web search switched off for the org comes back as a 400, and the fix is
+      // a setting rather than anything the TA can do — say which it was.
+      if (res.status === 400 && /web search/i.test(detail)) {
+        return { ok: false, reason: "search_disabled", detail: detail.slice(0, 300) };
+      }
+      return { ok: false, reason: "bad_response", detail: `${res.status} ${detail.slice(0, 300)}` };
+    }
+
+    const body = (await res.json().catch(() => null)) as {
+      content?: Block[];
+      stop_reason?: string;
+      usage?: { server_tool_use?: { web_search_requests?: number } };
+    } | null;
+    if (!body?.content) return { ok: false, reason: "bad_response" };
+
+    searches += body.usage?.server_tool_use?.web_search_requests ?? 0;
+
+    for (const b of body.content) {
+      if (b.type === "text" && b.text) {
+        text += b.text;
+        for (const c of b.citations ?? []) {
+          if (c.type === "web_search_result_location" && c.url) {
+            sources.push({
+              url: c.url,
+              title: c.title ?? c.url,
+              quote: (c.cited_text ?? "").slice(0, 200),
+            });
+          }
+        }
+      }
+    }
+
+    if (body.stop_reason === "pause_turn") {
+      messages.push({ role: "assistant", content: body.content });
+      continue;
+    }
+    break;
+  }
+
+  if (!text.trim()) return { ok: false, reason: "bad_response", detail: "empty" };
+
+  // De-duplicate by URL, keeping the first quote seen for each.
+  const seen = new Set<string>();
+  const unique = sources.filter((s) => (seen.has(s.url) ? false : (seen.add(s.url), true)));
+
+  return { ok: true, text, sources: unique, searches, provider: "anthropic" };
+}
+
+// ─── OpenAI ──────────────────────────────────────────────────────────────────
+
+async function callOpenAI(opts: {
+  system: string;
+  prompt: string;
+  maxTokens: number;
+}): Promise<AiResult> {
+  const key = openaiKey();
+  if (!key) return { ok: false, reason: "no_key" };
+  const model = (process.env.C141_MODEL ?? "").trim() || "gpt-4o";
+  try {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: opts.maxTokens,
+        messages: [
+          { role: "system", content: opts.system },
+          { role: "user", content: opts.prompt },
+        ],
+      }),
+    });
+    if (res.status === 429) return { ok: false, reason: "rate_limited" };
+    if (!res.ok) {
+      return { ok: false, reason: "bad_response", detail: `${res.status} ${(await res.text()).slice(0, 300)}` };
+    }
+    const body = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const text = body.choices?.[0]?.message?.content ?? "";
+    if (!text.trim()) return { ok: false, reason: "bad_response", detail: "empty" };
+    return { ok: true, text, sources: [], searches: 0, provider: "openai" };
+  } catch (e) {
+    return { ok: false, reason: "network", detail: String(e) };
+  }
+}
+
+// ─── What the app actually calls ─────────────────────────────────────────────
+
+/** Writing, from material the caller supplies. No claims about the world. */
+export async function write(system: string, prompt: string, maxTokens = 2000, task: Task = "jd"): Promise<AiResult> {
+  if (viaOpenRouter()) return callOpenRouter(task, `${system}\n\n${prompt}`, { maxTokens });
+  if (capActive()) return { ok: false, reason: "spend_cap", detail: "The capped test only spends through OpenRouter, where every call is metered." };
+  if (anthropicKey()) return callAnthropic({ system, prompt, maxTokens, search: false, maxSearches: 0 });
+  if (openaiKey()) return callOpenAI({ system, prompt, maxTokens });
+  return { ok: false, reason: "no_key" };
+}
+
+/**
+ * Questions about the world — companies, people, markets. Refuses rather than
+ * answering from memory, because an unsourced claim about a client's competitor
+ * is worse than no claim at all.
+ */
+export async function research(system: string, prompt: string, maxTokens = 3000, maxSearches = 8): Promise<AiResult> {
+  if (viaOpenRouter()) {
+    return callOpenRouter("research", `${system}\n\n${prompt}`, { maxTokens, search: true });
+  }
+  if (capActive()) return { ok: false, reason: "spend_cap", detail: "The capped test only spends through OpenRouter, where every call is metered." };
+  const st = aiStatus();
+  if (!st.configured) return { ok: false, reason: "no_key" };
+  if (!st.webSearch) return { ok: false, reason: "search_disabled" };
+  return callAnthropic({ system, prompt, maxTokens, search: true, maxSearches });
+}
+
+export const FAILURE_MESSAGE: Record<AiFailure, string> = {
+  no_key: "No model key is set. Add one to .env.local and restart.",
+  rate_limited: "The model is rate-limited right now. Try again in a minute.",
+  refused: "The model declined to answer this one.",
+  bad_response: "The model returned something unusable.",
+  network: "Could not reach the model.",
+  spend_cap: "The test's $5 spending cap would be passed, so this was not run.",
+  search_disabled:
+    "Web search is off, so this would have to be answered from memory — which for company facts means inventing them. Set C141_WEB_SEARCH=on in .env.local (Anthropic key required).",
+};

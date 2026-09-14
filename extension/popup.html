@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img src="icon48.png" alt="" width="22" height="22" />
+      <h1>Career141</h1>
+      <button id="settings-toggle" type="button" title="Connection">⚙</button>
+    </header>
+
+    <section id="settings" hidden>
+      <label>Platform address<input id="platformUrl" type="url" placeholder="http://localhost:3100" /></label>
+      <label>Access token<input id="token" type="password" placeholder="paste from Excel Tables" /></label>
+      <button id="connect" class="primary" type="button">Connect</button>
+      <p class="hint">The token is on the Excel Tables page of any opening.</p>
+    </section>
+
+    <section id="main">
+      <label>I am<select id="userId"></select></label>
+      <label>File into<select id="openingId"></select></label>
+      <button id="capture" class="primary" type="button">Add this profile</button>
+      <p id="status" class="status"></p>
+      <h2>Recent</h2>
+      <ul id="history"></ul>
+    </section>
+  </body>
+  <script src="popup.js"></script>
+</html>

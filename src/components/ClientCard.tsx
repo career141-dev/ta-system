@@ -1,0 +1,257 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import { ClientEditor, ClientMenu, type Contact, type Pane } from "./ClientEditor";
+
+export interface ClientOpening {
+  id: string;
+  title: string;
+  priorityTier: string;
+  status: string;
+  locations: string[];
+  taNames: string[];
+  followUp: number;
+  setsClosed: number;
+  days: number;
+  target: number;
+}
+
+/**
+ * A client and the work under it — spec §4.1.
+ *
+ * The client is the row; the openings are folded away behind it. A desk with a
+ * dozen clients and forty openings cannot read a page that prints all forty at
+ * once, and the question being asked here is almost always "what is going on at
+ * this client", not "show me every role".
+ *
+ * Open by default where there is live work, because that is the answer to the
+ * question most of the time.
+ */
+/** Which rows the TA left open, per browser. Reloading a page should not undo
+ *  a tidy-up: a desk with a dozen clients closes the ones it is not working on
+ *  and expects them to stay closed. */
+const OPEN_KEY = "c141.clients.open";
+
+function readOpenMap(): Record<string, boolean> {
+  try {
+    return JSON.parse(localStorage.getItem(OPEN_KEY) ?? "{}") as Record<string, boolean>;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Column widths as inline styles, not Tailwind arbitrary values.
+ *
+ * `grid-cols-[68px_76px_112px]` only exists if the scanner saw that exact
+ * string and wrote the rule into the bundle. When it does not — a stale build,
+ * a class assembled from a variable — the element keeps `display: grid` and
+ * loses its columns, so three stat blocks stack vertically down the right of
+ * every row. Inline styles cannot be purged and cannot go stale.
+ */
+const STAT_COLS = { display: "grid", gridTemplateColumns: "72px 76px 116px" } as const;
+const TRAILING = { width: 64 } as const;
+
+export function ClientCard({
+  clientId,
+  name,
+  status,
+  esaSignedAt,
+  contacts,
+  canDelete,
+  industry,
+  contactTitle,
+  openCount,
+  allTime,
+  value,
+  openings,
+}: {
+  clientId: string;
+  name: string;
+  status: string;
+  esaSignedAt: number | null;
+  contacts: Contact[];
+  canDelete: boolean;
+  industry: string;
+  contactTitle: string | null;
+  openCount: number;
+  allTime: number;
+  value: string;
+  openings: ClientOpening[];
+}) {
+  // Starts on the server default so the first paint matches the markup, then
+  // takes whatever this browser last chose.
+  const [open, setOpen] = useState(openCount > 0);
+  const [pane, setPane] = useState<Pane>(null);
+
+  useEffect(() => {
+    const remembered = readOpenMap()[clientId];
+    if (typeof remembered === "boolean") setOpen(remembered);
+  }, [clientId]);
+
+  const toggle = () =>
+    setOpen((was) => {
+      const next = !was;
+      try {
+        const map = readOpenMap();
+        map[clientId] = next;
+        localStorage.setItem(OPEN_KEY, JSON.stringify(map));
+      } catch {
+        // Private browsing, or storage turned off. The row still toggles.
+      }
+      return next;
+    });
+
+  return (
+    <section className="group/card overflow-hidden rounded-xl border border-rule bg-surface">
+      {/* The row expands, and the menu sits on top of it — a button inside a
+          button is invalid, and the editing controls were a permanent strip
+          across the card before this. */}
+      <div className="relative flex items-center gap-5 px-7 py-5 transition-colors hover:bg-paper/50">
+        <button
+          onClick={toggle}
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${name}`}
+          className="absolute inset-0 z-0"
+        />
+        <div className="pointer-events-none relative min-w-0 flex-1">
+          <h2 className="text-[17px] font-semibold tracking-tight">{name}</h2>
+          <p className="mt-1 text-[12.5px] text-ink-soft">
+            {industry}
+            {contactTitle && ` · ${contactTitle}`}
+          </p>
+        </div>
+
+        {/*
+          One grid, sized to the widest LABEL rather than to the numbers.
+
+          The previous version set column widths from the figures — 74px each —
+          and the labels underneath are far wider than that, so "Open", "All
+          time" and "In progress" overflowed their cells and ran together into
+          "OPENALL TIME IN PROGRESS". The label is the wider of the two things
+          in the column, so the label has to set the width.
+        */}
+        <div className="pointer-events-none relative shrink-0 items-baseline text-right" style={STAT_COLS}>
+          {([
+            [String(openCount), "Open"],
+            [String(allTime), "All time"],
+            [value, "In progress"],
+          ] as const).map(([n, l]) => (
+            <div key={l} className="px-2">
+              <div className="tabular whitespace-nowrap text-[17px] font-semibold leading-none">{n}</div>
+              <div className="mt-1.5 whitespace-nowrap text-[11px] text-ink-faint">{l}</div>
+            </div>
+          ))}
+        </div>
+
+        {/*
+          Chevron and menu in one fixed slot at the trailing edge.
+          They were separate children of a wrapping, space-between row, which
+          is why the three dots ended up floating on their own halfway across
+          the card with nothing near them. TRAILING_W is the same width the
+          opening rows reserve, so the number columns line up.
+        */}
+        <div className="flex shrink-0 items-center justify-end gap-2" style={TRAILING}>
+          <svg
+            width={16}
+            height={16}
+            viewBox="0 0 16 16"
+            aria-hidden="true"
+            className="pointer-events-none relative shrink-0 text-ink-faint"
+          >
+            <path
+              d={open ? "M4 10L8 6L12 10" : "M4 6L8 10L12 6"}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+
+          <div className="pointer-events-auto relative z-10">
+          <ClientMenu
+            clientId={clientId}
+            name={name}
+            industry={industry}
+            status={status}
+            esaSignedAt={esaSignedAt}
+            contacts={contacts}
+            openingCount={openings.length}
+            canDelete={canDelete}
+            onPane={setPane}
+            pane={pane}
+          />
+        </div>
+        </div>
+      </div>
+
+      {pane && (
+        <ClientEditor
+          clientId={clientId}
+          name={name}
+          industry={industry}
+          status={status}
+          esaSignedAt={esaSignedAt}
+          contacts={contacts}
+          pane={pane}
+          onClose={() => setPane(null)}
+        />
+      )}
+
+      {open &&
+        (openings.length === 0 ? (
+          <p className="border-t border-rule px-7 py-8 text-[13px] text-ink-faint">
+            No openings yet.
+          </p>
+        ) : (
+          <div className="divide-y divide-rule border-t border-rule">
+            {openings.map((o) => (
+              <Link
+                key={o.id}
+                href={`/openings/${o.id}`}
+                className="flex items-center gap-5 px-7 py-4 hover:bg-paper/60"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-[14px] font-medium">{o.title}</span>
+                    <span className="text-[11px] text-ink-faint">{o.priorityTier}</span>
+                    {o.status !== "open" && (
+                      <span className="rounded bg-tag px-1.5 py-px text-[11px] text-ink-soft">
+                        {o.status.replace("_", " ")}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-0.5 text-[12px] text-ink-faint">
+                    {o.locations.join(", ")} · {o.taNames.join(", ")}
+                  </p>
+                </div>
+                {/* The same three columns as the client row above, so the
+                    numbers line up down the card. */}
+                <div className="shrink-0 items-baseline text-right" style={STAT_COLS}>
+                  <span className="px-2">
+                    <span className="tabular block whitespace-nowrap text-[14px]">{o.followUp}</span>
+                    <span className="mt-1 block whitespace-nowrap text-[11px] text-ink-faint">Follow-up</span>
+                  </span>
+                  <span className="px-2">
+                    <span className="tabular block whitespace-nowrap text-[14px]">{o.setsClosed}</span>
+                    <span className="mt-1 block whitespace-nowrap text-[11px] text-ink-faint">Sets</span>
+                  </span>
+                  <span className="px-2">
+                    <span
+                      className={`tabular block whitespace-nowrap text-[14px] ${o.days > o.target ? "text-danger" : ""}`}
+                    >
+                      {o.days} of {o.target}
+                    </span>
+                    <span className="mt-1 block whitespace-nowrap text-[11px] text-ink-faint">Days</span>
+                  </span>
+                </div>
+                <span className="shrink-0" style={TRAILING} aria-hidden="true" />
+              </Link>
+            ))}
+          </div>
+        ))}
+    </section>
+  );
+}

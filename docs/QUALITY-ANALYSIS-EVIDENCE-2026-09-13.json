@@ -1,0 +1,68 @@
+{
+  "scope": "Synthetic diagnostic inputs; no real candidate data. Existing application code unchanged.",
+  "existing_suites": "17 passed; localhost integration test rerun separately after sandbox bind restriction",
+  "typecheck": "passed",
+  "probes": [
+    {
+      "case": "Separate experience requirements collapse",
+      "input": [
+        "15 years overall",
+        "8 years in management"
+      ],
+      "actualMinYears": 8
+    },
+    {
+      "case": "Negated responsibility treated as met",
+      "result": {
+        "score": 100,
+        "met": [
+          "Managed procurement budgets"
+        ]
+      }
+    },
+    {
+      "case": "Same candidate and job scored through two input paths",
+      "rulesOnly": 92,
+      "withSimilarity": 91
+    },
+    {
+      "case": "Declined candidate with complete fields",
+      "result": "complete"
+    },
+    {
+      "case": "Email-only candidate already contacted",
+      "result": {
+        "missing": [
+          {
+            "id": "current_salary",
+            "label": "Current salary",
+            "ask": "your current salary",
+            "field": "currentSalary",
+            "enabled": true
+          }
+        ],
+        "startedAt": 1789361940000,
+        "deadline": 1789448340000,
+        "state": "due",
+        "next": {
+          "at": 1789361940000,
+          "channels": [
+            "email"
+          ],
+          "reason": "No phone number \u2014 email instead of the call.",
+          "purpose": "no_answer"
+        },
+        "handBack": null
+      }
+    },
+    {
+      "case": "Studying qualification counted as held",
+      "penalties": []
+    },
+    {
+      "case": "Partial reply changes original email numbering",
+      "expectedOriginalNumber": 2,
+      "actualOriginalNumber": 3
+    }
+  ]
+}

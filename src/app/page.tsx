@@ -1,0 +1,246 @@
+import Link from "next/link";
+import { repo, stageCounts, setsForOpening } from "@/data/store";
+import { getCurrentUser } from "@/lib/session";
+import { PRIORITY_TARGET } from "@/data/types";
+import { inHours, relDays } from "@/lib/format";
+import { alertsFor } from "@/lib/sla";
+import { LeadDashboard } from "@/components/dash/LeadDashboard";
+import { DirectorDashboard } from "@/components/dash/DirectorDashboard";
+import { OpsDashboard } from "@/components/dash/OpsDashboard";
+
+/**
+ * The day, not the database. What is urgent, what is scheduled, what each of my
+ * openings needs from me next — and nothing about the agency as a whole, which
+ * is the Director's view, not a recruiter's.
+ */
+export default async function Dashboard() {
+  const user = await getCurrentUser();
+  const openings = repo.openingsForUser(user).filter((o) => o.status === "open");
+  const alerts = alertsFor(user.id);
+  const urgent = alerts.filter((a) => a.urgent);
+  const routine = alerts.filter((a) => !a.urgent);
+  const clients = repo.clients();
+
+  const interviews = repo
+    .interviews()
+    .filter((i) => i.outcome === "pending" && i.scheduledAt > Date.now())
+    .sort((a, b) => a.scheduledAt - b.scheduledAt)
+    .slice(0, 5);
+
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
+  // Spec §13 — four different jobs, four different screens.
+  if (user.role === "ta_lead" || user.role === "admin") {
+    return (
+      <main className="mx-auto max-w-[1180px] px-8 py-9">
+        <header className="mb-8">
+          <h1 className="text-[24px] font-semibold tracking-tight">
+            {greeting}, {user.name}
+          </h1>
+          <p className="mt-1.5 text-[13px] text-ink-soft">
+            {openings.length} open across the team
+            {urgent.length > 0 && ` · ${urgent.length} urgent`}
+          </p>
+        </header>
+        <LeadDashboard leadId={user.id} />
+      </main>
+    );
+  }
+
+  if (user.role === "director") {
+    return (
+      <main className="mx-auto max-w-[1180px] px-8 py-9">
+        <header className="mb-8">
+          <h1 className="text-[24px] font-semibold tracking-tight">
+            {greeting}, {user.name}
+          </h1>
+          <p className="mt-1.5 text-[13px] text-ink-soft">Agency-wide</p>
+        </header>
+        <DirectorDashboard />
+      </main>
+    );
+  }
+
+  if (user.role === "ops") {
+    return (
+      <main className="mx-auto max-w-[1180px] px-8 py-9">
+        <header className="mb-8">
+          <h1 className="text-[24px] font-semibold tracking-tight">
+            {greeting}, {user.name}
+          </h1>
+          <p className="mt-1.5 text-[13px] text-ink-soft">Chasing and coordination</p>
+        </header>
+        <OpsDashboard opsId={user.id} />
+      </main>
+    );
+  }
+
+  return (
+    <main className="mx-auto max-w-[1180px] px-8 py-9">
+      <header className="mb-8">
+        <h1 className="text-[24px] font-semibold tracking-tight">
+          {greeting}, {user.name}
+        </h1>
+        <p className="mt-1.5 text-[13px] text-ink-soft">
+          {openings.length} open {openings.length === 1 ? "role" : "roles"}
+          {urgent.length > 0 && ` · ${urgent.length} needing attention now`}
+          {interviews.length > 0 && ` · ${interviews.length} interviews ahead`}
+        </p>
+      </header>
+
+      {urgent.length > 0 && (
+        <section className="mb-8 rounded-xl border border-rule bg-surface">
+          <h2 className="border-b border-rule px-7 py-4 text-[13px] font-semibold">
+            Today, in order
+          </h2>
+          <div className="divide-y divide-rule">
+            {urgent.map((a) => (
+              <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4">
+                <div className="min-w-[260px] flex-1">
+                  <p className="text-[13.5px]">{a.detail}</p>
+                  <p className="mt-0.5 text-[11.5px] text-ink-faint">
+                    {a.kind.replace(/_/g, " ")}
+                  </p>
+                </div>
+                <span className="tabular text-[12.5px] text-ink-soft">{inHours(a.dueAt)}</span>
+                <Link
+                  href={a.href}
+                  className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12.5px] font-medium text-brand hover:bg-brand-soft"
+                >
+                  {a.action}
+                </Link>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
+        <section>
+          <h2 className="mb-3.5 text-[13px] font-semibold">My openings</h2>
+          <div className="flex flex-col gap-4">
+            {openings.length === 0 && (
+              <div className="rounded-xl border border-rule bg-surface px-7 py-14 text-center text-[13px] text-ink-faint">
+                Nothing assigned to you.
+              </div>
+            )}
+            {openings.map((o) => {
+              const client = clients.find((c) => c.id === o.clientId);
+              const counts = stageCounts(o.id);
+              const sets = setsForOpening(o.id);
+              const openSet = sets.find((s) => s.status === "open");
+              const live = repo.jobPosts(o.id).filter((j) => j.status === "live");
+              const cvsToday = live.reduce((n, j) => n + j.cvCountToday, 0);
+              const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
+              const target = PRIORITY_TARGET[o.priorityTier].days;
+
+              const need =
+                o.jdStatus === "pending_ta_approval"
+                  ? "The JD is waiting for your approval"
+                  : cvsToday < 10
+                    ? `Only ${cvsToday} CVs today — under the ten a day line`
+                    : openSet
+                      ? `Set ${openSet.setNumber} needs ${5 - openSet.count} more to close`
+                      : "On track";
+
+              return (
+                <Link
+                  key={o.id}
+                  href={`/openings/${o.id}`}
+                  className="rounded-xl border border-rule bg-surface px-7 py-5 hover:border-rule-strong"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-5">
+                    <div>
+                      <p className="text-[12px] text-ink-faint">{client?.name}</p>
+                      <p className="mt-0.5 text-[15.5px] font-semibold tracking-tight">{o.title}</p>
+                    </div>
+                    <div className="flex gap-7 text-right">
+                      <div>
+                        <div className="tabular text-[16px] font-semibold leading-none">
+                          {counts.follow_up ?? 0}
+                        </div>
+                        <div className="mt-1.5 text-[11.5px] text-ink-soft">Follow-up</div>
+                      </div>
+                      <div>
+                        <div className={`tabular text-[16px] font-semibold leading-none ${cvsToday < 10 ? "text-danger" : ""}`}>
+                          {cvsToday}
+                        </div>
+                        <div className="mt-1.5 text-[11.5px] text-ink-soft">CVs today</div>
+                      </div>
+                      <div>
+                        <div className={`tabular text-[16px] font-semibold leading-none ${days > target ? "text-danger" : ""}`}>
+                          {days}
+                        </div>
+                        <div className="mt-1.5 text-[11.5px] text-ink-soft">of {target} days</div>
+                      </div>
+                    </div>
+                  </div>
+                  <p className="mt-4 border-t border-rule pt-3.5 text-[12.5px] text-ink-soft">
+                    {need}
+                  </p>
+                </Link>
+              );
+            })}
+          </div>
+        </section>
+
+        <aside className="flex flex-col gap-8">
+          <section>
+            <h2 className="mb-3.5 text-[13px] font-semibold">Upcoming interviews</h2>
+            <div className="rounded-xl border border-rule bg-surface">
+              {interviews.length === 0 && (
+                <p className="px-6 py-10 text-center text-[12.5px] text-ink-faint">
+                  Nothing scheduled.
+                </p>
+              )}
+              <div className="divide-y divide-rule">
+                {interviews.map((iv) => {
+                  const app = repo.application(iv.applicationId);
+                  const cand = app ? repo.candidate(app.candidateId) : null;
+                  const opening = app ? repo.opening(app.openingId) : null;
+                  const confirmed = repo
+                    .callFeedback(iv.applicationId)
+                    .some((f) => f.kind === "pre_interview" && f.outcome === "reached");
+                  return (
+                    <Link
+                      key={iv.id}
+                      href={`/openings/${opening?.id}/candidate/${app?.id}?tab=call`}
+                      className="block px-6 py-4 hover:bg-paper/60"
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="truncate text-[13px] font-medium">{cand?.fullName}</span>
+                        <span className="tabular shrink-0 text-[11.5px] text-ink-soft">
+                          {inHours(iv.scheduledAt)}
+                        </span>
+                      </div>
+                      <p className="mt-1 truncate text-[11.5px] text-ink-faint">{opening?.title}</p>
+                      <p className={`mt-1.5 text-[11.5px] ${confirmed ? "text-ink-soft" : "text-danger"}`}>
+                        {confirmed ? "Attendance confirmed" : "Not yet contacted"}
+                      </p>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+
+          {routine.length > 0 && (
+            <section>
+              <h2 className="mb-3.5 text-[13px] font-semibold">When you have a moment</h2>
+              <ul className="flex flex-col gap-3.5">
+                {routine.slice(0, 6).map((a) => (
+                  <li key={a.id} className="text-[12.5px] leading-relaxed">
+                    <span className="text-ink-soft">{a.detail}</span>
+                    <br />
+                    <span className="text-ink-faint">{a.kind.replace(/_/g, " ")}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </aside>
+      </div>
+    </main>
+  );
+}

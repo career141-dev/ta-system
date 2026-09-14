@@ -1,0 +1,260 @@
+"use client";
+
+import { useState } from "react";
+import { deleteLink, logOutreach, toggleEyeMark, updateLink } from "@/app/actions";
+import { inputClass } from "./form";
+import { Confirm } from "./Confirm";
+import { dateAt } from "@/lib/format";
+import type { LinkOutcome, LinkVaultEntry } from "@/data/types";
+
+const OUTCOMES: { value: LinkOutcome; label: string }[] = [
+  { value: "no_contact", label: "Not contacted" },
+  { value: "contacted", label: "Contacted" },
+  { value: "responded", label: "Responded" },
+  { value: "cv_received", label: "CV received" },
+  { value: "shortlisted", label: "Shortlisted" },
+  { value: "declined", label: "Declined" },
+  { value: "unreachable", label: "Unreachable" },
+];
+
+const PHONE_SOURCES = [
+  { value: "", label: "—" },
+  { value: "mutual_connection", label: "Mutual connection" },
+  { value: "reception_call", label: "Reception / switchboard" },
+  { value: "internal_db", label: "Someone in our database" },
+  { value: "profile", label: "On their profile" },
+  { value: "other", label: "Other" },
+];
+
+const chev = (
+  <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint">
+    <path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+/**
+ * One row of Excel Tables — spec §4.5, to the Figma frame.
+ *
+ * Label on the left, facts on the right, the same as every other candidate row
+ * in the product. `Overview` carries where they are and what has been said to
+ * them; `LinkedIn URL` carries the link the whole record hangs off.
+ */
+export function LinkRow({
+  entry: r,
+  openingId,
+  addedByName,
+  userNames,
+}: {
+  entry: LinkVaultEntry;
+  openingId: string;
+  addedByName: string;
+  userNames: Record<string, string>;
+}) {
+  const [edit, setEdit] = useState(false);
+  const [allLog, setAllLog] = useState(false);
+  const selectClass = `${inputClass} cursor-pointer appearance-none pr-9`;
+  const log = [...r.conversationLog].reverse();
+  const shown = allLog ? log : log.slice(0, 2);
+  const outcome = OUTCOMES.find((o) => o.value === r.outcome)?.label ?? r.outcome;
+
+  return (
+    <article className="px-6 py-5">
+      <div className="flex gap-3.5">
+        <form action={toggleEyeMark} className="pt-1">
+          <input type="hidden" name="openingId" value={openingId} />
+          <input type="hidden" name="entryId" value={r.id} />
+          <button
+            title={r.isEyeMarked ? "Eye-marked — a high-conviction profile" : "Eye-mark this profile"}
+            className={`grid h-[15px] w-[15px] place-items-center rounded-[3px] border text-[10px] leading-none transition-colors ${
+              r.isEyeMarked ? "border-brand bg-brand text-white" : "border-rule-strong text-transparent hover:border-brand"
+            }`}
+          >
+            ✓
+          </button>
+        </form>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <a
+                  href={r.linkedinUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[14px] font-semibold text-accent hover:underline"
+                >
+                  {r.name ?? "Unnamed profile"}
+                </a>
+                <span className="text-[11px] text-ink-faint">in · 2nd</span>
+                <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
+                  {outcome}
+                </span>
+              </div>
+              <p className="mt-0.5 text-[13px]">{r.title ?? "Title not recorded"}</p>
+              <p className="mt-0.5 text-[12px] text-ink-faint">
+                {[r.company, r.phoneNumber].filter(Boolean).join(" · ") || "No company or number yet"}
+              </p>
+            </div>
+
+            <div className="flex shrink-0 flex-col items-end gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setEdit((v) => !v)}
+                  className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"
+                >
+                  Change outcome ⇕
+                </button>
+                <a
+                  href={r.linkedinUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                >
+                  Open profile
+                </a>
+                <button
+                  onClick={() => setEdit((v) => !v)}
+                  aria-label="More"
+                  className="rounded px-1.5 text-[15px] leading-none text-ink-faint transition-colors hover:text-ink"
+                >
+                  •••
+                </button>
+              </div>
+              <p className="text-right text-[11px] leading-snug text-ink-faint">
+                Added {dateAt(r.createdAt)}
+                <br />
+                by {addedByName}
+              </p>
+            </div>
+          </div>
+
+          <dl className="mt-3 grid grid-cols-[96px_1fr] gap-x-4 gap-y-1.5 text-[12.5px] leading-relaxed">
+            <dt className="font-medium text-ink-soft">Overview</dt>
+            <dd>
+              <span className="text-ink-soft">
+                {r.title ?? "Role unknown"}{r.company ? ` at ${r.company}` : ""} · {outcome.toLowerCase()}
+              </span>
+              {shown.map((c, i) => (
+                <span key={i} className="mt-0.5 block">
+                  {c.note}{" "}
+                  <span className="italic text-ink-faint">
+                    {c.channel} · {userNames[c.by] ?? c.by} · {dateAt(c.at)}
+                  </span>
+                </span>
+              ))}
+              {log.length > 2 && (
+                <button
+                  onClick={() => setAllLog((v) => !v)}
+                  className="mt-0.5 block text-[12px] text-accent hover:underline"
+                >
+                  {allLog ? "Show less" : `Show all (${log.length})`}
+                </button>
+              )}
+            </dd>
+
+            <dt className="font-medium text-ink-soft">LinkedIn URL</dt>
+            <dd className="truncate">
+              <a href={r.linkedinUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                {r.linkedinUrl.replace(/^https?:\/\//, "")}
+              </a>
+              {r.phoneSource && (
+                <span className="block text-ink-faint">
+                  Number via {PHONE_SOURCES.find((p) => p.value === r.phoneSource)?.label?.toLowerCase()}
+                </span>
+              )}
+            </dd>
+          </dl>
+
+          {edit && (
+            <div className="mt-4 grid gap-6 border-t border-rule pt-4 lg:grid-cols-2">
+              <form action={updateLink} className="flex flex-col gap-3.5">
+                <input type="hidden" name="openingId" value={openingId} />
+                <input type="hidden" name="entryId" value={r.id} />
+                <div className="grid grid-cols-2 gap-3">
+                  <label>
+                    <span className="mb-1.5 block text-[11.5px] text-ink-soft">Name</span>
+                    <input name="name" defaultValue={r.name ?? ""} className={inputClass} />
+                  </label>
+                  <label>
+                    <span className="mb-1.5 block text-[11.5px] text-ink-soft">Company</span>
+                    <input name="company" defaultValue={r.company ?? ""} className={inputClass} />
+                  </label>
+                </div>
+                <label>
+                  <span className="mb-1.5 block text-[11.5px] text-ink-soft">Outcome</span>
+                  <div className="relative">
+                    <select name="outcome" defaultValue={r.outcome} className={selectClass}>
+                      {OUTCOMES.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                    {chev}
+                  </div>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label>
+                    <span className="mb-1.5 block text-[11.5px] text-ink-soft">Phone</span>
+                    <input name="phoneNumber" defaultValue={r.phoneNumber ?? ""} placeholder="+94 7…" className={inputClass} />
+                  </label>
+                  <label>
+                    <span className="mb-1.5 block text-[11.5px] text-ink-soft">How you got it</span>
+                    <div className="relative">
+                      <select name="phoneSource" defaultValue={r.phoneSource ?? ""} className={selectClass}>
+                        {PHONE_SOURCES.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      {chev}
+                    </div>
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
+                    Save
+                  </button>
+                </div>
+              </form>
+
+              {/* Finding 02 — a row pasted by mistake, or a person who turns out
+                  to be the wrong one, had to stay in the table forever. */}
+              <form action={deleteLink} className="lg:col-span-2">
+                <input type="hidden" name="openingId" value={openingId} />
+                <input type="hidden" name="entryId" value={r.id} />
+                <Confirm
+                  label="Delete this row"
+                  question={
+                    log.length > 0
+                      ? `Delete ${r.name ?? "this row"} and the ${log.length} approach${log.length === 1 ? "" : "es"} logged against them?`
+                      : `Delete ${r.name ?? "this row"} from the table?`
+                  }
+                  className="text-[12px] text-ink-faint transition-colors hover:text-danger"
+                />
+              </form>
+
+              <form action={logOutreach} className="flex flex-col gap-2.5">
+                <input type="hidden" name="openingId" value={openingId} />
+                <input type="hidden" name="entryId" value={r.id} />
+                <span className="text-[11.5px] text-ink-soft">Log an approach</span>
+                <textarea name="note" rows={3} placeholder="What happened on this approach" className={`${inputClass} leading-relaxed`} />
+                <div className="flex items-center gap-2.5">
+                  <div className="relative">
+                    <select name="channel" defaultValue="linkedin" className={`${selectClass} py-1.5 text-[12px]`}>
+                      <option value="linkedin">LinkedIn</option>
+                      <option value="whatsapp">WhatsApp</option>
+                      <option value="call">Call</option>
+                      <option value="email">Email</option>
+                    </select>
+                    {chev}
+                  </div>
+                  <button className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-soft">
+                    Log it
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}

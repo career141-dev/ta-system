@@ -1,0 +1,7 @@
+/* The button lives in a shadow root and styles itself. This file exists so the
+   host element cannot be laid out by LinkedIn's own rules. */
+#c141-capture-host {
+  all: initial;
+  position: fixed;
+  z-index: 2147483000;
+}

@@ -1,0 +1,15 @@
+node_modules
+.next
+.data
+*.tsbuildinfo
+next-env.d.ts
+
+# Secrets — never commit
+.env
+.env.local
+.env*.local
+
+# Local embedding model runtime
+tools/embed/.venv
+.data-live-test
+tools/embed/models

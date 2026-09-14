@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+/* Palette sampled from the System-Design Figma file, not invented. */
+@theme inline {
+  /* ATS — the green app */
+  --color-brand: #165b42;
+  --color-brand-line: #34705a;
+  --color-brand-soft: #eaf2ee;
+  --color-ink: #1c1c1c;
+  --color-ink-soft: #56606a;
+  --color-ink-faint: #8b9298;
+  --color-paper: #f7f8fa;
+  --color-surface: #ffffff;
+  --color-rule: #dde1e5;
+  --color-rule-strong: #bcc2c8;
+  --color-navactive: #27323a;
+  --color-tag: #edeff1;
+  /* Outbound links and profile names — a blue that sits beside the green
+     without competing with it. Used by the link vault and database search. */
+  --color-accent: #1d4f8c;
+  --color-accent-soft: #eaf0f8;
+
+  /* Wage Intelligence — the research module */
+  --color-wi-bg: #0f172a;
+  --color-wi-accent: #2563eb;
+  --color-wi-paper: #f7f8fa;
+
+  --color-warn: #8a6212;
+  --color-warn-soft: #fdf3e0;
+  --color-danger: #b3261e;
+  --color-danger-soft: #fbeae8;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Report bars grow from nothing on first paint — see app/reports/ReportView. */
+@keyframes growbar {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes growbar {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(1); }
+  }
+}

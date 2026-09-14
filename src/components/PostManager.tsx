@@ -1,0 +1,387 @@
+"use client";
+
+import { useState } from "react";
+import { addJobPost, deleteJobPost, setPostStatus, transferCvs, updatePost } from "@/app/actions";
+import { TokenInput, inputClass } from "./form";
+import { Confirm } from "./Confirm";
+import type { JobPost, User } from "@/data/types";
+
+const STATUS_LABEL: Record<JobPost["status"], string> = {
+  draft: "Draft",
+  live: "Live",
+  paused: "Paused",
+  closed: "Closed",
+};
+
+/**
+ * Posts live inside the Opening (Q20). Two mechanisms matter here and both are
+ * easy to lose in a generic CRUD screen:
+ *
+ * Alias keywords — when a recruiter renames a post to beat candidate fatigue,
+ * the old title has to keep routing, or the rename silently orphans every
+ * application that still quotes it.
+ *
+ * CV transfer — a paused post's CVs move to the live one in one action, rather
+ * than being re-sourced.
+ */
+export function PostManager({
+  openingId,
+  posts,
+  users,
+  countsByPost,
+  bare = false,
+}: {
+  openingId: string;
+  posts: JobPost[];
+  users: User[];
+  countsByPost: Record<string, number>;
+  /** Sitting behind a disclosure that already names it — so it drops its own
+   *  card, heading and blurb and is just the controls. */
+  bare?: boolean;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [transferFrom, setTransferFrom] = useState<string | null>(null);
+
+  const live = posts.filter((p) => p.status === "live");
+
+  return (
+    <section className={bare ? "" : "rounded-2xl border border-rule bg-surface"}>
+      <header
+        className={`flex flex-wrap items-center justify-between gap-4 ${
+          bare ? "pb-4" : "border-b border-rule px-7 py-6"
+        }`}
+      >
+        {bare ? (
+          <span className="text-[12px] text-ink-faint">
+            {live.length} live of {posts.length}
+          </span>
+        ) : (
+          <div>
+            <h2 className="text-[15px] font-semibold">Posts</h2>
+            <p className="mt-1 text-[12.5px] text-ink-soft">
+              Many posts, one candidate pool. {live.length} live of {posts.length}.
+            </p>
+          </div>
+        )}
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className={
+            bare
+              ? "text-[12.5px] text-brand hover:underline"
+              : "flex items-center gap-2 rounded-full border border-brand-line px-4 py-2 text-[13px] font-medium text-brand transition-colors hover:bg-brand-soft"
+          }
+        >
+          {adding ? "Cancel" : "Add a post"}
+        </button>
+      </header>
+
+      {adding && (
+        <form action={addJobPost} className="border-b border-rule bg-paper/60 px-7 py-6">
+          <input type="hidden" name="openingId" value={openingId} />
+          <h3 className="mb-4 text-[13.5px] font-semibold">New post</h3>
+          <div className="flex flex-wrap items-end gap-4">
+            <label className="min-w-[280px] flex-1">
+              <span className="mb-1.5 block text-[12px] text-ink-soft">Title candidates will see</span>
+              <input
+                name="title"
+                required
+                autoFocus
+                placeholder="GM Merchandising"
+                className={`${inputClass} text-[15px]`}
+              />
+            </label>
+            <label>
+              <span className="mb-1.5 block text-[12px] text-ink-soft">Where it is posted</span>
+              <select name="channel" defaultValue="linkedin" className={`${inputClass} cursor-pointer`}>
+                <option value="linkedin">LinkedIn job</option>
+                <option value="facebook">Meta campaign (WhatsApp)</option>
+                <option value="email_campaign">Email campaign</option>
+              </select>
+            </label>
+            <label className="flex items-center gap-2 pb-2.5">
+              <input
+                type="checkbox"
+                name="liveOnLinkedIn"
+                value="1"
+                defaultChecked
+                className="h-4 w-4"
+              />
+              <span className="text-[12.5px]">It is live now</span>
+            </label>
+            <button className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+              Create post
+            </button>
+          </div>
+          <p className="mt-3 max-w-[78ch] text-[11.5px] leading-relaxed text-ink-faint">
+            <strong className="font-medium text-ink-soft">LinkedIn:</strong> put the owner&rsquo;s
+            applications inbox into the job setup, where LinkedIn emails applicants to. Each
+            application is filed to this post by its headline.{" "}
+            <strong className="font-medium text-ink-soft">Meta or email campaign:</strong> the post
+            gets a short code once created. Put it in the ad&rsquo;s pre-filled WhatsApp message, or
+            ask for it in the email subject, and replies carrying it are filed here. Only live posts
+            are filed to or chased.
+          </p>
+        </form>
+      )}
+
+      <div className="divide-y divide-rule">
+        {posts.length === 0 && (
+          <p className="px-7 py-12 text-center text-[13px] text-ink-faint">
+            No posts yet. Add one to start collecting applications.
+          </p>
+        )}
+
+        {posts.map((p) => {
+          const ta = users.find((u) => u.id === p.assignedTaId);
+          const isEditing = editing === p.id;
+          const count = countsByPost[p.id] ?? 0;
+
+          return (
+            <div key={p.id} className="px-7 py-6">
+              <div className="flex flex-wrap items-start justify-between gap-6">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <span className="text-[15px] font-medium">{p.title}</span>
+                    <span
+                      className={`rounded-md px-2 py-[3px] text-[11px] font-medium ${
+                        p.status === "live"
+                          ? "bg-brand-soft text-brand"
+                          : p.status === "paused"
+                            ? "bg-warn-soft text-warn"
+                            : "bg-tag text-ink-soft"
+                      }`}
+                    >
+                      {STATUS_LABEL[p.status]}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px] text-ink-soft">
+                    <span>{p.country ?? "No region set"}</span>
+                    <span className="text-ink-faint">·</span>
+                    <span>{ta?.name ?? "Unassigned"}</span>
+                    {/*
+                      The mailbox the advert points at belongs to the TA, not
+                      to this post — one address takes every job that TA is
+                      running, and the headline decides which. Showing a
+                      made-up per-post address here would be showing an address
+                      nothing delivers to.
+                    */}
+                    {ta?.routingEmail ? (
+                      <code className="rounded-md bg-paper px-2 py-1 text-[11.5px] text-ink-soft">
+                        {ta.routingEmail}
+                      </code>
+                    ) : (
+                      <span className="text-[11.5px] text-warn">
+                        No mailbox on {ta?.name ?? "this TA"} — applications cannot be routed.
+                      </span>
+                    )}
+                  </div>
+
+                  {/* A campaign post is found by its code, so the code and
+                      where it goes are shown on the post itself. */}
+                  {(p.channel === "facebook" || p.channel === "email_campaign") && (
+                    <div className="mt-2.5 rounded-lg border border-rule bg-paper/60 px-3 py-2 text-[12px] leading-relaxed text-ink-soft">
+                      <span className="mr-2 font-medium text-ink">
+                        {p.channel === "facebook" ? "Meta campaign" : "Email campaign"} code
+                      </span>
+                      <code className="rounded bg-surface px-1.5 py-0.5 text-[12px] text-ink">{p.campaignCode}</code>
+                      <br />
+                      {p.channel === "facebook"
+                        ? `Pre-filled WhatsApp text for the ad: “Hi, I'm applying for ${p.title} (${p.campaignCode})”.`
+                        : `Ask applicants to reply with “${p.campaignCode}” in the subject, sent to ${ta?.routingEmail ?? "the TA's applications inbox"}.`}
+                    </div>
+                  )}
+
+                  {p.aliasKeywords.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11.5px] text-ink-faint">Headline also matches:</span>
+                      {p.aliasKeywords.map((k) => (
+                        <span
+                          key={k}
+                          className="rounded-md border border-rule px-2 py-[3px] text-[11.5px] text-ink-soft"
+                        >
+                          {k}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex shrink-0 items-center gap-7">
+                  <div className="text-right">
+                    <div className="tabular text-[18px] font-semibold leading-none">{count}</div>
+                    <div className="mt-1.5 text-[11px] text-ink-soft">candidates</div>
+                  </div>
+                  <div className="text-right">
+                    <div
+                      className={`tabular text-[18px] font-semibold leading-none ${
+                        p.cvCountToday < 10 && p.status === "live" ? "text-danger" : ""
+                      }`}
+                    >
+                      {p.cvCountToday}
+                    </div>
+                    <div className="mt-1.5 text-[11px] text-ink-soft">today</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-3.5 flex flex-wrap items-center gap-4 text-[12.5px]">
+                <button
+                  onClick={() => setEditing(isEditing ? null : p.id)}
+                  className="text-ink-soft transition-colors hover:text-ink"
+                >
+                  {isEditing ? "Close" : "Edit"}
+                </button>
+
+                {/* Finding 10 — the type has four states and the control only
+                    ever offered two of them, so a finished post could be
+                    paused forever but never closed. */}
+                {(["draft", "live", "paused", "closed"] as const)
+                  .filter((next) => next !== p.status)
+                  .map((next) => (
+                    <form key={next} action={setPostStatus}>
+                      <input type="hidden" name="openingId" value={openingId} />
+                      <input type="hidden" name="postId" value={p.id} />
+                      <input type="hidden" name="status" value={next} />
+                      <button className="text-ink-soft transition-colors hover:text-ink">
+                        {next === "live"
+                          ? "Set live"
+                          : next === "paused"
+                            ? "Pause"
+                            : next === "draft"
+                              ? "Back to draft"
+                              : "Close"}
+                      </button>
+                    </form>
+                  ))}
+
+                <form action={deleteJobPost} className="ml-auto">
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <input type="hidden" name="postId" value={p.id} />
+                  <Confirm
+                    label="Delete post"
+                    question={
+                      count > 0
+                        ? `Delete this post? Its ${count} candidate${count === 1 ? "" : "s"} stay on the opening, without a post against them.`
+                        : "Delete this post?"
+                    }
+                    className="text-[12.5px] text-ink-faint transition-colors hover:text-danger"
+                  />
+                </form>
+
+                {p.status === "paused" && count > 0 && live.length > 0 && (
+                  <button
+                    onClick={() => setTransferFrom(transferFrom === p.id ? null : p.id)}
+                    className="font-medium text-brand transition-colors hover:underline"
+                  >
+                    Move {count} {count === 1 ? "candidate" : "candidates"} to a live post
+                  </button>
+                )}
+              </div>
+
+              {transferFrom === p.id && (
+                <form
+                  action={transferCvs}
+                  className="mt-3.5 rounded-xl border border-rule bg-paper/60 px-5 py-4"
+                >
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <input type="hidden" name="fromPostId" value={p.id} />
+                  <p className="text-[12.5px] text-ink-soft">
+                    Move to — they keep their stage and their owner.
+                  </p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {live.map((t) => (
+                      <button
+                        key={t.id}
+                        name="toPostId"
+                        value={t.id}
+                        className="rounded-full border border-brand-line px-3.5 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                      >
+                        {t.title}
+                      </button>
+                    ))}
+                  </div>
+                </form>
+              )}
+
+              {isEditing && (
+                <form
+                  action={updatePost}
+                  className="mt-4 grid gap-4 rounded-xl border border-rule bg-paper/60 px-5 py-4 sm:grid-cols-2"
+                >
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <input type="hidden" name="postId" value={p.id} />
+
+                  <div className="sm:col-span-2">
+                    <span className="mb-2 block text-[12.5px] font-medium">
+                      Alias titles
+                      <span className="ml-2 font-normal text-[11.5px] text-ink-faint">
+                        old or boosted titles that must keep routing here
+                      </span>
+                    </span>
+                    <TokenInput
+                      name="aliasKeywords"
+                      initial={p.aliasKeywords}
+                      placeholder="GM Marketing"
+                    />
+                  </div>
+
+                  <label>
+                    <span className="mb-2 block text-[12.5px] font-medium">Region</span>
+                    <input
+                      name="country"
+                      defaultValue={p.country ?? ""}
+                      placeholder="Sri Lanka"
+                      className={inputClass}
+                    />
+                  </label>
+
+                  <div>
+                    <span className="mb-2 block text-[12.5px] font-medium">Recruiter</span>
+                    <div className="relative">
+                      <select
+                        name="assignedTaId"
+                        defaultValue={p.assignedTaId ?? ""}
+                        className={`${inputClass} cursor-pointer appearance-none pr-10`}
+                      >
+                        <option value="">Unassigned</option>
+                        {users
+                          .filter((u) => u.role === "ta")
+                          .map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name}
+                            </option>
+                          ))}
+                      </select>
+                      <svg width={14} height={14}
+                        viewBox="0 0 16 16"
+                        aria-hidden="true"
+                        className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"
+                      >
+                        <path
+                          d="M4 6.5L8 10.5L12 6.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <button className="rounded-full bg-brand px-5 py-2.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
+                      Save post
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}

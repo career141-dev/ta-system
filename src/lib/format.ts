@@ -1,0 +1,33 @@
+export function relDays(ts: number | null): string {
+  if (!ts) return "—";
+  const d = Math.floor((Date.now() - ts) / 86_400_000);
+  if (d <= 0) return "today";
+  if (d === 1) return "yesterday";
+  return `${d}d ago`;
+}
+
+export function inHours(ts: number): string {
+  const h = (ts - Date.now()) / 3_600_000;
+  if (h < 0) return `${Math.abs(Math.round(h))}h ago`;
+  if (h < 1) return `in ${Math.round(h * 60)}m`;
+  if (h < 48) return `in ${Math.round(h)}h`;
+  return `in ${Math.round(h / 24)}d`;
+}
+
+export function money(n: number | null, ccy: string): string {
+  if (n === null) return "—";
+  if (ccy === "LKR") return `${Math.round(n / 1000)}K`;
+  return `${ccy} ${n.toLocaleString()}`;
+}
+
+export function timeAt(ts: number): string {
+  return new Date(ts).toLocaleString("en-GB", {
+    day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+/** On-screen dates: "30 Aug 2026". Relative ageing uses relDays; timestamps use timeAt. */
+export function dateAt(ts: number | null): string {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
