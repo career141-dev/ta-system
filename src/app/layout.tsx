@@ -7,6 +7,7 @@ import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
 import { repo } from "@/data/store";
 import { DeskAssistant } from "@/components/DeskAssistant";
+import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 
 export const metadata: Metadata = {
   title: "Career141 — Talent Acquisition",
@@ -33,13 +34,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           rel="stylesheet"
         />
       </head>
-      <body>
-        {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
-        <Suspense fallback={null}>
-          <Flash />
-        </Suspense>
-        {children}
-        {user ? <DeskAssistant /> : null}
+      <body suppressHydrationWarning>
+        <ConvexClientProvider>
+          {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
+          <Suspense fallback={null}>
+            <Flash />
+          </Suspense>
+          {children}
+          {user ? <DeskAssistant /> : null}
+        </ConvexClientProvider>
       </body>
     </html>
   );

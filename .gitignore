@@ -13,3 +13,4 @@ next-env.d.ts
 tools/embed/.venv
 .data-live-test
 tools/embed/models
+*.log

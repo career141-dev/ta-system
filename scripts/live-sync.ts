@@ -26,9 +26,13 @@ if (!config) {
 const pagesArg = arg("pages", "40");
 const started = Date.now();
 console.log(`Copying from ${new URL(config.url).host} — query functions only, ${config.rate} requests a second at most.`);
+const skipVectors = process.argv.includes("--skip-vectors");
+const useLiveVectors = process.argv.includes("--use-live-vectors");
 const result = await syncLive(new ReadOnlyConvex(config), {
   pageSize: Number(arg("size", "25")),
   maxPages: pagesArg === "all" ? Number.MAX_SAFE_INTEGER : Number(pagesArg),
+  skipVectors,
+  useLiveVectors,
   onPage: (n) => { if (n % 500 === 0) console.log(`  ${n.toLocaleString()} read…`); },
 });
 console.log(`\nRead ${result.read.toLocaleString()} CVs in ${Math.round((Date.now() - started) / 1000)}s (${result.requests} requests).`);

@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3100",
-    "build": "next build",
+    "dev": "next dev -p 3100 --webpack",
+    "build": "next build --webpack",
     "start": "next start -p 3100",
     "lint": "next lint",
     "seed": "node --experimental-strip-types scripts/seed.ts",
@@ -12,9 +12,11 @@
     "typecheck": "tsc --noEmit",
     "bench": "node --max-old-space-size=12000 --import ./tests/alias.mjs tests/benchmark.ts",
     "live:check": "node --import ./tests/alias.mjs scripts/live-check.ts",
-    "live:sync": "node --max-old-space-size=12000 --import ./tests/alias.mjs scripts/live-sync.ts"
+    "live:sync": "node --max-old-space-size=12000 --import ./tests/alias.mjs scripts/live-sync.ts",
+    "db:restore": "node scripts/restore-local.mjs"
   },
   "dependencies": {
+    "convex": "^1.45.0",
     "next": "16.2.9",
     "react": "19.2.4",
     "react-dom": "19.2.4"
