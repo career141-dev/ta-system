@@ -18,7 +18,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 
 export const messagesFor = query({
   args: {
@@ -28,7 +28,7 @@ export const messagesFor = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
 
     let rows: Doc<"communications">[] = [];
     if (args.applicationId) {
@@ -78,7 +78,7 @@ export const messagesFor = query({
 export const followUpState = query({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const app = await ctx.db.get(args.applicationId as Id<"applications">);
     if (!app) return null;
     const job = await ctx.db.get(app.jobId);
@@ -157,7 +157,7 @@ export const recordCall = mutation({
 export const callsFor = query({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const rows = await ctx.db
       .query("callFeedback")
       .withIndex("by_application", (q) =>

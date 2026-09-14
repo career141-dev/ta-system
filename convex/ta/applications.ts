@@ -19,7 +19,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 
@@ -58,7 +58,7 @@ export const listForOpening = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const jobId = args.openingId as Id<"jobs">;
 
     const apps = await ctx.db
@@ -79,7 +79,7 @@ export const listForOpening = query({
 export const get = query({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const app = await ctx.db.get(args.applicationId as Id<"applications">);
     if (!app) return null;
     const candidate = await ctx.db.get(app.candidateId);

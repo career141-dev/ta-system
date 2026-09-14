@@ -15,12 +15,12 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 
 export const runsForOpening = query({
   args: { actorId: v.optional(v.string()), openingId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const runs = await ctx.db
       .query("matchRuns")
       .withIndex("by_opening", (q) => q.eq("openingId", args.openingId as Id<"jobs">))
@@ -74,7 +74,7 @@ export const recordRun = mutation({
 export const exclusionsForOpening = query({
   args: { actorId: v.optional(v.string()), openingId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const rows = await ctx.db
       .query("matchExclusions")
       .withIndex("by_opening", (q) => q.eq("openingId", args.openingId as Id<"jobs">))
@@ -95,7 +95,7 @@ export const exclusionsForOpening = query({
 export const reverseMatchResults = query({
   args: { actorId: v.optional(v.string()), openingId: v.string(), minScore: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const job = await ctx.db.get(args.openingId as Id<"jobs">);
     if (!job) return null;
 

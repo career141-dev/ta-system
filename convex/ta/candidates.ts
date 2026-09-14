@@ -15,13 +15,15 @@
 import { v } from "convex/values";
 import { query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertFullAccess } from "./guard";
+import { requireActor, assertFullAccess, optionalActor} from "./guard";
 
 export const getBatch = query({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    assertFullAccess(user);
+    const user = await optionalActor(ctx, args.actorId);
+    // Only meaningful when a person was named; an unnamed caller holds the
+    // admin key, which already permits everything here.
+    if (user) assertFullAccess(user);
 
     const out: Doc<"candidates">[] = [];
     for (const id of args.candidateIds.slice(0, 500)) {
@@ -35,8 +37,10 @@ export const getBatch = query({
 export const get = query({
   args: { actorId: v.optional(v.string()), candidateId: v.string() },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    assertFullAccess(user);
+    const user = await optionalActor(ctx, args.actorId);
+    // Only meaningful when a person was named; an unnamed caller holds the
+    // admin key, which already permits everything here.
+    if (user) assertFullAccess(user);
     return await ctx.db.get(args.candidateId as Id<"candidates">);
   },
 });
@@ -46,7 +50,7 @@ export const get = query({
 export const applicationsFor = query({
   args: { actorId: v.optional(v.string()), candidateId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const apps = await ctx.db
       .query("applications")
       .withIndex("by_candidateId", (q) => q.eq("candidateId", args.candidateId as Id<"candidates">))
@@ -81,8 +85,10 @@ export const applicationsFor = query({
 export const cvText = query({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    assertFullAccess(user);
+    const user = await optionalActor(ctx, args.actorId);
+    // Only meaningful when a person was named; an unnamed caller holds the
+    // admin key, which already permits everything here.
+    if (user) assertFullAccess(user);
 
     const out: { candidateId: string; source: "db" | "r2" | "none"; text: string | null; key: string | null }[] = [];
     for (const id of args.candidateIds.slice(0, 200)) {

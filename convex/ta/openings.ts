@@ -10,7 +10,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess } from "./guard";
+import { requireActor, assertJobAccess, optionalActor} from "./guard";
 
 /** An opening as the TA platform reads it. Legacy fields are carried through
  *  unchanged so nothing is lost in translation. */
@@ -60,7 +60,7 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
+    const user = await optionalActor(ctx, args.actorId);
 
     const jobs = args.status
       ? await ctx.db
@@ -69,8 +69,15 @@ export const list = query({
           .collect()
       : await ctx.db.query("jobs").collect();
 
+    // "Only mine" is a question about a person, so it cannot be answered
+    // without one. Refusing beats returning everything, which would look like
+    // an answer and quietly widen what the caller sees.
+    if (args.mineOnly && !user) {
+      throw new Error("mineOnly needs an actorId — there is nobody to scope the list to.");
+    }
+
     let scoped = jobs;
-    if (args.mineOnly && !["admin", "ta_manager"].includes(user.role)) {
+    if (args.mineOnly && user && !["admin", "ta_manager"].includes(user.role)) {
       const mine = await ctx.db
         .query("jobAssignments")
         .withIndex("by_userId_isActive", (q) => q.eq("userId", user._id).eq("isActive", true))
@@ -87,7 +94,7 @@ export const list = query({
 export const get = query({
   args: { actorId: v.optional(v.string()), openingId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const job = await ctx.db.get(args.openingId as Id<"jobs">);
     if (!job) return null;
 

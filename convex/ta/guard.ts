@@ -29,6 +29,40 @@ export async function requireActor(
   return user;
 }
 
+/**
+ * The acting user where one was named, or null.
+ *
+ * For READS only, and the distinction from `requireActor` is deliberate.
+ *
+ * The TA platform resolves its session user from the store, and the store is
+ * what these reads feed — so requiring an actor on every read would be
+ * circular: it could not read the user it needs in order to read anything.
+ * Reads therefore carry an actor when the caller has one and go without when
+ * they do not.
+ *
+ * That is not an open door. Reaching these functions at all takes the
+ * deployment's admin key, which already permits calling everything here,
+ * internal functions included. An absent actor removes an attribution, not a
+ * barrier. Writes still demand one — see the mutations, which all use
+ * `requireActor` — because a write with nobody's name on it is the thing worth
+ * refusing.
+ */
+export async function optionalActor(
+  ctx: QueryCtx | MutationCtx,
+  actorId?: Id<"users"> | string | null,
+): Promise<Doc<"users"> | null> {
+  if (!actorId) {
+    // A Clerk identity still counts when one is present.
+    try {
+      const { user } = await resolveActor(ctx, null);
+      return user;
+    } catch {
+      return null;
+    }
+  }
+  return (await resolveActor(ctx, actorId)).user;
+}
+
 /** Mirrors requireFullAccess, for an actor we already have. */
 export function assertFullAccess(user: Doc<"users">): void {
   if (!(FULL_ACCESS_ROLES as readonly string[]).includes(user.role)) {

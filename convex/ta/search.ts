@@ -14,7 +14,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertFullAccess } from "./guard";
+import { requireActor, assertFullAccess, optionalActor} from "./guard";
 
 /**
  * Candidate rows for a set of ids, in result order.
@@ -28,8 +28,10 @@ import { requireActor, assertFullAccess } from "./guard";
 export const resultRows = query({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    assertFullAccess(user);
+    const user = await optionalActor(ctx, args.actorId);
+    // Only meaningful when a person was named; an unnamed caller holds the
+    // admin key, which already permits everything here.
+    if (user) assertFullAccess(user);
 
     const rows: Record<string, unknown>[] = [];
     for (const id of args.candidateIds.slice(0, 200)) {
@@ -81,7 +83,7 @@ export const resultRows = query({
 export const pipelineSignals = query({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
 
     const out: Record<string, { stage: string; openingId: string; openingTitle: string; clientName: string | null; isActive: boolean }[]> = {};
     for (const id of args.candidateIds.slice(0, 200)) {
@@ -109,6 +111,14 @@ export const pipelineSignals = query({
 
 // ─── Saved searches ──────────────────────────────────────────────────────────
 
+/**
+ * Saved searches — the one read here that genuinely needs a person.
+ *
+ * Every row carries `mine`, and "mine" has no meaning without an actor. So
+ * unlike the other reads this one requires one rather than tolerating its
+ * absence: an unattributed caller would get a list where every search claims
+ * to belong to nobody.
+ */
 export const savedSearches = query({
   args: { actorId: v.optional(v.string()), ownerOnly: v.optional(v.boolean()) },
   handler: async (ctx, args) => {

@@ -15,7 +15,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor } from "./guard";
+import { requireActor, optionalActor} from "./guard";
 
 function project(i: Doc<"intakeItems">) {
   return {
@@ -50,7 +50,7 @@ export const list = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
+    const user = await optionalActor(ctx, args.actorId);
 
     const rows = args.status
       ? await ctx.db
@@ -59,7 +59,11 @@ export const list = query({
           .collect()
       : await ctx.db.query("intakeItems").collect();
 
-    const scoped = args.mineOnly ? rows.filter((r) => r.routedToTaId === user._id) : rows;
+    // Same rule as the openings list: "mine" is unanswerable without a person.
+    if (args.mineOnly && !user) {
+      throw new Error("mineOnly needs an actorId — there is nobody to scope the queue to.");
+    }
+    const scoped = args.mineOnly && user ? rows.filter((r) => r.routedToTaId === user._id) : rows;
     scoped.sort((a, b) => b.receivedAt - a.receivedAt);
     return scoped.slice(0, args.limit ?? 200).map(project);
   },
@@ -68,7 +72,7 @@ export const list = query({
 export const get = query({
   args: { actorId: v.optional(v.string()), itemId: v.string() },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const item = await ctx.db.get(args.itemId as Id<"intakeItems">);
     return item ? project(item) : null;
   },
@@ -78,7 +82,7 @@ export const get = query({
 export const counts = query({
   args: { actorId: v.optional(v.string()) },
   handler: async (ctx, args) => {
-    await requireActor(ctx, args.actorId);
+    await optionalActor(ctx, args.actorId);
     const rows = await ctx.db.query("intakeItems").collect();
     const out: Record<string, number> = {};
     for (const r of rows) out[r.status] = (out[r.status] ?? 0) + 1;
