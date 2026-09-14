@@ -81,10 +81,17 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
 
   // ── The small tables, once ────────────────────────────────────────────────
   if (fresh) {
-    const [users, openings] = await Promise.all([backend.users(actor), backend.openings(actor)]);
+    const [users, openings, clients] = await Promise.all([
+      backend.users(actor),
+      backend.openings(actor),
+      backend.clients(actor).catch(() => []),
+    ]);
     db.users = users;
     db.openings = openings;
-    db.clients = clientsFrom(openings);
+    // Real rows once the backfill has run. Before that they are derived from
+    // the openings, so the app works on a database that has only been
+    // restored — the fallback is a bridge, not a second source of truth.
+    db.clients = clients.length > 0 ? clients : clientsFrom(openings);
   }
 
   // ── Applications, and the people on them ──────────────────────────────────

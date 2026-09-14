@@ -829,6 +829,23 @@ crons.interval(
   internal.cvs.sept5ReextractorActions.runSept5ReextractionTick
 );
 
-export default crons;
+/**
+ * The background automation, switchable off.
+ *
+ * These jobs were written for the production deployment: they poll three
+ * mailboxes, work the CV extraction queue, reap voice sessions and chase
+ * candidates. On a development machine restored from a production backup they
+ * do none of that usefully — there are no credentials and no network path —
+ * but they still run every few minutes, restart isolates on timeout and starve
+ * the backend of the capacity a deploy needs. A push that took seconds began
+ * taking two minutes and then failing outright.
+ *
+ * `C141_DISABLE_CRONS=true` on the deployment turns them off. It defaults to
+ * ON so that production behaviour is unchanged by this file existing: a
+ * deployment that has never heard of the variable keeps every job it had.
+ */
+const disabled = (process.env.C141_DISABLE_CRONS ?? "").trim().toLowerCase() === "true";
+
+export default disabled ? cronJobs() : crons;
 
 

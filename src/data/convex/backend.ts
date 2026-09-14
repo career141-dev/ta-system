@@ -21,7 +21,7 @@ import "server-only";
  */
 
 import { convexMutation, convexQuery } from "@/lib/convexServer";
-import type { Application, Candidate, Id, JobPost, Opening, User } from "@/data/types";
+import type { Application, Candidate, Client, Id, JobPost, Opening, User } from "@/data/types";
 import {
   mapApplication,
   mapCandidateDoc,
@@ -63,6 +63,14 @@ export async function users(actor: Actor = NO_ACTOR): Promise<User[]> {
 export async function actorForEmail(email: string): Promise<Actor & { user: User | null }> {
   const row = await convexQuery<BackendUser | null>("ta/actor:lookupByEmail", { email });
   return row ? { id: row._id, user: mapUser(row) } : { id: null, user: null };
+}
+
+// ─── Clients ─────────────────────────────────────────────────────────────────
+
+/** The real client rows, written by the backfill. Empty before it has run —
+ *  see prime.ts, which falls back to deriving them from the openings. */
+export async function clients(actor: Actor): Promise<Client[]> {
+  return convexQuery<Client[]>("ta/clients:list", { actorId: actor.id ?? undefined });
 }
 
 // ─── Openings ────────────────────────────────────────────────────────────────
