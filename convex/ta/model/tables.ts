@@ -625,7 +625,26 @@ export const TABLES: Record<string, TableModel> = {
   aiCalls: identity("taScreeningCalls", ["consent", "consentAt", "consentText", "transcript", "durationSeconds", "endedAt", "failureReason"]),
   outreach: identity("taOutreach", ["to", "subject", "sentAt", "byUserId", "callOutcome", "promisedAt"]),
   alerts: identity("taAlerts", ["resolvedAt"]),
-  briefs: identity("briefs", ["clientId", "openingId", "transcript", "recordingKey", "recordingDurationMs", "consentAcknowledgedBy", "consentAcknowledgedAt", "consentText"]),
+  briefs: (() => {
+    const base = identity("briefs", ["clientId", "openingId", "transcript", "recordingKey", "recordingDurationMs", "consentAcknowledgedBy", "consentAcknowledgedAt", "consentText"]);
+    return {
+      ...base,
+      // A brief saved before extraction finished, or by an older build, can hold
+      // only some of the extracted fields. Every screen reads the lists as lists.
+      fromDoc: (doc) => {
+        const row = base.fromDoc(doc);
+        const e = (row.extracted ?? {}) as Row;
+        row.extracted = {
+          title: "", salaryMin: null, salaryMax: null, currency: "LKR", packageNotes: "", headcount: 1, clientNotes: "", priorityTier: "P3",
+          ...e,
+          locations: Array.isArray(e.locations) ? e.locations : [],
+          nationalities: Array.isArray(e.nationalities) ? e.nationalities : [],
+          mustHaves: Array.isArray(e.mustHaves) ? e.mustHaves : [],
+        };
+        return row;
+      },
+    };
+  })(),
   reviewRounds: identity("reviewRounds", ["messageId", "setNumber", "trackedAt", "returnedAt", "replyBody"]),
   linkVault: identity("linkVault", ["name", "title", "company", "phoneNumber", "phoneSource", "candidateId", "capture"]),
   savedSearches: identity("savedSearches", ["openingId", "lastRunAt", "lastResultCount"]),

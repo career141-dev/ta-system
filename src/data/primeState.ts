@@ -185,3 +185,15 @@ export function withRealIds(text: string): string {
   if (aliases.size === 0) return text;
   return text.replace(/[a-z]{1,5}_[a-z0-9]{6,12}/g, (m) => aliases.get(m) ?? m);
 }
+
+/**
+ * A write went to Convex directly rather than through the store (the client and
+ * people actions keep their own backend rules). The loaded tables are now
+ * behind it, so the next load re-reads them instead of waiting out the refresh
+ * interval — the list the person returns to shows what they just saved.
+ */
+export function markTablesStale(): void {
+  state.tablesAt = 0;
+  state.allAt = 0;
+  state.version++;
+}
