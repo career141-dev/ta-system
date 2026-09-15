@@ -189,6 +189,67 @@ export async function moveStage(actor: Actor, applicationId: Id, stage: string, 
   });
 }
 
+// ─── Retrieval ───────────────────────────────────────────────────────────────
+
+/**
+ * Candidates matching words, from the backend's own full-text indexes.
+ *
+ * This is the half of retrieval that needs no model and no key: Convex search
+ * indexes over titles, skills, summaries and CV text, merged and weighted by
+ * where the hit landed. It is what makes search work at all when there is no
+ * embedding to compare against, and it is the other route in a hybrid — a CV
+ * that SAYS "Procurement Manager" is never hidden because its vector happened
+ * to land under the bar.
+ */
+export async function keywordSearch(
+  actor: Actor,
+  query: string,
+  limit = 100,
+): Promise<{ candidateId: Id; score: number }[]> {
+  if (!query.trim()) return [];
+  return convexQuery<{ candidateId: Id; score: number }[]>("matching/search:searchCandidates", {
+    query: query.slice(0, 300),
+    limit,
+  });
+}
+
+/** Several phrasings at once, merged, best score per person kept. */
+export async function keywordSearchMany(
+  actor: Actor,
+  queries: string[],
+  limitEach = 100,
+): Promise<{ candidateId: Id; score: number }[]> {
+  const terms = [...new Set(queries.map((q) => q.trim()).filter((q) => q.length > 2))].slice(0, 6);
+  if (terms.length === 0) return [];
+  const runs = await Promise.all(
+    terms.map((t) => keywordSearch(actor, t, limitEach).catch(() => [] as { candidateId: Id; score: number }[])),
+  );
+  const best = new Map<Id, number>();
+  for (const run of runs) {
+    for (const hit of run) best.set(hit.candidateId, Math.max(best.get(hit.candidateId) ?? 0, hit.score));
+  }
+  return [...best].map(([candidateId, score]) => ({ candidateId, score })).sort((a, b) => b.score - a.score);
+}
+
+/** How many candidates there are, without reading any of them. */
+export async function candidateStats(actor: Actor): Promise<{ total: number; sampled: boolean }> {
+  return convexQuery<{ total: number; sampled: boolean }>("ta/candidates:stats", {
+    actorId: actor.id ?? undefined,
+  });
+}
+
+/** Titles, skills, cities and employers the database actually holds, sampled. */
+export async function vocabulary(actor: Actor): Promise<{
+  titles: { title: string; count: number }[];
+  skills: string[];
+  cities: string[];
+  employers: string[];
+  industries: string[];
+  sampled: number;
+}> {
+  return convexQuery("ta/candidates:vocabulary", { actorId: actor.id ?? undefined });
+}
+
 // ─── Candidates ──────────────────────────────────────────────────────────────
 
 export async function candidate(actor: Actor, candidateId: Id): Promise<Candidate | null> {

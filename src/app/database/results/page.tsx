@@ -12,6 +12,8 @@ import { saveSearch } from "@/app/actions";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
+import { isConvex } from "@/data/mode";
+import { keywordRetrieve } from "@/lib/retrieve";
 
 const PAGE = 25;
 
@@ -46,6 +48,38 @@ export default async function ResultsPage({
   // 37); they now describe every match, the same set the headline counts.
   let similarity: Map<string, number> | undefined;
   let meaningProblem: string | null = null;
+  let retrievalProblem: string | null = null;
+
+  /*
+   * Retrieval, before anything is filtered.
+   *
+   * On the file store the whole database is already in memory, so a search is
+   * a filter over it. Backed by Convex it is not: the working set holds the
+   * people this page primed and nobody else, so filtering it would search a
+   * few hundred rows and confidently report that nothing matched.
+   *
+   * So the words are put to the backend's own full-text indexes first — title,
+   * skills, summary and CV text — and whoever comes back is brought into the
+   * working set for the criteria to narrow. No model and no key involved;
+   * this is the route that still works when the meaning half cannot run.
+   */
+  if (isConvex() && q && mode !== "meaning") {
+    try {
+      const terms = [
+        q,
+        ...criteria.titles,
+        ...criteria.skills.slice(0, 3),
+        ...criteria.employers.slice(0, 2),
+        ...criteria.qualifications.slice(0, 2),
+      ];
+      const hits = await keywordRetrieve(terms, 150);
+      await primeStore({ candidateIds: hits });
+      if (hits.length === 0) retrievalProblem = "Nothing in the database matched those words.";
+    } catch (e) {
+      retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+    }
+  }
+
   if (mode === "meaning" && q) {
     const vectors = await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
@@ -61,6 +95,17 @@ export default async function ResultsPage({
       await primeStore({ candidateIds: hits.map((h) => h.id) });
     } else {
       meaningProblem = `Search by meaning could not run (${query.reason}), so these are ranked on the words.`;
+      // Fall back to the word route rather than showing an empty page: the
+      // working set holds only what this page primed, and it has primed
+      // nobody yet.
+      if (isConvex()) {
+        try {
+          const hits = await keywordRetrieve([q, ...criteria.titles], 150);
+          await primeStore({ candidateIds: hits });
+        } catch (e) {
+          retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+        }
+      }
     }
   }
   // Below this a candidate is not close enough to count as a result at all.
@@ -216,6 +261,11 @@ export default async function ResultsPage({
         </aside>
 
         <div className="min-w-0">
+          {retrievalProblem && (
+            <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
+              {retrievalProblem}
+            </p>
+          )}
           {(meaningProblem || (mode === "meaning" && !isMeaningBased())) && (
             <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
               {meaningProblem ?? "No embedding key is set, so \u201cby meaning\u201d is standing in with shared words. Set OPENAI_API_KEY or OPENROUTER_API_KEY for real meaning-based search."}

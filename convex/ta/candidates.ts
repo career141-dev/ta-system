@@ -108,3 +108,57 @@ export const cvText = query({
     return out;
   },
 });
+
+/**
+ * How many candidates there are, and a vocabulary to search with — without
+ * reading 77,000 rows.
+ *
+ * The Database home page used to count them by loading them all. That was
+ * fine over a seeded file and is a whole-table read here, so the count comes
+ * from the table's own statistics where they exist and from a bounded sample
+ * where they do not — and it says which, because a sampled number presented as
+ * exact is a number somebody will later act on.
+ */
+export const stats = query({
+  args: { actorId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await optionalActor(ctx, args.actorId);
+    // A bounded walk: enough to be useful, capped so it cannot become a scan.
+    const CAP = 4000;
+    const page = await ctx.db.query("candidates").take(CAP + 1);
+    return { total: Math.min(page.length, CAP), sampled: page.length > CAP };
+  },
+});
+
+/** Titles, skills, cities and employers the database actually contains, from a
+ *  bounded sample — what the search box completes against. */
+export const vocabulary = query({
+  args: { actorId: v.optional(v.string()), sample: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    await optionalActor(ctx, args.actorId);
+    const rows = await ctx.db.query("candidates").take(Math.min(args.sample ?? 1500, 4000));
+    const titles = new Map<string, number>();
+    const skills = new Set<string>();
+    const cities = new Set<string>();
+    const employers = new Set<string>();
+    const industries = new Set<string>();
+    for (const c of rows) {
+      const t = c.currentJobTitle ?? c.currentTitle;
+      if (t) titles.set(t, (titles.get(t) ?? 0) + 1);
+      for (const s of (c.skills ?? []).slice(0, 12)) if (typeof s === "string") skills.add(s);
+      const city = c.locationStructured?.city ?? null;
+      if (city) cities.add(city);
+      if (c.currentEmployer) employers.add(c.currentEmployer);
+      if (c.sector) industries.add(c.sector);
+      for (const i of c.industries ?? []) industries.add(i);
+    }
+    return {
+      titles: [...titles.entries()].sort((a, b) => b[1] - a[1]).slice(0, 400).map(([t, n]) => ({ title: t, count: n })),
+      skills: [...skills].slice(0, 600),
+      cities: [...cities].slice(0, 200),
+      employers: [...employers].slice(0, 400),
+      industries: [...industries].slice(0, 200),
+      sampled: rows.length,
+    };
+  },
+});

@@ -7,6 +7,8 @@ import { Illustration } from "@/components/db/Illustration";
 import { deleteSearch } from "@/app/actions";
 import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { isConvex } from "@/data/mode";
+import { databaseShelf } from "@/lib/retrieve";
 
 /**
  * The Database, before you have asked it anything — spec §6D.1.
@@ -26,8 +28,15 @@ export default async function DatabaseHome({
   // an empty box, looking like the link was broken.
   const { q } = await searchParams;
   const user = await pageUser("database.read");
-  const vocab = repo.vocabulary();
-  const candidates = repo.candidates();
+  // Backed by Convex the working set holds only what this page primed, so
+  // `repo.candidates()` is not the database. The count and the words come from
+  // the backend, which can answer both without handing over 77,000 people.
+  const shelf = isConvex() ? await databaseShelf() : null;
+  const local = repo.candidates();
+  const vocab = shelf
+    ? { titles: shelf.titles.map((t) => t.title), skills: shelf.skills, industries: shelf.industries, cities: shelf.cities, employers: shelf.employers, qualifications: [], languages: [], nationalities: [] }
+    : repo.vocabulary();
+  const candidates = shelf ? [] : local;
   const saved = repo.savedSearches();
   const mine = saved.filter((s) => s.ownerId === user.id);
   const others = saved.filter((s) => s.ownerId !== user.id);
@@ -40,17 +49,19 @@ export default async function DatabaseHome({
     if (c.currentTitle) acc[c.currentTitle] = (acc[c.currentTitle] ?? 0) + 1;
     return acc;
   }, {});
-  const topTitles = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const topTitles: [string, number][] = shelf
+    ? shelf.titles.slice(0, 10).map((t) => [t.title, t.count])
+    : (Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10) as [string, number][]);
 
   // Written-out searches, built from the database's own vocabulary so each one
   // is a search that returns people rather than a plausible-looking sentence.
   const skillsByTitle = new Map<string, string[]>();
-  for (const c of candidates) {
+  for (const c of shelf ? [] : candidates) {
     if (!c.currentTitle) continue;
     const have = skillsByTitle.get(c.currentTitle) ?? [];
     skillsByTitle.set(c.currentTitle, [...new Set([...have, ...c.skills])]);
   }
-  const cities = vocab.cities.slice(0, 6);
+  const cities = (vocab.cities.length ? vocab.cities : ["Colombo"]).slice(0, 6);
   const prompts = topTitles.slice(0, 6).map(([title], i) => {
     const sk = skillsByTitle.get(title) ?? [];
     const a = sk[i % Math.max(sk.length, 1)];
@@ -61,8 +72,12 @@ export default async function DatabaseHome({
       : `A ${title} in ${city} with at least ${5 + i} years behind them.`;
   });
 
-  const freshMonth = candidates.filter((c) => Date.now() - c.createdAt < 30 * 86_400_000).length;
-  const onNoOpening = candidates.filter((c) => repo.applicationsForCandidate(c.id).length === 0).length;
+  // Only meaningful over a database held in memory. Backed by Convex these
+  // would each be a whole-table scan, and a wrong number is worse than none,
+  // so the line is left off rather than filled with a count of the page's own
+  // working set.
+  const freshMonth = shelf ? null : candidates.filter((c) => Date.now() - c.createdAt < 30 * 86_400_000).length;
+  const onNoOpening = shelf ? null : candidates.filter((c) => repo.applicationsForCandidate(c.id).length === 0).length;
 
   return (
     <main className="mx-auto max-w-[720px] px-6 pb-24 pt-8">
@@ -72,7 +87,7 @@ export default async function DatabaseHome({
         {greeting}, {user.name}
       </h1>
       <p className="mb-7 mt-1.5 text-center text-[13px] text-ink-soft">
-        <span className="tabular">{candidates.length.toLocaleString()}</span> CVs in the database
+        <span className="tabular">{(shelf?.total ?? candidates.length).toLocaleString()}</span>{shelf?.sampled ? "+" : ""} CVs in the database
       </p>
 
       <SearchBox initialQuery={q ?? ""}
@@ -155,10 +170,12 @@ export default async function DatabaseHome({
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-[11.5px] leading-relaxed text-ink-faint">
-            <span className="tabular">{freshMonth.toLocaleString()}</span> added in the last 30 days ·{" "}
-            <span className="tabular">{onNoOpening.toLocaleString()}</span> on no opening at all
-          </p>
+          {freshMonth !== null && onNoOpening !== null && (
+            <p className="mt-4 text-[11.5px] leading-relaxed text-ink-faint">
+              <span className="tabular">{freshMonth.toLocaleString()}</span> added in the last 30 days ·{" "}
+              <span className="tabular">{onNoOpening.toLocaleString()}</span> on no opening at all
+            </p>
+          )}
         </section>
       </div>
     </main>

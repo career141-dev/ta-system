@@ -127,8 +127,20 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
     }
   }
 
-  // Everyone on an application we hold, plus anyone named outright.
-  for (const a of db.applications) wanted.add(a.candidateId);
+  /*
+   * Whose candidate records to fetch.
+   *
+   * The people on a NAMED opening, because that page lists them by name — and
+   * anyone asked for outright. Not everybody on every application: the
+   * dashboards ask for all 8,378 applications to count stages, and pulling
+   * 8,378 candidate records to do it would make the slowest page on the desk
+   * out of one that only needed numbers.
+   */
+  if (scope.openingId) {
+    for (const a of db.applications) {
+      if (a.openingId === scope.openingId) wanted.add(a.candidateId);
+    }
+  }
   const missing = [...wanted].filter((id) => !state.candidates.has(id));
   if (missing.length > 0) {
     const people = await backend.candidatesByIds(actor, missing);
