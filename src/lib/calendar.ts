@@ -26,13 +26,87 @@ export function isWorkingDay(d: Date): boolean {
  * team in breach for not having worked Saturday.
  */
 export function workingHoursBetween(from: number, to: number): number {
+  return countWorkingHours(from, to, Infinity);
+}
+
+/**
+ * Whether at least `hours` working hours lie between two instants — the same
+ * answer as `workingHoursBetween(from, to) >= hours`, but it stops counting the
+ * moment the answer is known. For a CV that arrived months ago that is after a
+ * day or two of calendar, not months of it.
+ */
+export function hasWorkingHours(from: number, to: number, hours: number): boolean {
+  return countWorkingHours(from, to, hours) >= hours;
+}
+
+const WEEK = 7 * 86_400_000;
+
+function countWorkingHours(from: number, to: number, stopAt: number): number {
   if (to <= from) return 0;
   let hours = 0;
-  const cursor = new Date(from);
-  while (cursor.getTime() < to) {
-    const next = Math.min(cursor.getTime() + 3_600_000, to);
-    if (isWorkingDay(cursor)) hours += (next - cursor.getTime()) / 3_600_000;
-    cursor.setTime(next);
+  let at = from;
+  /*
+   * Whole weeks, counted once.
+   *
+   * Hour steps from `at` fall at the same local times on the same weekdays a
+   * week later, so a week's working hours repeat exactly — provided the
+   * server's clock offset did not change inside it (a daylight-saving switch
+   * moves every step against midnight) and no holiday falls in it. Holidays
+   * are checked by walking, so this only applies when there are none; the
+   * offset is checked at both ends of each reused week, and a change sends
+   * that week back to being walked.
+   */
+  if (HOLIDAYS.length === 0) {
+    const offsetAt = (t: number) => new Date(t).getTimezoneOffset();
+    while (to - at >= 2 * WEEK && hours < stopAt) {
+      const base = offsetAt(at);
+      const week = walk(at, at + WEEK, Infinity);
+      hours += week;
+      at += WEEK;
+      while (to - at >= 2 * WEEK && hours < stopAt && offsetAt(at) === base && offsetAt(at + WEEK) === base) {
+        hours += week;
+        at += WEEK;
+      }
+    }
+  }
+  return hours + walk(at, to, stopAt - hours);
+}
+
+function walk(from: number, to: number, stopAt: number): number {
+  if (to <= from || stopAt <= 0) return 0;
+  /*
+   * The rule is still "step an hour at a time from `from`, and count the step
+   * if the day it STARTS on is a working day". What changed is that runs of
+   * steps starting on the same day are counted together instead of one by one.
+   *
+   * Every step that starts before the next day boundary is judged by the same
+   * day, so they can be added in one go. Two boundaries matter, because the
+   * rule reads two clocks: the day of the week is the server's local day, and
+   * the holiday list is matched on the UTC date.
+   *
+   * The hour-by-hour loop ran once per hour per application. The shortlist
+   * alert asks it about every unscreened CV on the desk — about 7,000, many
+   * months old — so it was millions of iterations and 2.9 of the 3.1 seconds
+   * every page spent working out the alert badge. This does a few iterations
+   * per day instead, with the same answer (tests/calendar.test.ts checks it
+   * against the original over thousands of ranges).
+   */
+  const HOUR = 3_600_000;
+  let hours = 0;
+  let at = from;
+  // Two Date objects reused for the whole walk rather than two per day.
+  const probe = new Date(from);
+  const midnight = new Date(from);
+  while (at < to && hours < stopAt) {
+    probe.setTime(at);
+    midnight.setTime(at);
+    midnight.setHours(24, 0, 0, 0);
+    const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000 + 86_400_000;
+    const boundary = Math.min(midnight.getTime(), utcMidnight, to);
+    const steps = Math.max(1, Math.ceil((boundary - at) / HOUR));
+    const end = Math.min(at + steps * HOUR, to);
+    if (isWorkingDay(probe)) hours += (end - at) / HOUR;
+    at = end;
   }
   return hours;
 }

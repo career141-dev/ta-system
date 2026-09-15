@@ -612,7 +612,7 @@ export const repo = {
     lockDepth > 0 ? load().applications.find((a) => a.id === id) ?? null : indexes().applicationById.get(id) ?? null,
 
   /** Changes whenever the data does — for caches outside the store. */
-  version: () => `${cacheStamp}:${dataVersion}`,
+  version: () => `${cacheStamp}:${dataVersion}:${primedVersion()}`,
 
   /**
    * The opening a record really belongs to, read from the record.

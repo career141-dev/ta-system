@@ -17,6 +17,8 @@ import "server-only";
  * thing — is decided before we get here, by `src/lib/auth.ts`.
  */
 
+const TIMING = !!process.env.C141_TIMING;
+
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
 
 export class ConvexCallError extends Error {
@@ -57,6 +59,9 @@ type Kind = "query" | "mutation" | "action";
 async function call<T>(kind: Kind, path: string, args: Record<string, unknown>): Promise<T> {
   const { url, adminKey } = config();
 
+  // C141_TIMING=1 logs each backend call's path, duration and response size —
+  // the first thing to read when a page feels slow. Off by default.
+  const started = TIMING ? performance.now() : 0;
   let res: Response;
   try {
     res = await fetch(`${url}/api/${kind}`, {
@@ -69,12 +74,25 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
       cache: "no-store",
     });
   } catch (e) {
+    // Next.js signals "this page must render per request" by THROWING from
+    // fetch during the build (an error carrying a `digest`). Wrapping it turned
+    // that signal into a connection error, and `next build` failed on the first
+    // page that loads data. Control-flow errors pass through untouched.
+    if (e && typeof e === "object" && "digest" in e) throw e;
     throw new ConvexCallError(`Could not reach the Convex backend (${(e as Error).message}).`);
   }
 
-  const body = (await res.json().catch(() => null)) as
-    | { status?: string; value?: T; errorMessage?: string }
-    | null;
+  const raw = await res.text().catch(() => "");
+  if (TIMING) {
+    console.log(`[convex] ${kind} ${path} ${Math.round(performance.now() - started)}ms ${Math.round(raw.length / 1024)}KB`);
+  }
+  let parsed: unknown = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  const body = parsed as { status?: string; value?: T; errorMessage?: string } | null;
 
   if (!res.ok || !body || body.status !== "success") {
     // The server's message only. The request carries the admin key and must
