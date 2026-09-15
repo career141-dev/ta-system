@@ -103,6 +103,7 @@ import type * as lib_jdParser from "../lib/jdParser.js";
 import type * as lib_jobSynthesizer from "../lib/jobSynthesizer.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_locationResolver from "../lib/locationResolver.js";
+import type * as lib_outboundGuard from "../lib/outboundGuard.js";
 import type * as lib_permissions from "../lib/permissions.js";
 import type * as lib_qdrant from "../lib/qdrant.js";
 import type * as lib_validate from "../lib/validate.js";
@@ -250,6 +251,7 @@ declare const fullApi: ApiFromModules<{
   "lib/jobSynthesizer": typeof lib_jobSynthesizer;
   "lib/llm": typeof lib_llm;
   "lib/locationResolver": typeof lib_locationResolver;
+  "lib/outboundGuard": typeof lib_outboundGuard;
   "lib/permissions": typeof lib_permissions;
   "lib/qdrant": typeof lib_qdrant;
   "lib/validate": typeof lib_validate;

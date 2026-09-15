@@ -5,6 +5,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { getGraphToken } from "../lib/graphClient";
 import { buildStructuredEmailHtml } from "./emailHtml";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
 export { buildStructuredEmailHtml };
 
@@ -126,6 +127,10 @@ export const sendGraphEmail = internalAction({
         `[Graph Email] Sending email from ${senderEmail} to ${targetAddress}${logNote}`
       );
 
+      if (!emailAllowed(targetAddress)) {
+        throw new Error(suppressed("email", targetAddress));
+      }
+
       const res = await fetch(
         `${GRAPH_BASE}/users/${encodeURIComponent(senderEmail)}/sendMail`,
         {
@@ -221,6 +226,12 @@ export const replyToMessage = internalAction({
     replyHtml: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
+    // A reply goes to whoever wrote the original, which this cannot see without
+    // fetching it — so while outbound is locked, replies are not sent at all.
+    if (outboundLocked()) {
+      suppressed("email reply", `message ${args.messageId}`);
+      return;
+    }
     const token = await getGraphToken();
 
     // Rich HTML thread reply: create a reply draft (preserves conversation

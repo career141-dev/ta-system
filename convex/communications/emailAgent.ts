@@ -2,6 +2,7 @@ import { action, internalAction, internalMutation, query, internalQuery } from "
 import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
 
 // ----------------------------------------------------------------------------------
@@ -1088,6 +1089,9 @@ export const sendFollowUpEmail = internalAction({
     const senderEmail = process.env.OUTBOUND_EMAIL_SENDER || process.env.MS_SENDER_EMAIL;
     if (!senderEmail) {
       throw new Error("[EmailAgent] MS_SENDER_EMAIL or OUTBOUND_EMAIL_SENDER environment variable is not configured.");
+    }
+    if (!emailAllowed(args.candidateEmail)) {
+      throw new Error(suppressed("follow-up email", args.candidateEmail));
     }
     console.log(`[EmailAgent] Sending outbound follow-up email to ${args.candidateEmail} from ${senderEmail}`);
 

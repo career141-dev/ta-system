@@ -36,6 +36,7 @@ import "server-only";
 
 import type { Application, Candidate, Database, Id } from "@/data/types";
 import { isConvex } from "@/data/mode";
+import { assertSafeBackend } from "@/lib/safety";
 import * as backend from "@/data/convex/backend";
 import { blank, CANDIDATE_EVICT_MS, CANDIDATE_TTL_MS, primedVocabulary, state, TABLES_TTL_MS } from "@/data/primeState";
 
@@ -111,9 +112,14 @@ let loading: Promise<void> = Promise.resolve();
 
 export function primeStore(scope: PrimeScope = {}): Promise<void> {
   if (!isConvex()) return Promise.resolve();
+  // Refuses a backend that could message real people or poll live mailboxes — see lib/safety.ts.
+  const safe = assertSafeBackend();
   // Queue behind whatever is in flight — including a failed one, whose
   // rejection must not cancel this caller's turn.
-  const mine = loading.catch(() => {}).then(() => loadInto(scope));
+  // The load in flight is captured now: read inside the callback, `loading`
+  // would already be this call's own promise, and it would wait on itself.
+  const before = loading;
+  const mine = safe.then(() => before.catch(() => {})).then(() => loadInto(scope));
   loading = mine.catch(() => {});
   return mine;
 }

@@ -1,3 +1,5 @@
+import { phoneAllowed, suppressed } from "../lib/outboundGuard";
+
 /**
  * metaDirectSender.ts
  *
@@ -21,6 +23,10 @@ export async function sendMetaFreeText(
       success: false,
       error: `Missing required params — phone: ${!!cleanPhone}, phoneId: ${!!cleanPhoneId}, token: ${!!accessToken}`,
     };
+  }
+
+  if (!phoneAllowed(cleanPhone)) {
+    return { success: false, error: suppressed("WhatsApp message", cleanPhone) };
   }
 
   const url = `https://graph.facebook.com/v19.0/${cleanPhoneId}/messages`;

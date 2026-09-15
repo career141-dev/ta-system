@@ -37,6 +37,12 @@ export const sendFollowUp = action({
     body: v.string(),
   },
   handler: async (ctx, args): Promise<{ sent: boolean; via: string; reason?: string }> => {
+    const may = await ctx.runQuery(internal.ta.dispatchRecord.mayDispatch, {
+      actorId: args.actorId,
+      applicationId: args.applicationId,
+    });
+    if (!may.ok) return { sent: false, via: args.channel, reason: may.reason };
+
     const app = await ctx.runQuery(api.applications.applications.getApplication, {
       id: args.applicationId,
     });
@@ -124,6 +130,12 @@ export const startVoiceCall = action({
     kind: v.optional(v.union(v.literal("intake"), v.literal("follow_up"))),
   },
   handler: async (ctx, args): Promise<{ started: boolean; reason?: string }> => {
+    const may = await ctx.runQuery(internal.ta.dispatchRecord.mayDispatch, {
+      actorId: args.actorId,
+      applicationId: args.applicationId,
+    });
+    if (!may.ok) return { started: false, reason: may.reason };
+
     const app = await ctx.runQuery(api.applications.applications.getApplication, {
       id: args.applicationId,
     });

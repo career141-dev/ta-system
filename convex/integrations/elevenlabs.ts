@@ -3,6 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { v } from "convex/values";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
 export const triggerIntakeCall = internalAction({
   args: {
@@ -56,6 +57,11 @@ export const triggerIntakeCall = internalAction({
         console.warn(`[ElevenLabs] Test mode active: Suppressed intake call to real candidate ${candidate.phone}`);
         return { success: false, conversationId: "suppressed_test_mode" };
       }
+    }
+
+    if (!phoneAllowed(recipientPhone)) {
+      suppressed("voice call", recipientPhone);
+      return { success: false, conversationId: "suppressed_outbound_lock" };
     }
 
     // 2. Call ElevenLabs API
@@ -178,6 +184,11 @@ export const triggerFollowUpCall = internalAction({
         console.warn(`[ElevenLabs] Test mode active: Suppressed follow-up call to real candidate ${candidate.phone}`);
         return { success: false, skipped: true };
       }
+    }
+
+    if (!phoneAllowed(targetPhone)) {
+      suppressed("voice call", targetPhone);
+      return { success: false, skipped: true };
     }
 
     const response = await fetch("https://api.elevenlabs.io/v1/convai/conversation/outbound-call", {

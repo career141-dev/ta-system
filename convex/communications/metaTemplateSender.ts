@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -188,6 +189,10 @@ export const sendMetaTemplate = internalAction({
           ],
         },
       };
+
+      if (!phoneAllowed(cleanRecipientPhone)) {
+        throw new Error(suppressed("WhatsApp template", cleanRecipientPhone));
+      }
 
       try {
         console.log(`[Meta Template Sender] Dispatching template "${templateName}" (${langCode}) to target phone +${cleanRecipientPhone} using phone_number_id ${phoneId}`);
