@@ -7,4 +7,9 @@ declare module "livekit-server-sdk" {
     constructor(host: string, apiKey?: string, apiSecret?: string);
     [key: string]: any;
   }
+  export class AccessToken {
+    constructor(apiKey?: string, apiSecret?: string, options?: { identity?: string; name?: string; ttl?: number | string; metadata?: string });
+    addGrant(grant: Record<string, unknown>): void;
+    toJwt(): Promise<string>;
+  }
 }
