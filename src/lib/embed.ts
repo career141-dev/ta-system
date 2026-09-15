@@ -33,6 +33,7 @@ import type { Candidate, Opening } from "@/data/types";
 import { createHash } from "node:crypto";
 import { dataDir } from "@/data/dataDir";
 import { embedCost, embedMaxCost, reserve, SpendCapError } from "./spend";
+import { isConvex as isConvexStore } from "@/data/mode";
 
 const hashOf = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 16);
 
@@ -174,7 +175,24 @@ export async function embedTexts(texts: string[]): Promise<EmbedResult> {
           method: "POST",
           headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
           // Only providers that keep nothing and train on nothing (see lib/ai).
-          body: JSON.stringify({ model: name, input, ...(url.includes("openrouter") ? { provider: { zdr: true, data_collection: "deny" } } : {}) }),
+          body: JSON.stringify({
+            model: name,
+            input,
+            // ASK for the width; do not cut one down to it.
+            //
+            // text-embedding-3-small returns 1,536 numbers. Taking the first
+            // 1,024 of those is NOT the same vector as asking the model for
+            // 1,024: the `dimensions` parameter truncates and then
+            // RE-NORMALISES, so a requested vector has length 1 and a sliced
+            // one has length ~0.82 and points somewhere else entirely.
+            //
+            // Every vector in the index was made the first way — measured, they
+            // are all exactly 1.0 — so a query made the second way lands in a
+            // different space and matches nothing. This was silently wrong: it
+            // returns results, they are just the wrong results.
+            ...(width ? { dimensions: width } : {}),
+            ...(url.includes("openrouter") ? { provider: { zdr: true, data_collection: "deny" } } : {}),
+          }),
         });
       } catch (e) {
         // Whether a request that got no answer was charged is unknown: keep the reservation.
@@ -201,7 +219,20 @@ export async function embedTexts(texts: string[]): Promise<EmbedResult> {
     if (rows.length !== input.length) return { ok: false, reason: "bad_response: wrong count" };
     // Cut to the live index's width the same way the live system does, so a
     // query made here lands in the same space as the CVs it already holds.
-    for (const r of rows) vectors.push(Float32Array.from(width ? r.embedding.slice(0, width) : r.embedding));
+    for (const r of rows) {
+      // A provider that ignored `dimensions` has handed back a vector from a
+      // different space. Slicing it here is what hid the problem before, so it
+      // is refused instead: wrong results that look right are worse than none.
+      if (width && r.embedding.length !== width) {
+        return {
+          ok: false,
+          reason:
+            `bad_response: asked ${name} for ${width} dimensions and got ${r.embedding.length}. ` +
+            `Cutting it down would produce a vector that does not compare with the index.`,
+        };
+      }
+      vectors.push(Float32Array.from(r.embedding));
+    }
     tokens += body.usage?.total_tokens ?? 0;
   }
   return { ok: true, vectors, model, tokens };
@@ -351,7 +382,37 @@ export function forgetLiveVectors(ids: string[]) {
 export const candidateVector = (id: string) => get("candidates", id);
 export const openingVector = (id: string) => get("openings", id);
 
-/** Similarity of every candidate that has a vector to the query, highest first. */
+/**
+ * Nearest by meaning, from whichever index is in use.
+ *
+ * Backed by Convex the vectors live in Qdrant, which has 77,000 of them and an
+ * index to search them with. On the file store they are in `.data`, and
+ * scanning all of them is fine at that size.
+ *
+ * `allow` is applied AFTER retrieval in both cases. Qdrant can pre-filter on
+ * its payload, but the predicate here is arbitrary code — "not already on this
+ * opening", "not excluded" — so it is asked for more than `k` and narrowed
+ * afterwards.
+ */
+export async function nearestCandidates(
+  query: Float32Array,
+  k: number,
+  allow: (id: string) => boolean = () => true,
+): Promise<{ id: string; similarity: number }[]> {
+  if (!isConvexStore()) return nearest(query, k, allow);
+
+  const { searchVectors } = await import("./qdrantSearch");
+  // Over-fetch, because `allow` can reject a large share of what comes back
+  // and a short list would silently become shorter still.
+  const hits = await searchVectors(query, Math.min(k * 4, 2000));
+  return hits
+    .filter((h) => allow(h.candidateId))
+    .slice(0, k)
+    .map((h) => ({ id: h.candidateId, similarity: h.score }));
+}
+
+/** Similarity of every candidate that has a vector to the query, highest first.
+ *  The file-store path; see `nearestCandidates` for the one that picks. */
 export function nearest(query: Float32Array, k: number, allow: (id: string) => boolean = () => true) {
   const file = loadFile();
   const out: { id: string; similarity: number }[] = [];

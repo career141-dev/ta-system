@@ -406,6 +406,10 @@ Respond ONLY with a valid JSON object in this exact format:
           contentType: attachment.contentType || "application/pdf",
           resolvedJobId: resolvedJobId || undefined,
           rawSender: senderEmail,
+          // Carried through so the routing downstream can read the headline.
+          // It was read here and dropped, which left the only reliable signal
+          // for WHICH advert a CV is for unavailable to the thing that files it.
+          subject,
           currentExtractionDelayMs,
         });
 
@@ -920,18 +924,47 @@ Respond ONLY with a valid JSON object in this exact format:
 
       const sourceChannel = (args.targetInboxEmail.toLowerCase() === "linkedin@career141.com" || args.targetInboxEmail === process.env.LINKEDIN_SHARED_INBOX) ? "linkedin" : (args.targetInboxEmail.toLowerCase() === "cv@career141.com" ? "email" : "email_campaign");
 
-      await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
-        jobId: resolvedJobId || undefined,
-        sourceChannel: sourceChannel,
-        rawSender: args.rawSender,
-        s3Key: s3Key,
-        storageProvider: "r2",
-        fileHash: fileHash,
-        fileName: attachMeta.name ?? "cv.pdf",
-        fileType: attachMeta.contentType || "application/pdf",
-        fileSizeBytes: fileBuffer.length,
-        extractionDelayMs: args.extractionDelayMs + delayMsOffset,
-      });
+      /*
+       * Where the CV goes.
+       *
+       * With C141_TA_INTAKE on it goes to the queue: a row that is routed by
+       * the mailbox it arrived at and the headline in the subject, read, and
+       * then left for a person to admit. Nothing is written to the candidate
+       * table until somebody says so, which is what makes "we received forty
+       * and kept six" answerable.
+       *
+       * Off, it goes straight through as before. The switch is deliberately an
+       * environment variable rather than a setting in the UI: turning it on
+       * changes where every arriving CV lands, and that should take a deploy
+       * and a decision, not a misclick.
+       */
+      if ((process.env.C141_TA_INTAKE ?? "").trim().toLowerCase() === "true") {
+        await ctx.runAction(api.ta.intakeReceive.receiveCv, {
+          source: "email",
+          receivedFrom: args.rawSender ?? null,
+          // The address it arrived AT is what says whose adverts it can be
+          // for — the old routing only ever looked at the subject.
+          toAddress: args.targetInboxEmail,
+          subject: args.subject ?? null,
+          fileName: attachMeta.name ?? "cv.pdf",
+          fileHash,
+          s3Key,
+          fileType: attachMeta.contentType || "application/pdf",
+        });
+      } else {
+        await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+          jobId: resolvedJobId || undefined,
+          sourceChannel: sourceChannel,
+          rawSender: args.rawSender,
+          s3Key: s3Key,
+          storageProvider: "r2",
+          fileHash: fileHash,
+          fileName: attachMeta.name ?? "cv.pdf",
+          fileType: attachMeta.contentType || "application/pdf",
+          fileSizeBytes: fileBuffer.length,
+          extractionDelayMs: args.extractionDelayMs + delayMsOffset,
+        });
+      }
 
       delayMsOffset += 10000; // Add 10s delay between extractions of multiple attachments in same email
     }
@@ -1178,6 +1211,10 @@ export const processSingleEmailAttachment = internalAction({
     contentType: v.string(),
     resolvedJobId: v.optional(v.id("jobs")),
     rawSender: v.optional(v.string()),
+    // The headline is what says WHICH of a TA's adverts this is for. The old
+    // routing read it in the poller and threw it away before getting here, so
+    // this action had no way to route on anything but the job it was handed.
+    subject: v.optional(v.string()),
     currentExtractionDelayMs: v.number(),
   },
   handler: async (ctx, args) => {
@@ -1215,18 +1252,34 @@ export const processSingleEmailAttachment = internalAction({
 
       const sourceChannel = (args.targetInboxEmail === process.env.LINKEDIN_SHARED_INBOX || args.targetInboxEmail.toLowerCase() === "linkedin@career141.com") ? "linkedin" : (args.targetInboxEmail.toLowerCase() === "cv@career141.com" ? "email" : "email_campaign");
 
-      await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
-        jobId: args.resolvedJobId || undefined,
-        sourceChannel,
-        rawSender: args.rawSender,
-        s3Key,
-        storageProvider: "r2",
-        fileHash,
-        fileName: args.attachmentName,
-        fileType: args.contentType || "application/pdf",
-        fileSizeBytes: fileBuffer.length,
-        extractionDelayMs: args.currentExtractionDelayMs,
-      });
+      // See the note on the other ingestion hand-off above: with
+      // C141_TA_INTAKE on, an arriving CV joins the queue and becomes a
+      // candidate only when a person admits it.
+      if ((process.env.C141_TA_INTAKE ?? "").trim().toLowerCase() === "true") {
+        await ctx.runAction(api.ta.intakeReceive.receiveCv, {
+          source: "email",
+          receivedFrom: args.rawSender ?? null,
+          toAddress: args.targetInboxEmail,
+          subject: args.subject ?? null,
+          fileName: args.attachmentName,
+          fileHash,
+          s3Key,
+          fileType: args.contentType || "application/pdf",
+        });
+      } else {
+        await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+          jobId: args.resolvedJobId || undefined,
+          sourceChannel,
+          rawSender: args.rawSender,
+          s3Key,
+          storageProvider: "r2",
+          fileHash,
+          fileName: args.attachmentName,
+          fileType: args.contentType || "application/pdf",
+          fileSizeBytes: fileBuffer.length,
+          extractionDelayMs: args.currentExtractionDelayMs,
+        });
+      }
     } catch (e: any) {
       console.error(`[processSingleEmailAttachment] Error processing attachment ${args.attachmentName}:`, e.message);
     }

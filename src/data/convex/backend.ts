@@ -189,6 +189,130 @@ export async function moveStage(actor: Actor, applicationId: Id, stage: string, 
   });
 }
 
+// ─── Reverse matching ────────────────────────────────────────────────────────
+
+export interface ReverseMatchRow {
+  cvId: string;
+  overallScore: number;
+  reason: string;
+  matchedSkills?: string[];
+  missingSkills?: string[];
+  breakdown?: Record<string, number>;
+  currentRoleGate?: string;
+  roleFamilyMatch?: string;
+  locationGate?: string;
+  exclusionReason?: string | null;
+}
+
+/** What the engine last produced for an opening, without re-running it. */
+export async function reverseMatchResults(
+  actor: Actor,
+  openingId: Id,
+): Promise<{ status: string | null; matchedAt: string | null; results: ReverseMatchRow[] } | null> {
+  return convexQuery("ta/matching:reverseMatchResults", {
+    actorId: actor.id ?? undefined,
+    openingId,
+  });
+}
+
+/**
+ * Run the tuned reverse-match engine and wait for it.
+ *
+ * `runReverseMatch` is an action that embeds the job, searches Qdrant, calls a
+ * model to classify role families and writes its results onto the job — it
+ * takes tens of seconds. It is triggered and then polled rather than awaited
+ * in one call, because a request that blocks for a minute is a request that
+ * times out somewhere between here and the browser.
+ *
+ * Returns what it found, or says plainly that it is still running. A caller
+ * that cannot wait can come back to `reverseMatchResults`.
+ */
+export async function runReverseMatch(
+  actor: Actor,
+  openingId: Id,
+  opts: { taPreferences?: string; timeoutMs?: number } = {},
+): Promise<{ ok: true; results: ReverseMatchRow[] } | { ok: false; reason: string }> {
+  try {
+    await convexMutation("jobs/jobs:triggerReverseMatch", {
+      jobId: openingId,
+      ...(opts.taPreferences !== undefined ? { taPreferences: opts.taPreferences } : {}),
+    });
+  } catch (e) {
+    return { ok: false, reason: `could not start: ${(e as Error).message}` };
+  }
+
+  const deadline = Date.now() + (opts.timeoutMs ?? 90_000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const res = await reverseMatchResults(actor, openingId).catch(() => null);
+    if (!res) continue;
+    if (res.status === "done") return { ok: true, results: res.results };
+    if (res.status === "error") return { ok: false, reason: "the matching engine reported an error" };
+  }
+  return { ok: false, reason: "still running — the results will appear when it finishes" };
+}
+
+// ─── Retrieval ───────────────────────────────────────────────────────────────
+
+/**
+ * Candidates matching words, from the backend's own full-text indexes.
+ *
+ * This is the half of retrieval that needs no model and no key: Convex search
+ * indexes over titles, skills, summaries and CV text, merged and weighted by
+ * where the hit landed. It is what makes search work at all when there is no
+ * embedding to compare against, and it is the other route in a hybrid — a CV
+ * that SAYS "Procurement Manager" is never hidden because its vector happened
+ * to land under the bar.
+ */
+export async function keywordSearch(
+  actor: Actor,
+  query: string,
+  limit = 100,
+): Promise<{ candidateId: Id; score: number }[]> {
+  if (!query.trim()) return [];
+  return convexQuery<{ candidateId: Id; score: number }[]>("matching/search:searchCandidates", {
+    query: query.slice(0, 300),
+    limit,
+  });
+}
+
+/** Several phrasings at once, merged, best score per person kept. */
+export async function keywordSearchMany(
+  actor: Actor,
+  queries: string[],
+  limitEach = 100,
+): Promise<{ candidateId: Id; score: number }[]> {
+  const terms = [...new Set(queries.map((q) => q.trim()).filter((q) => q.length > 2))].slice(0, 6);
+  if (terms.length === 0) return [];
+  const runs = await Promise.all(
+    terms.map((t) => keywordSearch(actor, t, limitEach).catch(() => [] as { candidateId: Id; score: number }[])),
+  );
+  const best = new Map<Id, number>();
+  for (const run of runs) {
+    for (const hit of run) best.set(hit.candidateId, Math.max(best.get(hit.candidateId) ?? 0, hit.score));
+  }
+  return [...best].map(([candidateId, score]) => ({ candidateId, score })).sort((a, b) => b.score - a.score);
+}
+
+/** How many candidates there are, without reading any of them. */
+export async function candidateStats(actor: Actor): Promise<{ total: number; sampled: boolean }> {
+  return convexQuery<{ total: number; sampled: boolean }>("ta/candidates:stats", {
+    actorId: actor.id ?? undefined,
+  });
+}
+
+/** Titles, skills, cities and employers the database actually holds, sampled. */
+export async function vocabulary(actor: Actor): Promise<{
+  titles: { title: string; count: number }[];
+  skills: string[];
+  cities: string[];
+  employers: string[];
+  industries: string[];
+  sampled: number;
+}> {
+  return convexQuery("ta/candidates:vocabulary", { actorId: actor.id ?? undefined });
+}
+
 // ─── Candidates ──────────────────────────────────────────────────────────────
 
 export async function candidate(actor: Actor, candidateId: Id): Promise<Candidate | null> {
