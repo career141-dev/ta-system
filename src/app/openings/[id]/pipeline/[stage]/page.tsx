@@ -7,6 +7,7 @@ import { CandidateList, applyFilters, type ListFilters } from "@/components/Cand
 import { StatRow } from "@/components/StatRow";
 import { PIPELINE_STAGES, CLOSED_STAGES, EARLY_STAGES, STAGE_LABEL, type Stage } from "@/data/types";
 import { relDays } from "@/lib/format";
+import { primeStore } from "@/data/prime";
 
 export default async function StagePage({
   params,
@@ -17,6 +18,7 @@ export default async function StagePage({
 }) {
   const { id, stage } = await params;
   const filters = await searchParams;
+  await primeStore({ openingId: id });
   /*
    * Any real stage renders, not just the ones on the sidebar.
    *

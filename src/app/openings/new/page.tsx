@@ -2,6 +2,7 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { CaptureForm } from "@/components/CaptureForm";
+import { primeStore } from "@/data/prime";
 
 export default async function NewOpeningPage({
   searchParams,
@@ -9,6 +10,7 @@ export default async function NewOpeningPage({
   searchParams: Promise<{ created?: string }>;
 }) {
   const { created } = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await pageUser("opening.create");
   const isLead = user.role === "ta_lead" || user.role === "admin";
   const just = created ? repo.opening(created) : null;

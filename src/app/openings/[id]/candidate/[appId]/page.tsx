@@ -19,6 +19,7 @@ import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
 import { removeApplication } from "@/app/actions";
+import { primeStore } from "@/data/prime";
 
 /**
  * Finding 23 — Chat Log was a tab that explained why it was empty. A TA clicks
@@ -40,6 +41,7 @@ export default async function CandidateDrawer({
 }) {
   const { id, appId } = await params;
   const { tab = "cv" } = await searchParams;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
 
   const app = repo.application(appId);

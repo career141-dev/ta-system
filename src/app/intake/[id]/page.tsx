@@ -11,6 +11,7 @@ import {
   recheckIntake,
   rejectIntake,
 } from "@/app/actions";
+import { primeStore } from "@/data/prime";
 
 /**
  * One CV at the door.
@@ -41,6 +42,7 @@ export default async function IntakeItemPage({
 }) {
   const { id } = await params;
   const { msg } = await searchParams;
+  await primeStore({ allApplications: true });
   await pageUser("intake.handle");
   const item = repo.intakeItem(id);
   if (!item) notFound();

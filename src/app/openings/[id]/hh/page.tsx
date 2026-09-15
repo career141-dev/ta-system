@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { repo } from "@/data/store";
 import { ProjectHeader } from "../ProjectHeader";
+import { primeStore } from "@/data/prime";
 
 export default async function HeadhuntingOverview({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await primeStore({ openingId: id });
   const vault = repo.linkVault(id);
   const eye = vault.filter((v) => v.isEyeMarked);
   const reached = vault.filter((v) => ["cv_received", "shortlisted"].includes(v.outcome));

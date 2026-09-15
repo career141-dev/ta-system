@@ -182,6 +182,9 @@ fresh();
   }
 }
 
-fs.rmSync(tmp, { recursive: true, force: true });
+// Windows refuses to delete a directory that is a process's CWD (EPERM), and
+// can briefly hold locks on freshly written files — move out first, then retry.
+process.chdir(os.tmpdir());
+fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

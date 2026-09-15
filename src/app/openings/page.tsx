@@ -7,6 +7,7 @@ import { PRIORITY_TARGET } from "@/data/types";
 import { computeAlerts } from "@/lib/sla";
 import { relDays } from "@/lib/format";
 import { SearchIcon } from "@/components/icons";
+import { primeStore } from "@/data/prime";
 
 const BUCKETS = [
   { key: "mine", label: "My openings" },
@@ -21,6 +22,7 @@ export default async function OpeningsPage({
   searchParams: Promise<{ bucket?: string; q?: string }>;
 }) {
   const { bucket = "mine", q = "" } = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const clients = repo.clients();
   const users = repo.users();

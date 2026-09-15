@@ -1,0 +1,313 @@
+/* eslint-disable */
+/**
+ * Generated `api` utility.
+ *
+ * THIS CODE IS AUTOMATICALLY GENERATED.
+ *
+ * To regenerate, run `npx convex dev`.
+ * @module
+ */
+
+import type * as admin_activateReactDev from "../admin/activateReactDev.js";
+import type * as admin_backfillEmbeddingFlags from "../admin/backfillEmbeddingFlags.js";
+import type * as admin_backfillStuckUploads from "../admin/backfillStuckUploads.js";
+import type * as admin_backfillTokenCache from "../admin/backfillTokenCache.js";
+import type * as admin_checkAndStopImports from "../admin/checkAndStopImports.js";
+import type * as admin_checkData from "../admin/checkData.js";
+import type * as admin_cleanCandidateApps from "../admin/cleanCandidateApps.js";
+import type * as admin_cleanupCandidates from "../admin/cleanupCandidates.js";
+import type * as admin_debugWhatsApp from "../admin/debugWhatsApp.js";
+import type * as admin_inspectComms from "../admin/inspectComms.js";
+import type * as admin_ioPerformanceMigrations from "../admin/ioPerformanceMigrations.js";
+import type * as admin_migrateCandidates from "../admin/migrateCandidates.js";
+import type * as admin_migrateGlobalStats from "../admin/migrateGlobalStats.js";
+import type * as admin_migrateManualDirectoryApps from "../admin/migrateManualDirectoryApps.js";
+import type * as admin_mute from "../admin/mute.js";
+import type * as admin_qaTests from "../admin/qaTests.js";
+import type * as admin_qdrantBackfill from "../admin/qdrantBackfill.js";
+import type * as admin_recalculateGlobalStats from "../admin/recalculateGlobalStats.js";
+import type * as admin_removeProfileImages from "../admin/removeProfileImages.js";
+import type * as admin_runBackfill from "../admin/runBackfill.js";
+import type * as admin_setActiveJobs from "../admin/setActiveJobs.js";
+import type * as admin_settings from "../admin/settings.js";
+import type * as admin_updateJDs from "../admin/updateJDs.js";
+import type * as aiCalls_voiceCallGuards from "../aiCalls/voiceCallGuards.js";
+import type * as aiCalls_voiceCalls from "../aiCalls/voiceCalls.js";
+import type * as aiCalls_voiceEngine from "../aiCalls/voiceEngine.js";
+import type * as aiCalls_voiceSessionPolicy from "../aiCalls/voiceSessionPolicy.js";
+import type * as analytics from "../analytics.js";
+import type * as applications_applications from "../applications/applications.js";
+import type * as candidates_backfillLocation from "../candidates/backfillLocation.js";
+import type * as candidates_candidates from "../candidates/candidates.js";
+import type * as candidates_dedupLock from "../candidates/dedupLock.js";
+import type * as candidates_derivations from "../candidates/derivations.js";
+import type * as candidates_governance from "../candidates/governance.js";
+import type * as candidates_profile from "../candidates/profile.js";
+import type * as candidates_refereeActions from "../candidates/refereeActions.js";
+import type * as candidates_referees from "../candidates/referees.js";
+import type * as candidates_timeline from "../candidates/timeline.js";
+import type * as candidates_updateAllExp from "../candidates/updateAllExp.js";
+import type * as candidates_updateSanjeevExp from "../candidates/updateSanjeevExp.js";
+import type * as communications_emailAgent from "../communications/emailAgent.js";
+import type * as communications_emailBackfill from "../communications/emailBackfill.js";
+import type * as communications_emailBackfillMutations from "../communications/emailBackfillMutations.js";
+import type * as communications_emailHtml from "../communications/emailHtml.js";
+import type * as communications_followUpMutations from "../communications/followUpMutations.js";
+import type * as communications_graphEmail from "../communications/graphEmail.js";
+import type * as communications_graphEmailMutations from "../communications/graphEmailMutations.js";
+import type * as communications_graphSubscriptionQueries from "../communications/graphSubscriptionQueries.js";
+import type * as communications_graphSubscriptions from "../communications/graphSubscriptions.js";
+import type * as communications_inboundExtraction from "../communications/inboundExtraction.js";
+import type * as communications_inquiries from "../communications/inquiries.js";
+import type * as communications_messageClassifier from "../communications/messageClassifier.js";
+import type * as communications_metaDirectSender from "../communications/metaDirectSender.js";
+import type * as communications_metaTemplateSender from "../communications/metaTemplateSender.js";
+import type * as communications_whatchimp from "../communications/whatchimp.js";
+import type * as communications_whatchimpActions from "../communications/whatchimpActions.js";
+import type * as communications_whatsappAgent from "../communications/whatsappAgent.js";
+import type * as communications_whatsappOutbound from "../communications/whatsappOutbound.js";
+import type * as crons from "../crons.js";
+import type * as cvScanner_expandCriteria from "../cvScanner/expandCriteria.js";
+import type * as cvScanner_scanActions from "../cvScanner/scanActions.js";
+import type * as cvScanner_scanMutations from "../cvScanner/scanMutations.js";
+import type * as cvs_batches from "../cvs/batches.js";
+import type * as cvs_cvExtraction from "../cvs/cvExtraction.js";
+import type * as cvs_cvScoring from "../cvs/cvScoring.js";
+import type * as cvs_cvScoringActions from "../cvs/cvScoringActions.js";
+import type * as cvs_cvUploads from "../cvs/cvUploads.js";
+import type * as cvs_folderIngestion from "../cvs/folderIngestion.js";
+import type * as cvs_healer from "../cvs/healer.js";
+import type * as cvs_healerActions from "../cvs/healerActions.js";
+import type * as cvs_ingestion from "../cvs/ingestion.js";
+import type * as cvs_lazyParsing from "../cvs/lazyParsing.js";
+import type * as cvs_sept5Reextractor from "../cvs/sept5Reextractor.js";
+import type * as cvs_sept5ReextractorActions from "../cvs/sept5ReextractorActions.js";
+import type * as health from "../health.js";
+import type * as http from "../http.js";
+import type * as integrations_elevenlabs from "../integrations/elevenlabs.js";
+import type * as integrations_livekitSip from "../integrations/livekitSip.js";
+import type * as integrations_livekitSipPolicy from "../integrations/livekitSipPolicy.js";
+import type * as integrations_workable from "../integrations/workable.js";
+import type * as integrations_workableActions from "../integrations/workableActions.js";
+import type * as integrations_zipMutations from "../integrations/zipMutations.js";
+import type * as jobs_actions from "../jobs/actions.js";
+import type * as jobs_assignments from "../jobs/assignments.js";
+import type * as jobs_jobs from "../jobs/jobs.js";
+import type * as jobs_stats from "../jobs/stats.js";
+import type * as lib_activityLog from "../lib/activityLog.js";
+import type * as lib_auth from "../lib/auth.js";
+import type * as lib_currentRoleClassifier from "../lib/currentRoleClassifier.js";
+import type * as lib_gazetteer from "../lib/gazetteer.js";
+import type * as lib_graphClient from "../lib/graphClient.js";
+import type * as lib_jdParser from "../lib/jdParser.js";
+import type * as lib_jobSynthesizer from "../lib/jobSynthesizer.js";
+import type * as lib_llm from "../lib/llm.js";
+import type * as lib_locationResolver from "../lib/locationResolver.js";
+import type * as lib_permissions from "../lib/permissions.js";
+import type * as lib_qdrant from "../lib/qdrant.js";
+import type * as lib_validate from "../lib/validate.js";
+import type * as lib_voiceAgentWebhook from "../lib/voiceAgentWebhook.js";
+import type * as lib_webhookSecurity from "../lib/webhookSecurity.js";
+import type * as matching_agent2 from "../matching/agent2.js";
+import type * as matching_queries from "../matching/queries.js";
+import type * as matching_reindexVectors from "../matching/reindexVectors.js";
+import type * as matching_search from "../matching/search.js";
+import type * as meta_conversions from "../meta/conversions.js";
+import type * as meta_trigger from "../meta/trigger.js";
+import type * as pipeline_followUpHelper from "../pipeline/followUpHelper.js";
+import type * as pipeline_headhunt from "../pipeline/headhunt.js";
+import type * as pipeline_ingestion from "../pipeline/ingestion.js";
+import type * as pipeline_outreach from "../pipeline/outreach.js";
+import type * as pipeline_pipelineStateMachine from "../pipeline/pipelineStateMachine.js";
+import type * as pipeline_stages from "../pipeline/stages.js";
+import type * as settings_whatsappNumbers from "../settings/whatsappNumbers.js";
+import type * as stats_stats from "../stats/stats.js";
+import type * as stats_statsHelper from "../stats/statsHelper.js";
+import type * as stats_statsQueries from "../stats/statsQueries.js";
+import type * as storage_r2 from "../storage/r2.js";
+import type * as storageMigration from "../storageMigration.js";
+import type * as ta_actor from "../ta/actor.js";
+import type * as ta_applications from "../ta/applications.js";
+import type * as ta_backfill from "../ta/backfill.js";
+import type * as ta_candidates from "../ta/candidates.js";
+import type * as ta_clients from "../ta/clients.js";
+import type * as ta_guard from "../ta/guard.js";
+import type * as ta_intake from "../ta/intake.js";
+import type * as ta_matching from "../ta/matching.js";
+import type * as ta_openings from "../ta/openings.js";
+import type * as ta_outreach from "../ta/outreach.js";
+import type * as ta_search from "../ta/search.js";
+import type * as ta_stages from "../ta/stages.js";
+import type * as ta_users from "../ta/users.js";
+import type * as templates_messageTemplates from "../templates/messageTemplates.js";
+import type * as users_users from "../users/users.js";
+
+import type {
+  ApiFromModules,
+  FilterApi,
+  FunctionReference,
+} from "convex/server";
+
+declare const fullApi: ApiFromModules<{
+  "admin/activateReactDev": typeof admin_activateReactDev;
+  "admin/backfillEmbeddingFlags": typeof admin_backfillEmbeddingFlags;
+  "admin/backfillStuckUploads": typeof admin_backfillStuckUploads;
+  "admin/backfillTokenCache": typeof admin_backfillTokenCache;
+  "admin/checkAndStopImports": typeof admin_checkAndStopImports;
+  "admin/checkData": typeof admin_checkData;
+  "admin/cleanCandidateApps": typeof admin_cleanCandidateApps;
+  "admin/cleanupCandidates": typeof admin_cleanupCandidates;
+  "admin/debugWhatsApp": typeof admin_debugWhatsApp;
+  "admin/inspectComms": typeof admin_inspectComms;
+  "admin/ioPerformanceMigrations": typeof admin_ioPerformanceMigrations;
+  "admin/migrateCandidates": typeof admin_migrateCandidates;
+  "admin/migrateGlobalStats": typeof admin_migrateGlobalStats;
+  "admin/migrateManualDirectoryApps": typeof admin_migrateManualDirectoryApps;
+  "admin/mute": typeof admin_mute;
+  "admin/qaTests": typeof admin_qaTests;
+  "admin/qdrantBackfill": typeof admin_qdrantBackfill;
+  "admin/recalculateGlobalStats": typeof admin_recalculateGlobalStats;
+  "admin/removeProfileImages": typeof admin_removeProfileImages;
+  "admin/runBackfill": typeof admin_runBackfill;
+  "admin/setActiveJobs": typeof admin_setActiveJobs;
+  "admin/settings": typeof admin_settings;
+  "admin/updateJDs": typeof admin_updateJDs;
+  "aiCalls/voiceCallGuards": typeof aiCalls_voiceCallGuards;
+  "aiCalls/voiceCalls": typeof aiCalls_voiceCalls;
+  "aiCalls/voiceEngine": typeof aiCalls_voiceEngine;
+  "aiCalls/voiceSessionPolicy": typeof aiCalls_voiceSessionPolicy;
+  analytics: typeof analytics;
+  "applications/applications": typeof applications_applications;
+  "candidates/backfillLocation": typeof candidates_backfillLocation;
+  "candidates/candidates": typeof candidates_candidates;
+  "candidates/dedupLock": typeof candidates_dedupLock;
+  "candidates/derivations": typeof candidates_derivations;
+  "candidates/governance": typeof candidates_governance;
+  "candidates/profile": typeof candidates_profile;
+  "candidates/refereeActions": typeof candidates_refereeActions;
+  "candidates/referees": typeof candidates_referees;
+  "candidates/timeline": typeof candidates_timeline;
+  "candidates/updateAllExp": typeof candidates_updateAllExp;
+  "candidates/updateSanjeevExp": typeof candidates_updateSanjeevExp;
+  "communications/emailAgent": typeof communications_emailAgent;
+  "communications/emailBackfill": typeof communications_emailBackfill;
+  "communications/emailBackfillMutations": typeof communications_emailBackfillMutations;
+  "communications/emailHtml": typeof communications_emailHtml;
+  "communications/followUpMutations": typeof communications_followUpMutations;
+  "communications/graphEmail": typeof communications_graphEmail;
+  "communications/graphEmailMutations": typeof communications_graphEmailMutations;
+  "communications/graphSubscriptionQueries": typeof communications_graphSubscriptionQueries;
+  "communications/graphSubscriptions": typeof communications_graphSubscriptions;
+  "communications/inboundExtraction": typeof communications_inboundExtraction;
+  "communications/inquiries": typeof communications_inquiries;
+  "communications/messageClassifier": typeof communications_messageClassifier;
+  "communications/metaDirectSender": typeof communications_metaDirectSender;
+  "communications/metaTemplateSender": typeof communications_metaTemplateSender;
+  "communications/whatchimp": typeof communications_whatchimp;
+  "communications/whatchimpActions": typeof communications_whatchimpActions;
+  "communications/whatsappAgent": typeof communications_whatsappAgent;
+  "communications/whatsappOutbound": typeof communications_whatsappOutbound;
+  crons: typeof crons;
+  "cvScanner/expandCriteria": typeof cvScanner_expandCriteria;
+  "cvScanner/scanActions": typeof cvScanner_scanActions;
+  "cvScanner/scanMutations": typeof cvScanner_scanMutations;
+  "cvs/batches": typeof cvs_batches;
+  "cvs/cvExtraction": typeof cvs_cvExtraction;
+  "cvs/cvScoring": typeof cvs_cvScoring;
+  "cvs/cvScoringActions": typeof cvs_cvScoringActions;
+  "cvs/cvUploads": typeof cvs_cvUploads;
+  "cvs/folderIngestion": typeof cvs_folderIngestion;
+  "cvs/healer": typeof cvs_healer;
+  "cvs/healerActions": typeof cvs_healerActions;
+  "cvs/ingestion": typeof cvs_ingestion;
+  "cvs/lazyParsing": typeof cvs_lazyParsing;
+  "cvs/sept5Reextractor": typeof cvs_sept5Reextractor;
+  "cvs/sept5ReextractorActions": typeof cvs_sept5ReextractorActions;
+  health: typeof health;
+  http: typeof http;
+  "integrations/elevenlabs": typeof integrations_elevenlabs;
+  "integrations/livekitSip": typeof integrations_livekitSip;
+  "integrations/livekitSipPolicy": typeof integrations_livekitSipPolicy;
+  "integrations/workable": typeof integrations_workable;
+  "integrations/workableActions": typeof integrations_workableActions;
+  "integrations/zipMutations": typeof integrations_zipMutations;
+  "jobs/actions": typeof jobs_actions;
+  "jobs/assignments": typeof jobs_assignments;
+  "jobs/jobs": typeof jobs_jobs;
+  "jobs/stats": typeof jobs_stats;
+  "lib/activityLog": typeof lib_activityLog;
+  "lib/auth": typeof lib_auth;
+  "lib/currentRoleClassifier": typeof lib_currentRoleClassifier;
+  "lib/gazetteer": typeof lib_gazetteer;
+  "lib/graphClient": typeof lib_graphClient;
+  "lib/jdParser": typeof lib_jdParser;
+  "lib/jobSynthesizer": typeof lib_jobSynthesizer;
+  "lib/llm": typeof lib_llm;
+  "lib/locationResolver": typeof lib_locationResolver;
+  "lib/permissions": typeof lib_permissions;
+  "lib/qdrant": typeof lib_qdrant;
+  "lib/validate": typeof lib_validate;
+  "lib/voiceAgentWebhook": typeof lib_voiceAgentWebhook;
+  "lib/webhookSecurity": typeof lib_webhookSecurity;
+  "matching/agent2": typeof matching_agent2;
+  "matching/queries": typeof matching_queries;
+  "matching/reindexVectors": typeof matching_reindexVectors;
+  "matching/search": typeof matching_search;
+  "meta/conversions": typeof meta_conversions;
+  "meta/trigger": typeof meta_trigger;
+  "pipeline/followUpHelper": typeof pipeline_followUpHelper;
+  "pipeline/headhunt": typeof pipeline_headhunt;
+  "pipeline/ingestion": typeof pipeline_ingestion;
+  "pipeline/outreach": typeof pipeline_outreach;
+  "pipeline/pipelineStateMachine": typeof pipeline_pipelineStateMachine;
+  "pipeline/stages": typeof pipeline_stages;
+  "settings/whatsappNumbers": typeof settings_whatsappNumbers;
+  "stats/stats": typeof stats_stats;
+  "stats/statsHelper": typeof stats_statsHelper;
+  "stats/statsQueries": typeof stats_statsQueries;
+  "storage/r2": typeof storage_r2;
+  storageMigration: typeof storageMigration;
+  "ta/actor": typeof ta_actor;
+  "ta/applications": typeof ta_applications;
+  "ta/backfill": typeof ta_backfill;
+  "ta/candidates": typeof ta_candidates;
+  "ta/clients": typeof ta_clients;
+  "ta/guard": typeof ta_guard;
+  "ta/intake": typeof ta_intake;
+  "ta/matching": typeof ta_matching;
+  "ta/openings": typeof ta_openings;
+  "ta/outreach": typeof ta_outreach;
+  "ta/search": typeof ta_search;
+  "ta/stages": typeof ta_stages;
+  "ta/users": typeof ta_users;
+  "templates/messageTemplates": typeof templates_messageTemplates;
+  "users/users": typeof users_users;
+}>;
+
+/**
+ * A utility for referencing Convex functions in your app's public API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = api.myModule.myFunction;
+ * ```
+ */
+export declare const api: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "public">
+>;
+
+/**
+ * A utility for referencing Convex functions in your app's internal API.
+ *
+ * Usage:
+ * ```js
+ * const myFunctionReference = internal.myModule.myFunction;
+ * ```
+ */
+export declare const internal: FilterApi<
+  typeof fullApi,
+  FunctionReference<any, "internal">
+>;
+
+export declare const components: {};

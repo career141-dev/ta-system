@@ -6,6 +6,7 @@ import { PostManager } from "@/components/PostManager";
 import { ProjectHeader } from "../ProjectHeader";
 import { StatRow } from "@/components/StatRow";
 import { rowsOf, scopeApplications, visiblePosts } from "@/lib/visibility";
+import { primeStore } from "@/data/prime";
 
 type Params = ListFilters & { post?: string };
 
@@ -33,6 +34,7 @@ export default async function LinkedInJobPage({
 }) {
   const { id } = await params;
   const { post: postId, ...filters } = await searchParams;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
   const allPosts = repo.jobPosts(id);
   const posts = visiblePosts(allPosts, user);

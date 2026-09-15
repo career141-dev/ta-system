@@ -4,6 +4,7 @@ import { PeopleAdmin } from "./PeopleAdmin";
 import { allows } from "@/lib/auth";
 import { setFollowUpStandard, setAutoShortlistScore } from "@/app/actions";
 import { inputClass } from "@/components/form";
+import { primeStore } from "@/data/prime";
 
 export default async function PeoplePage({
   searchParams,
@@ -11,6 +12,7 @@ export default async function PeoplePage({
   searchParams: Promise<{ msg?: string }>;
 }) {
   const { msg } = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   // The same test the server makes on every change here.
   const canEdit = allows(user, "user.manage");

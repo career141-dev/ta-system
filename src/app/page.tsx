@@ -7,6 +7,7 @@ import { alertsFor } from "@/lib/sla";
 import { LeadDashboard } from "@/components/dash/LeadDashboard";
 import { DirectorDashboard } from "@/components/dash/DirectorDashboard";
 import { OpsDashboard } from "@/components/dash/OpsDashboard";
+import { primeStore } from "@/data/prime";
 
 /**
  * The day, not the database. What is urgent, what is scheduled, what each of my
@@ -14,6 +15,7 @@ import { OpsDashboard } from "@/components/dash/OpsDashboard";
  * is the Director's view, not a recruiter's.
  */
 export default async function Dashboard() {
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const openings = repo.openingsForUser(user).filter((o) => o.status === "open");
   const alerts = alertsFor(user.id);

@@ -13,6 +13,7 @@ import { sanitizeSpec,
 } from "@/lib/reporting";
 import { FAILURE_MESSAGE } from "@/lib/ai";
 import type { AiFailure } from "@/lib/ai";
+import { primeStore } from "@/data/prime";
 
 /**
  * Reports — rebuilt 12 September.
@@ -37,6 +38,7 @@ export default async function ReportsPage({
   }>;
 }) {
   const sp = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await pageUser("report.read");
   const saved = repo.savedReports(user.id);
 

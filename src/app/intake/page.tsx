@@ -6,6 +6,7 @@ import { PageHead, Card, Empty } from "@/components/ui";
 import { inHours } from "@/lib/format";
 import { dropIntake } from "@/app/actions";
 import type { IntakeItem, IntakeStatus } from "@/data/types";
+import { primeStore } from "@/data/prime";
 
 /**
  * The CV queue — everything that has arrived and has not yet been let in.
@@ -121,6 +122,7 @@ export default async function IntakePage({
   searchParams: Promise<{ msg?: string; all?: string }>;
 }) {
   const { msg, all } = await searchParams;
+  await primeStore({ allApplications: true });
   await pageUser("intake.handle");
   const items = repo.intake();
   const counts = repo.intakeCounts();

@@ -7,6 +7,8 @@ import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
 import { repo } from "@/data/store";
 import { DeskAssistant } from "@/components/DeskAssistant";
+import { ConvexClientProvider } from "@/components/ConvexClientProvider";
+import { primeStore } from "@/data/prime";
 
 export const metadata: Metadata = {
   title: "Career141 — Talent Acquisition",
@@ -14,6 +16,7 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  await primeStore({ allApplications: true });
   // Null on the sign-in screen, which is the one page that renders without a
   // session — and therefore without the top bar.
   const user = await currentUser();
@@ -33,13 +36,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           rel="stylesheet"
         />
       </head>
-      <body>
-        {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
-        <Suspense fallback={null}>
-          <Flash />
-        </Suspense>
-        {children}
-        {user ? <DeskAssistant /> : null}
+      <body suppressHydrationWarning>
+        <ConvexClientProvider>
+          {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
+          <Suspense fallback={null}>
+            <Flash />
+          </Suspense>
+          {children}
+          {user ? <DeskAssistant /> : null}
+        </ConvexClientProvider>
       </body>
     </html>
   );

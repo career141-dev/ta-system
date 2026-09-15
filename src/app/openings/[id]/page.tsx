@@ -10,6 +10,7 @@ import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
 import { setOpeningQuestions } from "@/app/actions";
+import { primeStore } from "@/data/prime";
 
 /**
  * Modelled on Recruiter's project overview: a short state line, a few suggested
@@ -24,6 +25,7 @@ export default async function OverviewPage({
 }) {
   const { id } = await params;
   const { msg } = await searchParams;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
