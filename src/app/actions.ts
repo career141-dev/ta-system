@@ -589,21 +589,29 @@ export async function addClient(formData: FormData) {
       ]
     : [];
 
+  let newId: string;
   const { isConvex } = await import("@/data/mode");
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    await convexMutation("ta/clients:add", {
+    newId = (await convexMutation<string>("ta/clients:add", {
       actorId: actor?._id,
       name,
       industry,
       contacts,
-    });
+    })) ?? "";
   } else {
-    repo.addClient({ name, industry, contacts });
+    newId = repo.addClient({ name, industry, contacts });
   }
+
+  const intent = String(formData.get("action") ?? "save");
+
   revalidatePath("/clients");
   revalidatePath("/openings/new");
+
+  if (intent === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
+  }
 }
 
 export async function updateClient(formData: FormData) {
