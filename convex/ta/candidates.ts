@@ -29,17 +29,46 @@ import { requireActor, assertFullAccess, optionalActor} from "./guard";
  * The heavy fields are left out — `rawText` and the embedding are large and no
  * screen that calls this shows them.
  */
-async function withCareer(ctx: QueryCtx, id: Id<"candidates">): Promise<Doc<"candidates"> | null> {
+async function withCareer(
+  ctx: QueryCtx,
+  id: Id<"candidates">,
+  shape: "list" | "full" = "list",
+): Promise<Doc<"candidates"> | null> {
   const candidate = await ctx.db.get(id);
   if (!candidate) return null;
   const resume = await ctx.db
     .query("candidateResumes")
     .withIndex("by_candidateId", (q) => q.eq("candidateId", id))
     .first();
-  const { rawText: _raw, ...rest } = candidate;
-  const career = resume?.jobHistory?.length ? resume.jobHistory : candidate.jobHistory;
-  return { ...rest, jobHistory: career ?? [] } as Doc<"candidates">;
+  const career = (resume?.jobHistory?.length ? resume.jobHistory : candidate.jobHistory) ?? [];
+  if (shape === "full") {
+    const { rawText: _raw, ...rest } = candidate;
+    return { ...rest, jobHistory: career } as Doc<"candidates">;
+  }
+  /*
+   * Lists get what the list mapper reads (src/lib/live/mapLive.ts) and nothing
+   * else. A full row carries the summary, extraction confidence, past titles,
+   * application summaries and a paragraph per role — none of it on a list, and
+   * the layout loads 740 of these on every page for the alert badge.
+   */
+  const out: Record<string, unknown> = { jobHistory: career.map(({ title, company, startDate, endDate }) => ({ title, company, startDate, endDate })) };
+  for (const field of LIST_FIELDS) {
+    const value = (candidate as Record<string, unknown>)[field];
+    if (value !== undefined) out[field] = value;
+  }
+  if (candidate.locationStructured?.raw_text) out.locationStructured = { raw_text: candidate.locationStructured.raw_text };
+  if (Array.isArray(candidate.education) && candidate.education.length) out.education = [candidate.education[0]];
+  return out as unknown as Doc<"candidates">;
 }
+
+/** Exactly the fields `mapCandidate` reads. Add here when the mapper grows. */
+const LIST_FIELDS = [
+  "_id", "_creationTime", "fullName", "email", "phone", "linkedinUrl", "location", "nationality",
+  "age", "gender", "currentEmployer", "currentJobTitle", "currentTitle", "totalExperienceYears",
+  "yearsOfExperience", "educationDegree", "educationInstitution", "certifications", "languages",
+  "skills", "industries", "sector", "noticePeriodDays", "currentSalary", "currentSalaryCurrency",
+  "expectedSalary", "expectedSalaryCurrency",
+] as const;
 
 export const getBatch = query({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
@@ -220,7 +249,7 @@ export const profile = query({
 
     const id = ctx.db.normalizeId("candidates", args.candidateId);
     if (!id) return null;
-    const candidate = await withCareer(ctx, id);
+    const candidate = await withCareer(ctx, id, "full");
     if (!candidate) return null;
 
     const [referees, applications, resume, upload] = await Promise.all([

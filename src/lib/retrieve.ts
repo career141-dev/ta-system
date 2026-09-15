@@ -61,17 +61,33 @@ export interface DatabaseShelf {
  * number somebody will quote, so the page marks it.
  */
 export async function databaseShelf(): Promise<DatabaseShelf> {
-  const [stats, vocab] = await Promise.all([
-    backend.candidateStats(NO_ACTOR),
-    backend.vocabulary(NO_ACTOR),
-  ]);
-  return {
-    total: stats.total,
-    sampled: stats.sampled,
-    titles: vocab.titles,
-    skills: vocab.skills,
-    cities: vocab.cities,
-    employers: vocab.employers,
-    industries: vocab.industries,
-  };
+  /*
+   * Held for ten minutes and shared by everyone.
+   *
+   * The count walks up to 4,001 candidate rows and the vocabulary samples
+   * 1,500 more — together over a second, on every visit to the Database home,
+   * to describe something that changes at the speed of the database gaining
+   * new kinds of people. A failed read is not kept.
+   */
+  const now = Date.now();
+  if (shelfCache && now - shelfCache.at < SHELF_TTL_MS) return shelfCache.value;
+  const value = Promise.all([backend.candidateStats(NO_ACTOR), backend.vocabulary(NO_ACTOR)]).then(
+    ([stats, vocab]) => ({
+      total: stats.total,
+      sampled: stats.sampled,
+      titles: vocab.titles,
+      skills: vocab.skills,
+      cities: vocab.cities,
+      employers: vocab.employers,
+      industries: vocab.industries,
+    }),
+  );
+  shelfCache = { at: now, value };
+  value.catch(() => {
+    if (shelfCache?.value === value) shelfCache = null;
+  });
+  return value;
 }
+
+const SHELF_TTL_MS = 10 * 60_000;
+let shelfCache: { at: number; value: Promise<DatabaseShelf> } | null = null;

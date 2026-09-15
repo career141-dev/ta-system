@@ -7,7 +7,6 @@ import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
 import { repo } from "@/data/store";
 import { DeskAssistant } from "@/components/DeskAssistant";
-import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import { primeStore } from "@/data/prime";
 
 export const metadata: Metadata = {
@@ -16,37 +15,39 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  // Follow-ups too: the alert badge below counts them, and a follow-up whose
-  // candidate is not held is dropped from that count rather than miscounted.
-  await primeStore({ allApplications: true, followUps: true });
+  // Who is asking needs only the users table. The desk — every application,
+  // and the people being chased — is loaded only for someone signed in: the
+  // sign-in screen has no badge to count.
+  await primeStore();
   // Null on the sign-in screen, which is the one page that renders without a
   // session — and therefore without the top bar.
   const user = await currentUser();
+  // Follow-ups too: the alert badge below counts them, and a follow-up whose
+  // candidate is not held is dropped from that count rather than miscounted.
+  if (user) await primeStore({ allApplications: true, followUps: true });
   // The badge counts the same alerts the Alerts page lists. It used to read a
   // stored count, which drifted: the 13 Sep audit found accounts showing one
   // where six were waiting.
   const alertCount = user ? alertsFor(user.id).length : 0;
   return (
     <html lang="en">
-      <head>
-        {/* The snippet card is typeset in Poppins, and the canvas takes its
-            faces from the document — so they load here, not in the studio. */}
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&family=Jost:wght@300;400;500;600;700&family=Quicksand:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600;700&family=Figtree:wght@300;400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+      {/*
+        No web fonts here. The app is set in the system face; the six families
+        the snippet card is drawn in load on the snippets page, which is the only
+        place they are used — they were a render-blocking stylesheet and thirty
+        font files on every page of the desk.
+
+        No Convex browser client either. Every read goes through the server, and
+        nothing on any page subscribes, so the provider only opened a WebSocket
+        and shipped the client library to every visitor for no reader.
+      */}
       <body suppressHydrationWarning>
-        <ConvexClientProvider>
-          {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
-          <Suspense fallback={null}>
-            <Flash />
-          </Suspense>
-          {children}
-          {user ? <DeskAssistant /> : null}
-        </ConvexClientProvider>
+        {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
+        <Suspense fallback={null}>
+          <Flash />
+        </Suspense>
+        {children}
+        {user ? <DeskAssistant /> : null}
       </body>
     </html>
   );

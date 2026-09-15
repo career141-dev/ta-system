@@ -15,7 +15,8 @@ import { primeStore } from "@/data/prime";
  * made the account menu's "Sign out" a button that did nothing.
  */
 export default async function SignInPage() {
-  await primeStore({ allApplications: true });
+  // A list of names. Nothing else on the desk is read here.
+  await primeStore();
   if (await currentUser()) redirect("/");
   const users = repo.users().filter((u) => u.isActive);
 

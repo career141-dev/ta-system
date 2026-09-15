@@ -935,7 +935,7 @@ export async function signOut() {
  * a deliberate act, so that signing out stays signed out.
  */
 export async function signInAs(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore();
   const id = String(formData.get("userId") ?? "");
   const user = repo.users().find((u) => u.id === id);
   if (!user || !user.isActive) redirect("/signin");

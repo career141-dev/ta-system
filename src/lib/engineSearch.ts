@@ -86,11 +86,8 @@ export async function engineSearch(
    *  from parsing the sentence. */
   edited = false,
 ): Promise<EngineSearch> {
-  const res = await convexAction<{
-    interpretation: EngineSearch["interpretation"];
-    results: EngineHit[];
-  }>("matching/search:aiSearch", {
-    query,
+  const args = {
+    query: query.trim().replace(/\s+/g, " "),
     location: criteria.locations[0] ?? undefined,
     minExperience: criteria.minExperience ?? undefined,
     maxExperience: criteria.maxExperience ?? undefined,
@@ -100,9 +97,51 @@ export async function engineSearch(
     // chip the recruiter set maps straight across.
     customFilters: edited && criteria.skills.length ? criteria.skills : undefined,
     limit,
+  };
+
+  /*
+   * The same search, answered once.
+   *
+   * A run is a model reading the sentence, a vector search, the full-text
+   * indexes, scoring, and a second model call re-ranking the uncertain band —
+   * fifteen to thirty seconds. The results page asked for it again on page 2,
+   * on the way back from a profile, and on every reload, for an identical
+   * answer. So an answer is kept for a few minutes against exactly what was
+   * sent, and a request that arrives while the same search is running waits
+   * for that run instead of starting a second one.
+   *
+   * Short-lived on purpose: a CV that arrives is in the next search after the
+   * window, and a changed chip is a different key, so it runs fresh.
+   */
+  const key = JSON.stringify(args);
+  const now = Date.now();
+  const held = engineCache.get(key);
+  if (held && now - held.at < ENGINE_CACHE_MS) {
+    // Touched, so the least recently used is what goes when the cache is full.
+    engineCache.delete(key);
+    engineCache.set(key, held);
+    return held.value;
+  }
+
+  const value = convexAction<{
+    interpretation: EngineSearch["interpretation"];
+    results: EngineHit[];
+  }>("matching/search:aiSearch", args).then((res) => ({
+    interpretation: res.interpretation,
+    hits: res.results ?? [],
+  }));
+  engineCache.set(key, { at: now, value });
+  while (engineCache.size > ENGINE_CACHE_MAX) engineCache.delete(engineCache.keys().next().value!);
+  // A failed run is not an answer to keep: the next request tries again.
+  value.catch(() => {
+    if (engineCache.get(key)?.value === value) engineCache.delete(key);
   });
-  return { interpretation: res.interpretation, hits: res.results ?? [] };
+  return value;
 }
+
+const ENGINE_CACHE_MS = 5 * 60_000;
+const ENGINE_CACHE_MAX = 50;
+const engineCache = new Map<string, { at: number; value: Promise<EngineSearch> }>();
 
 /**
  * The criteria still worth applying after the engine has spoken.

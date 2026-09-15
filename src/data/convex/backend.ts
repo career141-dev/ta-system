@@ -311,8 +311,21 @@ export async function vocabulary(actor: Actor): Promise<{
   industries: string[];
   sampled: number;
 }> {
-  return convexQuery("ta/candidates:vocabulary", { actorId: actor.id ?? undefined });
+  // One read every ten minutes, shared by the search parser and the Database
+  // home — it samples 1,500 candidate rows and takes over a second, for words
+  // that barely move. The actor does not change the answer.
+  void actor;
+  const now = Date.now();
+  if (vocabularyCache && now - vocabularyCache.at < 10 * 60_000) return vocabularyCache.value;
+  const value = convexQuery<Awaited<ReturnType<typeof vocabulary>>>("ta/candidates:vocabulary", {});
+  vocabularyCache = { at: now, value };
+  value.catch(() => {
+    if (vocabularyCache?.value === value) vocabularyCache = null;
+  });
+  return value;
 }
+
+let vocabularyCache: { at: number; value: ReturnType<typeof vocabulary> } | null = null;
 
 // ─── Candidates ──────────────────────────────────────────────────────────────
 
@@ -489,6 +502,12 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
   const proxied = found.url.match(/^\/api\/r2-file\?key=(.+)$/);
   if (!proxied) return { ok: true, url: found.url, fileName, fileType: found.fileType ?? null };
 
+  // Storage that is not configured stays not configured; asking again on every
+  // profile view spends a Node action to learn it. Re-checked after 5 minutes.
+  if (r2UnconfiguredAt && Date.now() - r2UnconfiguredAt < 5 * 60_000) {
+    return { ok: false, reason: "storage_unavailable", detail: unconfiguredDetail(fileName), fileName };
+  }
+
   try {
     const url = await convexAction<string>("storage/r2:generateDownloadUrl", {
       key: decodeURIComponent(proxied[1]),
@@ -500,13 +519,18 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
     // The SDK's words for "nothing is configured" are about HTTP labels and
     // buckets; the person reading the profile needs to know it is a setting.
     const unconfigured = /Bucket|credential|access key|R2_/i.test(message);
+    if (unconfigured) r2UnconfiguredAt = Date.now();
     return {
       ok: false,
       reason: "storage_unavailable",
       detail: unconfigured
-        ? `${fileName ?? "The CV"} is stored in R2 file storage, which is not configured on this deployment (R2_BUCKET_NAME and its access keys are not set), so it cannot be opened here.`
+        ? unconfiguredDetail(fileName)
         : `${fileName ?? "The CV"} is stored in R2 and a link to it could not be made (${message}).`,
       fileName,
     };
   }
 }
+
+let r2UnconfiguredAt = 0;
+const unconfiguredDetail = (fileName: string | null) =>
+  `${fileName ?? "The CV"} is stored in R2 file storage, which is not configured on this deployment (R2_BUCKET_NAME and its access keys are not set), so it cannot be opened here.`;

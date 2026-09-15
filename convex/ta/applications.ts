@@ -40,9 +40,10 @@ function projectApplication(a: Doc<"applications">) {
     sourcingChannel: a.taSourcingChannel ?? null,
     legacySourceChannel: a.sourceChannel,
     isAddOn: a.isAddOn ?? false,
-    aiMatchScore: a.aiMatchScore ?? null,
-    aiMatchExplanation: a.aiMatchExplanation ?? null,
-    candidateName: a.candidateName ?? null,
+    // Not the engine's aiMatchScore / aiMatchExplanation, nor candidateName:
+    // no screen reads them from a list, and the explanation is a paragraph per
+    // row — across the 8,378 applications the layout loads, most of a 6 MB
+    // response. The profile reads them for one person (ta/candidates:profile).
     isActive: a.isActive,
     createdAt: typeof a.createdAt === "number" ? a.createdAt : Date.parse(String(a.createdAt)) || 0,
     lastStageChangedAt: a.lastStageChangedAt,
