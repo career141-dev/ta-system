@@ -12,10 +12,12 @@ export const DAILY_CUTOFF_HOUR = 18;
 /** Holidays live here when the TA Lead can maintain them — phase 6 leaves it empty. */
 export const HOLIDAYS: string[] = [];
 
+const WEEK_MS = 7 * 24 * 3_600_000;
+
 export function isWorkingDay(d: Date): boolean {
   const day = d.getDay();
   if (day === 0 || day === 6) return false;
-  return !HOLIDAYS.includes(d.toISOString().slice(0, 10));
+  return HOLIDAYS.length === 0 || !HOLIDAYS.includes(d.toISOString().slice(0, 10));
 }
 
 /**
@@ -28,6 +30,20 @@ export function isWorkingDay(d: Date): boolean {
 export function workingHoursBetween(from: number, to: number): number {
   if (to <= from) return 0;
   let hours = 0;
+  // Whole weeks first. Stepping hour by hour is what the rule means, but the
+  // restored database has CVs years old, and the alerts ask this of every one
+  // of them: tens of millions of steps, seven seconds a page. Any 168 hours
+  // hold five whole working days — as long as no holiday can fall inside, so
+  // with holidays set the walk below does all of it.
+  if (HOLIDAYS.length === 0) {
+    const weeks = Math.floor((to - from) / WEEK_MS);
+    if (weeks > 1) {
+      // One week is left to the walk, so a daylight-saving hour near either
+      // end is still counted the slow, exact way.
+      hours += (weeks - 1) * 120;
+      from += (weeks - 1) * WEEK_MS;
+    }
+  }
   const cursor = new Date(from);
   while (cursor.getTime() < to) {
     const next = Math.min(cursor.getTime() + 3_600_000, to);

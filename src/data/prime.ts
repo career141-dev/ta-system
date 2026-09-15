@@ -141,6 +141,17 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
       if (a.openingId === scope.openingId) wanted.add(a.candidateId);
     }
   }
+  /*
+   * The alerts, though, name people — and the root layout computes them on
+   * every page for the badge. They only read candidates on the late stages
+   * (follow-up chases, interviews, offers, joining), which is a few hundred
+   * rather than the whole desk, so those come along with `allApplications`.
+   */
+  if (scope.allApplications) {
+    for (const a of db.applications) {
+      if (ALERT_STAGES.has(a.stage)) wanted.add(a.candidateId);
+    }
+  }
   const missing = [...wanted].filter((id) => !state.candidates.has(id));
   if (missing.length > 0) {
     const people = await backend.candidatesByIds(actor, missing);
@@ -157,6 +168,9 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+/** Stages whose people `computeAlerts` reads by name (src/lib/sla.ts). */
+const ALERT_STAGES = new Set<Application["stage"]>(["follow_up", "interview", "offer", "placed"]);
 
 function merge<T>(have: T[], incoming: T[], key: (x: T) => string): T[] {
   if (incoming.length === 0) return have;
