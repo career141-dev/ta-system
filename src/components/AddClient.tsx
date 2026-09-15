@@ -12,15 +12,30 @@ const INDUSTRIES = [
   "Construction", "Telecom", "Plantation", "IT Services", "Other",
 ];
 
-function Save() {
+function ActionButtons() {
   const { pending } = useFormStatus();
   return (
-    <button
-      disabled={pending}
-      className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-    >
-      {pending ? "Adding…" : "Add client"}
-    </button>
+    <div className="flex flex-wrap items-center gap-2.5">
+      <button
+        type="submit"
+        name="action"
+        value="save"
+        disabled={pending}
+        className="rounded-full border border-brand-line px-4 py-2 text-[13px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-50"
+      >
+        {pending ? "Saving…" : "Save client"}
+      </button>
+      <button
+        type="submit"
+        name="action"
+        value="create_job"
+        disabled={pending}
+        className="flex items-center gap-1.5 rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+      >
+        <span>+</span>
+        {pending ? "Creating…" : "Create job"}
+      </button>
+    </div>
   );
 }
 
@@ -112,8 +127,8 @@ export function AddClient() {
         </label>
       </div>
 
-      <div className="mt-6 flex items-center gap-3">
-        <Save />
+      <div className="mt-6 flex flex-wrap items-center gap-3">
+        <ActionButtons />
         <button
           type="button"
           onClick={() => setOpen(false)}
