@@ -11,6 +11,7 @@
  */
 
 import type { Database, Id } from "@/data/types";
+import type { Vocabulary } from "@/lib/query";
 import { invalidate } from "@/data/convex/snapshot";
 
 /** The empty shape, so a table nobody has migrated yet reads as absent rather
@@ -31,7 +32,35 @@ export const state = {
   candidates: new Set<Id>(),
   openings: new Set<Id>(),
   all: false,
+  /*
+   * The words the database contains, which is a different question from which
+   * rows this page primed.
+   *
+   * The search box reads a sentence by matching it against this. Built from
+   * the working set it would be built from the people a page had already
+   * fetched — which, at the moment a query is parsed, is nobody. "Colombo"
+   * would then be an unrecognised word, no place filter would be applied, and
+   * the screen would answer a broader question than the one that was typed
+   * while looking as though it had understood.
+   *
+   * So it comes from the whole database instead, and is held apart from the
+   * working set: it survives `resetStore` because a write does not change what
+   * words exist, and re-reading a sample of 77,000 rows after every save would
+   * cost more than it could possibly correct.
+   */
+  vocabulary: null as Vocabulary | null,
+  vocabularyAt: 0,
 };
+
+/** How long the vocabulary is trusted. Long, because it moves at the speed of
+ *  the database gaining new kinds of people, not new people. */
+export const VOCABULARY_TTL_MS = 10 * 60 * 1000;
+
+/** The database's vocabulary, or null if it has not been read or has aged out. */
+export function primedVocabulary(now = Date.now()): Vocabulary | null {
+  if (!state.vocabulary) return null;
+  return now - state.vocabularyAt < VOCABULARY_TTL_MS ? state.vocabulary : null;
+}
 
 /** The primed working set, or null when nothing has been primed yet. */
 export function primed(): Database | null {

@@ -37,9 +37,9 @@ import "server-only";
 import type { Application, Candidate, Database, Id } from "@/data/types";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
-import { blank, state } from "@/data/primeState";
+import { blank, primedVocabulary, resetStore, state } from "@/data/primeState";
 
-export { primed, hasCandidate, missingCandidateMessage, resetStore } from "@/data/primeState";
+export { primed, primedVocabulary, hasCandidate, missingCandidateMessage, resetStore } from "@/data/primeState";
 
 /** What a page needs on top of the small tables. */
 export interface PrimeScope {
@@ -54,6 +54,21 @@ export interface PrimeScope {
    * the one read here that grows with the desk rather than with the page.
    */
   allApplications?: boolean;
+  /**
+   * The people currently being chased, and their records.
+   *
+   * Follow-up state is not derivable from the application alone: whether a
+   * step is owed depends on which answers are still missing from the
+   * CANDIDATE, and whether anything can be sent at all depends on their phone
+   * and email. So `repo.followUps()` reads the record, and without it a
+   * follow-up is silently dropped rather than reported wrong — which is why
+   * the alert badge, which counts them, needs this.
+   *
+   * Bounded by the stage, not by the desk: 742 of 8,378 applications, fetched
+   * in two parallel batches. Implies `allApplications`, since the stage cannot
+   * be known before the applications are.
+   */
+  followUps?: boolean;
 }
 
 /**
@@ -66,9 +81,34 @@ export interface PrimeScope {
  * A no-op when the store is the JSON file, which is what keeps the tests — and
  * the offline build — running unchanged.
  */
-export async function primeStore(scope: PrimeScope = {}): Promise<void> {
-  if (!isConvex()) return;
+/**
+ * One load at a time.
+ *
+ * A layout and the page inside it render CONCURRENTLY, and both prime. Without
+ * this they both find an unprimed store, both call `blank()`, and the second
+ * one's blank overwrites whatever the first had already fetched — most
+ * damagingly `db.users`, which is where the session is resolved, so the page
+ * decides nobody is signed in and redirects to the sign-in screen while the
+ * layout around it renders the signed-in desk perfectly well. It presents as
+ * "that one page logs me out", and it moves depending on which fetch happens
+ * to return first.
+ *
+ * Serialising is the whole fix and costs nothing: the work is additive and
+ * idempotent, so the second caller finds its scope already held and returns
+ * without asking the backend for anything.
+ */
+let loading: Promise<void> = Promise.resolve();
 
+export function primeStore(scope: PrimeScope = {}): Promise<void> {
+  if (!isConvex()) return Promise.resolve();
+  // Queue behind whatever is in flight — including a failed one, whose
+  // rejection must not cancel this caller's turn.
+  const mine = loading.catch(() => {}).then(() => loadInto(scope));
+  loading = mine.catch(() => {});
+  return mine;
+}
+
+async function loadInto(scope: PrimeScope): Promise<void> {
   const fresh = state.snapshot === null;
   if (fresh) {
     state.snapshot = blank();
@@ -79,36 +119,89 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
   const db = state.snapshot!;
   const actor = { id: null as string | null };
 
-  // ── The small tables, once ────────────────────────────────────────────────
+  /*
+   * The vocabulary, from the database rather than from the working set.
+   *
+   * Read before anything else uses it, because the page parses its query
+   * immediately after this returns. It outlives the working set — see
+   * `primeState` — so this is a read once every ten minutes, not once a page.
+   */
+  if (!primedVocabulary()) {
+    try {
+      const v = await backend.vocabulary(actor);
+      state.vocabulary = {
+        titles: v.titles.map((t) => t.title),
+        skills: v.skills,
+        industries: v.industries,
+        cities: v.cities,
+        employers: v.employers,
+        // Not sampled by the backend: degrees and institutions are not indexed,
+        // so asking for them would mean a scan. The parser simply recognises no
+        // qualification words until they are, which is the honest result — the
+        // filter is still there for a recruiter who sets it from the chips.
+        qualifications: [],
+        languages: [],
+        nationalities: [],
+      };
+      state.vocabularyAt = Date.now();
+    } catch {
+      // A search that cannot read the vocabulary still runs; it reads the
+      // sentence less well. Better than a page that will not render.
+    }
+  }
+
+  /*
+   * ── The small tables, once ──────────────────────────────────────────────
+   *
+   * If this throws, the working set is thrown away rather than kept.
+   *
+   * The snapshot is created before the fetch, so `repo` has something to read;
+   * but "created" and "loaded" are different states, and only the second one is
+   * worth keeping. Leaving an empty snapshot in place after a failed fetch
+   * makes `fresh` false for every call that follows, so nothing ever tries
+   * again — and since `db.users` is where the session is resolved, one
+   * momentary hiccup from the backend signs everybody out of a running desk
+   * and keeps them out until the process is restarted. Observed exactly that
+   * way: a Convex deploy interrupted one page's load, and every page after it
+   * redirected to the sign-in screen.
+   */
   if (fresh) {
-    const [users, openings, clients] = await Promise.all([
-      backend.users(actor),
-      backend.openings(actor),
-      backend.clients(actor).catch(() => []),
-    ]);
-    db.users = users;
-    db.openings = openings;
-    // Real rows once the backfill has run. Before that they are derived from
-    // the openings, so the app works on a database that has only been
-    // restored — the fallback is a bridge, not a second source of truth.
-    db.clients = clients.length > 0 ? clients : clientsFrom(openings);
+    try {
+      const [users, openings, clients] = await Promise.all([
+        backend.users(actor),
+        backend.openings(actor),
+        backend.clients(actor).catch(() => []),
+      ]);
+      db.users = users;
+      db.openings = openings;
+      // Real rows once the backfill has run. Before that they are derived from
+      // the openings, so the app works on a database that has only been
+      // restored — the fallback is a bridge, not a second source of truth.
+      db.clients = clients.length > 0 ? clients : clientsFrom(openings);
+    } catch (e) {
+      resetStore();
+      throw e;
+    }
   }
 
   // ── Applications, and the people on them ──────────────────────────────────
   const wanted = new Set<Id>(scope.candidateIds ?? []);
 
-  if (scope.allApplications && !state.all) {
-    state.all = true;
+  // The "we have these" flags are set AFTER the rows arrive, for the reason
+  // above: a flag set before the fetch it describes turns one failed request
+  // into a permanently empty table nobody retries.
+  if ((scope.allApplications || scope.followUps) && !state.all) {
     const { applications } = await backend.allApplications(actor);
+    state.all = true;
     db.applications = merge(db.applications, applications, (a) => a.id);
     for (const o of db.openings) state.openings.add(o.id);
   } else if (scope.openingId && !state.openings.has(scope.openingId)) {
     const openingId = scope.openingId;
-    state.openings.add(openingId);
     const [apps, detail] = await Promise.all([
       backend.applications(actor, openingId),
       backend.opening(actor, openingId),
     ]);
+    state.openings.add(openingId);
     db.applications = merge(db.applications, apps, (a) => a.id);
     if (detail) {
       db.jobPosts = merge(db.jobPosts, detail.posts, (p) => p.id);
@@ -139,6 +232,11 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
   if (scope.openingId) {
     for (const a of db.applications) {
       if (a.openingId === scope.openingId) wanted.add(a.candidateId);
+    }
+  }
+  if (scope.followUps) {
+    for (const a of db.applications) {
+      if (a.stage === "follow_up") wanted.add(a.candidateId);
     }
   }
   const missing = [...wanted].filter((id) => !state.candidates.has(id));

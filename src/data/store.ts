@@ -74,7 +74,7 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
-import { hasCandidate, missingCandidateMessage, primed, resetStore } from "./primeState";
+import { hasCandidate, missingCandidateMessage, primed, primedVocabulary, resetStore } from "./primeState";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -1986,6 +1986,19 @@ export const repo = {
    * parser starts recognising every title the database actually contains.
    */
   vocabulary(): Vocabulary {
+    /*
+     * Backed by Convex the words come from the database, not from the rows
+     * this page happens to hold.
+     *
+     * Over the JSON file those are the same thing — the file IS the database.
+     * Over Convex they are not, and the difference is not visible in the
+     * result: a vocabulary built from an empty working set recognises no
+     * words, so the parser quietly ignores every one of them and the search
+     * answers a wider question than the one that was asked. `primeStore` reads
+     * the real one; this prefers it wherever it has.
+     */
+    const live = isConvex() ? primedVocabulary() : null;
+    if (live) return live;
     if (lockDepth > 0) return buildVocabulary(load());
     const ix = indexes();
     if (ix.vocabulary) return ix.vocabulary;

@@ -16,7 +16,9 @@ export const metadata: Metadata = {
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  await primeStore({ allApplications: true });
+  // Follow-ups too: the alert badge below counts them, and a follow-up whose
+  // candidate is not held is dropped from that count rather than miscounted.
+  await primeStore({ allApplications: true, followUps: true });
   // Null on the sign-in screen, which is the one page that renders without a
   // session — and therefore without the top bar.
   const user = await currentUser();

@@ -14,3 +14,4 @@ tools/embed/.venv
 .data-live-test
 tools/embed/models
 *.log
+.claude/

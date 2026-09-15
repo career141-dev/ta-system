@@ -333,14 +333,20 @@ export async function candidate(actor: Actor, candidateId: Id): Promise<Candidat
 export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, Candidate>> {
   if (ids.length === 0) return new Map();
   const out = new Map<Id, Candidate>();
-  // The backend caps a batch at 500; page rather than silently truncating.
-  for (let i = 0; i < ids.length; i += 500) {
-    const docs = await convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
-      actorId: actor.id ?? undefined,
-      candidateIds: ids.slice(i, i + 500),
-    });
-    for (const d of docs) out.set(d._id, mapCandidateDoc(d));
-  }
+  // The backend caps a batch at 500; page rather than silently truncating, and
+  // send the pages together — they do not depend on each other, so waiting for
+  // one before asking for the next only adds up the latencies.
+  const pages: Id[][] = [];
+  for (let i = 0; i < ids.length; i += 500) pages.push(ids.slice(i, i + 500));
+  const results = await Promise.all(
+    pages.map((page) =>
+      convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
+        actorId: actor.id ?? undefined,
+        candidateIds: page,
+      }),
+    ),
+  );
+  for (const docs of results) for (const d of docs) out.set(d._id, mapCandidateDoc(d));
   return out;
 }
 
