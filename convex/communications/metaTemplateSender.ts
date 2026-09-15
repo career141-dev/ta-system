@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
+import { resolveRecipient } from "../lib/outreachSafety";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -82,10 +83,27 @@ export const sendMetaTemplate = internalAction({
     }
 
     // Clean destination phone number digits
-    const cleanRecipientPhone = candidate.phone ? candidate.phone.replace(/\D/g, "") : "";
-    if (!cleanRecipientPhone) {
+    if (!candidate.phone || !candidate.phone.replace(/\D/g, "")) {
       throw new Error(`Candidate ${candidate.fullName || "unknown"} has no valid phone number`);
     }
+    // Templates reach phones that have never messaged us — the one send that
+    // most needs the gate, and the one that never had it.
+    const decision = resolveRecipient("whatsapp", candidate.phone);
+    if (!decision.ok) {
+      console.warn(`[Meta Template Sender] ${decision.reason}`);
+      await ctx.runMutation(internal.communications.metaTemplateSender.logTemplateCommunication, {
+        communicationId: args.communicationId,
+        applicationId: app?._id,
+        candidateId: resolvedCandidateId,
+        jobId: resolvedJobId || job?._id,
+        body: `[${args.templateType} template not sent] ${decision.reason}`,
+        status: "failed",
+        error: decision.reason,
+      });
+      return;
+    }
+    const cleanRecipientPhone = decision.to;
+    if (decision.note) console.log(`[Meta Template Sender] Template${decision.note}`);
 
     // 3. Construct parameters and text representations based on template type
     let templateName = "";
