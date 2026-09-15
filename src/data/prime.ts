@@ -141,6 +141,11 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
       if (a.openingId === scope.openingId) wanted.add(a.candidateId);
     }
   }
+  if (scope.allApplications) {
+    for (const a of db.applications) {
+      if (a.stage === "follow_up") wanted.add(a.candidateId);
+    }
+  }
   const missing = [...wanted].filter((id) => !state.candidates.has(id));
   if (missing.length > 0) {
     const people = await backend.candidatesByIds(actor, missing);
