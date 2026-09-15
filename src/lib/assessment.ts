@@ -39,6 +39,20 @@ export function requirementsFor(openingId: string): Requirements | null {
     targetNationalities: o.targetNationalities,
     industry: repo.client(o.clientId)?.industry ?? null,
     knownSkills: repo.vocabulary().skills,
+    // Only once someone (or the extractor) has actually filled them in — the
+    // creation placeholders say nothing about the job.
+    structured:
+      o.requirements && (o.requirements.status === "extracted" || o.requirements.editedAt)
+        ? {
+            requiredSkills: o.requirements.requiredSkills,
+            niceToHaveSkills: o.requirements.niceToHaveSkills,
+            experienceMinYears: o.requirements.experienceMinYears,
+            seniorityLevel: o.requirements.lockedFields.includes("seniorityLevel") || o.requirements.status === "extracted"
+              ? o.requirements.seniorityLevel
+              : null,
+            location: o.requirements.location,
+          }
+        : undefined,
   });
 }
 

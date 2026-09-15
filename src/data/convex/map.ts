@@ -17,6 +17,7 @@ import type {
   Id,
   JobPost,
   Opening,
+  OpeningRequirements,
   PriorityTier,
   Role,
   SourcingChannel,
@@ -139,8 +140,38 @@ export function mapOpening(o: BackendOpening): MappedOpening {
     status: OPENING_STATUS[o.status] ?? "open",
     createdAt: ms(o.createdAt),
     updatedAt: ms(o.updatedAt, ms(o.createdAt)),
+
+    requirements: {
+      requiredSkills: strList(o.requiredSkills),
+      niceToHaveSkills: strList(o.niceToHaveSkills),
+      seniorityLevel: typeof o.seniorityLevel === "string" ? o.seniorityLevel : null,
+      experienceMinYears: numOrNull(o.experienceMinYears),
+      experienceMaxYears: numOrNull(o.experienceMaxYears),
+      location: o.locations?.[0] ?? null,
+      educationLevel: typeof o.educationLevel === "string" ? o.educationLevel : null,
+      languagesRequired: strList(o.languagesRequired),
+      salaryMin: numOrNull(o.salaryMin),
+      salaryMax: numOrNull(o.salaryMax),
+      salaryCurrency: typeof o.salaryCurrency === "string" ? o.salaryCurrency : null,
+      clientIndustry: o.clientIndustry ?? null,
+      recruitmentType: (["both", "headhunting", "job_posting"].includes(String(o.recruitmentType))
+        ? o.recruitmentType
+        : "both") as OpeningRequirements["recruitmentType"],
+      isConfidential: o.isConfidential === true,
+      jobStatus: o.status,
+      status: (["extracting", "extracted", "failed"].includes(String(o.requirementsStatus))
+        ? o.requirementsStatus
+        : null) as OpeningRequirements["status"],
+      extractedAt: numOrNull(o.requirementsExtractedAt),
+      error: typeof o.requirementsError === "string" ? o.requirementsError : null,
+      lockedFields: strList(o.requirementsLockedFields),
+      editedBy: typeof o.requirementsEditedBy === "string" ? o.requirementsEditedBy : null,
+      editedAt: numOrNull(o.requirementsEditedAt),
+    },
   };
 }
+
+const strList = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 function statusToPosition(status: string): Opening["positionStatus"] {
   if (status === "filled") return "filled";
