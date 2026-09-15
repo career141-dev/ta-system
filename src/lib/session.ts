@@ -1,62 +1,51 @@
-import { cookies } from "next/headers";
-import { createHmac, timingSafeEqual } from "crypto";
-import { secret } from "./sign";
+import { auth, currentUser as clerkUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { repo } from "@/data/store";
 import type { User } from "@/data/types";
 
-export const SESSION_COOKIE = "c141_user";
-
 /**
  * The session boundary.
  *
- * This is still stage-one auth — there is no password, and the sign-in screen
- * is a list of accounts. What the 13 September audit found, and what is fixed
- * here, is that it was not even that: with no cookie the server picked the TA
- * Lead, so signing out signed you straight back in, a hand-written cookie
- * naming any user was accepted, and a deactivated account still resolved.
+ * Identity comes from Clerk; the desk account comes from our own roster. The
+ * two are joined on the Clerk account's verified email — the same key the
+ * Convex bridge (`convex/ta/actor.ts`) already matches on.
  *
- * Three things now hold, and they are the three that have to survive the move
- * to a real provider:
+ * The three rules the stage-one cookie established still hold:
  *
- *   **No session means no session.** Absent or unreadable, you land on the
- *   sign-in screen. Nothing is chosen for you.
- *   **The cookie is signed.** Editing it to name somebody else invalidates it.
+ *   **No session means no session.** No Clerk session, or one whose email has
+ *   no desk account, lands on the sign-in screen. Nothing is chosen for you.
+ *   **Identity cannot be forged.** Clerk signs and verifies the session; there
+ *   is no longer a cookie of ours to hand-edit.
  *   **A deactivated account does not resolve**, here and again in `lib/auth`.
  *
- * Swapping in Clerk replaces the body of `currentUser` and nothing else: every
- * caller downstream takes a `User`.
+ * Every caller downstream still takes a `User`.
  */
-
-function sign(id: string): string {
-  return createHmac("sha256", secret()).update(id).digest("base64url");
-}
 
 export { signText, verifyText } from "./sign";
 
-/** The cookie value for a user: their id, and proof the server wrote it. */
-export function sessionValue(id: string): string {
-  return `${id}.${sign(id)}`;
-}
-
-/** Reads a cookie back, returning the id only when the signature holds. */
-export function readSession(raw: string | undefined): string | null {
-  if (!raw) return null;
-  const cut = raw.lastIndexOf(".");
-  if (cut <= 0) return null;
-  const id = raw.slice(0, cut);
-  const given = Buffer.from(raw.slice(cut + 1));
-  const want = Buffer.from(sign(id));
-  if (given.length !== want.length) return null;
-  return timingSafeEqual(given, want) ? id : null;
+/** The Clerk account's verified email addresses, lower-cased. Empty when signed out. */
+export async function clerkEmails(): Promise<string[]> {
+  const { userId } = await auth();
+  if (!userId) return [];
+  const account = await clerkUser();
+  if (!account) return [];
+  return account.emailAddresses
+    .filter((e) => e.verification?.status === "verified")
+    .map((e) => e.emailAddress.trim().toLowerCase());
 }
 
 /** The signed-in user, or null. Never picks somebody for you. */
 export async function currentUser(): Promise<User | null> {
-  const jar = await cookies();
-  const id = readSession(jar.get(SESSION_COOKIE)?.value);
-  if (!id) return null;
-  const user = repo.users().find((u) => u.id === id);
+  const emails = await clerkEmails();
+  if (emails.length === 0) return null;
+  const match = () => repo.users().find((u) => emails.includes(u.email.trim().toLowerCase()));
+  let user = match();
+  if (!user) {
+    // Possibly added since the roster was loaded — look once more before refusing.
+    const { refreshUsers } = await import("@/data/prime");
+    await refreshUsers();
+    user = match();
+  }
   if (!user || !user.isActive) return null;
   return user;
 }

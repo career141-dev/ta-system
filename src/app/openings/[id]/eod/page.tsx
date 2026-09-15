@@ -6,6 +6,8 @@ import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
 import { readEodReply, readInboundReply } from "@/app/actions";
 import { timeAt } from "@/lib/format";
+import { primeStore } from "@/data/prime";
+import { requireSourcingSeat } from "../sourcingGate";
 
 /**
  * The email that goes out at the end of the day, and the reply that comes back.
@@ -27,8 +29,9 @@ export default async function EodPage({
   searchParams: Promise<{ kind?: string; msg?: string }>;
 }) {
   const { id } = await params;
-  const sp = await searchParams;
-  const kind: "director" | "client" = sp.kind === "client" ? "client" : "director";
+  await primeStore({ openingId: id });
+  await requireSourcingSeat(id);
+  const kind = "director" as const;
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
@@ -38,7 +41,6 @@ export default async function EodPage({
 
   const director = repo.users().find((u) => u.role === "director");
   const lead = repo.user(o.taLeadId);
-  const contact = client.contacts.find((c) => c.isPrimary) ?? client.contacts[0] ?? null;
 
   const rows = shortlistRows(id, user.role === "ta" ? user.id : null, kind);
   const effort = effortRow(id, user);
@@ -53,20 +55,6 @@ export default async function EodPage({
     : undefined;
   const history = repo.reviewRounds(id).filter((r) => r.kind === kind && r.status === "returned");
 
-  const tab = (k: "director" | "client", label: string) => (
-    <Link
-      key={k}
-      href={`/openings/${id}/eod?kind=${k}`}
-      className={`-mb-px border-b-2 px-3 py-2 text-[13px] ${
-        kind === k
-          ? "border-ink font-semibold text-ink"
-          : "border-transparent text-ink-soft hover:border-rule-strong hover:text-ink"
-      }`}
-    >
-      {label}
-    </Link>
-  );
-
   return (
     <main className="mx-auto max-w-[1100px] px-8 py-9">
       <Link
@@ -76,28 +64,14 @@ export default async function EodPage({
         ← {o.title}
       </Link>
 
-      <header className="mb-5 mt-3">
+      <header className="mb-6 mt-3">
         <h1 className="text-[26px] font-semibold tracking-tight">End of day</h1>
         <p className="mt-2 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
-          {kind === "director" ? (
-            <>
-              Sent from your own mailbox to {director?.name ?? "the Director"}, copying{" "}
-              {lead?.name ?? "the TA Lead"}. When the reply comes back, paste it below — whoever he
-              picks moves to the Director shortlist on its own.
-            </>
-          ) : (
-            <>
-              The Director&rsquo;s shortlist, going to {contact?.name ?? "the client"}. Their reply
-              moves whoever they pick to the Client shortlist.
-            </>
-          )}
+          Sent from your own mailbox to {director?.name ?? "the Director"}, copying{" "}
+          {lead?.name ?? "the TA Lead"}. When the reply comes back, paste it below — whoever he
+          picks moves to the Director shortlist on its own.
         </p>
       </header>
-
-      <div className="mb-5 flex gap-0.5 border-b border-rule">
-        {tab("director", "To the Director")}
-        {tab("client", "To the client")}
-      </div>
 
 
       {/* ── Waiting on a reply ─────────────────────────────────────────── */}
@@ -105,7 +79,7 @@ export default async function EodPage({
         <section className="mb-6 overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule px-7 py-4">
             <h2 className="text-[13.5px] font-semibold">
-              Waiting on {kind === "director" ? "the Director" : contact?.name ?? "the client"}
+              Waiting on {director?.name ?? "the Director"}
             </h2>
             <span className="text-[12px] text-ink-faint">
               {waiting.length} waiting · last sent {timeAt(awaiting.sentAt)}
@@ -213,10 +187,10 @@ export default async function EodPage({
         openingId={id}
         kind={kind}
         subject={subjectLine(client.name, o.title)}
-        toName={kind === "director" ? director?.name ?? "Director" : contact?.name ?? "Client"}
-        toEmail={kind === "director" ? director?.email ?? "" : contact?.email ?? ""}
-        ccName={kind === "director" ? lead?.name ?? "" : ""}
-        ccEmail={kind === "director" ? lead?.email ?? "" : ""}
+        toName={director?.name ?? "Director"}
+        toEmail={director?.email ?? ""}
+        ccName={lead?.name ?? ""}
+        ccEmail={lead?.email ?? ""}
         /* Copied in and named on the reply-to, so the reply is caught whether
            they press Reply or Reply All. */
         trackedAt={repo.shortlistInbox()}

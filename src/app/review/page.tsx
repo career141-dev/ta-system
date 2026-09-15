@@ -3,8 +3,10 @@ import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, reviewJobs, reviewList } from "@/lib/review";
+import { primeStore } from "@/data/prime";
 
 export default async function ReviewIndex() {
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const jobs = reviewJobs();
   if (jobs.length === 0) notFound();

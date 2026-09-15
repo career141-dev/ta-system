@@ -2,6 +2,7 @@ import { repo } from "@/data/store";
 import { canonicalProfile } from "@/lib/serper";
 import { authorised, normaliseCapture, preflight, reply } from "@/lib/extension";
 import { can } from "@/lib/auth";
+import { primeStore } from "@/data/prime";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export function OPTIONS() {
  * the table, and the collision lock in §9 depends on there being exactly one.
  */
 export async function POST(req: Request) {
+  await primeStore({ allApplications: true });
   if (!authorised(req)) return reply({ error: "bad_token" }, 401);
 
   let body: Record<string, unknown>;

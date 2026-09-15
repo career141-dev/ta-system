@@ -6,6 +6,7 @@ import { ContextBar } from "@/components/ContextBar";
 import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
+import { primeStore } from "@/data/prime";
 
 export default async function OpeningLayout({
   children,
@@ -15,6 +16,7 @@ export default async function OpeningLayout({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  await primeStore({ openingId: id });
   if (!repo.opening(id)) notFound();
 
   const user = await getCurrentUser();

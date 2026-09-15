@@ -18,12 +18,19 @@ const files = readdirSync(here)
 
 let failed = 0;
 const bad = [];
+// Pass cwd-relative POSIX-style paths. Absolute Windows paths ("C:\\…") break
+// `--import` ("c:" parses as a URL protocol) and absolute file:// URLs get
+// mangled when the command runs through MSYS/Git Bash. "./tests/x.ts" is safe
+// everywhere because spawnSync sets cwd to the project root.
+const rel = (p) => "./" + path.relative(path.resolve(here, ".."), p).split(path.sep).join("/");
 for (const file of files) {
   const label = file.replace(".test.ts", "");
   process.stdout.write(`\n== ${label} ${"=".repeat(Math.max(0, 60 - label.length))}\n`);
   const r = spawnSync(
     process.execPath,
-    ["--import", path.join(here, "alias.mjs"), path.join(here, file)],
+    // Node 22 only loads .ts files with the flag (23.6+ does it by default and
+    // still accepts it), so without it every suite failed before running.
+    ["--experimental-strip-types", "--no-warnings", "--import", rel(path.join(here, "alias.mjs")), rel(path.join(here, file))],
     { stdio: "inherit", cwd: path.resolve(here, "..") },
   );
   if (r.status !== 0) { failed++; bad.push(label); }

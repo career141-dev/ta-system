@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
-import { getCurrentUser, SESSION_COOKIE, sessionValue } from "@/lib/session";
+import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
@@ -24,6 +24,10 @@ import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
+import { primeStore } from "@/data/prime";
+import { isConvex } from "@/data/mode";
+import { convexMutation, convexQuery } from "@/lib/convexServer";
+import * as backend from "@/data/convex/backend";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -105,6 +109,7 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
 }
 
 export async function moveStage(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const stage = String(formData.get("stage")) as Stage;
@@ -134,17 +139,99 @@ export async function moveStage(formData: FormData) {
     await back(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
   }
 
+  if (isConvex()) {
+    // The backend owns the pipeline: its state machine checks the move, stops
+    // any running follow-up on the way out, and (by design) sends nothing on
+    // the way in — follow-up is sent from the candidate's Chat tab.
+    try {
+      await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
+    } catch (e) {
+      await back(backendMessage(e, "That move could not be made."));
+    }
+    await afterBackendWrite(openingId);
+    return;
+  }
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
   if (!res.ok) await back(res.message);
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
+// ─── Backend writes (Convex store) ───────────────────────────────────────────
+
+/** The backend's own reason, without the transport's wrapping. */
+function backendMessage(e: unknown, fallback: string): string {
+  const raw = (e as Error)?.message ?? "";
+  return raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200) || fallback;
+}
+
+/** The primed copy is behind a backend write; drop it so the next read is fresh. */
+async function afterBackendWrite(openingId: string) {
+  const { resetStore } = await import("@/data/prime");
+  resetStore();
+  revalidatePath(`/openings/${openingId}`, "layout");
+}
+
 export async function claimCandidate(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
+  if (isConvex()) {
+    let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+    try {
+      r = await backend.shortlist({ id: user.id }, appId);
+    } catch (e) {
+      await back(backendMessage(e, "Could not shortlist."));
+    }
+    // Named before the store is dropped — reading `repo` after that would throw.
+    const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
+    await afterBackendWrite(openingId);
+    if (owner) await back(`${owner} already claimed this candidate.`);
+    return;
+  }
   repo.shortlist(appId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+/**
+ * Send the next follow-up: the approved WhatsApp template and an email the
+ * first time, a reminder after that. Through the backend's outreach gate, so
+ * in test mode only the test recipient receives it.
+ */
+export async function sendFollowUpNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  if (!isConvex()) await back("Sending needs the Convex store.");
+  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number } | null = null;
+  try {
+    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId });
+  } catch (e) {
+    await back(backendMessage(e, "The follow-up could not be sent."));
+  }
+  await afterBackendWrite(openingId);
+  await back(
+    !r?.sent
+      ? r?.reason ?? "Nothing was sent."
+      : r.kind === "initial"
+        ? "Follow-up sent — WhatsApp template and email. Delivery shows below in a few seconds."
+        : `Reminder ${r.attempt} of ${r.maxAttempts} sent.`,
+  );
+}
+
+export async function stopFollowUpNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  try {
+    await convexMutation("ta/followUp:stop", { actorId: user.id, applicationId: appId });
+  } catch (e) {
+    await back(backendMessage(e, "Could not stop the follow-up."));
+  }
+  await afterBackendWrite(openingId);
+  await back("Follow-up stopped. Nothing further will be sent.");
 }
 
 /**
@@ -153,6 +240,7 @@ export async function claimCandidate(formData: FormData) {
  * not taken.
  */
 export async function confirmShortlist(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("appId").map(String);
@@ -164,8 +252,21 @@ export async function confirmShortlist(formData: FormData) {
     const app = repo.application(id);
     if (!app || app.openingId !== openingId) { skipped++; continue; }
     if (!can(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId }).ok) { skipped++; continue; }
+    if (isConvex()) {
+      try {
+        const r = await backend.shortlist({ id: user.id }, id);
+        if (r.ok) done++; else skipped++;
+      } catch {
+        skipped++;
+      }
+      continue;
+    }
     const r = repo.shortlist(id, user.id);
     if (r.ok) done++; else skipped++;
+  }
+  if (isConvex()) {
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
   }
   revalidatePath(`/openings/${openingId}`, "layout");
   await back(
@@ -174,6 +275,7 @@ export async function confirmShortlist(formData: FormData) {
 }
 
 export async function logCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -190,6 +292,7 @@ export async function logCall(formData: FormData) {
 }
 
 export async function addLink(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const url = String(formData.get("url") ?? "").trim();
@@ -198,6 +301,7 @@ export async function addLink(formData: FormData) {
 }
 
 export async function toggleEyeMark(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   repo.toggleEyeMark(String(formData.get("entryId")));
@@ -243,6 +347,7 @@ function readExtract(f: FormData): ExtractedBrief {
  * booking several off a single client call).
  */
 export async function createOpeningStep1(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
   const clientId = String(formData.get("clientId") ?? "");
@@ -266,39 +371,65 @@ export async function createOpeningStep1(formData: FormData) {
 
   if (!clientId || !title || assigned.length === 0) return;
 
-  const extracted = notes.trim()
-    ? { ...extractFromText(notes), title }
-    : { ...EMPTY_EXTRACT, title };
+  const users = repo.users();
+  const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
+  const directorId = users.find((u) => u.role === "director")?.id ?? null;
 
-  const briefId = repo.createBrief({
-    clientId,
-    openingId: null,
-    kind: isLead ? "management_to_lead" : "lead_to_ta",
-    capturedBy: user.id,
-    capturedAt: Date.now(),
-    method: recordingKey ? (notes.trim() ? "both" : "recording") : "notes",
-    notesMarkdown: notes,
-    transcriptStatus: recordingKey ? "unavailable" : "none",
-    transcript: null,
-    recordingKey,
-    recordingDurationMs: durationMs,
-    consentAcknowledgedBy: consentText ? user.id : null,
-    consentAcknowledgedAt: consentText ? Date.now() : null,
-    consentText,
-    extracted,
-  });
+  let openingId: string;
 
-  // The JD stays empty here. It is written on screen two, by the TA.
-  const openingId = repo.createOpeningFromBrief(briefId, {
-    clientId,
-    country,
-    hiringFor,
-    targetGender: gender,
-    jdMarkdown: "",
-    taLeadId: isLead ? user.id : (repo.users().find((u) => u.role === "ta_lead")?.id ?? user.id),
-    assignedTaIds: assigned,
-    directorId: repo.users().find((u) => u.role === "director")?.id ?? null,
-  });
+  if (isConvex()) {
+    openingId = await backend.createOpening(
+      { id: user.id },
+      {
+        clientId,
+        title,
+        country,
+        hiringFor,
+        targetGender: gender,
+        jdMarkdown: "",
+        assignedTaIds: assigned,
+        taLeadId,
+        directorId,
+        notesMarkdown: notes,
+      },
+    );
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  } else {
+    const extracted = notes.trim()
+      ? { ...extractFromText(notes), title }
+      : { ...EMPTY_EXTRACT, title };
+
+    const briefId = repo.createBrief({
+      clientId,
+      openingId: null,
+      kind: isLead ? "management_to_lead" : "lead_to_ta",
+      capturedBy: user.id,
+      capturedAt: Date.now(),
+      method: recordingKey ? (notes.trim() ? "both" : "recording") : "notes",
+      notesMarkdown: notes,
+      transcriptStatus: recordingKey ? "unavailable" : "none",
+      transcript: null,
+      recordingKey,
+      recordingDurationMs: durationMs,
+      consentAcknowledgedBy: consentText ? user.id : null,
+      consentAcknowledgedAt: consentText ? Date.now() : null,
+      consentText,
+      extracted,
+    });
+
+    // The JD stays empty here. It is written on screen two, by the TA.
+    openingId = repo.createOpeningFromBrief(briefId, {
+      clientId,
+      country,
+      hiringFor,
+      targetGender: gender,
+      jdMarkdown: "",
+      taLeadId,
+      assignedTaIds: assigned,
+      directorId,
+    });
+  }
 
   revalidatePath("/openings", "layout");
 
@@ -312,6 +443,7 @@ export async function createOpeningStep1(formData: FormData) {
   // words, and then ran again on approval whenever it had found nobody.
   after(async () => {
     try {
+      if (isConvex()) await primeStore({ openingId });
       await draftJd(openingId);
     } catch (err) {
       console.error(`[prepare ${openingId}]`, err);
@@ -326,6 +458,7 @@ export async function createOpeningStep1(formData: FormData) {
 
 /** Screen two — the TA saves their notes before generating from them. */
 export async function saveBriefNotes(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const notes = String(formData.get("notes") ?? "");
@@ -347,9 +480,30 @@ export async function saveBriefNotes(formData: FormData) {
  */
 /** Spec §5.2 — the TA reads the JD and approves it; only then is it live. */
 export async function approveJd(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const jd = String(formData.get("jdMarkdown") ?? "");
+  if (isConvex()) {
+    // Approval in the backend also starts reading the JD's requirements
+    // (skills, seniority, years, location, salary …) into the Job details.
+    // Matching waits for that, so it scores against the real requirements.
+    const suggestionsBefore = repo.suggestions(openingId).length;
+    const owner = repo.opening(openingId)?.assignedTaIds[0];
+    try {
+      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined);
+    } catch (e) {
+      await back(backendMessage(e, "The JD could not be approved."));
+    }
+    after(async () => {
+      await rematchWhenRequirementsSettle(openingId, user.id);
+      if (suggestionsBefore === 0) await sourceFor(openingId, owner).catch(() => undefined);
+      revalidatePath(`/openings/${openingId}`, "layout");
+    });
+    await afterBackendWrite(openingId);
+    if (String(formData.get("thenGo") ?? "") === "opening") redirect(`/openings/${openingId}`);
+    return;
+  }
   if (jd.trim()) repo.updateJd(openingId, jd);
   repo.approveJd(openingId, user.id);
 
@@ -389,18 +543,156 @@ export async function approveJd(formData: FormData) {
  * means; the change is stamped so the record still shows when it last moved.
  */
 export async function amendJd(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
   if (!o) return;
   if (!o.assignedTaIds.includes(user.id) && user.role === "ta") return;
   const jd = String(formData.get("jdMarkdown") ?? "");
+  if (isConvex()) {
+    if (jd.trim()) {
+      let r: { reextracting: boolean } | null = null;
+      try {
+        r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
+      } catch (e) {
+        await back(backendMessage(e, "The JD could not be saved."));
+      }
+      if (r?.reextracting) after(() => rematchWhenRequirementsSettle(openingId, user.id));
+    }
+    await afterBackendWrite(openingId);
+    redirect(`/openings/${openingId}/jd`);
+  }
   if (jd.trim()) repo.updateJd(openingId, jd);
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(`/openings/${openingId}/jd`);
 }
 
+// ─── Job details: requirements extracted from the approved JD ────────────────
+
+/**
+ * The JD with its reviewed Job details appended, for the LinkedIn / X-ray
+ * sourcing plan. The plan reads prose; a checked skills list and years floor
+ * steer its search vocabulary better than the parser can recover from wording.
+ */
+function withJobDetails(o: import("@/data/types").Opening): string {
+  const r = o.requirements;
+  const jd = o.jdMarkdown || o.title;
+  if (!r || (r.status !== "extracted" && !r.editedAt)) return jd;
+  const lines = [
+    r.requiredSkills.length ? `Required skills: ${r.requiredSkills.join(", ")}` : "",
+    r.niceToHaveSkills.length ? `Nice to have: ${r.niceToHaveSkills.join(", ")}` : "",
+    r.experienceMinYears ? `Experience: ${r.experienceMinYears}${r.experienceMaxYears ? `–${r.experienceMaxYears}` : "+"} years` : "",
+    r.seniorityLevel ? `Seniority: ${r.seniorityLevel.replace(/_/g, " ")}` : "",
+    r.location ? `Location: ${r.location}` : "",
+    r.educationLevel ? `Education: ${r.educationLevel.replace(/_/g, " ")}` : "",
+    r.languagesRequired.length ? `Languages: ${r.languagesRequired.join(", ")}` : "",
+  ].filter(Boolean);
+  return lines.length ? `${jd}\n\n## Job details (reviewed)\n${lines.map((l) => `- ${l}`).join("\n")}` : jd;
+}
+
+/** The structured salary range, as the sourcing salary rule reads it, when no free-text note exists. */
+function salaryNoteOf(o: import("@/data/types").Opening): string {
+  const r = o.requirements;
+  if (!r || (r.salaryMin == null && r.salaryMax == null)) return "";
+  const cur = r.salaryCurrency ?? "LKR";
+  const fmt = (n: number | null) => (n == null ? "" : n.toLocaleString("en-US"));
+  if (r.salaryMin != null && r.salaryMax != null) return `${cur} ${fmt(r.salaryMin)} - ${fmt(r.salaryMax)}`;
+  return r.salaryMax != null ? `up to ${cur} ${fmt(r.salaryMax)}` : `from ${cur} ${fmt(r.salaryMin)}`;
+}
+
+/**
+ * Wait for a requirements extraction to finish (it runs in the backend after
+ * approval), then run matching against the result. Bounded: if extraction is
+ * slow or failed, matching still runs on what the opening has.
+ */
+async function rematchWhenRequirementsSettle(openingId: string, actorId: string) {
+  for (let i = 0; i < 30; i++) {
+    const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
+    const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
+    if (status !== "extracting") break;
+    await new Promise((res) => setTimeout(res, 3_000));
+  }
+  const { resetStore } = await import("@/data/prime");
+  resetStore();
+  await primeStore({ openingId });
+  await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
+  revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+const listField = (formData: FormData, name: string) =>
+  String(formData.get(name) ?? "")
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const optionalNumber = (formData: FormData, name: string): number | null => {
+  const raw = String(formData.get(name) ?? "").replace(/,/g, "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** Save the Job details panel. What is saved is locked against automatic re-extraction. */
+export async function saveJobDetails(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  if (!isConvex()) await back("Job details need the Convex store.");
+
+  const minYears = optionalNumber(formData, "experienceMinYears");
+  const maxYears = optionalNumber(formData, "experienceMaxYears");
+  const salaryMin = optionalNumber(formData, "salaryMin");
+  const salaryMax = optionalNumber(formData, "salaryMax");
+  if ([minYears, maxYears, salaryMin, salaryMax].some((n) => Number.isNaN(n))) {
+    await back("Years and salary must be numbers.");
+  }
+  try {
+    await convexMutation("ta/requirements:save", {
+      actorId: user.id,
+      openingId,
+      title: String(formData.get("title") ?? ""),
+      clientIndustry: String(formData.get("clientIndustry") ?? "Other"),
+      recruitmentType: String(formData.get("recruitmentType") ?? "both"),
+      isConfidential: formData.get("isConfidential") === "on",
+      status: String(formData.get("status") ?? "active"),
+      location: String(formData.get("location") ?? ""),
+      seniorityLevel: String(formData.get("seniorityLevel") ?? "other"),
+      experienceMinYears: minYears ?? 0,
+      experienceMaxYears: maxYears,
+      educationLevel: String(formData.get("educationLevel") ?? ""),
+      salaryMin,
+      salaryMax,
+      salaryCurrency: String(formData.get("salaryCurrency") ?? ""),
+      requiredSkills: listField(formData, "requiredSkills"),
+      niceToHaveSkills: listField(formData, "niceToHaveSkills"),
+      languagesRequired: listField(formData, "languagesRequired"),
+    });
+  } catch (e) {
+    await back(backendMessage(e, "The job details could not be saved."));
+  }
+  after(() => rematchWhenRequirementsSettle(openingId, user.id));
+  await afterBackendWrite(openingId);
+  await back("Job details saved. Matching is re-running against them.");
+}
+
+/** Read the approved JD again and replace the details — including hand corrections. */
+export async function reextractJobDetails(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  try {
+    await convexMutation("ta/requirements:reextract", { actorId: user.id, openingId });
+  } catch (e) {
+    await back(backendMessage(e, "Could not start the extraction."));
+  }
+  after(() => rematchWhenRequirementsSettle(openingId, user.id));
+  await afterBackendWrite(openingId);
+  await back("Reading the JD again — the details update in a few seconds.");
+}
+
 export async function addJobPost(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const title = String(formData.get("title") ?? "").trim();
@@ -413,6 +705,7 @@ export async function addJobPost(formData: FormData) {
 }
 
 export async function updatePost(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "postId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const postId = String(formData.get("postId"));
@@ -427,6 +720,7 @@ export async function updatePost(formData: FormData) {
 }
 
 export async function setPostStatus(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "postId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const postId = String(formData.get("postId"));
@@ -437,6 +731,7 @@ export async function setPostStatus(formData: FormData) {
 
 /** Spec §6.1 — one click moves a paused post's CVs onto the live one. */
 export async function transferCvs(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "fromPostId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const from = String(formData.get("fromPostId"));
@@ -449,6 +744,7 @@ export async function transferCvs(formData: FormData) {
 // ─── Phase 7: backups and add-ons ────────────────────────────────────────────
 
 export async function declineOffer(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -463,6 +759,7 @@ export async function declineOffer(formData: FormData) {
 }
 
 export async function toggleAddOn(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
@@ -474,6 +771,7 @@ export async function toggleAddOn(formData: FormData) {
 // ─── Link vault (spec §4.5) ──────────────────────────────────────────────────
 
 export async function updateLink(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const entryId = String(formData.get("entryId"));
@@ -488,6 +786,7 @@ export async function updateLink(formData: FormData) {
 }
 
 export async function logOutreach(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const entryId = String(formData.get("entryId"));
@@ -501,6 +800,7 @@ export async function logOutreach(formData: FormData) {
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
 
 export async function setOpeningStatus(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const status = String(formData.get("status")) as "open" | "on_hold" | "closed" | "filled";
@@ -518,6 +818,7 @@ export async function setOpeningStatus(formData: FormData) {
  * be invisible to the desk that is supposed to be filling it.
  */
 export async function setOpeningTeam(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("memberId").map(String);
@@ -548,7 +849,8 @@ export async function setOpeningTeam(formData: FormData) {
 }
 
 export async function addClient(formData: FormData) {
-  await authorize(formData, "client.manage");
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "client.manage");
   const name = String(formData.get("name") ?? "").trim();
   const industry = String(formData.get("industry") ?? "").trim() || "—";
   if (!name) return;
@@ -567,30 +869,85 @@ export async function addClient(formData: FormData) {
       ]
     : [];
 
-  repo.addClient({ name, industry, contacts });
+  let newId: string;
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    newId = (await convexMutation<string>("ta/clients:add", {
+      actorId: actor?._id,
+      name,
+      industry,
+      contacts,
+    })) ?? "";
+  } else {
+    newId = repo.addClient({ name, industry, contacts });
+  }
+
+  const intent = String(formData.get("action") ?? "save");
+
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
+
+  if (intent === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
+  }
 }
 
 export async function updateClient(formData: FormData) {
-  await authorize(formData, "client.manage");
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const esa = String(formData.get("esaSignedAt") ?? "").trim();
-  repo.updateClient(clientId, {
-    name,
-    industry: String(formData.get("industry") ?? "").trim() || "—",
-    status: String(formData.get("status") ?? "active") as "active" | "dormant" | "archived",
-    esaSignedAt: esa ? new Date(esa).getTime() : null,
-  });
+  const industry = String(formData.get("industry") ?? "").trim() || "—";
+  const status = String(formData.get("status") ?? "active") as "active" | "dormant" | "archived";
+  const esaSignedAt = esa ? new Date(esa).getTime() : null;
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    await convexMutation("ta/clients:update", {
+      actorId: actor?._id,
+      clientId,
+      name,
+      industry,
+      status,
+      esaSignedAt,
+    });
+  } else {
+    repo.updateClient(clientId, {
+      name,
+      industry,
+      status,
+      esaSignedAt,
+    });
+  }
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
 }
 
 export async function deleteClient(formData: FormData) {
-  await authorize(formData, "client.manage");
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
-  const res = repo.deleteClient(clientId);
+
+  const { isConvex } = await import("@/data/mode");
+  let res: { ok: boolean; openings?: number } = { ok: true };
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    res = await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", {
+      actorId: actor?._id,
+      clientId,
+    });
+  } else {
+    res = repo.deleteClient(clientId);
+  }
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
   // Refused because work is filed under it — the page says so rather than
   // pretending the press did nothing.
   if (!res.ok) redirect(`/clients?held=${res.openings}`);
@@ -598,28 +955,40 @@ export async function deleteClient(formData: FormData) {
 
 /** Contacts arrive as parallel arrays from the repeatable rows. */
 export async function saveContacts(formData: FormData) {
-  await authorize(formData, "client.manage");
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const names = formData.getAll("contactName").map(String);
   const titles = formData.getAll("contactTitle").map(String);
   const emails = formData.getAll("contactEmail").map(String);
   const primary = String(formData.get("primary") ?? "0");
 
-  repo.setContacts(
-    clientId,
-    names.map((n, i) => ({
-      name: n.trim(),
-      title: (titles[i] ?? "").trim(),
-      email: (emails[i] ?? "").trim(),
-      isPrimary: String(i) === primary,
-    })),
-  );
+  const contacts = names.map((n, i) => ({
+    name: n.trim(),
+    title: (titles[i] ?? "").trim(),
+    email: (emails[i] ?? "").trim(),
+    isPrimary: String(i) === primary,
+  }));
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    await convexMutation("ta/clients:saveContacts", {
+      actorId: actor?._id,
+      clientId,
+      contacts,
+    });
+  } else {
+    repo.setContacts(clientId, contacts);
+  }
   revalidatePath("/clients");
 }
 
 // ─── Deletes and edits (12 Sep sweep) ────────────────────────────────────────
 
 export async function deleteOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   // Deleting a whole role and everything under it is a desk decision, not one
   // recruiter's.
@@ -637,6 +1006,7 @@ export async function deleteOpening(formData: FormData) {
  * the band or adds a second location is the normal case, not the exception.
  */
 export async function updateOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const list = (v: FormDataEntryValue | null) =>
@@ -674,6 +1044,7 @@ export async function updateOpening(formData: FormData) {
 }
 
 export async function deleteJobPost(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { post: "postId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   repo.deleteJobPost(String(formData.get("postId")));
@@ -681,6 +1052,7 @@ export async function deleteJobPost(formData: FormData) {
 }
 
 export async function deleteLink(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   repo.deleteLink(String(formData.get("entryId")));
@@ -688,6 +1060,7 @@ export async function deleteLink(formData: FormData) {
 }
 
 export async function removeApplication(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { application: "appId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = repo.removeApplication(String(formData.get("appId")));
@@ -698,6 +1071,7 @@ export async function removeApplication(formData: FormData) {
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
   const openingId = String(formData.get("openingId"));
   const field = String(formData.get("field")) as "email" | "phone";
@@ -718,6 +1092,7 @@ export async function updateCandidateContact(formData: FormData) {
  * morning after. A stage with no date is a stage nobody can act on.
  */
 export async function scheduleInterview(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
@@ -749,6 +1124,7 @@ export async function scheduleInterview(formData: FormData) {
 }
 
 export async function confirmInterview(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
   repo.confirmInterview(String(formData.get("interviewId")));
   revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
@@ -757,6 +1133,7 @@ export async function confirmInterview(formData: FormData) {
 
 /** How it went, which is a different fact from whether they turned up. */
 export async function setInterviewResult(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
   const rating = String(formData.get("clientRating") ?? "").trim();
   repo.setInterviewResult(String(formData.get("interviewId")), {
@@ -772,6 +1149,7 @@ export async function setInterviewResult(formData: FormData) {
 }
 
 export async function setInterviewOutcome(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
   repo.setInterviewOutcome(
     String(formData.get("interviewId")),
@@ -790,6 +1168,7 @@ export async function setInterviewOutcome(formData: FormData) {
  * month shows next month's numbers rather than a snapshot nobody can date.
  */
 export async function saveReport(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "report.read");
   const name = String(formData.get("name") ?? "").trim();
   const spec = String(formData.get("spec") ?? "");
@@ -817,6 +1196,7 @@ export async function saveReport(formData: FormData) {
  * allowed to return the answer itself.
  */
 export async function askReport(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "report.read");
   const question = String(formData.get("question") ?? "").trim();
   if (!question) return;
@@ -836,6 +1216,7 @@ export async function askReport(formData: FormData) {
 }
 
 export async function deleteReport(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "report.read");
   repo.deleteReport(String(formData.get("reportId")), user.id);
   revalidatePath("/reports");
@@ -844,73 +1225,164 @@ export async function deleteReport(formData: FormData) {
 
 // ─── People (finding 11) ─────────────────────────────────────────────────────
 
-export async function addUser(formData: FormData) {
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return;
-  repo.addUser({
-    name,
-    email: String(formData.get("email") ?? "").trim(),
+// ─── People and roles — admin only ──────────────────────────────────────────
+//
+// In Convex mode the roster lives in the backend, and `repo`'s in-memory write
+// is discarded on commit — so these used to look saved and change nothing.
+// They now write through `ta/users`, which checks for an admin itself.
+
+const DESK_ROLES = ["admin", "director", "ta_lead", "ta", "ops", "client", "viewer"] as const;
+
+function personFrom(formData: FormData) {
+  const role = String(formData.get("role") ?? "ta");
+  return {
+    name: String(formData.get("name") ?? "").trim(),
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
     phone: String(formData.get("phone") ?? "").trim() || null,
     routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
-    role: String(formData.get("role") ?? "ta") as import("@/data/types").Role,
-  });
-  revalidatePath("/people");
+    role: (DESK_ROLES as readonly string[]).includes(role) ? (role as import("@/data/types").Role) : null,
+  };
+}
+
+/** Run a roster write in the backend, then make the next read see it. */
+async function saveRoster(run: () => Promise<unknown>, done: string): Promise<never> {
+  try {
+    await run();
+  } catch (e) {
+    // The backend's own message ("last active admin", "already has an account").
+    const raw = (e as Error).message ?? "";
+    const why = raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160);
+    await back(why || "That change could not be saved.");
+  }
+  const { refreshUsers } = await import("@/data/prime");
+  await refreshUsers();
+  revalidatePath("/", "layout");
+  return back(done);
+}
+
+async function adminOnly(formData: FormData): Promise<User> {
+  const actor = await authorize(formData, "user.manage");
+  if (actor.role !== "admin") await back("Only an admin can manage people and roles.");
+  return actor;
+}
+
+export async function addUser(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const p = personFrom(formData);
+  if (!p.name) await back("A name is required.");
+  if (!p.email) await back("An email is required — it is what they sign in with.");
+  if (!p.role) await back("Pick a role.");
+  if (!isConvex()) {
+    repo.addUser({ name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+    }),
+    `${p.name} added as ${p.role}.`,
+  );
 }
 
 export async function updateUser(formData: FormData) {
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  repo.updateUser(String(formData.get("userId")), {
-    name: String(formData.get("name") ?? "").trim(),
-    email: String(formData.get("email") ?? "").trim(),
-    phone: String(formData.get("phone") ?? "").trim() || null,
-    routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
-    role: String(formData.get("role") ?? "ta") as import("@/data/types").Role,
-  });
-  revalidatePath("/people");
-}
-
-export async function setUserActive(formData: FormData) {
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  repo.setUserActive(String(formData.get("userId")), String(formData.get("active")) === "1");
-  revalidatePath("/people");
-}
-
-export async function signOut() {
-  const { cookies } = await import("next/headers");
-  (await cookies()).delete(SESSION_COOKIE);
-  redirect("/signin");
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const p = personFrom(formData);
+  if (!userId || !p.name || !p.email || !p.role) await back("Name, email and role are all required.");
+  if (!isConvex()) {
+    repo.updateUser(userId, { name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id, userId, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+    }),
+    `${p.name} saved.`,
+  );
 }
 
 /**
- * Sign in as an account. Stage-one auth: no password, but a signed cookie and
- * a deliberate act, so that signing out stays signed out.
+ * Invite someone with a role already decided.
+ *
+ * The roster entry is written FIRST, so the role is in place before the email
+ * is even opened. An address already on the roster keeps its record and takes
+ * the new role (and is brought back if they had left).
  */
-export async function signInAs(formData: FormData) {
-  const id = String(formData.get("userId") ?? "");
-  const user = repo.users().find((u) => u.id === id);
-  if (!user || !user.isActive) redirect("/signin");
-  const { cookies } = await import("next/headers");
-  (await cookies()).set(SESSION_COOKIE, sessionValue(user.id), {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 30,
-  });
-  redirect("/");
+export async function inviteUser(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const p = personFrom(formData);
+  if (!p.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) await back("Enter the email address to invite.");
+  if (!p.role) await back("Pick a role.");
+  const name = p.name || p.email.split("@")[0];
+  if (!isConvex()) await back("Invites need the Convex store (C141_STORE=convex).");
+
+  const existing = repo.users().find((u) => u.email.trim().toLowerCase() === p.email);
+  if (existing?.id === actor.id && p.role !== "admin") await back("You can't change your own role here.");
+  try {
+    await convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id,
+      userId: existing?.id,
+      fullName: existing && !p.name ? existing.name : name,
+      email: p.email,
+      phone: existing && !p.phone ? existing.phone : p.phone,
+      routingEmail: existing && !p.routingEmail ? existing.routingEmail : p.routingEmail,
+      taRole: p.role,
+    });
+    if (existing && !existing.isActive) {
+      await convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
+    }
+  } catch (e) {
+    const raw = (e as Error).message ?? "";
+    await back(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
+  }
+  const { refreshUsers } = await import("@/data/prime");
+  await refreshUsers();
+  revalidatePath("/", "layout");
+
+  const { sendInvite } = await import("@/lib/invites");
+  const sent = await sendInvite(p.email, p.role!);
+  await back(sent.ok ? `Invite sent to ${p.email} as ${p.role}.` : `Role saved for ${p.email}. ${sent.reason}`);
 }
+
+/** Withdraw an invite link. Their roster entry stays; mark them as left to remove access too. */
+export async function revokeUserInvite(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await adminOnly(formData);
+  const id = String(formData.get("invitationId") ?? "");
+  if (!id) await back("That invite could not be found.");
+  const { revokeInvite } = await import("@/lib/invites");
+  const r = await revokeInvite(id);
+  revalidatePath("/people");
+  await back(r.ok ? "Invite revoked. Mark them as left too if they should not get in." : r.reason);
+}
+
+export async function setUserActive(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const active = String(formData.get("active")) === "1";
+  if (!isConvex()) {
+    repo.setUserActive(userId, active);
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId, isActive: active }),
+    active ? "Brought back." : "Marked as left.",
+  );
+}
+
 
 // ─── Database search (spec §6D) ──────────────────────────────────────────────
 
 /** Run a search: the sentence goes in the URL, the parser does the rest. */
 export async function runDatabaseSearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
   const q = String(formData.get("q") ?? "").trim();
   const mode = String(formData.get("mode") ?? "natural");
@@ -923,6 +1395,7 @@ export async function runDatabaseSearch(formData: FormData) {
 }
 
 export async function saveSearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "database.read");
   const query = String(formData.get("q") ?? "").trim();
   const name = String(formData.get("name") ?? "").trim() || query.slice(0, 60);
@@ -930,18 +1403,50 @@ export async function saveSearch(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "") || null;
   const count = Number(formData.get("count") ?? 0);
   if (!query) return;
-  repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count });
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    // Persist to Convex DB so saved searches survive server restarts.
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    if (actor) {
+      await convexMutation("ta/search:saveSearch", {
+        actorId: actor._id,
+        name,
+        query,
+        mode,
+        openingId: openingId ?? null,
+        count,
+      });
+    }
+  } else {
+    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count });
+  }
   revalidatePath("/database", "layout");
 }
 
 export async function deleteSearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
-  repo.deleteSearch(String(formData.get("searchId")));
+  const searchId = String(formData.get("searchId"));
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const user = await getCurrentUser();
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    if (actor) {
+      await convexMutation("ta/search:deleteSearch", { actorId: actor._id, searchId });
+    }
+  } else {
+    repo.deleteSearch(searchId);
+  }
   revalidatePath("/database", "layout");
 }
 
 /** Put a database candidate onto an opening — lands at Matched, unclaimed. */
 export async function addToOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
@@ -973,6 +1478,7 @@ function contextFor(openingId: string): OpeningContext | null {
 }
 
 export async function runResearch(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const res = await researchOpening(openingId, user.id);
@@ -981,6 +1487,7 @@ export async function runResearch(formData: FormData) {
 }
 
 export async function runBenchmark(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
@@ -994,11 +1501,11 @@ export async function runBenchmark(formData: FormData) {
       title: o.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: o.jdMarkdown || o.title,
+      jdText: withJobDetails(o),
       locations: o.locations,
       targetNationalities: o.targetNationalities,
       targetGender: o.targetGender,
-      salaryNote: o.packageNotes,
+      salaryNote: o.packageNotes || salaryNoteOf(o),
       targetEmployers: [],
       alreadyKnown: repo.suggestions(openingId).map((x) => canonicalProfile(x.linkedinUrl ?? "")).filter((x): x is string => Boolean(x)),
     },
@@ -1010,6 +1517,7 @@ export async function runBenchmark(formData: FormData) {
 }
 
 export async function pickBenchmark(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { benchmark: "entryId", opening: "openingId" });
   repo.toggleBenchmark(String(formData.get("entryId")));
   revalidatePath(`/openings/${String(formData.get("openingId"))}/hh`, "layout");
@@ -1037,11 +1545,11 @@ async function sourceFor(openingId: string, forUserId?: string): Promise<{ found
       title: o.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: o.jdMarkdown || o.title,
+      jdText: withJobDetails(o),
       locations: o.locations,
       targetNationalities: o.targetNationalities,
       targetGender: o.targetGender,
-      salaryNote: o.packageNotes,
+      salaryNote: o.packageNotes || salaryNoteOf(o),
       targetEmployers: repo.benchmarks(openingId).filter((b) => b.isSelected).map((b) => b.company),
       alreadyKnown,
     },
@@ -1061,6 +1569,7 @@ async function sourceFor(openingId: string, forUserId?: string): Promise<{ found
 }
 
 export async function runSuggestions(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = await sourceFor(openingId, user.id);
@@ -1076,6 +1585,7 @@ export async function runSuggestions(formData: FormData) {
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
 export async function keepSuggestion(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const id = String(formData.get("suggestionId"));
@@ -1090,6 +1600,7 @@ export async function keepSuggestion(formData: FormData) {
 }
 
 export async function dismissSuggestion(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
   repo.setSuggestionStatus(String(formData.get("suggestionId")), "dismissed", "not_relevant");
   revalidatePath(`/openings/${String(formData.get("openingId"))}/hh/suggestions`);
@@ -1107,8 +1618,24 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
   if (!opening || !c) return null;
   const brief = opening.briefId ? repo.brief(opening.briefId) : null;
   const client = repo.client(opening.clientId);
-  const extracted = brief?.extracted ?? { ...EMPTY_EXTRACT, title: opening.title };
 
+  if (isConvex()) {
+    // The notes live in the backend's briefs table, joined to the opening; the
+    // draft is saved there too. Nothing is approved here — the TA reads it first.
+    const notes = await convexQuery<string>("ta/openings:briefNotes", { openingId }).catch(() => "");
+    const fromNotes = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
+    const template = buildJd(fromNotes, client?.name ?? "the client");
+    const res = await generateJdText(c, notes, template);
+    const actorId = opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
+    if (actorId) {
+      await convexMutation("ta/openings:saveJd", { actorId, openingId, jdMarkdown: res.ok ? res.text : template }).catch(
+        (e) => console.error(`[draftJd ${openingId}]`, e),
+      );
+    }
+    return res.ok ? { ok: true } : { ok: false, reason: res.reason };
+  }
+
+  const extracted = brief?.extracted ?? { ...EMPTY_EXTRACT, title: opening.title };
   repo.applyExtractedToOpening(openingId, extracted);
   const template = buildJd(extracted, client?.name ?? "the client");
 
@@ -1149,6 +1676,7 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
 }
 
 export async function generateJdWithModel(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const res = await draftJd(openingId);
@@ -1164,6 +1692,7 @@ export async function generateJdWithModel(formData: FormData) {
 
 /** A TA correcting a generated field. Marked, so regeneration leaves it alone. */
 export async function editResearchField(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const key = String(formData.get("field"));
@@ -1192,6 +1721,7 @@ export async function editResearchField(formData: FormData) {
  *   SEARCH — go and find more. Spends one of the three rounds.
  */
 export async function sendChatMessage(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const body = String(formData.get("body") ?? "").trim();
@@ -1310,6 +1840,7 @@ function intakeBack(id: string, msg?: string) {
 }
 
 export async function admitIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.admitIntake(id, user.id, {
@@ -1324,6 +1855,7 @@ export async function admitIntake(formData: FormData) {
 }
 
 export async function mergeIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.mergeIntake(id, String(formData.get("candidateId")), user.id);
@@ -1334,6 +1866,7 @@ export async function mergeIntake(formData: FormData) {
 }
 
 export async function rejectIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   repo.rejectIntake(String(formData.get("itemId")), user.id, String(formData.get("note") ?? ""));
   revalidatePath("/intake");
@@ -1342,6 +1875,7 @@ export async function rejectIntake(formData: FormData) {
 
 /** Correcting a mis-read field before it can become a dedup key. */
 export async function editIntakeParsed(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const s = (k: string) => {
@@ -1363,6 +1897,7 @@ export async function editIntakeParsed(formData: FormData) {
 }
 
 export async function recheckIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   repo.recheckIntake(id);
@@ -1376,6 +1911,7 @@ export async function recheckIntake(formData: FormData) {
  * else's CV.
  */
 export async function dropIntake(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "intake.handle");
   await getCurrentUser();
   const text = String(formData.get("rawText") ?? "").trim();
@@ -1400,6 +1936,7 @@ export async function dropIntake(formData: FormData) {
 // number are switched on.
 
 export async function recordFollowUpAttempt(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const f = repo.followUp(appId);
@@ -1434,6 +1971,7 @@ export async function recordFollowUpAttempt(formData: FormData) {
 
 /** How a follow-up call went: no answer, answered, call back at…, will send by…, not interested. */
 export async function recordFollowUpCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1456,6 +1994,7 @@ export async function recordFollowUpCall(formData: FormData) {
 
 /** Answers to the opening's own follow-up questions, and the standard three. */
 export async function saveFollowUpAnswers(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1479,6 +2018,7 @@ export async function saveFollowUpAnswers(formData: FormData) {
 
 /** The opening's own follow-up questions, one per line. */
 export async function setOpeningQuestions(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const existing = repo.opening(openingId)?.followUpQuestions ?? [];
@@ -1498,6 +2038,7 @@ export async function setOpeningQuestions(formData: FormData) {
 }
 
 export async function setAutoShortlistScore(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const n = Math.round(Number(formData.get("score")));
   if (!Number.isFinite(n) || n < 40 || n > 100) await back("Pick a score between 40 and 100.");
@@ -1509,6 +2050,7 @@ export async function setAutoShortlistScore(formData: FormData) {
 // ─── Database matches (13 September) ────────────────────────────────────────
 
 export async function findMatchesNow(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = await findDatabaseMatches(openingId, "manual");
@@ -1521,6 +2063,7 @@ export async function findMatchesNow(formData: FormData) {
 
 /** The desk's standard questions — which are asked, and how they read. */
 export async function setFollowUpStandard(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const rows = repo.followUpStandard().map((q) => ({
     id: q.id,
@@ -1533,6 +2076,7 @@ export async function setFollowUpStandard(formData: FormData) {
 }
 
 export async function logFollowUpReply(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1573,6 +2117,7 @@ const day = (fd: FormData, k: string): number | null => {
 };
 
 export async function makeOffer(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1593,6 +2138,7 @@ export async function makeOffer(formData: FormData) {
 }
 
 export async function respondToOffer(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", offer: "offerId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1610,6 +2156,7 @@ export async function respondToOffer(formData: FormData) {
 }
 
 export async function recordPlacement(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1636,6 +2183,7 @@ export async function recordPlacement(formData: FormData) {
 // a TA on the phone typing what they hear; the voice agent is built and off.
 
 export async function startCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
@@ -1651,6 +2199,7 @@ export async function startCall(formData: FormData) {
 }
 
 export async function recordConsent(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", call: "callId", opening: "openingId" });
   await getCurrentUser();
   const appId = String(formData.get("applicationId"));
@@ -1666,6 +2215,7 @@ export async function recordConsent(formData: FormData) {
 }
 
 export async function recordCallAnswer(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", call: "callId", opening: "openingId" });
   await getCurrentUser();
   const appId = String(formData.get("applicationId"));
@@ -1682,6 +2232,7 @@ export async function recordCallAnswer(formData: FormData) {
 }
 
 export async function finishCall(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", call: "callId", opening: "openingId" });
   await getCurrentUser();
   const appId = String(formData.get("applicationId"));
@@ -1715,6 +2266,7 @@ export async function finishCall(formData: FormData) {
 // reply landing.
 
 export async function sendEod(formData: FormData) {
+  await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
@@ -1811,6 +2363,7 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
 }
 
 export async function readEodReply(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") === "client" ? "client" : "director";
@@ -1822,6 +2375,7 @@ export async function readEodReply(formData: FormData) {
 
 /** The one shortlist-replies box, changed by a director without a deploy. */
 export async function setShortlistInbox(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const actor = await getCurrentUser();
   if (actor.role !== "admin" && actor.role !== "director") return;
@@ -1848,6 +2402,7 @@ export async function setShortlistInbox(formData: FormData) {
  * will make when the mailbox is connected.
  */
 export async function readInboundReply(formData: FormData) {
+  await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { opening: "openingId" });
   await getCurrentUser();
   const openingId = String(formData.get("openingId"));
@@ -1887,4 +2442,89 @@ export async function readInboundReply(formData: FormData) {
   const round = target.round!;
   const o = repo.opening(round.openingId);
   back(`${o?.title ?? "That job"} (${round.kind}): ${await readReplyFor(round.openingId, round.kind, body, round.id)}`);
+}
+
+// ─── Convex bridge (proof of concept) ────────────────────────────────────────
+
+/**
+ * Read this deployment's live jobs as the signed-in TA.
+ *
+ * The first thing in this app to go through the Convex backend rather than the
+ * JSON store, and deliberately the smallest one: it proves the whole chain
+ * without changing a screen or writing anything.
+ *
+ *   signed cookie → TA user → Convex user (by email) → call with `actorId`
+ *
+ * Two calls go out, because they prove different halves and only one of them
+ * is worth trusting on its own:
+ *
+ *   `jobs/jobs:getActiveJobsBasicInfo` has NO auth check — it is a plain query.
+ *   A reply proves the transport, the admin key and the URL, and nothing at all
+ *   about whether the actor was understood.
+ *
+ *   `ta/actor:whoami` goes through `requireUser`, which is the gate the other
+ *   thirteen modules call. A reply naming the right person, with
+ *   `source: "actor_id"`, is what proves the dual-mode adapter works for a
+ *   cookie session with no Clerk identity anywhere.
+ *
+ * Returns a result rather than throwing: this is a probe, and a failure is
+ * something to display, not a 500.
+ */
+export async function probeConvexAsCurrentUser(): Promise<
+  | {
+      ok: true;
+      actor: { taUserId: string; email: string; convexUserId: string; role: string };
+      whoami: { userId: string; email: string; fullName: string; role: string; source: string };
+      jobs: { total: number; sample: { title: string; keyword: string; clientName: string }[] };
+    }
+  | { ok: false; reason: string }
+> {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  // Reading is the least this can be. Anything that writes through this bridge
+  // must ask `authorize` first, exactly as every other action here does.
+  if (!can(user, "database.read").ok) return { ok: false, reason: "You cannot read the database." };
+
+  const { convexActorForEmail, convexQuery, ConvexCallError } = await import("@/lib/convexServer");
+
+  try {
+    const actor = await convexActorForEmail(user.email);
+    if (!actor) {
+      return {
+        ok: false,
+        reason: `${user.email} has no account in the Convex backend, so there is nobody to act as. Create one there, or sign in as a TA who has one.`,
+      };
+    }
+    if (!actor.isActive) return { ok: false, reason: `${actor.email} is deactivated in the backend.` };
+
+    // The adapter's own test: no Clerk identity, an explicit actor.
+    const whoami = await convexQuery<{
+      userId: string;
+      email: string;
+      fullName: string;
+      role: string;
+      source: string;
+    }>("ta/actor:whoami", { actorId: actor._id });
+
+    const jobs = await convexQuery<
+      { _id: string; title: string; keyword: string; clientName: string }[]
+    >("jobs/jobs:getActiveJobsBasicInfo", {});
+
+    return {
+      ok: true,
+      actor: { taUserId: user.id, email: user.email, convexUserId: actor._id, role: actor.role },
+      whoami,
+      jobs: {
+        total: jobs.length,
+        sample: jobs.slice(0, 5).map((j) => ({
+          title: j.title,
+          keyword: j.keyword,
+          clientName: j.clientName,
+        })),
+      },
+    };
+  } catch (e) {
+    if (e instanceof ConvexCallError) return { ok: false, reason: e.message };
+    throw e;
+  }
 }

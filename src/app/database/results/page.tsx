@@ -8,9 +8,13 @@ import { criteriaFromParams, criteriaToParams, describe, parseBoolean, parseQuer
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
+import { DbCandidateDrawer } from "@/components/db/DbCandidateDrawer";
 import { saveSearch } from "@/app/actions";
-import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearest } from "@/lib/embed";
+import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
+import { primeStore } from "@/data/prime";
+import { isConvex } from "@/data/mode";
+import { keywordRetrieve } from "@/lib/retrieve";
 
 const PAGE = 25;
 
@@ -20,11 +24,13 @@ export default async function ResultsPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const sp = await searchParams;
+  await primeStore({ allApplications: true });
   await pageUser("database.read");
   const q = typeof sp.q === "string" ? sp.q : "";
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
   const forOpening = typeof sp.for === "string" ? sp.for : null;
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const candidateId = typeof sp.candidate === "string" ? sp.candidate : null;
   const vocab = repo.vocabulary();
 
   // The sentence is parsed once; after that the URL's criteria win, so removing
@@ -44,13 +50,59 @@ export default async function ResultsPage({
   // 37); they now describe every match, the same set the headline counts.
   let similarity: Map<string, number> | undefined;
   let meaningProblem: string | null = null;
+  let retrievalProblem: string | null = null;
+
+  /*
+   * Retrieval, before anything is filtered.
+   *
+   * On the file store the whole database is already in memory, so a search is
+   * a filter over it. Backed by Convex it is not: the working set holds the
+   * people this page primed and nobody else, so filtering it would search a
+   * few hundred rows and confidently report that nothing matched.
+   *
+   * So the words are put to the backend's own full-text indexes first — title,
+   * skills, summary and CV text — and whoever comes back is brought into the
+   * working set for the criteria to narrow. No model and no key involved;
+   * this is the route that still works when the meaning half cannot run.
+   */
+  if (isConvex() && q && mode !== "meaning") {
+    try {
+      const terms = [
+        q,
+        ...criteria.titles,
+        ...criteria.skills.slice(0, 3),
+        ...criteria.employers.slice(0, 2),
+        ...criteria.qualifications.slice(0, 2),
+      ];
+      const hits = await keywordRetrieve(terms, 150);
+      await primeStore({ candidateIds: hits });
+      if (hits.length === 0) retrievalProblem = "Nothing in the database matched those words.";
+    } catch (e) {
+      retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+    }
+  }
+
   if (mode === "meaning" && q) {
     const vectors = await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
     if (query.ok) {
-      similarity = new Map(nearest(query.vectors[0], Number.MAX_SAFE_INTEGER).map((n) => [n.id, n.similarity]));
+      const hits = await nearestCandidates(query.vectors[0], 1000);
+      similarity = new Map(hits.map((n) => [n.id, n.similarity]));
+      // The rows have to be in the working set before `repo` can read them.
+      await primeStore({ candidateIds: hits.map((h) => h.id) });
     } else {
       meaningProblem = `Search by meaning could not run (${query.reason}), so these are ranked on the words.`;
+      // Fall back to the word route rather than showing an empty page: the
+      // working set holds only what this page primed, and it has primed
+      // nobody yet.
+      if (isConvex()) {
+        try {
+          const hits = await keywordRetrieve([q, ...criteria.titles], 150);
+          await primeStore({ candidateIds: hits });
+        } catch (e) {
+          retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+        }
+      }
     }
   }
   // Below this a candidate is not close enough to count as a result at all.
@@ -110,6 +162,12 @@ export default async function ResultsPage({
     ...(forOpening ? { for: forOpening } : {}),
   };
 
+  // The full URL of the current results page — passed to candidate profile so
+  // "← Back to results" returns exactly here, including page number.
+  const currentSearchParams = new URLSearchParams(extra);
+  if ((page - 1) > 0) currentSearchParams.set("page", String(page));
+  const backToResults = `${base}?${currentSearchParams.toString()}`;
+
   // Widening — only offered where it would actually find someone.
   const suggestions: { label: string; found: number; href: string }[] = [];
   if (criteria.locations.length) {
@@ -140,8 +198,40 @@ export default async function ResultsPage({
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
     p.set("page", String(n));
     if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
     return `${base}?${p.toString()}`;
   };
+
+  const candidateHref = (id: string) => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (page > 1) p.set("page", String(page));
+    if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
+    p.set("candidate", id);
+    return `${base}?${p.toString()}`;
+  };
+
+  const closeHref = (() => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (page > 1) p.set("page", String(page));
+    if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
+    return `${base}?${p.toString()}`;
+  })();
+
+  const activeCandidate = candidateId ? repo.candidate(candidateId) : null;
+  const activeIndex = activeCandidate ? results.findIndex((r) => r.candidate.id === activeCandidate.id) : -1;
+  const prevCandidateId = activeIndex > 0 ? results[activeIndex - 1].candidate.id : null;
+  const nextCandidateId = activeIndex >= 0 && activeIndex < results.length - 1 ? results[activeIndex + 1].candidate.id : null;
+  const activeStatus = activeCandidate ? repo.overallStatus(activeCandidate.id) : null;
+  const statusLabel =
+    activeStatus?.busy && activeStatus.stage
+      ? activeStatus.stage === "placed"
+        ? "Placed elsewhere"
+        : `${STAGE_LABEL[activeStatus.stage]} on another opening`
+      : null;
 
   const appsFor = (candidateId: string): RowApp[] =>
     repo.applicationsForCandidate(candidateId).map((a) => {
@@ -154,6 +244,8 @@ export default async function ResultsPage({
         stageLabel: STAGE_LABEL[a.stage],
         ownerName: users.find((u) => u.id === a.ownerTaId)?.name ?? null,
         isLive: !["rejected", "dropped_out", "placed"].includes(a.stage),
+        lastStageChangedAt: a.lastStageChangedAt,
+        rejectReason: a.rejectReason ?? null,
       };
     });
 
@@ -206,6 +298,11 @@ export default async function ResultsPage({
         </aside>
 
         <div className="min-w-0">
+          {retrievalProblem && (
+            <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
+              {retrievalProblem}
+            </p>
+          )}
           {(meaningProblem || (mode === "meaning" && !isMeaningBased())) && (
             <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
               {meaningProblem ?? "No embedding key is set, so \u201cby meaning\u201d is standing in with shared words. Set OPENAI_API_KEY or OPENROUTER_API_KEY for real meaning-based search."}
@@ -310,6 +407,8 @@ export default async function ResultsPage({
                     apps={appsFor(r.candidate.id)}
                     openings={openingOptions}
                     defaultOpeningId={forOpening}
+                    backHref={backToResults}
+                    candidateHref={candidateHref(r.candidate.id)}
                   />
                   {i === 1 && suggestions.length > 0 && (
                     <div className="border-b border-rule bg-paper/60 px-6 py-5">
@@ -368,6 +467,20 @@ export default async function ResultsPage({
           )}
         </div>
       </div>
+
+      {activeCandidate && (
+        <DbCandidateDrawer
+          candidate={activeCandidate}
+          apps={appsFor(activeCandidate.id)}
+          openings={openingOptions}
+          currentIndex={activeIndex >= 0 ? activeIndex : 0}
+          totalCandidates={results.length}
+          prevHref={prevCandidateId ? candidateHref(prevCandidateId) : null}
+          nextHref={nextCandidateId ? candidateHref(nextCandidateId) : null}
+          closeHref={closeHref}
+          statusLabel={statusLabel}
+        />
+      )}
     </main>
   );
 }

@@ -2,16 +2,19 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { CaptureForm } from "@/components/CaptureForm";
+import { primeStore } from "@/data/prime";
 
 export default async function NewOpeningPage({
   searchParams,
 }: {
-  searchParams: Promise<{ created?: string }>;
+  searchParams: Promise<{ created?: string; client?: string; clientId?: string }>;
 }) {
-  const { created } = await searchParams;
+  const { created, client, clientId } = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await pageUser("opening.create");
   const isLead = user.role === "ta_lead" || user.role === "admin";
   const just = created ? repo.opening(created) : null;
+  const initialClientId = client || clientId || null;
 
   return (
     <main className="mx-auto max-w-[720px] px-8 py-10">
@@ -46,10 +49,14 @@ export default async function NewOpeningPage({
       </header>
 
       <CaptureForm
-        key={created ?? "new"}
+        key={`${created ?? "new"}-${initialClientId ?? "none"}`}
         clients={repo.clients()}
-        tas={repo.users().filter((u) => u.role === "ta")}
+        tas={repo
+          .users()
+          .filter((u) => u.isActive && (u.role === "ta" || u.role === "ta_lead" || u.role === "admin"))
+          .sort((a, b) => a.name.localeCompare(b.name))}
         isLead={isLead}
+        initialClientId={initialClientId}
       />
     </main>
   );

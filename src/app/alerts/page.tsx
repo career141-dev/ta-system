@@ -3,6 +3,7 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { alertsFor, computeAlerts, isWorkingDay } from "@/lib/sla";
 import { inHours } from "@/lib/format";
+import { primeStore } from "@/data/prime";
 
 const KIND_LABEL: Record<string, string> = {
   low_volume: "Low volume",
@@ -25,6 +26,7 @@ export default async function AlertsPage({
   searchParams: Promise<{ all?: string }>;
 }) {
   const { all } = await searchParams;
+  await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const everyones = all === "1";
   const alerts = everyones ? computeAlerts() : alertsFor(user.id);

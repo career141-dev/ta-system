@@ -11,6 +11,7 @@ import { Assistant } from "@/components/hh/Assistant";
 import { getCurrentUser } from "@/lib/session";
 import { ChevronIcon } from "@/components/icons";
 import { scopeSuggestions } from "@/lib/visibility";
+import { primeStore } from "@/data/prime";
 
 const TIER_TONE = {
   priority: "bg-brand-soft text-brand",
@@ -37,6 +38,7 @@ export default async function Page({
 }) {
   const { id } = await params;
   const sp = await searchParams;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();

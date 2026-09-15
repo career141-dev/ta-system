@@ -269,8 +269,9 @@ export function PeoplePicker({
   );
 }
 
-/** Client choice is a visual pick, not a dropdown — there are few of them and
- *  the industry is worth seeing while you choose. */
+/** Client choice is a visual pick with instant search and scrollable grid —
+ *  showing a clean 2x2 view (max 4 visible without scrolling) so the form
+ *  stays compact and well-proportioned. */
 export function ClientPicker({
   name,
   clients,
@@ -283,36 +284,126 @@ export function ClientPicker({
   onChange?: (v: string) => void;
 }) {
   const [value, setValueState] = useState(initial ?? "");
+  const [query, setQuery] = useState("");
+
   const setValue = (v: string) => {
     setValueState(v);
     onChange?.(v);
   };
+
+  const q = query.trim().toLowerCase();
+  const filtered = q
+    ? clients.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          c.industry.toLowerCase().includes(q),
+      )
+    : clients;
+
+  const selectedClient = clients.find((c) => c.id === value);
+
   return (
-    <>
+    <div className="space-y-3">
       <input type="hidden" name={name} value={value} required />
-      <div className="grid gap-2 sm:grid-cols-2">
-        {clients.map((c) => {
-          const on = c.id === value;
-          return (
+
+      {/* Search Bar + Selected Client Indicator */}
+      <div className="flex items-center gap-2.5">
+        <div className="relative flex-1">
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 20 20"
+            fill="none"
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"
+          >
+            <path
+              d="M9 15A6 6 0 1 0 9 3a6 6 0 0 0 0 12ZM19 19l-4.35-4.35"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search client name or industry..."
+            className="w-full rounded-lg border border-rule bg-surface pl-8.5 pr-8 py-2 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint/70 focus:border-brand focus:ring-[3px] focus:ring-brand/12"
+          />
+          {query && (
             <button
-              key={c.id}
               type="button"
-              onClick={() => setValue(c.id)}
-              className={`rounded-xl border px-4 py-3 text-left transition-all ${
-                on
-                  ? "border-brand bg-brand-soft ring-[3px] ring-brand/10"
-                  : "border-rule bg-surface hover:border-rule-strong"
-              }`}
+              onClick={() => setQuery("")}
+              className="absolute right-2 top-1/2 -translate-y-1/2 flex h-5 w-5 items-center justify-center rounded-full text-ink-faint hover:bg-tag hover:text-ink text-[13px]"
+              aria-label="Clear search"
             >
-              <span className={`block text-[13.5px] ${on ? "font-semibold text-brand" : "font-medium"}`}>
-                {c.name}
-              </span>
-              <span className="mt-0.5 block text-[11.5px] text-ink-faint">{c.industry}</span>
+              ×
             </button>
-          );
-        })}
+          )}
+        </div>
+
+        {selectedClient && (
+          <div className="hidden sm:inline-flex items-center gap-1.5 rounded-lg border border-brand/20 bg-brand-soft px-2.5 py-1.5 text-[12px] text-brand">
+            <span className="text-[10.5px] uppercase font-semibold tracking-wider text-brand/70">Selected:</span>
+            <span className="font-medium max-w-[130px] truncate">{selectedClient.name}</span>
+          </div>
+        )}
       </div>
-    </>
+
+      {/* Scrollable client grid (constrained height: exactly 4 cards / 2 rows visible) */}
+      {filtered.length > 0 ? (
+        <div className="max-h-[124px] overflow-y-auto pr-1">
+          <div className="grid gap-2 sm:grid-cols-2">
+            {filtered.map((c) => {
+              const on = c.id === value;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setValue(c.id)}
+                  className={`h-[58px] flex flex-col justify-center rounded-xl border px-3.5 text-left transition-all ${
+                    on
+                      ? "border-brand bg-brand-soft ring-[3px] ring-brand/10 shadow-sm"
+                      : "border-rule bg-surface hover:border-rule-strong hover:bg-paper/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`block truncate text-[13px] ${
+                        on ? "font-semibold text-brand" : "font-medium text-ink"
+                      }`}
+                    >
+                      {c.name}
+                    </span>
+                    {on && (
+                      <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-brand text-[9.5px] text-white">
+                        ✓
+                      </span>
+                    )}
+                  </div>
+                  <span className="mt-0.5 block text-[11px] text-ink-faint truncate">{c.industry}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-dashed border-rule py-5 text-center">
+          <p className="text-[12.5px] text-ink-soft">
+            No clients match &ldquo;<span className="font-medium text-ink">{query}</span>&rdquo;
+          </p>
+          <button
+            type="button"
+            onClick={() => setQuery("")}
+            className="mt-1.5 text-[11.5px] font-medium text-brand hover:underline"
+          >
+            Show all clients ({clients.length})
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

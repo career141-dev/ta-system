@@ -5,9 +5,13 @@ import { getCurrentUser } from "@/lib/session";
 import { ProjectHeader } from "../ProjectHeader";
 import { SnippetStudio } from "@/components/SnippetStudio";
 import { snippetFromOpening } from "@/lib/snippet";
+import { primeStore } from "@/data/prime";
+import { requireSourcingSeat } from "../sourcingGate";
 
 export default async function SnippetsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await primeStore({ openingId: id });
+  await requireSourcingSeat(id);
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();

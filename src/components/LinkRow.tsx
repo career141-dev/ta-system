@@ -99,6 +99,12 @@ export function LinkRow({
             <div className="flex shrink-0 flex-col items-end gap-2">
               <div className="flex items-center gap-2">
                 <button
+                  type="button"
+                  className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                >
+                  Add to pipeline
+                </button>
+                <button
                   onClick={() => setEdit((v) => !v)}
                   className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"
                 >
@@ -211,6 +217,12 @@ export function LinkRow({
                 <div className="flex flex-wrap items-center gap-3">
                   <button className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
                     Save
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                  >
+                    Add to pipeline
                   </button>
                 </div>
               </form>

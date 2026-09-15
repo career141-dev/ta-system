@@ -18,7 +18,12 @@ import { InterviewPanel } from "@/components/InterviewPanel";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
+import { LiveFollowUp } from "@/components/LiveFollowUp";
+import { WebCallPanel } from "@/components/WebCallPanel";
+import { WebCallResults } from "@/components/WebCallResults";
+import { isConvex } from "@/data/mode";
 import { removeApplication } from "@/app/actions";
+import { primeStore } from "@/data/prime";
 
 /**
  * Finding 23 — Chat Log was a tab that explained why it was empty. A TA clicks
@@ -40,6 +45,7 @@ export default async function CandidateDrawer({
 }) {
   const { id, appId } = await params;
   const { tab = "cv" } = await searchParams;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
 
   const app = repo.application(appId);
@@ -368,8 +374,10 @@ export default async function CandidateDrawer({
           <div className="flex flex-col gap-5">
             {/* The screening call and the chase are the owner's to run. Hiding
                 them for anyone else matches what the server will allow. */}
-            {!locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="call" />}
-            {!locked && (
+            {isConvex() && !locked && <WebCallPanel applicationId={app.id} openingId={id} />}
+            {isConvex() && <WebCallResults applicationId={app.id} actorId={user.id} />}
+            {!isConvex() && !locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="call" />}
+            {!isConvex() && !locked && (
               <ScreeningPanel
                 app={app}
                 candidate={c}
@@ -393,9 +401,17 @@ export default async function CandidateDrawer({
 
         {tab === "chat" && (
           <div className="flex flex-col gap-5">
-            {/* The chase is WhatsApp and email, so it is run from the chat. */}
-            {!locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="chat" />}
-            <Chat applicationId={app.id} />
+            {/* The chase is WhatsApp and email, so it is run from the chat. On
+                the Convex store it is the real sequence, sent and read by the
+                backend; the file store keeps the drafting desk. */}
+            {isConvex() ? (
+              <LiveFollowUp applicationId={app.id} openingId={id} actorId={user.id} locked={locked} />
+            ) : (
+              <>
+                {!locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="chat" />}
+                <Chat applicationId={app.id} />
+              </>
+            )}
           </div>
         )}
 

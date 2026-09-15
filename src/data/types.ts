@@ -125,6 +125,39 @@ export interface Opening {
   status: "open" | "on_hold" | "closed" | "filled";
   createdAt: number;
   updatedAt: number;
+
+  /**
+   * The structured requirements read out of the approved JD (Job details).
+   * Present on the Convex store; the JSON store has none and scores from the
+   * JD text alone.
+   */
+  requirements?: OpeningRequirements;
+}
+
+export interface OpeningRequirements {
+  requiredSkills: string[];
+  niceToHaveSkills: string[];
+  seniorityLevel: string | null;
+  experienceMinYears: number | null;
+  experienceMaxYears: number | null;
+  location: string | null;
+  educationLevel: string | null;
+  languagesRequired: string[];
+  salaryMin: number | null;
+  salaryMax: number | null;
+  salaryCurrency: string | null;
+  clientIndustry: string | null;
+  recruitmentType: "both" | "headhunting" | "job_posting";
+  isConfidential: boolean;
+  jobStatus: string;
+  /** extracting while the model reads the JD; failed carries `error`. */
+  status: "extracting" | "extracted" | "failed" | null;
+  extractedAt: number | null;
+  error: string | null;
+  /** Fields a person corrected — automatic re-extraction fills around them. */
+  lockedFields: string[];
+  editedBy: string | null;
+  editedAt: number | null;
 }
 
 export interface JobPost {

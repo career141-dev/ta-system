@@ -26,6 +26,7 @@ import { seatFor, visibleToSeat } from "./visibility";
 import { write, type AiResult } from "./ai";
 import { assess } from "./assessment";
 import { FIT_BANDS } from "./scoring";
+import { PLATFORM_KNOWLEDGE, quickWorkflowHelp } from "./platformGuide";
 
 const DAY = 86_400_000;
 const when = (t: number) =>
@@ -214,19 +215,22 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
 }
 
 const SYSTEM = [
-  "You are the assistant inside Career141's recruitment platform, answering a member of the TA desk.",
-  "Answer ONLY from the JSON snapshot you are given. If the snapshot does not contain the answer, say you can't see that and suggest where on the platform to look.",
-  "Never invent names, numbers, phone numbers or dates. Count from the snapshot.",
-  "Be brief: a sentence or a short list. Use the person's words, not the system's (say 'follow-up', not 'follow_up').",
-  "When you mention an opening or a person, link it with markdown using the snapshot's link, e.g. [Brand Manager](/openings/op_brand).",
-  "Sets are numbered per recruiter; a set stays open until a day it reaches five.",
-  "When listing jobs or people, include only those the snapshot shows with a count above zero for what was asked.",
-  "Never assume anyone's gender: use the person's name, or 'they'.",
-  "Never mention the snapshot's field names (like byStage or databaseMatches); describe things in plain words.",
-  "Use each link exactly as the snapshot gives it, starting with /openings/.",
-  `A strong match is a fit score of ${FIT_BANDS.strong} or more. Qualifications listed for a match were found in their CV.`,
-  "People waiting for review means new CVs plus database matches nobody has claimed yet; add them up across jobs.",
-  "When several jobs tie on a count, say they tie rather than naming one.",
+  "You are the Intelligent Desk Assistant and Platform Guide inside Career141's recruitment platform, answering a member of the TA desk.",
+  "",
+  "You have two primary capabilities:",
+  "1. PLATFORM & WORKFLOW GUIDE: Explain how features work, guide recruiters through workflows, and provide direct markdown links to pages (e.g. [Database Search](/database), [Clients](/clients), [New Opening](/openings/new), [Openings](/openings), [Sourcing](/hh/suggestions)).",
+  "2. LIVE DESK ASSISTANT: Answer questions about the recruiter's live openings, candidates, pipeline stages, upcoming interviews, and alerts using the provided JSON snapshot.",
+  "",
+  "Guidelines:",
+  "- When answering how-to or workflow questions, use the Platform Knowledge Base below. Be clear, concise, and provide actionable steps.",
+  "- When answering about specific numbers, candidates, or jobs on this person's desk, count accurately from the JSON snapshot. Never invent names, phone numbers, or dates.",
+  "- When mentioning an opening, candidate, or platform tool, format it as a clickable markdown link (e.g. [Database Search](/database), [Clients](/clients), [Brand Manager](/openings/op_brand)).",
+  "- Use friendly, professional words: say 'follow-up' rather than 'follow_up', 'new CV' rather than 'new_cv'.",
+  "- Sets are numbered per recruiter and a set closes once it reaches five candidates (The Rule of 5).",
+  "- A strong match has a fit score of 70+ (or >= 0.70 in semantic vector search).",
+  "- People waiting for review means new CVs plus database matches nobody has claimed yet.",
+  "",
+  PLATFORM_KNOWLEDGE,
 ].join("\n");
 
 export type ModelCall = (system: string, prompt: string) => Promise<AiResult>;
@@ -267,6 +271,10 @@ type Snapshot = ReturnType<typeof snapshotFor>;
  * for anything else, or when the question names a job this person cannot see.
  */
 export function quickAnswer(snap: Snapshot, question: string, user: User): string | null {
+  // Check common platform guide & workflow questions first
+  const workflowHelp = quickWorkflowHelp(question);
+  if (workflowHelp) return workflowHelp;
+
   const q = question.toLowerCase();
   // Desk shorthand for job titles: "EHS" is Environment, Health and Safety.
   const expanded = q.replace(/\b(ehs|hse|ohs)\b/g, "environment health safety").replace(/\bba\b/g, "business analyst").replace(/\bqa\b/g, "quality assurance").replace(/\bscm\b/g, "supply chain");
@@ -430,7 +438,7 @@ export function safeLinks(markdown: string): { text: string; href?: string }[] {
     if (m.index > last) parts.push({ text: markdown.slice(last, m.index) });
     // Models sometimes put a host in front of an internal path ("https://example.com/openings/…").
     // Keep the path, never the host.
-    const inner = m[2].match(/(\/(?:openings|candidates|database|reports|people)\/[^\s)]*)/);
+    const inner = m[2].match(/(\/(?:openings|candidates|database|reports|people|clients|review|hh|alerts)(?:\/[^\s)]*)?)/);
     const href = m[2].startsWith("/") ? m[2] : inner ? inner[1] : m[2];
     parts.push(href.startsWith("/") && !href.startsWith("//") ? { text: m[1], href } : { text: m[1] });
     last = m.index + m[0].length;

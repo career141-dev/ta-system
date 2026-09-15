@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { addUser, setShortlistInbox, setUserActive, updateUser } from "@/app/actions";
+import { addUser, inviteUser, revokeUserInvite, setShortlistInbox, setUserActive, updateUser } from "@/app/actions";
+import type { OffDeskAccount, PendingInvite } from "@/lib/invites";
 import { inputClass } from "@/components/form";
 import type { Role, User } from "@/data/types";
 
@@ -30,13 +31,20 @@ const ROLE_LABEL = Object.fromEntries(ROLES.map((r) => [r.value, r.label])) as R
 export function PeopleAdmin({
   users,
   canEdit,
+  currentUserId,
   shortlistInbox,
+  invites,
+  otherAccounts,
 }: {
   users: User[];
   canEdit: boolean;
+  currentUserId: string;
   shortlistInbox: string;
+  invites: PendingInvite[];
+  otherAccounts: OffDeskAccount[];
 }) {
   const [adding, setAdding] = useState(false);
+  const [inviting, setInviting] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [showGone, setShowGone] = useState(false);
 
@@ -49,11 +57,20 @@ export function PeopleAdmin({
       <div className="mb-6 flex flex-wrap items-center gap-4">
         {canEdit && (
           <button
-            onClick={() => setAdding((v) => !v)}
+            onClick={() => { setInviting((v) => !v); setAdding(false); }}
+            className="flex items-center gap-2 rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+          >
+            <span className="text-[15px] leading-none">{inviting ? "✕" : "✉"}</span>
+            {inviting ? "Cancel" : "Invite someone"}
+          </button>
+        )}
+        {canEdit && (
+          <button
+            onClick={() => { setAdding((v) => !v); setInviting(false); }}
             className="flex items-center gap-2 rounded-full border border-brand-line px-4 py-2 text-[13px] font-medium text-brand transition-colors hover:bg-brand-soft"
           >
             <span className="text-[15px] leading-none">{adding ? "✕" : "+"}</span>
-            {adding ? "Cancel" : "Add someone"}
+            {adding ? "Cancel" : "Add without invite"}
           </button>
         )}
         {gone.length > 0 && (
@@ -65,6 +82,63 @@ export function PeopleAdmin({
           </button>
         )}
       </div>
+
+      {inviting && (
+        <form
+          action={inviteUser}
+          onSubmit={() => setInviting(false)}
+          className="mb-6 rounded-2xl border border-rule bg-surface px-6 py-5"
+        >
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <label>
+              <span className="mb-1.5 block text-[12px] text-ink-soft">Email</span>
+              <input name="email" type="email" required autoFocus placeholder="nuha@career141.com" className={inputClass} />
+            </label>
+            <label>
+              <span className="mb-1.5 block text-[12px] text-ink-soft">Name</span>
+              <input name="name" placeholder="Nuha Rizwan" className={inputClass} />
+            </label>
+            <label>
+              <span className="mb-1.5 block text-[12px] text-ink-soft">Role</span>
+              <select name="role" defaultValue="ta" className={`${inputClass} cursor-pointer`}>
+                {ROLES.map((r) => (
+                  <option key={r.value} value={r.value}>{r.label} — {r.note}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <button className="mt-4 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+            Send invite
+          </button>
+          <p className="mt-3 max-w-[80ch] text-[11.5px] leading-relaxed text-ink-faint">
+            The role is saved now, so it applies from their first sign-in. They get an email from
+            Clerk with a link to set up their sign-in. You can change the role later with Edit.
+          </p>
+        </form>
+      )}
+
+      {canEdit && invites.length > 0 && (
+        <div className="mb-6 overflow-hidden rounded-2xl border border-rule bg-surface">
+          <div className="border-b border-rule px-6 py-2.5 text-[11px] uppercase tracking-[0.08em] text-ink-faint">
+            Invites waiting to be accepted
+          </div>
+          <div className="divide-y divide-rule">
+            {invites.map((i) => (
+              <div key={i.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-6 py-3">
+                <span className="min-w-[200px] flex-1 text-[13px]">{i.email}</span>
+                <span className="w-[150px] text-[12.5px] text-ink-soft">
+                  {i.role && i.role in ROLE_LABEL ? ROLE_LABEL[i.role as Role] : "—"}
+                </span>
+                <span className="text-[12px] text-ink-faint">sent {new Date(i.createdAt).toLocaleDateString()}</span>
+                <form action={revokeUserInvite}>
+                  <input type="hidden" name="invitationId" value={i.id} />
+                  <button className="text-[12.5px] text-ink-faint transition-colors hover:text-ink">Revoke</button>
+                </form>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {adding && (
         <form action={addUser} className="mb-6 rounded-2xl border border-rule bg-surface px-6 py-5">
@@ -213,13 +287,16 @@ export function PeopleAdmin({
                       <button onClick={() => setEditing(u.id)} className="text-[12.5px] text-ink-soft transition-colors hover:text-ink">
                         Edit
                       </button>
-                      <form action={setUserActive}>
-                        <input type="hidden" name="userId" value={u.id} />
-                        <input type="hidden" name="active" value={u.isActive ? "0" : "1"} />
-                        <button className="text-[12.5px] text-ink-faint transition-colors hover:text-ink">
-                          {u.isActive ? "Mark as left" : "Bring back"}
-                        </button>
-                      </form>
+                      {/* Nobody marks themselves as left — that is how a desk locks itself out. */}
+                      {u.id !== currentUserId && (
+                        <form action={setUserActive}>
+                          <input type="hidden" name="userId" value={u.id} />
+                          <input type="hidden" name="active" value={u.isActive ? "0" : "1"} />
+                          <button className="text-[12.5px] text-ink-faint transition-colors hover:text-ink">
+                            {u.isActive ? "Mark as left" : "Bring back"}
+                          </button>
+                        </form>
+                      )}
                     </div>
                   )}
                 </div>
@@ -228,6 +305,49 @@ export function PeopleAdmin({
           ))}
         </div>
       </div>
+
+      {/* Accounts the older app created. They exist — which is why inviting
+          one says "already has an account" — but are not on this desk and
+          have no access here until an admin gives them a role. */}
+      {canEdit && otherAccounts.length > 0 && (
+        <div className="mt-8 overflow-hidden rounded-2xl border border-rule bg-surface">
+          <div className="border-b border-rule px-6 py-3">
+            <div className="text-[13.5px] font-semibold">Other accounts — not on the desk</div>
+            <p className="mt-0.5 max-w-[84ch] text-[11.5px] leading-relaxed text-ink-faint">
+              Created by the older app. They have no access here until you give them a role. Only
+              those marked &ldquo;can sign in&rdquo; have a login on this Clerk instance; the others
+              need an invite after you give them access.
+            </p>
+          </div>
+          <div className="divide-y divide-rule">
+            {otherAccounts.map((a) => (
+              <form key={a.email} action={addUser} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-6 py-3">
+                <input type="hidden" name="email" value={a.email} />
+                <input type="hidden" name="name" value={a.fullName} />
+                <div className="min-w-[220px] flex-1">
+                  <div className="text-[13px]">{a.fullName}</div>
+                  <div className="text-[12px] text-ink-faint">
+                    {a.email}
+                    {a.duplicates > 0 && ` · ${a.duplicates + 1} records`}
+                  </div>
+                </div>
+                <span className="w-[130px] text-[11.5px] text-ink-faint">old app: {a.oldAppRole}</span>
+                <span className={`w-[100px] text-[11.5px] ${a.canSignInHere ? "text-brand" : "text-ink-faint"}`}>
+                  {a.canSignInHere ? "can sign in" : "no login here"}
+                </span>
+                <select name="role" defaultValue="ta" className={`${inputClass} w-[170px] cursor-pointer`}>
+                  {ROLES.map((r) => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+                <button className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand hover:bg-brand-soft">
+                  Give access
+                </button>
+              </form>
+            ))}
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -6,6 +6,7 @@ import { runResearch, runBenchmark, pickBenchmark } from "@/app/actions";
 import { ResearchField } from "@/components/hh/ResearchField";
 import { timeAt } from "@/lib/format";
 import { EMPTY_RESEARCH } from "@/data/types";
+import { primeStore } from "@/data/prime";
 
 const CONFIDENCE_TONE = {
   high: "bg-brand-soft text-brand",
@@ -33,6 +34,7 @@ export default async function Page({
 }) {
   const { id } = await params;
   const { err, found, searches } = await searchParams;
+  await primeStore({ openingId: id });
   const o = repo.opening(id);
   if (!o) notFound();
   const client = repo.client(o.clientId);

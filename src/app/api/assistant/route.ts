@@ -2,6 +2,7 @@ import { currentUser } from "@/lib/session";
 import { askDesk, type AssistantTurn } from "@/lib/deskAssistant";
 import { looksLikeAction, propose, understand } from "@/lib/deskActions";
 import { FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
+import { primeStore } from "@/data/prime";
 
 /**
  * The desk assistant. Signed-in people only; each asks about their own scope
@@ -11,6 +12,7 @@ import { FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 const recent = new Map<string, number[]>();
 
 export async function POST(req: Request) {
+  await primeStore({ allApplications: true });
   const user = await currentUser();
   if (!user || !user.isActive) return Response.json({ error: "Sign in first." }, { status: 401 });
   const now = Date.now();

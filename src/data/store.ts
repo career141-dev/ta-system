@@ -73,6 +73,8 @@ import { DEFAULT_FEE_PERCENT, DEFAULT_GUARANTEE_DAYS } from "@/lib/closing";
 import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
+import { isConvex } from "./mode";
+import { hasCandidate, missingCandidateMessage, primed, resetStore, state } from "./primeState";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -102,7 +104,8 @@ let indexCache: Indexes | null = null;
 
 function indexes(): Indexes {
   const db = load();
-  if (indexCache && indexCache.db === db && indexCache.version === dataVersion) return indexCache;
+  const currentVersion = isConvex() ? state.version : dataVersion;
+  if (indexCache && indexCache.db === db && indexCache.version === currentVersion) return indexCache;
   const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
     const list = m.get(k);
     if (list) list.push(v);
@@ -125,7 +128,7 @@ function indexes(): Indexes {
   }
   indexCache = {
     db,
-    version: dataVersion,
+    version: currentVersion,
     candidateById: new Map(db.candidates.map((c) => [c.id, c])),
     applicationById: new Map(db.applications.map((a) => [a.id, a])),
     appsByOpening,
@@ -191,6 +194,21 @@ function backfill(db: Partial<Database>): Database {
  * written by another application as well as this one.
  */
 function load(): Database {
+  // Backed by Convex, the rows were fetched before the render began — see
+  // src/data/prime.ts for why they are not fetched here. Everything below this
+  // line is the JSON file's path and is untouched.
+  if (isConvex()) {
+    const working = primed();
+    if (!working) {
+      throw new Error(
+        "The store has not been primed. Add `await primeStore()` at the top of the page, " +
+          "server action or route handler before anything reads `repo` — and pass a scope " +
+          "({ openingId } or { candidateIds }) where candidates are needed. See src/data/prime.ts.",
+      );
+    }
+    return working;
+  }
+
   let stamp = 0;
   try {
     stamp = fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).mtimeMs : 0;
@@ -357,6 +375,12 @@ function mutate(fn: (db: Database) => void) {
     const db = load();
     fn(db);
     dataVersion++;
+    if (isConvex()) {
+      // The rows live on the server; the copy here is now behind. Dropping it
+      // is what makes the next read see the write.
+      resetStore();
+      return;
+    }
     writeOut(db);
   });
 }
@@ -561,8 +585,14 @@ export const repo = {
   },
   // Inside a write the data is changing under the lookup, so it scans directly;
   // outside one it uses the indexes.
-  candidate: (id: Id) =>
-    lockDepth > 0 ? load().candidates.find((c) => c.id === id) ?? null : indexes().candidateById.get(id) ?? null,
+  candidate: (id: Id) => {
+    const found =
+      lockDepth > 0 ? load().candidates.find((c) => c.id === id) ?? null : indexes().candidateById.get(id) ?? null;
+    // Backed by Convex, a miss returns null rather than throwing so callers with
+    // `if (!candidate) continue` or optional chaining don't crash the server.
+    if (!found && isConvex() && !hasCandidate(id)) return null;
+    return found;
+  },
 
   applications: (openingId?: Id) => {
     if (!openingId) return load().applications;
