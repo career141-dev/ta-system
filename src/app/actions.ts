@@ -27,6 +27,7 @@ import { findDatabaseMatches } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexMutation } from "@/lib/convexServer";
+import * as backend from "@/data/convex/backend";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -138,8 +139,35 @@ export async function moveStage(formData: FormData) {
     await back(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
   }
 
+  if (isConvex()) {
+    // The backend owns the pipeline: its state machine checks the move, stops
+    // any running follow-up on the way out, and (by design) sends nothing on
+    // the way in — follow-up is sent from the candidate's Chat tab.
+    try {
+      await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
+    } catch (e) {
+      await back(backendMessage(e, "That move could not be made."));
+    }
+    await afterBackendWrite(openingId);
+    return;
+  }
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
   if (!res.ok) await back(res.message);
+  revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+// ─── Backend writes (Convex store) ───────────────────────────────────────────
+
+/** The backend's own reason, without the transport's wrapping. */
+function backendMessage(e: unknown, fallback: string): string {
+  const raw = (e as Error)?.message ?? "";
+  return raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200) || fallback;
+}
+
+/** The primed copy is behind a backend write; drop it so the next read is fresh. */
+async function afterBackendWrite(openingId: string) {
+  const { resetStore } = await import("@/data/prime");
+  resetStore();
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -148,8 +176,62 @@ export async function claimCandidate(formData: FormData) {
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
+  if (isConvex()) {
+    let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+    try {
+      r = await backend.shortlist({ id: user.id }, appId);
+    } catch (e) {
+      await back(backendMessage(e, "Could not shortlist."));
+    }
+    // Named before the store is dropped — reading `repo` after that would throw.
+    const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
+    await afterBackendWrite(openingId);
+    if (owner) await back(`${owner} already claimed this candidate.`);
+    return;
+  }
   repo.shortlist(appId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+/**
+ * Send the next follow-up: the approved WhatsApp template and an email the
+ * first time, a reminder after that. Through the backend's outreach gate, so
+ * in test mode only the test recipient receives it.
+ */
+export async function sendFollowUpNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  if (!isConvex()) await back("Sending needs the Convex store.");
+  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number } | null = null;
+  try {
+    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId });
+  } catch (e) {
+    await back(backendMessage(e, "The follow-up could not be sent."));
+  }
+  await afterBackendWrite(openingId);
+  await back(
+    !r?.sent
+      ? r?.reason ?? "Nothing was sent."
+      : r.kind === "initial"
+        ? "Follow-up sent — WhatsApp template and email. Delivery shows below in a few seconds."
+        : `Reminder ${r.attempt} of ${r.maxAttempts} sent.`,
+  );
+}
+
+export async function stopFollowUpNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  try {
+    await convexMutation("ta/followUp:stop", { actorId: user.id, applicationId: appId });
+  } catch (e) {
+    await back(backendMessage(e, "Could not stop the follow-up."));
+  }
+  await afterBackendWrite(openingId);
+  await back("Follow-up stopped. Nothing further will be sent.");
 }
 
 /**
@@ -170,8 +252,21 @@ export async function confirmShortlist(formData: FormData) {
     const app = repo.application(id);
     if (!app || app.openingId !== openingId) { skipped++; continue; }
     if (!can(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId }).ok) { skipped++; continue; }
+    if (isConvex()) {
+      try {
+        const r = await backend.shortlist({ id: user.id }, id);
+        if (r.ok) done++; else skipped++;
+      } catch {
+        skipped++;
+      }
+      continue;
+    }
     const r = repo.shortlist(id, user.id);
     if (r.ok) done++; else skipped++;
+  }
+  if (isConvex()) {
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
   }
   revalidatePath(`/openings/${openingId}`, "layout");
   await back(

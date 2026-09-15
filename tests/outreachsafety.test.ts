@@ -1,4 +1,4 @@
-import { mayReplyTo, outreachLive, resolveRecipient } from "../convex/lib/outreachSafety.ts";
+import { mayReplyTo, outreachLive, resolveRecipient } from "../convex/lib/outreachSafety";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
