@@ -54,6 +54,7 @@ export function ResultRow({
   apps,
   openings,
   defaultOpeningId,
+  backHref,
   candidateHref,
 }: {
   candidate: Candidate;
@@ -67,6 +68,8 @@ export function ResultRow({
   apps: RowApp[];
   openings: { id: string; label: string }[];
   defaultOpeningId: string | null;
+  /** The search results URL to return to from the candidate profile. */
+  backHref?: string;
   candidateHref?: string;
 }) {
   const [allRoles, setAllRoles] = useState(false);
@@ -82,7 +85,8 @@ export function ResultRow({
   const otherSkills = c.skills.filter((s) => !matchedSkills.includes(s));
   const skills = allSkills ? [...matchedSkills, ...otherSkills] : [...matchedSkills, ...otherSkills].slice(0, 3);
 
-  const targetLink = candidateHref ?? `/candidates/${c.id}`;
+  const fallbackHref = `/candidates/${c.id}${backHref ? `?from=${encodeURIComponent(backHref)}` : ""}`;
+  const targetLink = candidateHref ?? fallbackHref;
 
   return (
     <article className="border-b border-rule px-6 py-5 last:border-b-0">
@@ -93,7 +97,7 @@ export function ResultRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2.5">
-            {/* Their record in the platform, opening in a drawer over results */}
+            {/* Their record in the platform, opening in a drawer over results or navigating to profile */}
             <Link href={targetLink} className="text-[15px] font-semibold text-accent hover:underline">
               {c.fullName}
             </Link>

@@ -74,7 +74,7 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
-import { hasCandidate, missingCandidateMessage, primed, resetStore } from "./primeState";
+import { hasCandidate, missingCandidateMessage, primed, resetStore, state } from "./primeState";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -104,7 +104,8 @@ let indexCache: Indexes | null = null;
 
 function indexes(): Indexes {
   const db = load();
-  if (indexCache && indexCache.db === db && indexCache.version === dataVersion) return indexCache;
+  const currentVersion = isConvex() ? state.version : dataVersion;
+  if (indexCache && indexCache.db === db && indexCache.version === currentVersion) return indexCache;
   const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
     const list = m.get(k);
     if (list) list.push(v);
@@ -127,7 +128,7 @@ function indexes(): Indexes {
   }
   indexCache = {
     db,
-    version: dataVersion,
+    version: currentVersion,
     candidateById: new Map(db.candidates.map((c) => [c.id, c])),
     applicationById: new Map(db.applications.map((a) => [a.id, a])),
     appsByOpening,
@@ -587,10 +588,9 @@ export const repo = {
   candidate: (id: Id) => {
     const found =
       lockDepth > 0 ? load().candidates.find((c) => c.id === id) ?? null : indexes().candidateById.get(id) ?? null;
-    // Backed by Convex, a miss is ambiguous: this person may not exist, or the
-    // page may simply not have asked for them. Those need different fixes, so
-    // the second one says so loudly instead of rendering an empty row.
-    if (!found && isConvex() && !hasCandidate(id)) throw new Error(missingCandidateMessage(id));
+    // Backed by Convex, a miss returns null rather than throwing so callers with
+    // `if (!candidate) continue` or optional chaining don't crash the server.
+    if (!found && isConvex() && !hasCandidate(id)) return null;
     return found;
   },
 

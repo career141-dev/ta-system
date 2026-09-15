@@ -45,6 +45,22 @@ export const get = query({
   },
 });
 
+export const profile = query({
+  args: {
+    actorId: v.optional(v.string()),
+    candidateId: v.optional(v.string()),
+    id: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await optionalActor(ctx, args.actorId);
+    const target = args.candidateId ?? args.id;
+    if (!target) return null;
+    const cid = ctx.db.normalizeId("candidates", target);
+    if (!cid) return null;
+    return await ctx.db.get(cid);
+  },
+});
+
 /** Every application this person has ever been on, across all openings. This
  *  is what the "rejected on two previous openings" warning is built from. */
 export const applicationsFor = query({
