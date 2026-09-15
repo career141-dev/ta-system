@@ -1,3 +1,4 @@
+import { externalUrl } from "@/lib/url";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { ProjectHeader } from "../../ProjectHeader";
@@ -150,7 +151,7 @@ export default async function Page({
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
                       {b.linkedinUrl ? (
-                        <a href={b.linkedinUrl} target="_blank" rel="noreferrer" className="text-[13.5px] font-semibold text-accent hover:underline">
+                        <a href={externalUrl(b.linkedinUrl) ?? undefined} target="_blank" rel="noreferrer" className="text-[13.5px] font-semibold text-accent hover:underline">
                           {b.name ?? "Name not established"}
                         </a>
                       ) : (
@@ -166,7 +167,7 @@ export default async function Page({
                     <p className="mt-0.5 text-[13px]">{b.title} at {b.company}</p>
                     {b.note && <p className="mt-0.5 text-[12px] text-ink-faint">{b.note}</p>}
                     {b.sourceUrl && (
-                      <a href={b.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11.5px] text-accent hover:underline">
+                      <a href={externalUrl(b.sourceUrl) ?? undefined} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11.5px] text-accent hover:underline">
                         {b.sourceTitle ?? b.sourceUrl}
                       </a>
                     )}

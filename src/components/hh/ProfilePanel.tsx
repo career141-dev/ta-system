@@ -1,5 +1,6 @@
 "use client";
 
+import { externalUrl } from "@/lib/url";
 import { useState } from "react";
 import { keepSuggestion, dismissSuggestion } from "@/app/actions";
 import type { ProfileSuggestion } from "@/data/types";
@@ -68,7 +69,7 @@ export function ProfilePanel({
 
                 {s.linkedinUrl && (
                   <a
-                    href={s.linkedinUrl}
+                    href={externalUrl(s.linkedinUrl) ?? undefined}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-3.5 inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"
@@ -119,7 +120,7 @@ export function ProfilePanel({
                 {s.sourceUrl && (
                   <>
                     {" · "}
-                    <a href={s.sourceUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                    <a href={externalUrl(s.sourceUrl) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
                       source
                     </a>
                   </>

@@ -1,5 +1,6 @@
 "use client";
 
+import { externalUrl } from "@/lib/url";
 import { useState } from "react";
 import { deleteLink, logOutreach, toggleEyeMark, updateLink } from "@/app/actions";
 import { inputClass } from "./form";
@@ -78,7 +79,7 @@ export function LinkRow({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <a
-                  href={r.linkedinUrl}
+                  href={externalUrl(r.linkedinUrl) ?? undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="text-[14px] font-semibold text-accent hover:underline"
@@ -105,7 +106,7 @@ export function LinkRow({
                   Change outcome ⇕
                 </button>
                 <a
-                  href={r.linkedinUrl}
+                  href={externalUrl(r.linkedinUrl) ?? undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
@@ -154,7 +155,7 @@ export function LinkRow({
 
             <dt className="font-medium text-ink-soft">LinkedIn URL</dt>
             <dd className="truncate">
-              <a href={r.linkedinUrl} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+              <a href={externalUrl(r.linkedinUrl) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
                 {r.linkedinUrl.replace(/^https?:\/\//, "")}
               </a>
               {r.phoneSource && (

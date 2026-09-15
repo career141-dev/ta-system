@@ -13,9 +13,33 @@
 // "no text" and "text lives in R2" need different handling upstream.
 
 import { v } from "convex/values";
-import { query } from "../_generated/server";
+import { query, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
+
+/**
+ * A candidate row with their career attached.
+ *
+ * Extraction writes the dated job history to `candidateResumes`, not to the
+ * candidate, so a row read on its own has no career at all — every result on
+ * the Database screen showed a single current role, and the profile had no
+ * Career section. The old system's `getCandidate` merges it the same way
+ * (`resume?.jobHistory || jobHistory`); this is that rule, in one place.
+ *
+ * The heavy fields are left out — `rawText` and the embedding are large and no
+ * screen that calls this shows them.
+ */
+async function withCareer(ctx: QueryCtx, id: Id<"candidates">): Promise<Doc<"candidates"> | null> {
+  const candidate = await ctx.db.get(id);
+  if (!candidate) return null;
+  const resume = await ctx.db
+    .query("candidateResumes")
+    .withIndex("by_candidateId", (q) => q.eq("candidateId", id))
+    .first();
+  const { rawText: _raw, ...rest } = candidate;
+  const career = resume?.jobHistory?.length ? resume.jobHistory : candidate.jobHistory;
+  return { ...rest, jobHistory: career ?? [] } as Doc<"candidates">;
+}
 
 export const getBatch = query({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
@@ -36,7 +60,7 @@ export const getBatch = query({
      * because the alert badge in the layout needs those records.
      */
     const docs = await Promise.all(
-      args.candidateIds.slice(0, 500).map((id) => ctx.db.get(id as Id<"candidates">)),
+      args.candidateIds.slice(0, 500).map((id) => withCareer(ctx, id as Id<"candidates">)),
     );
     return docs.filter((c): c is Doc<"candidates"> => c !== null);
   },
@@ -49,7 +73,7 @@ export const get = query({
     // Only meaningful when a person was named; an unnamed caller holds the
     // admin key, which already permits everything here.
     if (user) assertFullAccess(user);
-    return await ctx.db.get(args.candidateId as Id<"candidates">);
+    return await withCareer(ctx, args.candidateId as Id<"candidates">);
   },
 });
 
@@ -167,6 +191,84 @@ export const vocabulary = query({
       employers: [...employers].slice(0, 400),
       industries: [...industries].slice(0, 200),
       sampled: rows.length,
+    };
+  },
+});
+
+/**
+ * Everything the database holds about one person, for their profile.
+ *
+ * The list screens need twenty fields and get them through the shared mapper.
+ * A profile is where a recruiter reads the rest — the summary, a career with
+ * dates and what they did, every qualification, the referees, the CV — and
+ * none of that was being asked for, so the page showed a fraction of the
+ * record and looked as though the extraction had failed.
+ *
+ * Returned raw, not reshaped: `src/lib/candidateProfile.ts` does the mapping,
+ * in one tested place, as the list mapper does.
+ *
+ * The CV's LOCATION is deliberately not resolved here. That is
+ * `candidates/candidates:getCvUploadUrl`, the old system's lookup with its
+ * application and file-hash fallbacks, and a second copy of it would drift.
+ * This only says whether there is a file and what it is.
+ */
+export const profile = query({
+  args: { actorId: v.optional(v.string()), candidateId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await optionalActor(ctx, args.actorId);
+    if (user) assertFullAccess(user);
+
+    const id = ctx.db.normalizeId("candidates", args.candidateId);
+    if (!id) return null;
+    const candidate = await withCareer(ctx, id);
+    if (!candidate) return null;
+
+    const [referees, applications, resume, upload] = await Promise.all([
+      ctx.db.query("referees").withIndex("by_candidateId", (q) => q.eq("candidateId", id)).collect(),
+      ctx.db.query("applications").withIndex("by_candidateId", (q) => q.eq("candidateId", id)).collect(),
+      ctx.db.query("candidateResumes").withIndex("by_candidateId", (q) => q.eq("candidateId", id)).first(),
+      candidate.cvUploadId ? ctx.db.get(candidate.cvUploadId) : Promise.resolve(null),
+    ]);
+
+    const jobs = await Promise.all(applications.map((a) => ctx.db.get(a.jobId)));
+
+    const cvTextInDb =
+      (resume?.rawText && resume.rawText.trim().length >= 30 ? resume.rawText : null) ??
+      // `withCareer` drops the row's own copy to keep list reads light; a profile
+      // is one person, so it is read back here.
+      (await ctx.db.get(id).then((row) => (row?.rawText && row.rawText.trim().length >= 30 ? row.rawText : null)));
+
+    return {
+      candidate,
+      referees: referees.map((r) => ({
+        name: r.name,
+        designation: r.designation ?? null,
+        company: r.company ?? null,
+        contactNo: r.contactNo ?? null,
+        email: r.email ?? null,
+        relationship: r.relationship ?? null,
+      })),
+      matches: applications.map((a, i) => ({
+        applicationId: a._id as string,
+        jobId: a.jobId as string,
+        jobTitle: jobs[i]?.title ?? null,
+        clientName: jobs[i]?.clientName ?? null,
+        score: typeof a.aiMatchScore === "number" ? a.aiMatchScore : null,
+        explanation: a.aiMatchExplanation ?? null,
+      })),
+      cv: upload
+        ? {
+            fileName: upload.fileName ?? null,
+            fileType: upload.fileType ?? null,
+            fileSize: typeof upload.fileSize === "number" ? upload.fileSize : null,
+            status: upload.status ?? null,
+            // Where the bytes are, without the key itself: the page only needs
+            // to know whether opening it depends on R2 being configured.
+            storage: upload.s3Key ? ("r2" as const) : upload.storageId ? ("convex" as const) : ("none" as const),
+          }
+        : null,
+      cvText: cvTextInDb,
+      cvTextInR2: !cvTextInDb && !!(resume?.rawTextKey ?? candidate.rawTextKey),
     };
   },
 });

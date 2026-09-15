@@ -27,11 +27,46 @@ export function blank(): Database {
   };
 }
 
+/*
+ * How long a loaded table is trusted before the next page re-reads it.
+ *
+ * The working set is shared by every request this server handles, so without
+ * a lifetime it is the database as it was when the process started: a CV that
+ * arrives through the live intake, or a stage moved in the other app, never
+ * appears until a restart. Short enough that the desk sees the desk; long
+ * enough that the layout and page of one request, and a burst of clicks, do not
+ * each re-read 8,000 applications.
+ *
+ * Stale data is REFRESHED IN PLACE, never blanked. A request that is halfway
+ * through rendering reads the same store, and emptying it underneath that
+ * request is exactly the "not primed" failure the loud error exists to catch.
+ */
+export const TABLES_TTL_MS = 30_000;
+export const CANDIDATE_TTL_MS = 60_000;
+/** Candidate rows nobody has asked for in this long are let go, so the set does
+ *  not grow with every search the desk ever ran. No request lasts this long. */
+export const CANDIDATE_EVICT_MS = 10 * 60_000;
+
 export const state = {
   snapshot: null as Database | null,
-  candidates: new Set<Id>(),
-  openings: new Set<Id>(),
-  all: false,
+  /** When the small tables (users, openings, clients) were last read. */
+  tablesAt: 0,
+  /** Candidate id -> when its row was fetched (kept for misses too). */
+  candidates: new Map<Id, number>(),
+  /** Opening id -> when its applications were fetched. */
+  openings: new Map<Id, number>(),
+  /** When every application was last fetched; 0 when never. */
+  allAt: 0,
+  /*
+   * Bumped whenever the working set's rows change.
+   *
+   * `store.ts` caches its lookup indexes against the snapshot OBJECT, and
+   * priming adds rows to that same object — so without this the index built by
+   * the layout (for the alert badge) never learned about the candidate the page
+   * primed a moment later. `repo.candidate(id)` then answered "not here" for a
+   * row that was sitting in memory, and the profile rendered a 404.
+   */
+  version: 0,
   /*
    * The words the database contains, which is a different question from which
    * rows this page primed.
@@ -67,6 +102,11 @@ export function primed(): Database | null {
   return state.snapshot;
 }
 
+/** Changes whenever primed rows are added or refreshed — see `state.version`. */
+export function primedVersion(): number {
+  return state.version;
+}
+
 /** True once a candidate has been fetched, so a miss can be told from a blank. */
 export function hasCandidate(id: Id): boolean {
   return state.candidates.has(id);
@@ -89,8 +129,10 @@ export function missingCandidateMessage(id: Id): string {
  */
 export function resetStore(): void {
   state.snapshot = null;
-  state.candidates = new Set();
-  state.openings = new Set();
-  state.all = false;
+  state.tablesAt = 0;
+  state.candidates = new Map();
+  state.openings = new Map();
+  state.allAt = 0;
+  state.version++;
   invalidate();
 }

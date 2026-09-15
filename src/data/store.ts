@@ -74,7 +74,7 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
-import { hasCandidate, missingCandidateMessage, primed, primedVocabulary, resetStore } from "./primeState";
+import { hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -93,6 +93,7 @@ let dataVersion = 0;
 interface Indexes {
   db: Database;
   version: number;
+  primedVersion: number;
   candidateById: Map<Id, Candidate>;
   applicationById: Map<Id, Application>;
   appsByOpening: Map<Id, Application[]>;
@@ -104,7 +105,14 @@ let indexCache: Indexes | null = null;
 
 function indexes(): Indexes {
   const db = load();
-  if (indexCache && indexCache.db === db && indexCache.version === dataVersion) return indexCache;
+  if (
+    indexCache &&
+    indexCache.db === db &&
+    indexCache.version === dataVersion &&
+    indexCache.primedVersion === primedVersion()
+  ) {
+    return indexCache;
+  }
   const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
     const list = m.get(k);
     if (list) list.push(v);
@@ -128,6 +136,7 @@ function indexes(): Indexes {
   indexCache = {
     db,
     version: dataVersion,
+    primedVersion: primedVersion(),
     candidateById: new Map(db.candidates.map((c) => [c.id, c])),
     applicationById: new Map(db.applications.map((a) => [a.id, a])),
     appsByOpening,

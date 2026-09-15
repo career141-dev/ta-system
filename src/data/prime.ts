@@ -37,7 +37,7 @@ import "server-only";
 import type { Application, Candidate, Database, Id } from "@/data/types";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
-import { blank, primedVocabulary, resetStore, state } from "@/data/primeState";
+import { blank, CANDIDATE_EVICT_MS, CANDIDATE_TTL_MS, primedVocabulary, state, TABLES_TTL_MS } from "@/data/primeState";
 
 export { primed, primedVocabulary, hasCandidate, missingCandidateMessage, resetStore } from "@/data/primeState";
 
@@ -109,14 +109,17 @@ export function primeStore(scope: PrimeScope = {}): Promise<void> {
 }
 
 async function loadInto(scope: PrimeScope): Promise<void> {
-  const fresh = state.snapshot === null;
-  if (fresh) {
-    state.snapshot = blank();
-    state.candidates = new Set();
-    state.openings = new Set();
-    state.all = false;
+  try {
+    await refresh(scope);
+  } finally {
+    // Whatever changed, derived indexes must rebuild. Cheap to over-bump: an
+    // index is rebuilt on the next read, not here.
+    state.version++;
   }
-  const db = state.snapshot!;
+}
+
+async function refresh(scope: PrimeScope): Promise<void> {
+  const now = Date.now();
   const actor = { id: null as string | null };
 
   /*
@@ -151,63 +154,70 @@ async function loadInto(scope: PrimeScope): Promise<void> {
   }
 
   /*
-   * ── The small tables, once ──────────────────────────────────────────────
+   * ── The small tables ────────────────────────────────────────────────────
    *
-   * If this throws, the working set is thrown away rather than kept.
+   * Loaded into locals first and installed only once they are complete, so the
+   * store is never in a "created but not loaded" state. That state is what
+   * signed the whole desk out twice: a load interrupted by a backend restart
+   * left an empty `db.users`, which is where the session is resolved, and
+   * nothing retried it.
    *
-   * The snapshot is created before the fetch, so `repo` has something to read;
-   * but "created" and "loaded" are different states, and only the second one is
-   * worth keeping. Leaving an empty snapshot in place after a failed fetch
-   * makes `fresh` false for every call that follows, so nothing ever tries
-   * again — and since `db.users` is where the session is resolved, one
-   * momentary hiccup from the backend signs everybody out of a running desk
-   * and keeps them out until the process is restarted. Observed exactly that
-   * way: a Convex deploy interrupted one page's load, and every page after it
-   * redirected to the sign-in screen.
+   * A refresh that fails keeps the rows already held. They are thirty seconds
+   * old; an empty list of users is not an improvement on that.
    */
-  if (fresh) {
+  if (!state.snapshot || now - state.tablesAt > TABLES_TTL_MS) {
     try {
       const [users, openings, clients] = await Promise.all([
         backend.users(actor),
         backend.openings(actor),
         backend.clients(actor).catch(() => []),
       ]);
+      // A backend that is still starting can answer with nothing rather than an
+      // error. Nobody can sign in to a desk with no users, so that is a failed
+      // read, not an answer.
+      if (users.length === 0) throw new Error("The backend returned no users — it may still be starting.");
+      const db = state.snapshot ?? blank();
       db.users = users;
       db.openings = openings;
       // Real rows once the backfill has run. Before that they are derived from
       // the openings, so the app works on a database that has only been
       // restored — the fallback is a bridge, not a second source of truth.
       db.clients = clients.length > 0 ? clients : clientsFrom(openings);
+      state.snapshot = db;
+      state.tablesAt = now;
     } catch (e) {
-      resetStore();
-      throw e;
+      if (!state.snapshot) throw e;
     }
   }
+  const db = state.snapshot!;
 
   // ── Applications, and the people on them ──────────────────────────────────
   const wanted = new Set<Id>(scope.candidateIds ?? []);
 
-  // The "we have these" flags are set AFTER the rows arrive, for the reason
-  // above: a flag set before the fetch it describes turns one failed request
-  // into a permanently empty table nobody retries.
-  if ((scope.allApplications || scope.followUps) && !state.all) {
-    const { applications } = await backend.allApplications(actor);
-    state.all = true;
-    db.applications = merge(db.applications, applications, (a) => a.id);
-    for (const o of db.openings) state.openings.add(o.id);
-  } else if (scope.openingId && !state.openings.has(scope.openingId)) {
+  if ((scope.allApplications || scope.followUps) && now - state.allAt > TABLES_TTL_MS) {
+    try {
+      const { applications } = await backend.allApplications(actor);
+      // Replaced, not merged: an application that moved stage or was removed
+      // must not survive as its old self.
+      db.applications = applications;
+      state.allAt = now;
+      for (const o of db.openings) state.openings.set(o.id, now);
+    } catch (e) {
+      if (state.allAt === 0) throw e;
+    }
+  } else if (scope.openingId && now - (state.openings.get(scope.openingId) ?? 0) > TABLES_TTL_MS) {
     const openingId = scope.openingId;
     const [apps, detail] = await Promise.all([
       backend.applications(actor, openingId),
       backend.opening(actor, openingId),
     ]);
-    state.openings.add(openingId);
-    db.applications = merge(db.applications, apps, (a) => a.id);
+    state.openings.set(openingId, now);
+    db.applications = [...db.applications.filter((a) => a.openingId !== openingId), ...apps];
     if (detail) {
       db.jobPosts = merge(db.jobPosts, detail.posts, (p) => p.id);
-      db.assignments = merge(
-        db.assignments,
-        detail.assignments.map((a, i) => ({
+      db.assignments = [
+        ...db.assignments.filter((a) => a.openingId !== openingId),
+        ...detail.assignments.map((a, i) => ({
           id: `${openingId}:${a.userId}:${i}`,
           openingId,
           userId: a.userId,
@@ -215,8 +225,7 @@ async function loadInto(scope: PrimeScope): Promise<void> {
           assignedAt: 0,
           assignedBy: null,
         })),
-        (a) => a.id,
-      );
+      ];
     }
   }
 
@@ -239,18 +248,31 @@ async function loadInto(scope: PrimeScope): Promise<void> {
       if (a.stage === "follow_up") wanted.add(a.candidateId);
     }
   }
-  const missing = [...wanted].filter((id) => !state.candidates.has(id));
-  if (missing.length > 0) {
-    const people = await backend.candidatesByIds(actor, missing);
-    const added: Candidate[] = [];
-    for (const id of missing) {
+  const stale = [...wanted].filter((id) => now - (state.candidates.get(id) ?? 0) > CANDIDATE_TTL_MS);
+  if (stale.length > 0) {
+    const people = await backend.candidatesByIds(actor, stale);
+    const fresh: Candidate[] = [];
+    for (const id of stale) {
       // Remembered even when absent, so a deleted row is not chased forever
       // and a genuine miss can still be told from a page that never asked.
-      state.candidates.add(id);
+      state.candidates.set(id, now);
       const c = people.get(id);
-      if (c) added.push(c);
+      if (c) fresh.push(c);
     }
-    db.candidates = merge(db.candidates, added, (c) => c.id);
+    const gone = new Set(stale.filter((id) => !people.has(id)));
+    db.candidates = merge(
+      db.candidates.filter((c) => !gone.has(c.id)),
+      fresh,
+      (c) => c.id,
+    );
+  }
+
+  // Let go of people nobody has asked for in ten minutes.
+  const evict = [...state.candidates].filter(([id, at]) => now - at > CANDIDATE_EVICT_MS && !wanted.has(id));
+  if (evict.length > 0) {
+    const out = new Set(evict.map(([id]) => id));
+    for (const id of out) state.candidates.delete(id);
+    db.candidates = db.candidates.filter((c) => !out.has(c.id));
   }
 }
 

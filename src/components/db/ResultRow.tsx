@@ -1,5 +1,6 @@
 "use client";
 
+import { externalUrl } from "@/lib/url";
 import { useState } from "react";
 import Link from "next/link";
 import { addToOpening } from "@/app/actions";
@@ -215,7 +216,7 @@ export function ResultRow({
             )}
             {c.linkedinUrl && (
               <a
-                href={c.linkedinUrl}
+                href={externalUrl(c.linkedinUrl) ?? undefined}
                 target="_blank"
                 rel="noreferrer"
                 className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"

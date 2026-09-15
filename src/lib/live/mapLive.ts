@@ -3,6 +3,7 @@
  * what gets copied is visible and tested.
  */
 import type { Candidate } from "@/data/types";
+import { externalUrl } from "@/lib/url";
 
 export interface LiveResume {
   _id: string;
@@ -37,7 +38,7 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     fullName: c.fullName || "Unnamed candidate",
     email: c.email ?? null,
     phone: c.phone ?? null,
-    linkedinUrl: c.linkedinUrl ?? null,
+    linkedinUrl: externalUrl(c.linkedinUrl),
     location: c.location ?? c.locationStructured?.raw_text ?? null,
     nationality: c.nationality ?? null,
     age: typeof c.age === "number" ? c.age : null,

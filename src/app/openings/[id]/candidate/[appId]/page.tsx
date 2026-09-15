@@ -1,3 +1,4 @@
+import { externalUrl } from "@/lib/url";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
@@ -165,7 +166,7 @@ export default async function CandidateDrawer({
               <ContactRow kind="phone" value={c.phone} candidateId={c.id} openingId={id} locked={locked} />
               {c.linkedinUrl && (
                 <a
-                  href={c.linkedinUrl}
+                  href={externalUrl(c.linkedinUrl) ?? undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex w-fit items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"
