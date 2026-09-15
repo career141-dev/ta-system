@@ -46,12 +46,16 @@ if (!["127.0.0.1", "localhost", "::1"].includes(new URL(url).hostname)) {
   process.exit(1);
 }
 
-async function call(kind, fnPath, args = {}) {
+async function call(kind, fnPath, args = {}, attempt = 0) {
   const res = await fetch(`${url}/api/${kind}`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Convex ${adminKey}` },
     body: JSON.stringify({ path: fnPath, args, format: "json" }),
   });
+  if (res.status === 429 && attempt < 5) {
+    await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
+    return call(kind, fnPath, args, attempt + 1);
+  }
   const body = await res.json().catch(() => null);
   if (body?.status !== "success") throw new Error(body?.errorMessage ?? `HTTP ${res.status}`);
   return body.value;

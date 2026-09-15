@@ -30,7 +30,8 @@ const users = await convexQuery<U[]>("ta/users:listTaUsers", {});
 const azma = users.find((u) => /azma/i.test(u.fullName ?? u.name ?? u.email));
 if (!azma) throw new Error("No desk user named Azma to sign in as.");
 // The app's user ids are the backend's, mapped in data/convex/map.ts.
-const cookie = `c141_user=${azma._id}.${createHmac("sha256", secret()).update(azma._id).digest("base64url")}`;
+// Signs in through the development sign-in (lib/devSignin.ts), so this runs against a dev server with C141_DEV_SIGNIN=on.
+const cookie = `c141_dev_user=${azma._id}.${createHmac("sha256", `dev-signin:${secret()}`).update(azma._id).digest("base64url")}`;
 
 const openings = await convexQuery<{ id: string; status: string; totalApplications: number }[]>("ta/openings:list", { limit: 500 });
 const busy = openings.filter((o) => o.status === "open").sort((a, b) => b.totalApplications - a.totalApplications)[0];

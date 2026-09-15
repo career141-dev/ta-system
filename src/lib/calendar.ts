@@ -12,10 +12,12 @@ export const DAILY_CUTOFF_HOUR = 18;
 /** Holidays live here when the TA Lead can maintain them — phase 6 leaves it empty. */
 export const HOLIDAYS: string[] = [];
 
+const WEEK_MS = 7 * 24 * 3_600_000;
+
 export function isWorkingDay(d: Date): boolean {
   const day = d.getDay();
   if (day === 0 || day === 6) return false;
-  return !HOLIDAYS.includes(d.toISOString().slice(0, 10));
+  return HOLIDAYS.length === 0 || !HOLIDAYS.includes(d.toISOString().slice(0, 10));
 }
 
 /**

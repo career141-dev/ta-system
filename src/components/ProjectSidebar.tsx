@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
-import { addJobPost, signOut } from "@/app/actions";
+import { addJobPost } from "@/app/actions";
+import { SignOutButton } from "@clerk/nextjs";
 import { RAIL_TOP } from "@/lib/chrome";
 
 export interface SidebarPost {
@@ -308,11 +309,11 @@ export function ProjectSidebar({
         >
           Help
         </a>
-        <form action={signOut}>
+        <SignOutButton redirectUrl="/signin">
           <button className="w-full rounded-lg px-3.5 py-2 text-left text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink">
             Sign out
           </button>
-        </form>
+        </SignOutButton>
       </div>
     </aside>
   );

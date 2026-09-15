@@ -5,6 +5,7 @@ import { allows } from "@/lib/auth";
 import { setFollowUpStandard, setAutoShortlistScore } from "@/app/actions";
 import { inputClass } from "@/components/form";
 import { primeStore } from "@/data/prime";
+import { pendingInvites, offDeskAccounts } from "@/lib/invites";
 
 export default async function PeoplePage({
   searchParams,
@@ -27,7 +28,14 @@ export default async function PeoplePage({
           ? " Nobody is deleted — a name on a year of stage changes has to keep resolving, so someone who leaves is marked as left and comes off the pickers."
           : " Only an admin can change this."}
       </p>
-      <PeopleAdmin users={repo.users()} canEdit={canEdit} shortlistInbox={repo.shortlistInbox()} />
+      <PeopleAdmin
+        users={repo.users()}
+        canEdit={canEdit}
+        currentUserId={user.id}
+        shortlistInbox={repo.shortlistInbox()}
+        invites={canEdit ? await pendingInvites() : []}
+        otherAccounts={canEdit ? await offDeskAccounts(user.id) : []}
+      />
 
       {/* The bar for pre-shortlisting a new CV. Worth tuning once there is a
           month of scores to look at. */}
