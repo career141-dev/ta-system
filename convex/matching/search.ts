@@ -239,12 +239,21 @@ export const aiSearch = action({
       // Try Stage 1 High-Throughput Scan in Qdrant (top 200 vectors — capped to prevent DB timeout)
       try {
         const { queryCandidateVectors } = await import("../lib/qdrant.js");
-        const qdrantMatches = await queryCandidateVectors(queryEmbedding, {
+        let qdrantMatches = await queryCandidateVectors(queryEmbedding, {
           limit: 200,
           minExperience: args.minExperience,
           locationCity: args.location,
           seniorityLevel: args.seniority,
         });
+        // A filtered search that finds nobody usually means the index does not
+        // carry the field the filter reads, not that nobody matches. Ask again
+        // by meaning alone — the strict filters below still apply place, years
+        // and seniority to whoever comes back — rather than dropping to the
+        // native index, whose vectors are from a different model.
+        if (qdrantMatches.length === 0 && (args.location || args.minExperience || args.seniority)) {
+          console.warn("[aiSearch] Filtered vector search found nothing; retrying by meaning alone.");
+          qdrantMatches = await queryCandidateVectors(queryEmbedding, { limit: 200 });
+        }
 
         if (qdrantMatches.length > 0) {
           vectorCandidateIds = qdrantMatches.map((m) => ({

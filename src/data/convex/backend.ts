@@ -502,9 +502,13 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
   const proxied = found.url.match(/^\/api\/r2-file\?key=(.+)$/);
   if (!proxied) return { ok: true, url: found.url, fileName, fileType: found.fileType ?? null };
 
-  // Storage that is not configured stays not configured; asking again on every
-  // profile view spends a Node action to learn it. Re-checked after 5 minutes.
-  if (r2UnconfiguredAt && Date.now() - r2UnconfiguredAt < 5 * 60_000) {
+  // Asked, not tried: signing a link on a deployment without R2 fails inside
+  // the backend and is logged there as an uncaught error on every profile
+  // view. The answer is kept for five minutes either way.
+  if (Date.now() - r2Checked.at > 5 * 60_000) {
+    r2Checked = { at: Date.now(), configured: await convexQuery<boolean>("ta/storage:r2Configured", {}).catch(() => true) };
+  }
+  if (!r2Checked.configured) {
     return { ok: false, reason: "storage_unavailable", detail: unconfiguredDetail(fileName), fileName };
   }
 
@@ -519,7 +523,7 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
     // The SDK's words for "nothing is configured" are about HTTP labels and
     // buckets; the person reading the profile needs to know it is a setting.
     const unconfigured = /Bucket|credential|access key|R2_/i.test(message);
-    if (unconfigured) r2UnconfiguredAt = Date.now();
+    if (unconfigured) r2Checked = { at: Date.now(), configured: false };
     return {
       ok: false,
       reason: "storage_unavailable",
@@ -531,6 +535,6 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
   }
 }
 
-let r2UnconfiguredAt = 0;
+let r2Checked = { at: 0, configured: true };
 const unconfiguredDetail = (fileName: string | null) =>
   `${fileName ?? "The CV"} is stored in R2 file storage, which is not configured on this deployment (R2_BUCKET_NAME and its access keys are not set), so it cannot be opened here.`;

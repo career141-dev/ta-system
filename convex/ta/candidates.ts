@@ -16,6 +16,7 @@ import { v } from "convex/values";
 import { query, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
+import { candidateIdToPointId, candidateVectorPayload } from "../lib/vectorPayload";
 
 /**
  * A candidate row with their career attached.
@@ -298,6 +299,25 @@ export const profile = query({
         : null,
       cvText: cvTextInDb,
       cvTextInR2: !cvTextInDb && !!(resume?.rawTextKey ?? candidate.rawTextKey),
+    };
+  },
+});
+
+/**
+ * Qdrant payloads for a page of candidates, built by the same function the
+ * vector writers use — for scripts/qdrant-payload-repair.ts, which rewrites
+ * the payloads of points already in the index without re-embedding them.
+ */
+export const vectorPayloadPage = query({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), numItems: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("candidates")
+      .paginate({ cursor: args.cursor ?? null, numItems: Math.min(args.numItems ?? 400, 800) });
+    return {
+      points: page.page.map((c) => ({ pointId: candidateIdToPointId(c._id), payload: candidateVectorPayload(c) })),
+      isDone: page.isDone,
+      continueCursor: page.continueCursor,
     };
   },
 });
