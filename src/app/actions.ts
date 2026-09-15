@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
-import { getCurrentUser, SESSION_COOKIE, sessionValue } from "@/lib/session";
+import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
@@ -25,6 +25,8 @@ import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
+import { isConvex } from "@/data/mode";
+import { convexMutation } from "@/lib/convexServer";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -882,73 +884,158 @@ export async function deleteReport(formData: FormData) {
 
 // ─── People (finding 11) ─────────────────────────────────────────────────────
 
-export async function addUser(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return;
-  repo.addUser({
-    name,
-    email: String(formData.get("email") ?? "").trim(),
+// ─── People and roles — admin only ──────────────────────────────────────────
+//
+// In Convex mode the roster lives in the backend, and `repo`'s in-memory write
+// is discarded on commit — so these used to look saved and change nothing.
+// They now write through `ta/users`, which checks for an admin itself.
+
+const DESK_ROLES = ["admin", "director", "ta_lead", "ta", "ops", "client", "viewer"] as const;
+
+function personFrom(formData: FormData) {
+  const role = String(formData.get("role") ?? "ta");
+  return {
+    name: String(formData.get("name") ?? "").trim(),
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
     phone: String(formData.get("phone") ?? "").trim() || null,
     routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
-    role: String(formData.get("role") ?? "ta") as import("@/data/types").Role,
-  });
-  revalidatePath("/people");
+    role: (DESK_ROLES as readonly string[]).includes(role) ? (role as import("@/data/types").Role) : null,
+  };
+}
+
+/** Run a roster write in the backend, then make the next read see it. */
+async function saveRoster(run: () => Promise<unknown>, done: string): Promise<never> {
+  try {
+    await run();
+  } catch (e) {
+    // The backend's own message ("last active admin", "already has an account").
+    const raw = (e as Error).message ?? "";
+    const why = raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160);
+    await back(why || "That change could not be saved.");
+  }
+  const { refreshUsers } = await import("@/data/prime");
+  await refreshUsers();
+  revalidatePath("/", "layout");
+  return back(done);
+}
+
+async function adminOnly(formData: FormData): Promise<User> {
+  const actor = await authorize(formData, "user.manage");
+  if (actor.role !== "admin") await back("Only an admin can manage people and roles.");
+  return actor;
+}
+
+export async function addUser(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const p = personFrom(formData);
+  if (!p.name) await back("A name is required.");
+  if (!p.email) await back("An email is required — it is what they sign in with.");
+  if (!p.role) await back("Pick a role.");
+  if (!isConvex()) {
+    repo.addUser({ name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+    }),
+    `${p.name} added as ${p.role}.`,
+  );
 }
 
 export async function updateUser(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  repo.updateUser(String(formData.get("userId")), {
-    name: String(formData.get("name") ?? "").trim(),
-    email: String(formData.get("email") ?? "").trim(),
-    phone: String(formData.get("phone") ?? "").trim() || null,
-    routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
-    role: String(formData.get("role") ?? "ta") as import("@/data/types").Role,
-  });
+  const actor = await adminOnly(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const p = personFrom(formData);
+  if (!userId || !p.name || !p.email || !p.role) await back("Name, email and role are all required.");
+  if (!isConvex()) {
+    repo.updateUser(userId, { name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id, userId, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+    }),
+    `${p.name} saved.`,
+  );
+}
+
+/**
+ * Invite someone with a role already decided.
+ *
+ * The roster entry is written FIRST, so the role is in place before the email
+ * is even opened. An address already on the roster keeps its record and takes
+ * the new role (and is brought back if they had left).
+ */
+export async function inviteUser(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const p = personFrom(formData);
+  if (!p.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) await back("Enter the email address to invite.");
+  if (!p.role) await back("Pick a role.");
+  const name = p.name || p.email.split("@")[0];
+  if (!isConvex()) await back("Invites need the Convex store (C141_STORE=convex).");
+
+  const existing = repo.users().find((u) => u.email.trim().toLowerCase() === p.email);
+  if (existing?.id === actor.id && p.role !== "admin") await back("You can't change your own role here.");
+  try {
+    await convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id,
+      userId: existing?.id,
+      fullName: existing && !p.name ? existing.name : name,
+      email: p.email,
+      phone: existing && !p.phone ? existing.phone : p.phone,
+      routingEmail: existing && !p.routingEmail ? existing.routingEmail : p.routingEmail,
+      taRole: p.role,
+    });
+    if (existing && !existing.isActive) {
+      await convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
+    }
+  } catch (e) {
+    const raw = (e as Error).message ?? "";
+    await back(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
+  }
+  const { refreshUsers } = await import("@/data/prime");
+  await refreshUsers();
+  revalidatePath("/", "layout");
+
+  const { sendInvite } = await import("@/lib/invites");
+  const sent = await sendInvite(p.email, p.role!);
+  await back(sent.ok ? `Invite sent to ${p.email} as ${p.role}.` : `Role saved for ${p.email}. ${sent.reason}`);
+}
+
+/** Withdraw an invite link. Their roster entry stays; mark them as left to remove access too. */
+export async function revokeUserInvite(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await adminOnly(formData);
+  const id = String(formData.get("invitationId") ?? "");
+  if (!id) await back("That invite could not be found.");
+  const { revokeInvite } = await import("@/lib/invites");
+  const r = await revokeInvite(id);
   revalidatePath("/people");
+  await back(r.ok ? "Invite revoked. Mark them as left too if they should not get in." : r.reason);
 }
 
 export async function setUserActive(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  repo.setUserActive(String(formData.get("userId")), String(formData.get("active")) === "1");
-  revalidatePath("/people");
+  const actor = await adminOnly(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const active = String(formData.get("active")) === "1";
+  if (!isConvex()) {
+    repo.setUserActive(userId, active);
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId, isActive: active }),
+    active ? "Brought back." : "Marked as left.",
+  );
 }
 
-export async function signOut() {
-  await primeStore({ allApplications: true });
-  const { cookies } = await import("next/headers");
-  (await cookies()).delete(SESSION_COOKIE);
-  redirect("/signin");
-}
-
-/**
- * Sign in as an account. Stage-one auth: no password, but a signed cookie and
- * a deliberate act, so that signing out stays signed out.
- */
-export async function signInAs(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const id = String(formData.get("userId") ?? "");
-  const user = repo.users().find((u) => u.id === id);
-  if (!user || !user.isActive) redirect("/signin");
-  const { cookies } = await import("next/headers");
-  (await cookies()).set(SESSION_COOKIE, sessionValue(user.id), {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 30,
-  });
-  redirect("/");
-}
 
 // ─── Database search (spec §6D) ──────────────────────────────────────────────
 
