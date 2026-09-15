@@ -4,6 +4,7 @@ import { ProjectHeader } from "../ProjectHeader";
 import { StatRow } from "@/components/StatRow";
 import { inputClass } from "@/components/form";
 import { primeStore } from "@/data/prime";
+import { requireSourcingSeat } from "../sourcingGate";
 
 /**
  * Spec §6.1, notebook page 4 — referees named on CVs, made searchable against
@@ -20,6 +21,7 @@ export default async function ReferencePage({
   const { id } = await params;
   const { company = "" } = await searchParams;
   await primeStore({ openingId: id });
+  await requireSourcingSeat(id);
 
   const ranked = repo.refereesForOpening(id);
   const vault = repo.linkVault(id);

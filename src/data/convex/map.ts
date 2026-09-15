@@ -249,6 +249,9 @@ const ROLES: Record<string, Role> = {
   viewer: "viewer",
 };
 
+/** This platform's roles, as `taRole` stores them. */
+const TA_ROLES = new Set<string>(["admin", "director", "ta_lead", "ta", "ops", "client", "viewer"]);
+
 export interface BackendUser {
   _id: string;
   email: string;
@@ -265,7 +268,11 @@ export interface BackendUser {
 export function mapUser(u: BackendUser): User {
   // An explicit taRole is a decision somebody made; the mapped backend role is
   // an inference. The decision wins.
-  const role = (u.taRole && ROLES[u.taRole] ? (u.taRole as Role) : ROLES[u.role]) ?? "viewer";
+  //
+  // The explicit role is checked against this platform's own roles, not the
+  // backend vocabulary in ROLES: "ta_lead" is not a backend name, so checking it
+  // there silently dropped a TA Lead back to whatever the backend role said.
+  const role = (u.taRole && TA_ROLES.has(u.taRole) ? (u.taRole as Role) : ROLES[u.role]) ?? "viewer";
   return {
     id: u._id,
     name: u.fullName,
