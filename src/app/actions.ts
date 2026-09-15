@@ -570,7 +570,7 @@ export async function setOpeningTeam(formData: FormData) {
 
 export async function addClient(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "client.manage");
+  const user = await authorize(formData, "client.manage");
   const name = String(formData.get("name") ?? "").trim();
   const industry = String(formData.get("industry") ?? "").trim() || "—";
   if (!name) return;
@@ -589,32 +589,85 @@ export async function addClient(formData: FormData) {
       ]
     : [];
 
-  repo.addClient({ name, industry, contacts });
+  let newId: string;
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    newId = (await convexMutation<string>("ta/clients:add", {
+      actorId: actor?._id,
+      name,
+      industry,
+      contacts,
+    })) ?? "";
+  } else {
+    newId = repo.addClient({ name, industry, contacts });
+  }
+
+  const intent = String(formData.get("action") ?? "save");
+
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
+
+  if (intent === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
+  }
 }
 
 export async function updateClient(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "client.manage");
+  const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const esa = String(formData.get("esaSignedAt") ?? "").trim();
-  repo.updateClient(clientId, {
-    name,
-    industry: String(formData.get("industry") ?? "").trim() || "—",
-    status: String(formData.get("status") ?? "active") as "active" | "dormant" | "archived",
-    esaSignedAt: esa ? new Date(esa).getTime() : null,
-  });
+  const industry = String(formData.get("industry") ?? "").trim() || "—";
+  const status = String(formData.get("status") ?? "active") as "active" | "dormant" | "archived";
+  const esaSignedAt = esa ? new Date(esa).getTime() : null;
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    await convexMutation("ta/clients:update", {
+      actorId: actor?._id,
+      clientId,
+      name,
+      industry,
+      status,
+      esaSignedAt,
+    });
+  } else {
+    repo.updateClient(clientId, {
+      name,
+      industry,
+      status,
+      esaSignedAt,
+    });
+  }
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
 }
 
 export async function deleteClient(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "client.manage");
+  const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
-  const res = repo.deleteClient(clientId);
+
+  const { isConvex } = await import("@/data/mode");
+  let res: { ok: boolean; openings?: number } = { ok: true };
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    res = await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", {
+      actorId: actor?._id,
+      clientId,
+    });
+  } else {
+    res = repo.deleteClient(clientId);
+  }
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
   // Refused because work is filed under it — the page says so rather than
   // pretending the press did nothing.
   if (!res.ok) redirect(`/clients?held=${res.openings}`);
@@ -623,22 +676,32 @@ export async function deleteClient(formData: FormData) {
 /** Contacts arrive as parallel arrays from the repeatable rows. */
 export async function saveContacts(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "client.manage");
+  const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
   const names = formData.getAll("contactName").map(String);
   const titles = formData.getAll("contactTitle").map(String);
   const emails = formData.getAll("contactEmail").map(String);
   const primary = String(formData.get("primary") ?? "0");
 
-  repo.setContacts(
-    clientId,
-    names.map((n, i) => ({
-      name: n.trim(),
-      title: (titles[i] ?? "").trim(),
-      email: (emails[i] ?? "").trim(),
-      isPrimary: String(i) === primary,
-    })),
-  );
+  const contacts = names.map((n, i) => ({
+    name: n.trim(),
+    title: (titles[i] ?? "").trim(),
+    email: (emails[i] ?? "").trim(),
+    isPrimary: String(i) === primary,
+  }));
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    await convexMutation("ta/clients:saveContacts", {
+      actorId: actor?._id,
+      clientId,
+      contacts,
+    });
+  } else {
+    repo.setContacts(clientId, contacts);
+  }
   revalidatePath("/clients");
 }
 
@@ -975,14 +1038,44 @@ export async function saveSearch(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "") || null;
   const count = Number(formData.get("count") ?? 0);
   if (!query) return;
-  repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count });
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    // Persist to Convex DB so saved searches survive server restarts.
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    if (actor) {
+      await convexMutation("ta/search:saveSearch", {
+        actorId: actor._id,
+        name,
+        query,
+        mode,
+        openingId: openingId ?? null,
+        count,
+      });
+    }
+  } else {
+    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count });
+  }
   revalidatePath("/database", "layout");
 }
 
 export async function deleteSearch(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
-  repo.deleteSearch(String(formData.get("searchId")));
+  const searchId = String(formData.get("searchId"));
+
+  const { isConvex } = await import("@/data/mode");
+  if (isConvex()) {
+    const user = await getCurrentUser();
+    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    if (actor) {
+      await convexMutation("ta/search:deleteSearch", { actorId: actor._id, searchId });
+    }
+  } else {
+    repo.deleteSearch(searchId);
+  }
   revalidatePath("/database", "layout");
 }
 

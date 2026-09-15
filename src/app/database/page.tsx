@@ -37,9 +37,26 @@ export default async function DatabaseHome({
     ? { titles: shelf.titles.map((t) => t.title), skills: shelf.skills, industries: shelf.industries, cities: shelf.cities, employers: shelf.employers, qualifications: [], languages: [], nationalities: [] }
     : repo.vocabulary();
   const candidates = shelf ? [] : local;
-  const saved = repo.savedSearches();
-  const mine = saved.filter((s) => s.ownerId === user.id);
-  const others = saved.filter((s) => s.ownerId !== user.id);
+
+  // Read saved searches from Convex DB (persists across restarts) in Convex
+  // mode, and from the in-memory file store otherwise.
+  let saved: { id: string; name: string; query: string; mode: "natural" | "boolean" | "meaning"; ownerId: string; openingId: string | null; createdAt: number; lastRunAt: number | null; lastResultCount: number | null; mine?: boolean }[] = [];
+  if (isConvex()) {
+    try {
+      const { convexActorForEmail, convexQuery } = await import("@/lib/convexServer");
+      const actor = await convexActorForEmail(user.email);
+      if (actor) {
+        saved = await convexQuery<typeof saved>("ta/search:savedSearches", { actorId: actor._id });
+      }
+    } catch {
+      // Non-fatal — if Convex is unreachable, show an empty list rather than crashing.
+      saved = [];
+    }
+  } else {
+    saved = repo.savedSearches().map((s) => ({ ...s, mine: s.ownerId === user.id }));
+  }
+  const mine = saved.filter((s) => s.mine !== false && (s.ownerId === user.id || s.mine === true));
+  const others = saved.filter((s) => s.mine === false || (s.ownerId !== user.id && s.mine !== true));
   const users = repo.users();
 
   const hour = new Date().getHours();

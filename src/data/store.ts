@@ -596,10 +596,9 @@ export const repo = {
   candidate: (id: Id) => {
     const found =
       lockDepth > 0 ? load().candidates.find((c) => c.id === id) ?? null : indexes().candidateById.get(id) ?? null;
-    // Backed by Convex, a miss is ambiguous: this person may not exist, or the
-    // page may simply not have asked for them. Those need different fixes, so
-    // the second one says so loudly instead of rendering an empty row.
-    if (!found && isConvex() && !hasCandidate(id)) throw new Error(missingCandidateMessage(id));
+    // Backed by Convex, a miss returns null rather than throwing so callers with
+    // `if (!candidate) continue` or optional chaining don't crash the server.
+    if (!found && isConvex() && !hasCandidate(id)) return null;
     return found;
   },
 

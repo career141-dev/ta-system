@@ -29,10 +29,13 @@ export default async function CandidatePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ msg?: string }>;
+  searchParams: Promise<{ msg?: string; from?: string }>;
 }) {
   const { id } = await params;
-  await searchParams;
+  const { from } = await searchParams;
+  const backHref = from ? decodeURIComponent(from) : null;
+  // Only a path on this site: "/x" is, "//host/x" and "/\host" are another site.
+  const safeBack = backHref && /^\/(?![\/\\])/.test(backHref) ? backHref : "/database";
   await primeStore({ candidateIds: [id] });
   const user = await pageUser("database.read");
   const c = repo.candidate(id);
@@ -82,8 +85,8 @@ export default async function CandidatePage({
 
   return (
     <main className="mx-auto max-w-[1040px] px-8 py-9">
-      <Link href="/database" className="text-[12.5px] text-ink-soft hover:text-ink">
-        ← Database
+      <Link href={safeBack} className="text-[12.5px] text-ink-soft hover:text-ink">
+        {backHref ? "← Back to results" : "← Database"}
       </Link>
 
       <header className="mt-3 flex flex-wrap items-start justify-between gap-6">

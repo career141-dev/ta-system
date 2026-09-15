@@ -274,6 +274,7 @@ async function refresh(scope: PrimeScope): Promise<void> {
     for (const id of out) state.candidates.delete(id);
     db.candidates = db.candidates.filter((c) => !out.has(c.id));
   }
+  state.version++;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
