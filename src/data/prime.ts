@@ -159,6 +159,7 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
     }
     db.candidates = merge(db.candidates, added, (c) => c.id);
   }
+  state.version++;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────

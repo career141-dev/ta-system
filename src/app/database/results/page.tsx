@@ -84,11 +84,6 @@ export default async function ResultsPage({
     const vectors = await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
     if (query.ok) {
-      // Bounded, not the whole index. Asking for every vector's similarity was
-      // affordable against a file of 755; against 77,000 in Qdrant it is a
-      // request for the entire database. The page shows 25 at a time and the
-      // spotlight counts describe the matches, so a deep-but-finite list is
-      // the same answer for far less work.
       const hits = await nearestCandidates(query.vectors[0], 1000);
       similarity = new Map(hits.map((n) => [n.id, n.similarity]));
       // The rows have to be in the working set before `repo` can read them.
@@ -164,6 +159,12 @@ export default async function ResultsPage({
     ...(mode !== "natural" ? { mode } : {}),
     ...(forOpening ? { for: forOpening } : {}),
   };
+
+  // The full URL of the current results page — passed to candidate profile so
+  // "← Back to results" returns exactly here, including page number.
+  const currentSearchParams = new URLSearchParams(extra);
+  if ((page - 1) > 0) currentSearchParams.set("page", String(page));
+  const backToResults = `${base}?${currentSearchParams.toString()}`;
 
   // Widening — only offered where it would actually find someone.
   const suggestions: { label: string; found: number; href: string }[] = [];
@@ -370,6 +371,7 @@ export default async function ResultsPage({
                     apps={appsFor(r.candidate.id)}
                     openings={openingOptions}
                     defaultOpeningId={forOpening}
+                    backHref={backToResults}
                   />
                   {i === 1 && suggestions.length > 0 && (
                     <div className="border-b border-rule bg-paper/60 px-6 py-5">

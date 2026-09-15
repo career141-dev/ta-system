@@ -31,6 +31,7 @@ export const state = {
   candidates: new Set<Id>(),
   openings: new Set<Id>(),
   all: false,
+  version: 0,
 };
 
 /** The primed working set, or null when nothing has been primed yet. */
@@ -63,5 +64,6 @@ export function resetStore(): void {
   state.candidates = new Set();
   state.openings = new Set();
   state.all = false;
+  state.version++;
   invalidate();
 }

@@ -52,6 +52,7 @@ export function ResultRow({
   apps,
   openings,
   defaultOpeningId,
+  backHref,
 }: {
   candidate: Candidate;
   /** The same fit score the lists use. Only present when the search is tied
@@ -64,6 +65,8 @@ export function ResultRow({
   apps: RowApp[];
   openings: { id: string; label: string }[];
   defaultOpeningId: string | null;
+  /** The search results URL to return to from the candidate profile. */
+  backHref?: string;
 }) {
   const [allRoles, setAllRoles] = useState(false);
   const [allSkills, setAllSkills] = useState(false);
@@ -91,7 +94,10 @@ export function ResultRow({
                 a link to "#" looks clickable and does nothing. */}
             {/* Their record in the platform. LinkedIn is linked further along
                 the row, as the outside source it is. */}
-            <Link href={`/candidates/${c.id}`} className="text-[15px] font-semibold text-accent hover:underline">
+            <Link
+              href={`/candidates/${c.id}${backHref ? `?from=${encodeURIComponent(backHref)}` : ""}`}
+              className="text-[15px] font-semibold text-accent hover:underline"
+            >
               {c.fullName}
             </Link>
             {fit && <FitChip score={fit} />}
