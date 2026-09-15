@@ -29,7 +29,13 @@ for (const file of files) {
   const r = spawnSync(
     process.execPath,
     ["--import", rel(path.join(here, "alias.mjs")), rel(path.join(here, file))],
-    { stdio: "inherit", cwd: path.resolve(here, "..") },
+    {
+      stdio: "inherit",
+      cwd: path.resolve(here, ".."),
+      // The desk's rules are tested against the in-memory JSON store; the running
+      // app refuses it (src/data/mode.ts) unless both of these are set.
+      env: { ...process.env, C141_STORE: "json", C141_TEST_RUN: "1" },
+    },
   );
   if (r.status !== 0) { failed++; bad.push(label); }
 }

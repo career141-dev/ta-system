@@ -428,6 +428,10 @@ export default defineSchema({
     publishedAt: v.optional(v.string()),
     filledAt: v.optional(v.string()),
     updatedAt: v.string(),
+    // TA System — package notes the lead writes on the opening, and every
+    // place it can be worked from (`location` holds the first, for the engines).
+    packageNotes: v.optional(v.string()),
+    taLocations: v.optional(v.array(v.string())),
   })
     .index("by_keyword", ["keyword"])
     .index("by_status", ["status"])
@@ -645,6 +649,10 @@ export default defineSchema({
     relationship: v.optional(v.string()),
     notes: v.optional(v.string()),
     createdAt: v.string(),
+    // TA System.
+    contactable: v.optional(v.boolean()),
+    lastContactedAt: v.optional(v.number()),
+    extractedAt: v.optional(v.number()),
   })
     .index("by_candidateId", ["candidateId"]),
 
@@ -786,6 +794,16 @@ export default defineSchema({
     hasEmbedding: v.optional(v.boolean()),
     candidateQuestions: v.optional(v.string()),
     customCallData: v.optional(v.any()),
+    // TA System — fields the desk records that extraction does not. Salaries
+    // arrive as the candidate said them ("250k", "LKR 250,000 plus car"), so the
+    // words are kept alongside the numbers the engines read.
+    nationality: v.optional(v.string()),
+    age: v.optional(v.number()),
+    gender: v.optional(v.string()),
+    englishLevel: v.optional(v.number()),
+    cvFileName: v.optional(v.string()),
+    taCurrentSalaryText: v.optional(v.string()),
+    taExpectedSalaryText: v.optional(v.string()),
   })
     .index("by_email", ["email"])
     .index("by_phone", ["phone"])
@@ -956,6 +974,9 @@ export default defineSchema({
     statusA: v.optional(v.union(v.string(), v.null())),
     statusB: v.optional(v.union(v.string(), v.null())),
     droppedOutReason: v.optional(v.string()),
+    // TA System — a recruiter's rating and running notes on this application.
+    rating: v.optional(v.union(v.number(), v.null())),
+    taNotes: v.optional(v.array(v.string())),
   })
     .index("by_jobId", ["jobId"])
     .index("by_job_stage", ["jobId", "currentStage"])
@@ -989,6 +1010,8 @@ export default defineSchema({
     isBackwardMove: v.optional(v.boolean()),
 
     createdAt: v.number(),
+    // TA System — who acted, in the desk's own terms (director, client).
+    taActorType: v.optional(v.string()),
   })
     .index("by_application", ["applicationId"])
     .index("by_candidate", ["candidateId"])
@@ -2462,6 +2485,71 @@ export default defineSchema({
     recordedBy: v.id("users"),
     recordedAt: v.number(),
   }).index("by_application", ["applicationId"]),
+
+
+  // ─── TA System tables with no counterpart in the pipeline backend ─────────
+
+  /** Stored alerts (escalations a call has not yet cleared). Computed alerts
+   *  are not stored — see src/lib/sla.ts. */
+  taAlerts: defineTable({
+    kind: v.string(),
+    subjectType: v.string(),
+    subjectId: v.string(),
+    assignedTo: v.id("users"),
+    raisedAt: v.number(),
+    dueAt: v.number(),
+    resolvedAt: v.optional(v.union(v.number(), v.null())),
+    detail: v.string(),
+  }).index("by_subject", ["subjectId"]),
+
+  /** Follow-up messages and calls a recruiter recorded against an application.
+   *  Separate from `communications`, which is the engines' own message log. */
+  taOutreach: defineTable({
+    applicationId: v.id("applications"),
+    candidateId: v.id("candidates"),
+    direction: v.union(v.literal("out"), v.literal("in")),
+    channel: v.string(),
+    attempt: v.number(),
+    to: v.optional(v.union(v.string(), v.null())),
+    subject: v.optional(v.union(v.string(), v.null())),
+    body: v.string(),
+    sentAt: v.optional(v.union(v.number(), v.null())),
+    byUserId: v.optional(v.union(v.id("users"), v.null())),
+    createdAt: v.number(),
+    callOutcome: v.optional(v.union(v.string(), v.null())),
+    promisedAt: v.optional(v.union(v.number(), v.null())),
+  }).index("by_application", ["applicationId"]),
+
+  /** Screening calls run from the desk (simulation, assisted, live). The
+   *  voice agent's own call records stay in `aiCalls`. */
+  taScreeningCalls: defineTable({
+    applicationId: v.id("applications"),
+    candidateId: v.id("candidates"),
+    openingId: v.id("jobs"),
+    mode: v.string(),
+    status: v.string(),
+    stateVersion: v.number(),
+    consent: v.optional(v.union(v.string(), v.null())),
+    consentAt: v.optional(v.union(v.number(), v.null())),
+    consentText: v.optional(v.union(v.string(), v.null())),
+    answers: v.array(v.any()),
+    transcript: v.optional(v.union(v.string(), v.null())),
+    durationSeconds: v.optional(v.union(v.number(), v.null())),
+    applied: v.array(v.string()),
+    conflicts: v.array(v.object({ field: v.string(), existing: v.string(), heard: v.string() })),
+    startedBy: v.id("users"),
+    startedAt: v.number(),
+    endedAt: v.optional(v.union(v.number(), v.null())),
+    failureReason: v.optional(v.union(v.string(), v.null())),
+  }).index("by_application", ["applicationId"]),
+
+  /** Desk settings as key and value — the pre-shortlist score, the standard
+   *  follow-up questions, the shortlist inbox. */
+  taSettings: defineTable({
+    key: v.string(),
+    value: v.string(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
 }, { schemaValidation: false });
 

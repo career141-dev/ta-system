@@ -10,45 +10,9 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
+import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
 
-/** An opening as the TA platform reads it. Legacy fields are carried through
- *  unchanged so nothing is lost in translation. */
-function projectOpening(job: Doc<"jobs">) {
-  return {
-    id: job._id as string,
-    title: job.title,
-    clientId: (job.clientId ?? null) as string | null,
-    clientName: job.clientName,
-    clientIndustry: job.clientIndustry,
-    jdMarkdown: job.jobDescription,
-    jdStatus: job.jdStatus ?? null,
-    jdApprovedAt: job.jdApprovedAt ?? null,
-    keyword: job.keyword,
-    locations: job.location ? [job.location] : [],
-    targetNationalities: job.targetNationalities ?? [],
-    targetGender: job.targetGender ?? null,
-    headcount: job.headcount ?? 1,
-    priorityTier: job.priorityTier ?? null,
-    positionStatus: job.positionStatus ?? null,
-    status: job.status,
-    seniorityLevel: job.seniorityLevel,
-    requiredSkills: job.requiredSkills ?? [],
-    niceToHaveSkills: job.niceToHaveSkills ?? [],
-    experienceMinYears: job.experienceMinYears ?? null,
-    experienceMaxYears: job.experienceMaxYears ?? null,
-    followUpQuestions: job.followUpQuestions ?? [],
-    taLeadId: (job.taLeadId ?? null) as string | null,
-    assignedTaIds: (job.assignedTaIds ?? []) as string[],
-    primaryRecruiterId: job.primaryRecruiterId as string,
-    stageCounts: job.stageCounts ?? {},
-    totalApplications: job.totalApplications ?? 0,
-    valueOnProgressing: job.valueOnProgressing ?? null,
-    valueOfPlacement: job.valueOfPlacement ?? null,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-  };
-}
 
 export const list = query({
   args: {

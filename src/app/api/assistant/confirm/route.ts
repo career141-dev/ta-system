@@ -1,9 +1,12 @@
+import { primeStore } from "@/data/prime";
 import { revalidatePath } from "next/cache";
 import { currentUser } from "@/lib/session";
 import { execute } from "@/lib/deskActions";
 
 /** Runs a change the person has confirmed in the Ask chat. Checked again in full. */
 export async function POST(req: Request) {
+  // Load the store before reading it — this route has no page to do it first.
+  await primeStore({ allApplications: true, followUps: true });
   const user = await currentUser();
   if (!user || !user.isActive) return Response.json({ ok: false, message: "Sign in first." }, { status: 401 });
   let token = "";

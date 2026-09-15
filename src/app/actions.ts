@@ -8,7 +8,13 @@ import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
-import { redirect } from "next/navigation";
+import { redirect as nextRedirect } from "next/navigation";
+import { withRealIds } from "@/data/primeState";
+
+/** Redirect, with any id created in this action swapped for the one the database gave it. */
+function redirect(url: string): never {
+  return nextRedirect(withRealIds(url));
+}
 import { after } from "next/server";
 import {
   generateJdText,

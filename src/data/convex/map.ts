@@ -23,7 +23,7 @@ import type {
   Stage,
   User,
 } from "@/data/types";
-import { mapCandidate, type LiveCandidate, type LiveResume } from "@/lib/live/mapLive";
+import { mapCandidate, type LiveCandidate, type LiveResume } from "../../lib/live/mapLive";
 
 export { mapCandidate };
 export type { LiveCandidate, LiveResume };
@@ -99,21 +99,19 @@ export function mapOpening(o: BackendOpening): MappedOpening {
     id: o.id,
     clientId: o.clientId ?? "",
     title: o.title,
-    // Neither exists in the backend. Left blank rather than invented: an
-    // invented position code would look like a real one on a report.
-    positionCode: "",
-    jobOrderNumber: "",
+    positionCode: typeof o.positionCode === "string" ? o.positionCode : "",
+    jobOrderNumber: typeof o.jobOrderNumber === "string" ? o.jobOrderNumber : "",
     jdMarkdown: o.jdMarkdown ?? "",
     followUpQuestions: o.followUpQuestions ?? [],
     jdStatus: (o.jdStatus as Opening["jdStatus"]) ?? "draft",
-    jdApprovedBy: null,
+    jdApprovedBy: typeof o.jdApprovedBy === "string" ? o.jdApprovedBy : null,
     jdApprovedAt: o.jdApprovedAt ?? null,
-    briefId: null,
+    briefId: typeof o.briefId === "string" ? o.briefId : null,
 
     salaryMin: numOrNull(o.salaryMin),
     salaryMax: numOrNull(o.salaryMax),
     salaryCurrency: typeof o.salaryCurrency === "string" ? o.salaryCurrency : "LKR",
-    packageNotes: "",
+    packageNotes: typeof o.packageNotes === "string" ? o.packageNotes : "",
 
     targetNationalities: o.targetNationalities ?? [],
     targetGender: o.targetGender ?? null,
@@ -126,15 +124,15 @@ export function mapOpening(o: BackendOpening): MappedOpening {
 
     assignedTaIds: o.assignedTaIds ?? [],
     taLeadId: o.taLeadId ?? o.primaryRecruiterId ?? "",
-    directorId: null,
+    directorId: typeof o.directorId === "string" ? o.directorId : null,
 
-    requirementReceivedAt: ms(o.createdAt) || null,
-    assignedAt: null,
-    closedAt: null,
+    requirementReceivedAt: numOrNull(o.requirementReceivedAt) ?? (ms(o.createdAt) || null),
+    assignedAt: numOrNull(o.assignedAt),
+    closedAt: numOrNull(o.closedAt),
 
     valueOnProgressing: o.valueOnProgressing ?? null,
     valueOfPlacement: o.valueOfPlacement ?? null,
-    valueLost: null,
+    valueLost: numOrNull(o.valueLost),
 
     status: OPENING_STATUS[o.status] ?? "open",
     createdAt: ms(o.createdAt),
@@ -208,23 +206,23 @@ export function mapApplication(a: BackendApplication): Application {
     ownerTaId: a.ownerTaId,
     shortlistedAt: a.shortlistedAt,
     setNumber: a.setNumber,
-    rating: null,
-    notes: [],
+    rating: numOrNull(a.rating),
+    notes: Array.isArray(a.notes) ? (a.notes as string[]) : [],
 
-    statusA: null,
-    statusB: null,
-    rankTier: null,
-    rankWeight: null,
+    statusA: typeof a.statusA === "string" ? a.statusA : null,
+    statusB: typeof a.statusB === "string" ? a.statusB : null,
+    rankTier: typeof a.rankTier === "string" ? a.rankTier : null,
+    rankWeight: numOrNull(a.rankWeight),
 
-    rejectedBy: null,
+    rejectedBy: typeof a.rejectedBy === "string" ? a.rejectedBy : null,
     rejectReason: typeof a.rejectReason === "string" ? a.rejectReason : null,
     droppedOutReason: typeof a.droppedOutReason === "string" ? a.droppedOutReason : null,
 
     isAddOn: a.isAddOn ?? false,
-    addedOnAt: null,
-    backupForApplicationId: null,
-    offerDeclinedAt: null,
-    offerDeclineReason: null,
+    addedOnAt: numOrNull(a.addedOnAt),
+    backupForApplicationId: typeof a.backupForApplicationId === "string" ? a.backupForApplicationId : null,
+    offerDeclinedAt: numOrNull(a.offerDeclinedAt),
+    offerDeclineReason: typeof a.offerDeclineReason === "string" ? a.offerDeclineReason : null,
 
     createdAt: a.createdAt,
     lastStageChangedAt: a.lastStageChangedAt,

@@ -136,3 +136,52 @@ export function resetStore(): void {
   state.version++;
   invalidate();
 }
+
+// ─── Saving ──────────────────────────────────────────────────────────────────
+
+import type { CommitOp } from "./unitOfWork";
+
+/**
+ * How the store saves in Convex mode. Registered by prime.ts, which is where
+ * the Convex client lives; the store itself must not import it, because the
+ * unit tests load the store in plain Node where server-only modules throw.
+ */
+let committer: ((ops: CommitOp[]) => { ids: Record<string, string> }) | null = null;
+
+export function setCommitter(fn: typeof committer): void {
+  committer = fn;
+}
+
+export function getCommitter(): typeof committer {
+  return committer;
+}
+
+/** Mark the working set changed, so derived indexes rebuild. */
+export function bumpPrimed(): void {
+  state.version++;
+}
+
+// ─── Temporary ids ───────────────────────────────────────────────────────────
+
+/**
+ * The store names a new row before it is saved (`op_k2x9…`) and the database
+ * gives it its real id when it is. Code that created the row still holds the
+ * first name — to redirect to it, or to look it up again in the same action —
+ * so every rename is remembered for the life of the process and resolved on
+ * the way back in (see withIdAliases in store.ts, and actions' redirect).
+ */
+const aliases = new Map<string, string>();
+
+export function recordAliases(ids: Record<string, string>): void {
+  for (const [from, to] of Object.entries(ids)) aliases.set(from, to);
+}
+
+export function realId<T>(value: T): T {
+  return (typeof value === "string" ? (aliases.get(value) ?? value) : value) as T;
+}
+
+/** A URL or text with every temporary id in it replaced. */
+export function withRealIds(text: string): string {
+  if (aliases.size === 0) return text;
+  return text.replace(/[a-z]{1,5}_[a-z0-9]{6,12}/g, (m) => aliases.get(m) ?? m);
+}

@@ -3,7 +3,7 @@
 // Whether file storage can be used here, asked without trying to use it.
 
 import { v } from "convex/values";
-import { query } from "../_generated/server";
+import { mutation, query } from "../_generated/server";
 
 /**
  * True when every setting the R2 client needs is present.
@@ -49,7 +49,37 @@ export const countPage = query({
   handler: async (ctx, args) => {
     const page = await ctx.db
       .query(args.table as never)
-      .paginate({ cursor: args.cursor ?? null, numItems: 1000 });
+      .paginate({ cursor: args.cursor ?? null, numItems: 300 });
     return { count: page.page.length, isDone: page.isDone, continueCursor: page.continueCursor };
   },
+});
+
+/**
+ * Remove job assignments left by an end-to-end test run. Assignments are only
+ * ever revoked by the app, never deleted, so a test's own rows need this —
+ * and it deletes only assignments on openings whose client is a "C141 TEST"
+ * client, so it cannot be pointed at real work.
+ */
+export const purgeTestAssignments = mutation({
+  args: { assignmentIds: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    let removed = 0;
+    for (const id of args.assignmentIds) {
+      const aid = ctx.db.normalizeId("jobAssignments", id);
+      if (!aid) continue;
+      const a = await ctx.db.get(aid);
+      if (!a) continue;
+      const job = await ctx.db.get(a.jobId);
+      if (job && !String(job.clientName ?? "").startsWith("C141 TEST")) continue;
+      await ctx.db.delete(aid);
+      removed++;
+    }
+    return { removed };
+  },
+});
+
+/** Where to upload one brief recording — Convex's own file storage. */
+export const recordingUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => ctx.storage.generateUploadUrl(),
 });

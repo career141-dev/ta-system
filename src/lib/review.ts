@@ -12,6 +12,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { dataDir } from "@/data/dataDir";
+import { repo } from "@/data/store";
 
 export type ReviewDecision = "shortlist" | "maybe" | "reject";
 
@@ -51,13 +52,16 @@ export function reviewList(job: number): string[] {
   }
 }
 
+/** Every decision, kept in the database's settings under `review.decisions`. */
 function readAll(): ReviewRecord[] {
   try {
-    return JSON.parse(fs.readFileSync(decisionsFile(), "utf8")) as ReviewRecord[];
+    return JSON.parse(repo.setting(DECISIONS_KEY, "[]")) as ReviewRecord[];
   } catch {
     return [];
   }
 }
+
+const DECISIONS_KEY = "review.decisions";
 
 export function reviewDecisions(reviewerId: string, job: number): Map<string, ReviewRecord> {
   return new Map(readAll().filter((r) => r.reviewerId === reviewerId && r.job === job).map((r) => [r.candidateId, r]));
@@ -67,10 +71,7 @@ export function saveReviewDecision(rec: Omit<ReviewRecord, "at">) {
   if (!reviewList(rec.job).includes(rec.candidateId)) throw new Error("Not on this review list.");
   const all = readAll().filter((r) => !(r.reviewerId === rec.reviewerId && r.job === rec.job && r.candidateId === rec.candidateId));
   all.push({ ...rec, note: rec.note.slice(0, 300), at: Date.now() });
-  fs.mkdirSync(dir(), { recursive: true });
-  const tmp = `${decisionsFile()}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(all, null, 1));
-  fs.renameSync(tmp, decisionsFile());
+  repo.setSetting(DECISIONS_KEY, JSON.stringify(all));
 }
 
 export interface ReviewRequirements {

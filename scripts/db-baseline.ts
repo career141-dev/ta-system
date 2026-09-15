@@ -25,8 +25,15 @@ for (const table of tables) {
   let cursor: string | null = null;
   let n = 0;
   for (;;) {
-    const page: { count: number; isDone: boolean; continueCursor: string | null } =
-      await convexQuery("ta/storage:countPage", { table, cursor });
+    let page: { count: number; isDone: boolean; continueCursor: string | null } | null = null;
+    for (let attempt = 1; !page; attempt++) {
+      try {
+        page = await convexQuery("ta/storage:countPage", { table, cursor });
+      } catch (e) {
+        if (attempt >= 4) throw new Error(`Counting ${table} failed: ${(e as Error).message}`);
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+      }
+    }
     n += page.count;
     if (page.isDone || !page.continueCursor) break;
     cursor = page.continueCursor;

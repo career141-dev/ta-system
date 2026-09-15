@@ -38,7 +38,16 @@ import type { Application, Candidate, Database, Id } from "@/data/types";
 import { isConvex } from "@/data/mode";
 import { assertSafeBackend } from "@/lib/safety";
 import * as backend from "@/data/convex/backend";
-import { blank, CANDIDATE_EVICT_MS, CANDIDATE_TTL_MS, primedVocabulary, state, TABLES_TTL_MS } from "@/data/primeState";
+import { blank, CANDIDATE_EVICT_MS, CANDIDATE_TTL_MS, primedVocabulary, realId, setCommitter, state, TABLES_TTL_MS } from "@/data/primeState";
+import { convexMutationSync } from "@/data/convex/syncCall";
+import { convexQuery } from "@/lib/convexServer";
+
+/*
+ * How the store saves: one Convex transaction per write (convex/ta/commit.ts).
+ * Registered here, with the Convex client, rather than imported by the store —
+ * see primeState.setCommitter.
+ */
+setCommitter((ops) => convexMutationSync<{ ids: Record<string, string> }>("ta/commit:apply", { ops }));
 
 export { primed, primedVocabulary, hasCandidate, missingCandidateMessage, resetStore } from "@/data/primeState";
 
@@ -112,6 +121,8 @@ let loading: Promise<void> = Promise.resolve();
 
 export function primeStore(scope: PrimeScope = {}): Promise<void> {
   if (!isConvex()) return Promise.resolve();
+  // A scope may name a row by the id it had before it was saved.
+  scope = { ...scope, openingId: realId(scope.openingId ?? null), candidateIds: scope.candidateIds?.map((id) => realId(id)) };
   // Refuses a backend that could message real people or poll live mailboxes — see lib/safety.ts.
   const safe = assertSafeBackend();
   // Queue behind whatever is in flight — including a failed one, whose
@@ -183,10 +194,11 @@ async function refresh(scope: PrimeScope): Promise<void> {
    */
   if (!state.snapshot || now - state.tablesAt > TABLES_TTL_MS) {
     try {
-      const [users, openings, clients] = await Promise.all([
+      const [users, openings, clients, whole] = await Promise.all([
         backend.users(actor),
         backend.openings(actor),
-        backend.clients(actor).catch(() => []),
+        backend.clients(actor),
+        loadWholeTables(),
       ]);
       // A backend that is still starting can answer with nothing rather than an
       // error. Nobody can sign in to a desk with no users, so that is a failed
@@ -195,10 +207,14 @@ async function refresh(scope: PrimeScope): Promise<void> {
       const db = state.snapshot ?? blank();
       db.users = users;
       db.openings = openings;
-      // Real rows once the backfill has run. Before that they are derived from
-      // the openings, so the app works on a database that has only been
-      // restored — the fallback is a bridge, not a second source of truth.
-      db.clients = clients.length > 0 ? clients : clientsFrom(openings);
+      // The clients table only. Clients used to be derived from the openings'
+      // free-text names when the table was empty — ids that exist nowhere, so a
+      // change to one could never be saved.
+      db.clients = clients;
+      // Every other table the desk keeps: interviews, offers, placements,
+      // review rounds, the link vault, intake, follow-up records, settings…
+      // Before, these were never loaded, and read as empty.
+      Object.assign(db, whole);
       state.snapshot = db;
       state.tablesAt = now;
     } catch (e) {
@@ -229,20 +245,8 @@ async function refresh(scope: PrimeScope): Promise<void> {
     ]);
     state.openings.set(openingId, now);
     db.applications = [...db.applications.filter((a) => a.openingId !== openingId), ...apps];
-    if (detail) {
-      db.jobPosts = merge(db.jobPosts, detail.posts, (p) => p.id);
-      db.assignments = [
-        ...db.assignments.filter((a) => a.openingId !== openingId),
-        ...detail.assignments.map((a, i) => ({
-          id: `${openingId}:${a.userId}:${i}`,
-          openingId,
-          userId: a.userId,
-          role: a.role as never,
-          assignedAt: 0,
-          assignedBy: null,
-        })),
-      ];
-    }
+    // Posts and assignments come with the whole tables above, with their real ids.
+    void detail;
   }
 
   /*
@@ -286,6 +290,10 @@ async function refresh(scope: PrimeScope): Promise<void> {
       fresh,
       (c) => c.id,
     );
+    // Their referees, which the reference page and follow-up read by candidate.
+    const refs = await convexQuery<Database["referees"]>("ta/tables:refereesFor", { candidateIds: stale });
+    const refreshed = new Set(stale);
+    db.referees = [...db.referees.filter((r) => !refreshed.has(r.fromCandidateId)), ...refs];
   }
 
   // Let go of people nobody has asked for in ten minutes.
@@ -300,6 +308,34 @@ async function refresh(scope: PrimeScope): Promise<void> {
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
+/** Tables loaded whole, through ta/tables:page — the TA System's own records. */
+const WHOLE_TABLES = [
+  "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
+  "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "intake",
+  "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
+  "matchExclusions", "callFeedback", "interviews",
+] as const;
+
+async function loadWholeTables(): Promise<Partial<Database>> {
+  const entries = await Promise.all(
+    WHOLE_TABLES.map(async (table) => {
+      const rows: unknown[] = [];
+      let cursor: string | null = null;
+      for (let pages = 0; pages < 200; pages++) {
+        const page: { rows: unknown[]; isDone: boolean; continueCursor: string | null } = await convexQuery(
+          "ta/tables:page",
+          { table, cursor, numItems: 1000 },
+        );
+        rows.push(...page.rows);
+        if (page.isDone || !page.continueCursor) break;
+        cursor = page.continueCursor;
+      }
+      return [table, rows] as const;
+    }),
+  );
+  return Object.fromEntries(entries) as Partial<Database>;
+}
+
 /** Stages whose people `computeAlerts` reads by name (src/lib/sla.ts). */
 const ALERT_STAGES = new Set<Application["stage"]>(["follow_up", "interview", "offer", "placed"]);
 
@@ -310,32 +346,3 @@ function merge<T>(have: T[], incoming: T[], key: (x: T) => string): T[] {
   return [...byKey.values()];
 }
 
-/**
- * Clients, derived from the openings until the backfill gives them their own
- * table (plan step 5).
- *
- * The backend keeps `clientName` as free text, so "DirectFN" and "DIRECTFN"
- * are two spellings of one company. They fold together on a normalised key
- * here rather than showing as two clients — the same rule the backfill will
- * apply when it writes the real rows.
- */
-function clientsFrom(openings: { clientId: string; clientName: string; clientIndustry: string; createdAt: number }[]): Database["clients"] {
-  const byKey = new Map<string, Database["clients"][number]>();
-  for (const o of openings) {
-    const name = (o.clientName ?? "").trim();
-    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (!key) continue;
-    if (!byKey.has(key)) {
-      byKey.set(key, {
-        id: o.clientId || `client:${key}`,
-        name,
-        industry: o.clientIndustry ?? "",
-        contacts: [],
-        esaSignedAt: null,
-        status: "active",
-        createdAt: o.createdAt,
-      });
-    }
-  }
-  return [...byKey.values()];
-}

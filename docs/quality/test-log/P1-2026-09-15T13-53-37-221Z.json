@@ -1,0 +1,67 @@
+{
+  "at": "2026-09-15T13:53:51.047Z",
+  "passed": 6,
+  "failed": 4,
+  "results": [
+    {
+      "id": "P1-00",
+      "name": "a new client gets a real database id",
+      "ok": true,
+      "detail": "gx7j34h1bq36xp1b0rv9gtweqs8ee011"
+    },
+    {
+      "id": "P1-00b",
+      "name": "the temporary id still finds it in the same request",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-03",
+      "name": "the client is in the database after a reload",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-05",
+      "name": "the opening is stored with its client, lead and JD",
+      "ok": true,
+      "detail": "Untitled role, JD pending_ta_approval"
+    },
+    {
+      "id": "P2-05b",
+      "name": "the brief is linked to the opening",
+      "ok": true,
+      "detail": "m17fefm0z3qkm65v3rfe88s98s8ef00k"
+    },
+    {
+      "id": "P2-09",
+      "name": "the team is stored as active assignments",
+      "ok": true,
+      "detail": "2 assignments"
+    },
+    {
+      "id": "P1-01a",
+      "name": "a candidate added to the opening is stored as an application",
+      "ok": false,
+      "detail": "{\"ok\":true}"
+    },
+    {
+      "id": "P1-01",
+      "name": "claiming a candidate is stored: owner, set, stage",
+      "ok": false,
+      "detail": "gone"
+    },
+    {
+      "id": "P1-01b",
+      "name": "the move is in the application's history",
+      "ok": false,
+      "detail": "0 events"
+    },
+    {
+      "id": "ERR",
+      "name": "the run stopped",
+      "ok": false,
+      "detail": "Error: Convex refused ta/commit:apply: [Request ID: 22d95109ce2f1604] Server Error | Uncaught Error: \"\" is not a applications id. | "
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { primeStore } from "@/data/prime";
 import { currentUser } from "@/lib/session";
 import { askDesk, type AssistantTurn } from "@/lib/deskAssistant";
 import { looksLikeAction, propose, understand } from "@/lib/deskActions";
@@ -11,6 +12,8 @@ import { FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 const recent = new Map<string, number[]>();
 
 export async function POST(req: Request) {
+  // Load the store before reading it — this route has no page to do it first.
+  await primeStore({ allApplications: true, followUps: true });
   const user = await currentUser();
   if (!user || !user.isActive) return Response.json({ error: "Sign in first." }, { status: 401 });
   const now = Date.now();

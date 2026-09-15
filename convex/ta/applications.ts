@@ -19,36 +19,13 @@
 import { v } from "convex/values";
 import { mutation, query } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
+import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 
 const SET_SIZE = 5;
 
-function projectApplication(a: Doc<"applications">) {
-  return {
-    id: a._id as string,
-    openingId: a.jobId as string,
-    candidateId: a.candidateId as string,
-    jobPostId: (a.jobPostId ?? null) as string | null,
-    stage: toTaStage(a.currentStage),
-    backendStage: a.currentStage,
-    ownerTaId: (a.ownerTaId ?? null) as string | null,
-    shortlistedAt: a.shortlistedAt ?? null,
-    setNumber: a.setNumber ?? null,
-    answers: a.answers ?? {},
-    sourcingChannel: a.taSourcingChannel ?? null,
-    legacySourceChannel: a.sourceChannel,
-    isAddOn: a.isAddOn ?? false,
-    // Not the engine's aiMatchScore / aiMatchExplanation, nor candidateName:
-    // no screen reads them from a list, and the explanation is a paragraph per
-    // row — across the 8,378 applications the layout loads, most of a 6 MB
-    // response. The profile reads them for one person (ta/candidates:profile).
-    isActive: a.isActive,
-    createdAt: typeof a.createdAt === "number" ? a.createdAt : Date.parse(String(a.createdAt)) || 0,
-    lastStageChangedAt: a.lastStageChangedAt,
-  };
-}
 
 export const listForOpening = query({
   args: {
@@ -94,7 +71,7 @@ export const listAll = query({
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const page = await ctx.db.query("applications").paginate({
-      numItems: Math.min(args.limit ?? 4000, 4000),
+      numItems: Math.min(args.limit ?? 2000, 2000),
       cursor: args.cursor ?? null,
     });
     return {

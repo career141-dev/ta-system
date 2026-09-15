@@ -1,17 +1,14 @@
-import fs from "node:fs";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/auth";
-import { dataDir } from "@/data/dataDir";
+import { convexMutation } from "@/lib/convexServer";
 
 /** A brief is minutes, not hours. Anything past this is not a brief. */
 const MAX_BYTES = 40 * 1024 * 1024;
 
 /**
- * Standalone storage for brief recordings: a file under .data/recordings.
- * Phase 8c points this at Cloudflare R2 — the rest of the flow stores only the
- * key, so nothing above this changes.
+ * Brief recordings go to Convex file storage. The brief stores only the key
+ * (`convex:<storageId>`), so nothing above this knows where the bytes are.
  */
 export async function POST(req: Request) {
   // Only somebody signed in, who could open a role, can store a recording —
@@ -31,9 +28,13 @@ export async function POST(req: Request) {
   if (file.type && !file.type.startsWith("audio/") && file.type !== "video/webm") {
     return NextResponse.json({ error: "not_audio" }, { status: 415 });
   }
-  const dir = path.join(dataDir(), "recordings");
-  fs.mkdirSync(dir, { recursive: true });
-  const key = `rec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}.webm`;
-  fs.writeFileSync(path.join(dir, key), Buffer.from(await file.arrayBuffer()));
-  return NextResponse.json({ key });
+  const uploadUrl = await convexMutation<string>("ta/storage:recordingUploadUrl", {});
+  const put = await fetch(uploadUrl, {
+    method: "POST",
+    headers: { "content-type": file.type || "audio/webm" },
+    body: Buffer.from(await file.arrayBuffer()),
+  });
+  if (!put.ok) return NextResponse.json({ error: "upload_failed" }, { status: 502 });
+  const { storageId } = (await put.json()) as { storageId: string };
+  return NextResponse.json({ key: `convex:${storageId}` });
 }

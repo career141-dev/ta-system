@@ -29,6 +29,11 @@ export class ConvexCallError extends Error {
   }
 }
 
+/** The backend's URL and admin key, after the loopback check. Server code only. */
+export function convexConfig(): { url: string; adminKey: string } {
+  return config();
+}
+
 function config(): { url: string; adminKey: string } {
   const url = (process.env.CONVEX_SELF_HOSTED_URL || process.env.CONVEX_URL || "").trim().replace(/\/+$/, "");
   const adminKey = (process.env.CONVEX_SELF_HOSTED_ADMIN_KEY ?? "").trim();
