@@ -23,8 +23,10 @@
 
 import { repo } from "@/data/store";
 import type { Candidate, MatchRun } from "@/data/types";
+import type { Requirements } from "./scoring";
 import { candidateEmbedText, candidateVector, cosine, embedModel, ensureVectors, isMeaningBased, nearestCandidates, openingEmbedText, openingVector } from "./embed";
 import { locationFit } from "./places";
+import { isConvex } from "@/data/mode";
 import { ASSESSMENT_VERSION, assess, requirementsFor } from "./assessment";
 import { FIT_BANDS, titleScore, yearsFromHistory } from "./scoring";
 
@@ -100,10 +102,102 @@ export function failsHardRules(
   return null;
 }
 
+/**
+ * Run the backend's reverse-match engine and take its results.
+ *
+ * Returns null when the engine could not run, so the caller falls back rather
+ * than showing an empty list: "nobody matches" and "the matcher is not
+ * working" are different answers, and only one of them is about candidates.
+ */
+async function matchViaEngine(
+  o: { id: string; clientId: string; locations: string[]; targetNationalities: string[]; assignedTaIds: string[] },
+  req: Requirements,
+  trigger: MatchRun["trigger"],
+  now: number,
+): Promise<MatchResult | null> {
+  const backend = await import("@/data/convex/backend");
+  const { primeStore } = await import("@/data/prime");
+
+  const run = await backend.runReverseMatch({ id: null }, o.id);
+  if (!run.ok) return null;
+
+  const onOpening = new Set(repo.applications(o.id).map((a) => a.candidateId));
+  const excluded = repo.matchExcluded(o.id);
+  const fresh = run.results.filter((r) => !onOpening.has(r.cvId) && !excluded.has(r.cvId));
+  await primeStore({ candidateIds: fresh.map((r) => r.cvId) });
+
+  // The desk's rules, applied to the engine's output. The engine knows about
+  // fit; it knows nothing about who this client already rejected.
+  const failed: Record<string, number> = {};
+  const kept: { row: (typeof fresh)[number]; candidate: Candidate }[] = [];
+  for (const r of fresh) {
+    const c = repo.candidate(r.cvId);
+    if (!c) continue;
+    const why = failsHardRules(c, { ...o, localOnly: req.localOnly }, req.minYears, now);
+    if (why) failed[why] = (failed[why] ?? 0) + 1;
+    else kept.push({ row: r, candidate: c });
+  }
+  kept.sort((a, b) => b.row.overallScore - a.row.overallScore);
+
+  const waiting = repo.applications(o.id).filter((a) => a.stage === "matched" && !a.ownerTaId).length;
+  const room = Math.max(0, LIMITS.shown - waiting);
+  const by = o.assignedTaIds?.[0] ?? repo.users().find((u) => u.role === "director")?.id ?? "system";
+
+  let added = 0;
+  repo.batch(() => {
+    for (const k of kept.slice(0, room)) {
+      const res = repo.addCandidateToOpening(k.candidate.id, o.id, by, null, {
+        kind: "auto_match",
+        note: `Matched from the database — fit ${k.row.overallScore}. ${k.row.reason ?? ""}`.trim(),
+      });
+      if (res.ok) added++;
+    }
+  });
+
+  const failedNote = Object.entries(failed).map(([k, n]) => `${n} ${k.replace("_", " ")}`).join(", ");
+  const record: Omit<MatchRun, "id"> = {
+    openingId: o.id,
+    at: now,
+    trigger,
+    considered: run.results.length,
+    afterRules: kept.length,
+    added,
+    embedModel: "reverse-match (agent2)",
+    assessmentVersion: ASSESSMENT_VERSION,
+    note: [
+      failedNote ? `Ruled out by the desk's rules: ${failedNote}.` : null,
+      room === 0 ? `${waiting} matches already waiting, so none added.` : null,
+    ].filter(Boolean).join(" ") || null,
+  };
+  repo.saveMatchRun(record);
+  return { ok: true, run: record };
+}
+
+/**
+ * Candidates whose job IS this job, from the backend's title index.
+ *
+ * The meaning route caps at a few hundred, and a common title has more people
+ * than that — so somebody doing exactly this work can be crowded out by CVs
+ * that merely read similarly. This is the second way in, and it is why the
+ * matcher does not rely on vectors alone.
+ *
+ * The rows are primed as a side effect, because the scoring below reads them
+ * through `repo`.
+ */
+async function titleCandidates(req: Requirements, limit: number): Promise<Candidate[]> {
+  const { keywordRetrieve } = await import("./retrieve");
+  const { primeStore } = await import("@/data/prime");
+  const terms = [req.title, ...req.titleVariants.slice(0, 4)].filter(Boolean);
+  if (terms.length === 0) return [];
+  const ids = await keywordRetrieve(terms, limit);
+  await primeStore({ candidateIds: ids });
+  return ids.map((id) => repo.candidate(id)).filter((c): c is Candidate => Boolean(c));
+}
+
 export async function findDatabaseMatches(
   openingId: string,
   trigger: MatchRun["trigger"],
-  opts: { now?: number } = {},
+  opts: { now?: number; engine?: "tuned" | "local" } = {},
 ): Promise<MatchResult> {
   const now = opts.now ?? Date.now();
   const o = repo.opening(openingId);
@@ -112,9 +206,35 @@ export async function findDatabaseMatches(
   const req = requirementsFor(openingId);
   if (!req) return { ok: false, reason: "jd_not_approved" };
 
+  /*
+   * The tuned engine, where it can run.
+   *
+   * `matching/agent2:runReverseMatch` is the one the desk spent months
+   * correcting against real TA feedback: role-family classification, the
+   * current-role level gate, the domain multipliers, the calibrated vector
+   * blend. None of that is reimplemented here and none of it should be.
+   *
+   * What this platform adds on top is the part the old engine has no notion
+   * of — the desk's own rules about who may be put forward at all. Somebody
+   * this client turned down three months ago, somebody with an offer already
+   * out, somebody a TA has taken off this opening: the engine will suggest all
+   * three quite happily, and suggesting them is how an agency loses a client.
+   */
+  if (isConvex() && opts.engine !== "local") {
+    const viaEngine = await matchViaEngine(o, req, trigger, now);
+    if (viaEngine) return viaEngine;
+    // Fell through: the engine could not run. The route below still works off
+    // Qdrant and the title index, so the screen is not left empty.
+  }
+
   // 1. Nearest by meaning.
-  const cv = await refreshCandidateVectors();
-  if (!cv.ok) return { ok: false, reason: `embeddings: ${cv.reason}` };
+  // Backed by Convex the vectors are Qdrant's and were built by the
+  // reindexer; there is nothing to refresh here and 77,000 of them could not
+  // be rebuilt per run anyway.
+  if (!isConvex()) {
+    const cv = await refreshCandidateVectors();
+    if (!cv.ok) return { ok: false, reason: `embeddings: ${cv.reason}` };
+  }
   const job = await ensureVectors("openings", [{ id: o.id, text: openingEmbedText(o, repo.client(o.clientId)?.industry ?? null) }]);
   if (!job.ok) return { ok: false, reason: `embeddings: ${job.reason}` };
   const jobVec = openingVector(o.id)!;
@@ -130,11 +250,23 @@ export async function findDatabaseMatches(
   // database happens to hold (13 September review).
   const nearIds = new Set(near.map((n) => n.id));
   const titled: { id: string; title: number; similarity: number }[] = [];
-  for (const c of repo.candidates()) {
+  // The title route.
+  //
+  // On the file store this walks every candidate. Backed by Convex it cannot:
+  // the working set is not the database. The same question — "who has been
+  // this exact job" — goes to the backend's title index instead, which is what
+  // that index is for.
+  const titlePool = isConvex()
+    ? await titleCandidates(req, LIMITS.byTitle)
+    : repo.candidates();
+  for (const c of titlePool) {
     if (nearIds.has(c.id) || onOpening.has(c.id) || excluded.has(c.id)) continue;
     const t = Math.max(titleScore(c.currentTitle, req.title, req.titleVariants), ...c.workHistory.slice(0, 2).map((h) => titleScore(h.title, req.title, req.titleVariants)));
     if (t < 50) continue;
-    const v = candidateVector(c.id);
+    // Their real similarity, so the ranking stays fair against the meaning
+    // route. Backed by Convex the vector is Qdrant's and is not to hand here;
+    // 0 ranks them by title alone, which is the signal that found them.
+    const v = isConvex() ? null : candidateVector(c.id);
     titled.push({ id: c.id, title: t, similarity: v ? cosine(jobVec, v) : 0 });
   }
   titled.sort((a, b) => b.title - a.title || b.similarity - a.similarity);

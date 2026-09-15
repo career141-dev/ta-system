@@ -189,6 +189,69 @@ export async function moveStage(actor: Actor, applicationId: Id, stage: string, 
   });
 }
 
+// ─── Reverse matching ────────────────────────────────────────────────────────
+
+export interface ReverseMatchRow {
+  cvId: string;
+  overallScore: number;
+  reason: string;
+  matchedSkills?: string[];
+  missingSkills?: string[];
+  breakdown?: Record<string, number>;
+  currentRoleGate?: string;
+  roleFamilyMatch?: string;
+  locationGate?: string;
+  exclusionReason?: string | null;
+}
+
+/** What the engine last produced for an opening, without re-running it. */
+export async function reverseMatchResults(
+  actor: Actor,
+  openingId: Id,
+): Promise<{ status: string | null; matchedAt: string | null; results: ReverseMatchRow[] } | null> {
+  return convexQuery("ta/matching:reverseMatchResults", {
+    actorId: actor.id ?? undefined,
+    openingId,
+  });
+}
+
+/**
+ * Run the tuned reverse-match engine and wait for it.
+ *
+ * `runReverseMatch` is an action that embeds the job, searches Qdrant, calls a
+ * model to classify role families and writes its results onto the job — it
+ * takes tens of seconds. It is triggered and then polled rather than awaited
+ * in one call, because a request that blocks for a minute is a request that
+ * times out somewhere between here and the browser.
+ *
+ * Returns what it found, or says plainly that it is still running. A caller
+ * that cannot wait can come back to `reverseMatchResults`.
+ */
+export async function runReverseMatch(
+  actor: Actor,
+  openingId: Id,
+  opts: { taPreferences?: string; timeoutMs?: number } = {},
+): Promise<{ ok: true; results: ReverseMatchRow[] } | { ok: false; reason: string }> {
+  try {
+    await convexMutation("jobs/jobs:triggerReverseMatch", {
+      jobId: openingId,
+      ...(opts.taPreferences !== undefined ? { taPreferences: opts.taPreferences } : {}),
+    });
+  } catch (e) {
+    return { ok: false, reason: `could not start: ${(e as Error).message}` };
+  }
+
+  const deadline = Date.now() + (opts.timeoutMs ?? 90_000);
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 2500));
+    const res = await reverseMatchResults(actor, openingId).catch(() => null);
+    if (!res) continue;
+    if (res.status === "done") return { ok: true, results: res.results };
+    if (res.status === "error") return { ok: false, reason: "the matching engine reported an error" };
+  }
+  return { ok: false, reason: "still running — the results will appear when it finishes" };
+}
+
 // ─── Retrieval ───────────────────────────────────────────────────────────────
 
 /**
