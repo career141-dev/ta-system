@@ -108,8 +108,21 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
   return body.value as T;
 }
 
-export const convexQuery = <T>(path: string, args: Record<string, unknown> = {}) =>
-  call<T>("query", path, args);
+/**
+ * Queries are read-only, so one that ran past the backend's one-second limit —
+ * which happens on a cold cache after the backend restarts — is simply asked
+ * again. Mutations and actions are never retried here.
+ */
+export async function convexQuery<T>(path: string, args: Record<string, unknown> = {}): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call<T>("query", path, args);
+    } catch (e) {
+      if (attempt >= 3 || !(e instanceof ConvexCallError) || !/timed out/i.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, 250 * attempt));
+    }
+  }
+}
 
 export const convexMutation = <T>(path: string, args: Record<string, unknown> = {}) =>
   call<T>("mutation", path, args);

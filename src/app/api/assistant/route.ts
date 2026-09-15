@@ -1,7 +1,7 @@
 import { primeStore } from "@/data/prime";
 import { currentUser } from "@/lib/session";
 import { askDesk, type AssistantTurn } from "@/lib/deskAssistant";
-import { looksLikeAction, propose, understand } from "@/lib/deskActions";
+import { candidateIdsForIntent, looksLikeAction, propose, understand } from "@/lib/deskActions";
 import { FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 
 /**
@@ -37,7 +37,10 @@ export async function POST(req: Request) {
   // A change is never made here: it comes back as a proposal to confirm.
   if (looksLikeAction(question)) {
     const intent = await understand(question);
-    if (intent) return Response.json(propose(user, intent));
+    if (intent) {
+      await primeStore({ allApplications: true, followUps: true, candidateIds: candidateIdsForIntent(user, intent.job) });
+      return Response.json(propose(user, intent));
+    }
   }
 
   const r = await askDesk(user, question, history);

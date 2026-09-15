@@ -821,6 +821,12 @@ const rawRepo = {
     if (!app) return { ok: false, message: "That application no longer exists." };
 
     const from = app.stage;
+    // A person rejecting or dropping someone says why — whichever screen, or
+    // the assistant, asked. Only the form enforced it, so the assistant could
+    // reject with no reason on record.
+    if (!opts.force && actorId && (opts.actorType ?? "user") === "user" && (stage === "rejected" || stage === "dropped_out") && from !== stage && !reason?.trim()) {
+      return { ok: false, message: stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out." };
+    }
     if (!opts.force) {
       const db0 = load();
       const check = canMove(from, stage, {
@@ -2534,6 +2540,11 @@ const rawRepo = {
     const app = db.applications.find((a) => a.id === input.applicationId);
     if (!app) return { ok: false, message: "No such application." };
     if (input.salary <= 0) return { ok: false, message: "An offer needs a salary." };
+    // An offer goes to someone the client shortlisted or interviewed. The move
+    // below is forced (the offer is what allows it), so without this a New CV
+    // could be made an offer, skipping the Director and the client.
+    const route = canMove(app.stage, "offer", { hasOffer: true });
+    if (!route.ok) return { ok: false, message: `An offer can be made once the client has shortlisted them. ${route.message}` };
     if (db.offers.some((o) => o.applicationId === app.id && o.status === "pending"))
       return { ok: false, message: "There is already an open offer on this candidate." };
 
