@@ -49,10 +49,10 @@ const resolved =
   "";
 
 // ── 3. Guard ──────────────────────────────────────────────────────────────────
-function isLocalhost(url) {
+function isAllowedHost(url) {
   try {
     const { hostname } = new URL(url);
-    return hostname === "127.0.0.1" || hostname === "localhost";
+    return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "94.136.189.48";
   } catch {
     return false;
   }
@@ -61,18 +61,16 @@ function isLocalhost(url) {
 if (!resolved) {
   console.error(
     "\n🛑  BLOCKED: No Convex URL is set in environment or .env.local.\n" +
-    "    Set NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:3210 in .env.local first.\n"
+    "    Set NEXT_PUBLIC_CONVEX_URL=http://127.0.0.1:3210 (or your VPS IP) first.\n"
   );
   process.exit(1);
 }
 
-if (!isLocalhost(resolved)) {
+if (!isAllowedHost(resolved)) {
   console.error(
-    "\n🛑  BLOCKED: Refusing to run convex CLI against a non-local deployment.\n" +
+    "\n🛑  BLOCKED: Refusing to run convex CLI against a disallowed deployment.\n" +
     `    Resolved target: ${resolved}\n` +
-    "    This repo only allows 127.0.0.1 or localhost as a target.\n" +
-    "    If you meant to deploy to production, do it from the CV-Processing-\n" +
-    "    Recruitment-Pipeline-System repo, not from ta-system.\n"
+    "    This repo only allows localhost or the staging VPS (94.136.189.48) as a target.\n"
   );
   process.exit(1);
 }
