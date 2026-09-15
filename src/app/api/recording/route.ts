@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/auth";
 import { convexMutation } from "@/lib/convexServer";
+import { primeStore } from "@/data/prime";
 
 /** A brief is minutes, not hours. Anything past this is not a brief. */
 const MAX_BYTES = 40 * 1024 * 1024;
@@ -13,6 +14,8 @@ const MAX_BYTES = 40 * 1024 * 1024;
 export async function POST(req: Request) {
   // Only somebody signed in, who could open a role, can store a recording —
   // this endpoint wrote any upload from anyone to disk (audit finding 42).
+  // Knowing who is signed in reads the users table, so load it first.
+  await primeStore({});
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "signed_out" }, { status: 401 });
   if (!can(user, "opening.create").ok) return NextResponse.json({ error: "not_allowed" }, { status: 403 });

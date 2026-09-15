@@ -9,7 +9,7 @@
 // refused with "That record no longer exists".
 
 import { v } from "convex/values";
-import { query } from "../_generated/server";
+import { internalQuery } from "../_generated/server";
 import { optionalActor } from "./guard";
 import { TABLES } from "./model/tables";
 
@@ -21,7 +21,7 @@ const WHOLE = new Set([
   "matchExclusions", "callFeedback", "interviews",
 ]);
 
-export const page = query({
+export const page = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     table: v.string(),
@@ -47,7 +47,7 @@ export const page = query({
 });
 
 /** Referees for the candidates the app has loaded — 33,000 in all, so never whole. */
-export const refereesFor = query({
+export const refereesFor = internalQuery({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);

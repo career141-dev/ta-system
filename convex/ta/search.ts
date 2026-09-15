@@ -12,7 +12,7 @@
 // then this is the seam, not the feature.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
 
@@ -25,7 +25,7 @@ import { requireActor, assertFullAccess, optionalActor} from "./guard";
  * whole CV text for fifty of them is the difference between a fast screen and
  * a slow one.
  */
-export const resultRows = query({
+export const resultRows = internalQuery({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
@@ -80,7 +80,7 @@ export const resultRows = query({
  * somebody in front of a client who already turned them down is how an agency
  * loses credibility, so it has to be visible before the approach.
  */
-export const pipelineSignals = query({
+export const pipelineSignals = internalQuery({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -119,7 +119,7 @@ export const pipelineSignals = query({
  * absence: an unattributed caller would get a list where every search claims
  * to belong to nobody.
  */
-export const savedSearches = query({
+export const savedSearches = internalQuery({
   args: { actorId: v.optional(v.string()), ownerOnly: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -141,7 +141,7 @@ export const savedSearches = query({
   },
 });
 
-export const saveSearch = mutation({
+export const saveSearch = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     name: v.string(),
@@ -166,7 +166,7 @@ export const saveSearch = mutation({
   },
 });
 
-export const deleteSearch = mutation({
+export const deleteSearch = internalMutation({
   args: { actorId: v.optional(v.string()), searchId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);

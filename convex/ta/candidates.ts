@@ -13,7 +13,7 @@
 // "no text" and "text lives in R2" need different handling upstream.
 
 import { v } from "convex/values";
-import { query, type QueryCtx } from "../_generated/server";
+import { internalQuery, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
 import { candidateIdToPointId, candidateVectorPayload } from "../lib/vectorPayload";
@@ -71,7 +71,7 @@ const LIST_FIELDS = [
   "expectedSalary", "expectedSalaryCurrency",
 ] as const;
 
-export const getBatch = query({
+export const getBatch = internalQuery({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
@@ -96,7 +96,7 @@ export const getBatch = query({
   },
 });
 
-export const get = query({
+export const get = internalQuery({
   args: { actorId: v.optional(v.string()), candidateId: v.string() },
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
@@ -112,7 +112,7 @@ export const get = query({
  * whole database, not the few hundred rows a page happens to have loaded.
  * Returns ids in rank order; the page loads the records it shows.
  */
-export const quickSearch = query({
+export const quickSearch = internalQuery({
   args: { actorId: v.optional(v.string()), q: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<string[]> => {
     const user = await optionalActor(ctx, args.actorId);
@@ -132,7 +132,7 @@ export const quickSearch = query({
 
 /** Every application this person has ever been on, across all openings. This
  *  is what the "rejected on two previous openings" warning is built from. */
-export const applicationsFor = query({
+export const applicationsFor = internalQuery({
   args: { actorId: v.optional(v.string()), candidateId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -167,7 +167,7 @@ export const applicationsFor = query({
  * and "none" means there is no text at all. A caller that treats all three as
  * an empty string will quietly score people on nothing.
  */
-export const cvText = query({
+export const cvText = internalQuery({
   args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
@@ -204,7 +204,7 @@ export const cvText = query({
  * where they do not — and it says which, because a sampled number presented as
  * exact is a number somebody will later act on.
  */
-export const stats = query({
+export const stats = internalQuery({
   args: { actorId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -217,7 +217,7 @@ export const stats = query({
 
 /** Titles, skills, cities and employers the database actually contains, from a
  *  bounded sample — what the search box completes against. */
-export const vocabulary = query({
+export const vocabulary = internalQuery({
   args: { actorId: v.optional(v.string()), sample: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -265,7 +265,7 @@ export const vocabulary = query({
  * application and file-hash fallbacks, and a second copy of it would drift.
  * This only says whether there is a file and what it is.
  */
-export const profile = query({
+export const profile = internalQuery({
   args: { actorId: v.optional(v.string()), candidateId: v.string() },
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
@@ -331,7 +331,7 @@ export const profile = query({
  * vector writers use — for scripts/qdrant-payload-repair.ts, which rewrites
  * the payloads of points already in the index without re-embedding them.
  */
-export const vectorPayloadPage = query({
+export const vectorPayloadPage = internalQuery({
   args: { cursor: v.optional(v.union(v.string(), v.null())), numItems: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const page = await ctx.db

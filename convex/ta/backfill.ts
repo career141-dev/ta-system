@@ -16,7 +16,7 @@
 // only where it is empty, so a correction made by hand survives a re-run.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { optionalActor } from "./guard";
 
@@ -74,7 +74,7 @@ function campaignCodeOf(job: Doc<"jobs">): string {
 
 // ─── 1. clients ──────────────────────────────────────────────────────────────
 
-export const backfillClients = mutation({
+export const backfillClients = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     dryRun: v.optional(v.boolean()),
@@ -146,7 +146,7 @@ export const backfillClients = mutation({
 
 // ─── 2. job posts ────────────────────────────────────────────────────────────
 
-export const backfillJobPosts = mutation({
+export const backfillJobPosts = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     dryRun: v.optional(v.boolean()),
@@ -216,7 +216,7 @@ export const backfillJobPosts = mutation({
 
 // ─── 3. the TA fields on a job ───────────────────────────────────────────────
 
-export const backfillJobFields = mutation({
+export const backfillJobFields = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     dryRun: v.optional(v.boolean()),
@@ -277,7 +277,7 @@ export const backfillJobFields = mutation({
  * comes back so the caller can continue, and re-running from the start is
  * harmless.
  */
-export const backfillApplications = mutation({
+export const backfillApplications = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     dryRun: v.optional(v.boolean()),
@@ -328,7 +328,7 @@ export const backfillApplications = mutation({
  * the caller rather than here — and the job rows are too heavy to collect in
  * one go anyway.
  */
-export const status = query({
+export const status = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     cursor: v.optional(v.union(v.string(), v.null())),

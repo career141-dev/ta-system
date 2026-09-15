@@ -19,7 +19,7 @@
 // nothing else — which is exactly right for someone who has no Clerk login.
 
 import { v } from "convex/values";
-import { internalMutation, mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc } from "../_generated/dataModel";
 import { requireActor } from "./guard";
 
@@ -53,7 +53,7 @@ const taUser = v.object({
  * Idempotent: running it twice changes nothing the second time. Returns what
  * it did per address so a dry run can be read before anything is trusted.
  */
-export const upsertTaUsers = mutation({
+export const upsertTaUsers = internalMutation({
   args: {
     users: v.array(taUser),
     /** Report what would happen and write nothing. */
@@ -173,7 +173,7 @@ const isActiveAdmin = (u: Doc<"users">) => u.isActive && u.taRole === "admin";
  *
  * The desk can never be left without an active admin.
  */
-export const adminSaveUser = mutation({
+export const adminSaveUser = internalMutation({
   args: {
     actorId: v.string(),
     /** Absent to add someone new. */
@@ -254,7 +254,7 @@ export const adminSaveUser = mutation({
 });
 
 /** Mark someone as left, or bring them back. Nobody is deleted. Admin only. */
-export const adminSetUserActive = mutation({
+export const adminSetUserActive = internalMutation({
   args: { actorId: v.string(), userId: v.string(), isActive: v.boolean() },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorId);
@@ -308,7 +308,7 @@ async function allWithEmail(ctx: { db: any }, email: string): Promise<Doc<"users
  * "already has an account", and bring it onto the desk with a role.
  * One row per address; `duplicates` counts the extra records behind it.
  */
-export const listOffDeskAccounts = query({
+export const listOffDeskAccounts = internalQuery({
   args: { actorId: v.string() },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorId);
@@ -344,7 +344,7 @@ async function assertAnotherAdmin(ctx: { db: any }, excluding: Doc<"users">["_id
 }
 
 /** Everyone who can act from the TA platform, with what the routing needs. */
-export const listTaUsers = query({
+export const listTaUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const all = await ctx.db.query("users").collect();

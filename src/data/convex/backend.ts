@@ -350,17 +350,23 @@ export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, 
   // The backend caps a batch at 500; page rather than silently truncating, and
   // send the pages together — they do not depend on each other, so waiting for
   // one before asking for the next only adds up the latencies.
+  //
+  // Pages of 200, four at a time: a page of 500 reads 1,000 documents (each
+  // candidate and their résumé) and can run past the backend's one-second
+  // limit, and several such pages at once make each other slower.
   const pages: Id[][] = [];
-  for (let i = 0; i < ids.length; i += 500) pages.push(ids.slice(i, i + 500));
-  const results = await Promise.all(
-    pages.map((page) =>
-      convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
-        actorId: actor.id ?? undefined,
-        candidateIds: page,
-      }),
-    ),
-  );
-  for (const docs of results) for (const d of docs) out.set(d._id, mapCandidateDoc(d));
+  for (let i = 0; i < ids.length; i += 200) pages.push(ids.slice(i, i + 200));
+  for (let i = 0; i < pages.length; i += 4) {
+    const results = await Promise.all(
+      pages.slice(i, i + 4).map((page) =>
+        convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
+          actorId: actor.id ?? undefined,
+          candidateIds: page,
+        }),
+      ),
+    );
+    for (const docs of results) for (const d of docs) out.set(d._id, mapCandidateDoc(d));
+  }
   return out;
 }
 

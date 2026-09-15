@@ -18,7 +18,7 @@
 // would mean re-earning all of it.
 
 import { v } from "convex/values";
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 
 /**
@@ -28,7 +28,7 @@ import { api, internal } from "../_generated/api";
  * who has asked not to be contacted all stop it here with a reason the screen
  * can show.
  */
-export const sendFollowUp = action({
+export const sendFollowUp = internalAction({
   args: {
     actorId: v.string(),
     applicationId: v.id("applications"),
@@ -48,7 +48,7 @@ export const sendFollowUp = action({
     });
     if (!app) return { sent: false, via: args.channel, reason: "That application no longer exists." };
 
-    const candidate = await ctx.runQuery(api.ta.candidates.get, {
+    const candidate = await ctx.runQuery(internal.ta.candidates.get, {
       actorId: args.actorId,
       candidateId: app.candidateId,
     });
@@ -85,7 +85,7 @@ export const sendFollowUp = action({
     const email = (candidate as { email?: string }).email;
     if (!email) return { sent: false, via: "email", reason: "No email address on file." };
 
-    const mailbox = await ctx.runQuery(api.ta.dispatchRecord.senderMailbox, { jobId: app.jobId });
+    const mailbox = await ctx.runQuery(internal.ta.dispatchRecord.senderMailbox, { jobId: app.jobId });
     if (!mailbox) return { sent: false, via: "email", reason: "This opening has no recruiter to send from." };
 
     const subject = args.subject ?? "Following up on your application";
@@ -123,7 +123,7 @@ export const sendFollowUp = action({
  * it will only dial a configured test recipient. Both of those are its rules,
  * not this wrapper's, and they are why this is safe to expose.
  */
-export const startVoiceCall = action({
+export const startVoiceCall = internalAction({
   args: {
     actorId: v.string(),
     applicationId: v.id("applications"),

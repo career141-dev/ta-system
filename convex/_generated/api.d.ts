@@ -151,6 +151,7 @@ import type * as ta_search from "../ta/search.js";
 import type * as ta_stages from "../ta/stages.js";
 import type * as ta_storage from "../ta/storage.js";
 import type * as ta_tables from "../ta/tables.js";
+import type * as ta_testSweep from "../ta/testSweep.js";
 import type * as ta_users from "../ta/users.js";
 import type * as templates_messageTemplates from "../templates/messageTemplates.js";
 import type * as users_users from "../users/users.js";
@@ -305,6 +306,7 @@ declare const fullApi: ApiFromModules<{
   "ta/stages": typeof ta_stages;
   "ta/storage": typeof ta_storage;
   "ta/tables": typeof ta_tables;
+  "ta/testSweep": typeof ta_testSweep;
   "ta/users": typeof ta_users;
   "templates/messageTemplates": typeof templates_messageTemplates;
   "users/users": typeof users_users;

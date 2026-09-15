@@ -1,0 +1,151 @@
+{
+  "at": "2026-09-15T17:51:10.541Z",
+  "passed": 24,
+  "failed": 0,
+  "results": [
+    {
+      "id": "P1-00",
+      "name": "a new client gets a real database id",
+      "ok": true,
+      "detail": "gx7vk77wzn0b3vdtyhcvt8yrv18efm0m"
+    },
+    {
+      "id": "P1-00b",
+      "name": "the temporary id still finds it in the same request",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-03",
+      "name": "the client is in the database after a reload",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-05",
+      "name": "the opening is stored with its title, client, lead and JD",
+      "ok": true,
+      "detail": "QA Test Role 2026-09-15T17-50-59-753Z, JD pending_ta_approval"
+    },
+    {
+      "id": "P2-05b",
+      "name": "the brief is linked to the opening",
+      "ok": true,
+      "detail": "m178c8msdfpvhq1106k4ym6bxd8eevye"
+    },
+    {
+      "id": "P2-09",
+      "name": "the team is stored as active assignments",
+      "ok": true,
+      "detail": "2 assignments"
+    },
+    {
+      "id": "P1-01a",
+      "name": "a candidate added to the opening is stored as an application",
+      "ok": true,
+      "detail": "stage matched"
+    },
+    {
+      "id": "P1-01",
+      "name": "claiming a candidate is stored: owner, set, stage",
+      "ok": true,
+      "detail": "owner lead, set 1, follow_up"
+    },
+    {
+      "id": "P1-01b",
+      "name": "the move is in the application's history",
+      "ok": true,
+      "detail": "1 events"
+    },
+    {
+      "id": "P1-02a",
+      "name": "a change to a different field of the same record is not a conflict",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-02",
+      "name": "an edit to a field someone else just changed is refused, not overwritten",
+      "ok": true,
+      "detail": "Someone else changed this record a moment ago, so your change was not saved. Reload the page and try again."
+    },
+    {
+      "id": "P1-02b",
+      "name": "the other person's value is the one kept",
+      "ok": true,
+      "detail": "rating 4"
+    },
+    {
+      "id": "P1-02c",
+      "name": "the non-conflicting note was stored",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-03",
+      "name": "a commit that fails part-way writes nothing",
+      "ok": true,
+      "detail": "Convex refused ta/commit:apply: [Request ID: 45edd73a0bcd5fc7] Server Error\nUnca"
+    },
+    {
+      "id": "P1-09a",
+      "name": "a forced move to client shortlist is stored",
+      "ok": true,
+      "detail": "{\"ok\":true}"
+    },
+    {
+      "id": "P1-09",
+      "name": "scheduling an interview — a write followed by a stage move — no longer crashes",
+      "ok": true,
+      "detail": "{\"ok\":true,\"id\":\"iv_uwly9kqs\"}"
+    },
+    {
+      "id": "P6-01",
+      "name": "the interview is stored and the application moved to interview",
+      "ok": true,
+      "detail": "video, round 1"
+    },
+    {
+      "id": "P6-01b",
+      "name": "the interview reads back with its fields intact",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-03",
+      "name": "an offer is stored and the application moved to offer",
+      "ok": true,
+      "detail": "LKR 250000 pending"
+    },
+    {
+      "id": "P6-06",
+      "name": "a placement is stored with fee and guarantee, and the application is placed",
+      "ok": true,
+      "detail": "fee 12%, 90 days"
+    },
+    {
+      "id": "P1-04a",
+      "name": "link vault",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-04b",
+      "name": "saved searches",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-04c",
+      "name": "call feedback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-04d",
+      "name": "settings",
+      "ok": true,
+      "detail": "2026-09-15T17-50-59-753Z"
+    }
+  ]
+}

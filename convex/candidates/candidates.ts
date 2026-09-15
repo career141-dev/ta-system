@@ -498,7 +498,22 @@ export const updateCandidateFields = mutation({
       if (args.cvUploadId) {
         await ctx.db.patch(args.cvUploadId, { candidateId: survivor._id });
       }
-      // Delete the ghost profile (it was just created; it has no applications yet)
+      // Delete the ghost profile (it was just created; it has no applications yet),
+      // and the rows written for it so far. Extraction records the CV text on the
+      // ghost before this merge runs, so its resume row was left pointing at a
+      // candidate that no longer exists. The survivor's own resume is updated below.
+      for (const r of await ctx.db
+        .query("candidateResumes")
+        .withIndex("by_candidateId", (q) => q.eq("candidateId", candidateId))
+        .collect()) {
+        await ctx.db.delete(r._id);
+      }
+      for (const r of await ctx.db
+        .query("referees")
+        .withIndex("by_candidateId", (q) => q.eq("candidateId", candidateId))
+        .collect()) {
+        await ctx.db.patch(r._id, { candidateId: survivor._id });
+      }
       await ctx.db.delete(candidateId);
       targetId = survivor._id;
     }

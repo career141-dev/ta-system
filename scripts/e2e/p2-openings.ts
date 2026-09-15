@@ -27,6 +27,8 @@ const { realId } = await import("@/data/primeState");
 const { can } = await import("@/lib/auth");
 const { secret } = await import("@/lib/sign");
 const { convexMutation, convexQuery } = await import("@/lib/convexServer");
+/** Anything test data this run leaves is swept at the end (ta/testSweep). */
+const SWEEP_SINCE = Date.now();
 
 const BASE = "http://127.0.0.1:3177";
 let passed = 0;
@@ -236,6 +238,9 @@ try {
   for (const c of cleanup.filter((x) => x.kind === "client")) ops.push({ table: "clients", kind: "delete", key: c.id, before: {} });
   if (ops.length) await convexMutation("ta/commit:apply", { ops }).catch((e) => console.log(`  cleanup: ${(e as Error).message.slice(0, 160)}`));
   console.log(`  removed ${cleanup.length} records`);
+  await convexMutation<{ removed: Record<string, number> }>("ta/testSweep:sweep", { since: SWEEP_SINCE })
+    .then((r) => { const n = Object.values(r.removed).reduce((a, b) => a + b, 0); if (n) console.log(`  sweep removed ${n} leftover rows`); })
+    .catch((e) => console.log(`  sweep: ${(e as Error).message.slice(0, 160)}`));
   console.log(`\n${passed} passed, ${failed} failed`);
   fs.mkdirSync("docs/quality/test-log", { recursive: true });
   fs.writeFileSync(`docs/quality/test-log/P2-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), passed, failed, results }, null, 2));

@@ -13,7 +13,7 @@
 // `applications:createApplication`.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, optionalActor} from "./guard";
 
@@ -41,7 +41,7 @@ function project(i: Doc<"intakeItems">) {
   };
 }
 
-export const list = query({
+export const list = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     status: v.optional(v.string()),
@@ -69,7 +69,7 @@ export const list = query({
   },
 });
 
-export const get = query({
+export const get = internalQuery({
   args: { actorId: v.optional(v.string()), itemId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -79,7 +79,7 @@ export const get = query({
 });
 
 /** How many are waiting, by status — the queue's headline. */
-export const counts = query({
+export const counts = internalQuery({
   args: { actorId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -98,7 +98,7 @@ export const counts = query({
  * saying so costs one indexed read. Returning the existing row rather than
  * inserting a duplicate makes this safe to call from a retrying webhook.
  */
-export const receive = mutation({
+export const receive = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     source: v.string(),
@@ -158,7 +158,7 @@ export const receive = mutation({
 });
 
 /** Record what was read out of the file, and what dedup concluded. */
-export const setParsed = mutation({
+export const setParsed = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     itemId: v.string(),
@@ -189,7 +189,7 @@ export const setParsed = mutation({
  * makes the queue auditable after the fact — "this row is now that person".
  * Only a person reaches this, which is the whole point of the queue.
  */
-export const resolve = mutation({
+export const resolve = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     itemId: v.string(),

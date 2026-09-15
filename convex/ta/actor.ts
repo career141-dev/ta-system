@@ -19,7 +19,7 @@
 // silently recorded against nobody.
 
 import { v } from "convex/values";
-import { query } from "../_generated/server";
+import { internalQuery } from "../_generated/server";
 import { requireUser } from "../lib/permissions";
 
 /**
@@ -28,7 +28,7 @@ import { requireUser } from "../lib/permissions";
  * Returns only what the caller needs to decide what to do next — never the
  * token identifier, which is Clerk's and has no business leaving the backend.
  */
-export const lookupByEmail = query({
+export const lookupByEmail = internalQuery({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const email = args.email.trim().toLowerCase();
@@ -77,7 +77,7 @@ function project(u: {
  * through `requireUser`, which is the gate the other 13 modules call, so a
  * successful reply here means the cookie session really did authenticate.
  */
-export const whoami = query({
+export const whoami = internalQuery({
   args: { actorId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx, args.actorId ?? null);

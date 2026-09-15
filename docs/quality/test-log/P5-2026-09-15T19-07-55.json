@@ -1,0 +1,169 @@
+{
+  "at": "2026-09-15T19:08:51.498Z",
+  "passed": 27,
+  "failed": 0,
+  "results": [
+    {
+      "id": "P5-00",
+      "name": "seven test candidates are on the test opening as matches",
+      "ok": true,
+      "detail": "7 applications"
+    },
+    {
+      "id": "P5-01",
+      "name": "six shortlisted on one day all join the open set (set 1), owned and in follow-up",
+      "ok": true,
+      "detail": "sets 1,1,1,1,1,1"
+    },
+    {
+      "id": "P5-01b",
+      "name": "a second TA cannot take a candidate someone owns, and is told who",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P5-01e",
+      "name": "each shortlist writes a pipeline event",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P5-02",
+      "name": "a move the stage rules forbid is refused (follow-up straight to interview)",
+      "ok": true,
+      "detail": "Follow-up does not lead to Interview."
+    },
+    {
+      "id": "P5-03",
+      "name": "a rejection without a reason is refused",
+      "ok": true,
+      "detail": "Say why they were rejected."
+    },
+    {
+      "id": "P5-03b",
+      "name": "a rejection with a reason is saved with the reason and who",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P5-07",
+      "name": "a follow-up attempt is recorded (not sent) with channel and attempt number",
+      "ok": true,
+      "detail": "1 messages"
+    },
+    {
+      "id": "P5-08",
+      "name": "a reply is read: salary and notice fill the blank fields on the candidate",
+      "ok": true,
+      "detail": "applied current salary, expected salary, notice period; now 180,000 / 220,000 / 30d"
+    },
+    {
+      "id": "P5-09",
+      "name": "answers to the follow-up questions are saved against each question",
+      "ok": true,
+      "detail": "3 questions"
+    },
+    {
+      "id": "P5-09b",
+      "name": "a call-back outcome needs a time; with one it is saved",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P5-10",
+      "name": "an assisted screening call is started and finished, and saved as completed",
+      "ok": true,
+      "detail": "applied nothing new"
+    },
+    {
+      "id": "P5-05",
+      "name": "the end-of-day email is recorded: a review round awaiting reply, four people in director review",
+      "ok": true,
+      "detail": "C141-ARNSLA, 4 people"
+    },
+    {
+      "id": "P5-06",
+      "name": "the director's reply moves three to director shortlist and rejects one with the note",
+      "ok": true,
+      "detail": "{\"moved\":3,\"rejected\":1,\"held\":0,\"stale\":0,\"repeated\":0}"
+    },
+    {
+      "id": "P5-06s",
+      "name": "the director shortlist screen lists them",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-03b",
+      "name": "an offer cannot be made to someone still a database match",
+      "ok": true,
+      "detail": "An offer can be made once the client has shortlisted them. Database match does not lead to Offer."
+    },
+    {
+      "id": "P6-01",
+      "name": "an interview is booked and rebooked: one pending, the first cancelled, stage interview",
+      "ok": true,
+      "detail": "cancelled,pending"
+    },
+    {
+      "id": "P6-02",
+      "name": "confirmation, result, rating and feedback are saved",
+      "ok": true,
+      "detail": "passed, rating 4"
+    },
+    {
+      "id": "P6-03",
+      "name": "an offer is made after the interview: offer saved, stage offer",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-03c",
+      "name": "a second open offer on the same candidate is refused",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-04",
+      "name": "a declined offer drops the candidate out with the reason and marks the offer declined",
+      "ok": true,
+      "detail": "dropped_out"
+    },
+    {
+      "id": "P6-06",
+      "name": "a placement is recorded from the offer: stage placed, salary and join date kept",
+      "ok": true,
+      "detail": "fee 12%, guarantee 90 days"
+    },
+    {
+      "id": "P6-07",
+      "name": "with no signed ESA the default fee (12%) and guarantee (90 days) apply",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-06b",
+      "name": "the same offer cannot be placed twice",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-06s",
+      "name": "the placed candidate is on the Placed screen and their page opens",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-08",
+      "name": "the placed candidate's history holds every step",
+      "ok": true,
+      "detail": "follow_up → director_review → director_shortlist → client_shortlist → interview → interview → offer → placed"
+    },
+    {
+      "id": "P5-11",
+      "name": "the alerts screen loads for the TA",
+      "ok": true,
+      "detail": "HTTP 200"
+    }
+  ]
+}

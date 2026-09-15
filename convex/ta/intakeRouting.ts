@@ -23,7 +23,7 @@
 // copy exists only because a Convex function cannot import from src/.
 
 import { v } from "convex/values";
-import { query } from "../_generated/server";
+import { internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { optionalActor } from "./guard";
 
@@ -157,7 +157,7 @@ export interface RouteResult {
  * lost, it simply has no post and waits in that TA's queue to be placed by
  * hand.
  */
-export const routeInbound = query({
+export const routeInbound = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     to: v.string(),

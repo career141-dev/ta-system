@@ -12,7 +12,7 @@
 // plain mutation; they cannot live in the same module.
 
 import { v } from "convex/values";
-import { internalMutation, internalQuery, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { assertJobAccess, requireActor, WORKS_THE_DESK } from "./guard";
 import { Id } from "../_generated/dataModel";
 
@@ -48,7 +48,7 @@ export const createOutbound = internalMutation({
 });
 
 /** Who the recruiter is, for the "from" mailbox an email needs. */
-export const senderMailbox = query({
+export const senderMailbox = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);

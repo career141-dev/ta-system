@@ -946,7 +946,7 @@ Respond ONLY with a valid JSON object in this exact format:
        * and a decision, not a misclick.
        */
       if ((process.env.C141_TA_INTAKE ?? "").trim().toLowerCase() === "true") {
-        await ctx.runAction(api.ta.intakeReceive.receiveCv, {
+        await ctx.runAction(internal.ta.intakeReceive.receiveCv, {
           source: "email",
           receivedFrom: args.rawSender ?? null,
           // The address it arrived AT is what says whose adverts it can be
@@ -1266,7 +1266,7 @@ export const processSingleEmailAttachment = internalAction({
       // C141_TA_INTAKE on, an arriving CV joins the queue and becomes a
       // candidate only when a person admits it.
       if ((process.env.C141_TA_INTAKE ?? "").trim().toLowerCase() === "true") {
-        await ctx.runAction(api.ta.intakeReceive.receiveCv, {
+        await ctx.runAction(internal.ta.intakeReceive.receiveCv, {
           source: "email",
           receivedFrom: args.rawSender ?? null,
           toAddress: args.targetInboxEmail,

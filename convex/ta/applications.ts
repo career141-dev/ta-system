@@ -17,7 +17,7 @@
 // the pipeline events and the Meta events all still fire.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
@@ -27,7 +27,7 @@ import { executeStageTransition, PipelineStage } from "../pipeline/pipelineState
 const SET_SIZE = 5;
 
 
-export const listForOpening = query({
+export const listForOpening = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),
@@ -62,7 +62,7 @@ export const listForOpening = query({
  * pages rather than truncating — a list that looks complete and is short by
  * two hundred is worse than one that takes two round trips.
  */
-export const listAll = query({
+export const listAll = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     cursor: v.optional(v.union(v.string(), v.null())),
@@ -82,7 +82,7 @@ export const listAll = query({
   },
 });
 
-export const get = query({
+export const get = internalQuery({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -105,7 +105,7 @@ export const get = query({
  * already owns them: two TAs reaching for the same person at the same moment
  * is ordinary desk life, not an error, and the loser needs to be told who won.
  */
-export const shortlist = mutation({
+export const shortlist = internalMutation({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -175,7 +175,7 @@ async function nextSetNumber(
 }
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */
-export const moveStage = mutation({
+export const moveStage = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     applicationId: v.string(),
@@ -208,7 +208,7 @@ export const moveStage = mutation({
 });
 
 /** Take a candidate off an opening's automatic matches for good. */
-export const excludeFromMatches = mutation({
+export const excludeFromMatches = internalMutation({
   args: { actorId: v.optional(v.string()), openingId: v.string(), candidateId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);

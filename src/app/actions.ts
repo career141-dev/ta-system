@@ -52,6 +52,12 @@ import { convexMutation } from "@/lib/convexServer";
  * message, looks like a dead button. Returning to the referring page keeps the
  * person where they were and tells them why.
  */
+/** The candidate a form acts on, so the action loads their record before reading it. */
+function candidateIdsIn(formData: FormData): string[] {
+  const id = String(formData.get("candidateId") ?? "").trim();
+  return id ? [id] : [];
+}
+
 async function back(message: string): Promise<never> {
   const ref = (await headers()).get("referer");
   let to = "/";
@@ -812,7 +818,7 @@ export async function removeApplication(formData: FormData) {
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
   const openingId = String(formData.get("openingId"));
   const field = String(formData.get("field")) as "email" | "phone";
@@ -1187,7 +1193,7 @@ export async function deleteSearch(formData: FormData) {
 
 /** Put a database candidate onto an opening — lands at Matched, unclaimed. */
 export async function addToOpening(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
@@ -1580,7 +1586,7 @@ export async function admitIntake(formData: FormData) {
 }
 
 export async function mergeIntake(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.mergeIntake(id, String(formData.get("candidateId")), user.id);

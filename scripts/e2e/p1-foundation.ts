@@ -22,6 +22,8 @@ const { primeStore, resetStore } = await import("@/data/prime");
 const { repo } = await import("@/data/store");
 const { realId } = await import("@/data/primeState");
 const { convexMutation, convexQuery } = await import("@/lib/convexServer");
+/** Anything test data this run leaves is swept at the end (ta/testSweep). */
+const SWEEP_SINCE = Date.now();
 
 let passed = 0;
 let failed = 0;
@@ -244,6 +246,9 @@ try {
   } catch (e) {
     console.log(`  cleanup failed: ${(e as Error).message.slice(0, 200)}`);
   }
+  await convexMutation<{ removed: Record<string, number> }>("ta/testSweep:sweep", { since: SWEEP_SINCE })
+    .then((r) => { const n = Object.values(r.removed).reduce((a, b) => a + b, 0); if (n) console.log(`  sweep removed ${n} leftover rows`); })
+    .catch((e) => console.log(`  sweep: ${(e as Error).message.slice(0, 160)}`));
   console.log(`\n${passed} passed, ${failed} failed`);
   fs.mkdirSync("docs/quality/test-log", { recursive: true });
   fs.writeFileSync(`docs/quality/test-log/P1-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), passed, failed, results }, null, 2));

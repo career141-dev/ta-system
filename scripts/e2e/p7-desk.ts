@@ -27,6 +27,8 @@ const { repo } = await import("@/data/store");
 const { realId } = await import("@/data/primeState");
 const { secret } = await import("@/lib/sign");
 const { convexMutation } = await import("@/lib/convexServer");
+/** Anything test data this run leaves is swept at the end (ta/testSweep). */
+const SWEEP_SINCE = Date.now();
 const { reportCsv, runReport, DEFAULT_SPEC } = await import("@/lib/reporting");
 
 const BASE = "http://127.0.0.1:3177";
@@ -245,6 +247,9 @@ try {
   } catch (e) {
     console.log(`  cleanup: ${(e as Error).message.slice(0, 300)}`);
   }
+  await convexMutation<{ removed: Record<string, number> }>("ta/testSweep:sweep", { since: SWEEP_SINCE })
+    .then((r) => { const n = Object.values(r.removed).reduce((a, b) => a + b, 0); if (n) console.log(`  sweep removed ${n} leftover rows`); })
+    .catch((e) => console.log(`  sweep: ${(e as Error).message.slice(0, 160)}`));
   console.log(`\n${passed} passed, ${failed} failed`);
   fs.mkdirSync("docs/quality/test-log", { recursive: true });
   fs.writeFileSync(`docs/quality/test-log/P7-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), passed, failed, results }, null, 2));

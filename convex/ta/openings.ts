@@ -8,13 +8,13 @@
 // and must keep working until the backfill (plan step 5) has run.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
 
 
-export const list = query({
+export const list = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     /** Omit for every status. */
@@ -55,7 +55,7 @@ export const list = query({
   },
 });
 
-export const get = query({
+export const get = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -100,7 +100,7 @@ export const get = query({
  * existing `jobs` mutations and are not duplicated here, so there is one
  * writer per field rather than two that can disagree.
  */
-export const updateTaFields = mutation({
+export const updateTaFields = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),
@@ -140,7 +140,7 @@ export const updateTaFields = mutation({
  * no agreed requirements to score against, so nothing is scored at all. It is
  * therefore a real state change, not a label.
  */
-export const approveJd = mutation({
+export const approveJd = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),

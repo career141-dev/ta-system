@@ -21,7 +21,7 @@
 // The map is returned so the app can rename them in memory.
 
 import { v } from "convex/values";
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { resolveActor } from "../lib/auth";
 import { TABLES, sameValue, type ModelCx, type Row } from "./model/tables";
 
@@ -38,7 +38,7 @@ const opValidator = v.object({
 
 export class CommitConflict extends Error {}
 
-export const apply = mutation({
+export const apply = internalMutation({
   args: { actorId: v.optional(v.string()), ops: v.array(opValidator) },
   handler: async (ctx, args): Promise<{ ids: Record<string, string> }> => {
     // Called only by the TA server with the admin key. A named actor is
