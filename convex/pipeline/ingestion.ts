@@ -77,6 +77,12 @@ export const processCvIngestion = mutation({
                 changedBy: "system",
               }],
             } as any);
+            // Scored against this opening like any new applicant, so a strong
+            // returning candidate reaches the shortlist instead of waiting unread.
+            await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+              candidateId: existingFile.candidateId,
+              jobId: args.jobId,
+            });
           }
           console.log(`[processCvIngestion] Linked existing candidate ${existingFile.candidateId} to job ${args.jobId} (appId: ${appId})`);
         }

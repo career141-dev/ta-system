@@ -137,6 +137,8 @@ import type * as ta_commit from "../ta/commit.js";
 import type * as ta_dispatch from "../ta/dispatch.js";
 import type * as ta_dispatchRecord from "../ta/dispatchRecord.js";
 import type * as ta_guard from "../ta/guard.js";
+import type * as ta_inboxTest from "../ta/inboxTest.js";
+import type * as ta_ingestionTest from "../ta/ingestionTest.js";
 import type * as ta_intake from "../ta/intake.js";
 import type * as ta_intakeReceive from "../ta/intakeReceive.js";
 import type * as ta_intakeRouting from "../ta/intakeRouting.js";
@@ -289,6 +291,8 @@ declare const fullApi: ApiFromModules<{
   "ta/dispatch": typeof ta_dispatch;
   "ta/dispatchRecord": typeof ta_dispatchRecord;
   "ta/guard": typeof ta_guard;
+  "ta/inboxTest": typeof ta_inboxTest;
+  "ta/ingestionTest": typeof ta_ingestionTest;
   "ta/intake": typeof ta_intake;
   "ta/intakeReceive": typeof ta_intakeReceive;
   "ta/intakeRouting": typeof ta_intakeRouting;

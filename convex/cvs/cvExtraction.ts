@@ -989,6 +989,8 @@ export async function runCvExtraction(
   }
 
   let candidateId: any = null;
+  // Whether this run made the candidate row, so a rejected document can take it away again.
+  let createdStub = false;
 
   try {
     let url: string | null = null;
@@ -1139,6 +1141,7 @@ export async function runCvExtraction(
         extractionModel,
       });
     } else {
+      createdStub = true;
       candidateId = await ctx.runMutation(api.candidates.candidates.createCandidate, {
         rawTextKey,
         sourceChannel: sourceChannel ?? undefined,
@@ -1204,6 +1207,11 @@ export async function runCvExtraction(
       checkDeadline("pre_llm");
       const tLlmStart = Date.now();
       let extractedData = await callOpenRouterLLM(ctx, cappedRawText, cvUploadId, sourceChannel).catch((err) => {
+        // The model read the text and said it is not a CV (an invoice, a deck).
+        // That is an answer, not a failure: OCR will not change it, and falling
+        // through to OCR used to leave the document as "needs review" with an
+        // empty candidate attached.
+        if (String(err?.message ?? err).includes("NOT_A_CV")) throw err;
         console.warn("[CvExtraction] First call to OpenRouter LLM failed:", err.message || err);
         return null;
       });
@@ -1424,7 +1432,15 @@ export async function runCvExtraction(
 
     const shouldRetry = false; // Do not auto-retry 5-6 times on failure; single pass only
 
-    // NEVER delete the candidate stub. Preserve the candidate and application in New CVs so no applicant is lost!
+    // A document that is not a CV is not an applicant: remove the empty row this
+    // run created for it, and put nobody in New CVs.
+    if (isNotACV && candidateId && createdStub) {
+      await ctx.runMutation(api.candidates.candidates.deleteCandidate, { candidateId, preserveUpload: true });
+      await ctx.runMutation(api.candidates.candidates.updateCvUpload, { cvUploadId, status: "processed", clearCandidate: true });
+      candidateId = null;
+    }
+
+    // Otherwise NEVER delete the candidate stub. Preserve the candidate and application in New CVs so no applicant is lost!
     if (candidateId) {
       const fallbackName = cvUpload?.fileName
         ? cvUpload.fileName.replace(/\.[^/.]+$/, "").replace(/[_\-]/g, " ")

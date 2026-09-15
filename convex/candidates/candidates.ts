@@ -873,9 +873,12 @@ export const updateCvUpload = mutation({
     errorMessage: v.optional(v.string()),
     processingStartedAt: v.optional(v.number()),
     isHealAttempted: v.optional(v.boolean()),
+    /** Unlink the candidate — for a document found not to be a CV after its row was made. */
+    clearCandidate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const updates: Record<string, unknown> = { status: args.status };
+    if (args.clearCandidate) updates.candidateId = undefined;
     if (args.fileHash !== undefined) updates.fileHash = args.fileHash;
     if (args.candidateId !== undefined) updates.candidateId = args.candidateId;
     if (args.errorMessage !== undefined) updates.errorMessage = args.errorMessage;

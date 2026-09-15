@@ -113,6 +113,13 @@ export const processCvScoring = action({
 
     const { candidate, job, application } = data;
 
+    // Extraction keeps the CV text in file storage, not on the resume row, so
+    // read it from there; scoring without it judged every CV on its headline fields.
+    const textKey = (candidate as any).rawTextKey as string | undefined;
+    if (!(candidate as any).rawText && textKey) {
+      (candidate as any).rawText = (await ctx.runAction(api.storage.r2.getResumeRawText, { rawTextKey: textKey })) ?? undefined;
+    }
+
     // ── Step 2: Build job requirements object ──────────────────────────
     const req = {
       title:             job.title,

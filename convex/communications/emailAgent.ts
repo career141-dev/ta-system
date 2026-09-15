@@ -168,6 +168,12 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
 }
 
 async function markEmailAsRead(inboxEmail: string, messageId: string) {
+  // A test deployment reads the live mailboxes; it must not change them. A
+  // message it marks read is one the production poller then never picks up.
+  if (outboundLocked()) {
+    console.log(`[EmailAgent] Outbound lock on: left ${messageId} unread in ${inboxEmail}`);
+    return;
+  }
   const token = await getGraphToken();
   if (!token) return;
 
