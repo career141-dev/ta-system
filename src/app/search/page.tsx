@@ -2,12 +2,18 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
+import { storeMode } from "@/data/mode";
+import { convexQuery } from "@/lib/convexServer";
 
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const { q = "" } = await searchParams;
-  await primeStore({ allApplications: true });
   await pageUser("database.read");
-  const { openings, candidates } = repo.search(q);
+  // The loaded rows are a slice of the database; the people come from the
+  // database's own search, then are loaded so the list can name them.
+  const ids = storeMode() === "convex" && q.trim().length >= 2 ? await convexQuery<string[]>("ta/candidates:quickSearch", { q }) : [];
+  await primeStore({ allApplications: true, candidateIds: ids });
+  const found = repo.search(q, ids);
+  const { openings, candidates } = found;
   const clients = repo.clients();
 
   return (

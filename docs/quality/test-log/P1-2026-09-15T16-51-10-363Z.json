@@ -1,13 +1,13 @@
 {
-  "at": "2026-09-15T14:01:03.005Z",
-  "passed": 16,
-  "failed": 1,
+  "at": "2026-09-15T16:51:19.806Z",
+  "passed": 24,
+  "failed": 0,
   "results": [
     {
       "id": "P1-00",
       "name": "a new client gets a real database id",
       "ok": true,
-      "detail": "gx7tsb5n43g3wzzpggfrn5am018efryj"
+      "detail": "gx7wp7esspsh9p8255wveqsg458eehms"
     },
     {
       "id": "P1-00b",
@@ -25,13 +25,13 @@
       "id": "P2-05",
       "name": "the opening is stored with its title, client, lead and JD",
       "ok": true,
-      "detail": "QA Test Role 2026-09-15T13-59-26-924Z, JD pending_ta_approval"
+      "detail": "QA Test Role 2026-09-15T16-51-10-363Z, JD pending_ta_approval"
     },
     {
       "id": "P2-05b",
       "name": "the brief is linked to the opening",
       "ok": true,
-      "detail": "m17av6vyp4qf3fjbzmztbfmr5d8ee9k3"
+      "detail": "m179k55kb0d4c1nka2gv15zhrd8eerhv"
     },
     {
       "id": "P2-09",
@@ -85,7 +85,7 @@
       "id": "P1-03",
       "name": "a commit that fails part-way writes nothing",
       "ok": true,
-      "detail": "Convex refused ta/commit:apply: [Request ID: 531b286e773d5002] Server Error\nUnca"
+      "detail": "Convex refused ta/commit:apply: [Request ID: e0419409e6e8ff6c] Server Error\nUnca"
     },
     {
       "id": "P1-09a",
@@ -97,13 +97,55 @@
       "id": "P1-09",
       "name": "scheduling an interview — a write followed by a stage move — no longer crashes",
       "ok": true,
-      "detail": "{\"ok\":true,\"id\":\"iv_8bm4onah\"}"
+      "detail": "{\"ok\":true,\"id\":\"iv_gs7s4t3o\"}"
     },
     {
-      "id": "ERR",
-      "name": "the run stopped",
-      "ok": false,
-      "detail": "Error: Convex refused ta/applications:listAll: [Request ID: eb9599127f4ca50a] Server Error | Function execution timed out (maximum duration: 1s) | "
+      "id": "P6-01",
+      "name": "the interview is stored and the application moved to interview",
+      "ok": true,
+      "detail": "video, round 1"
+    },
+    {
+      "id": "P6-01b",
+      "name": "the interview reads back with its fields intact",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P6-03",
+      "name": "an offer is stored and the application moved to offer",
+      "ok": true,
+      "detail": "LKR 250000 pending"
+    },
+    {
+      "id": "P6-06",
+      "name": "a placement is stored with fee and guarantee, and the application is placed",
+      "ok": true,
+      "detail": "fee 12%, 90 days"
+    },
+    {
+      "id": "P1-04a",
+      "name": "link vault",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-04b",
+      "name": "saved searches",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-04c",
+      "name": "call feedback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P1-04d",
+      "name": "settings",
+      "ok": true,
+      "detail": "2026-09-15T16-51-10-363Z"
     }
   ]
 }

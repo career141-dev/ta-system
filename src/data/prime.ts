@@ -321,11 +321,19 @@ async function loadWholeTables(): Promise<Partial<Database>> {
     WHOLE_TABLES.map(async (table) => {
       const rows: unknown[] = [];
       let cursor: string | null = null;
-      for (let pages = 0; pages < 200; pages++) {
-        const page: { rows: unknown[]; isDone: boolean; continueCursor: string | null } = await convexQuery(
-          "ta/tables:page",
-          { table, cursor, numItems: 1000 },
-        );
+      // A page that runs past the backend's one-second query limit is asked
+      // for again at half the size, rather than failing the whole page load.
+      let numItems = 1000;
+      for (let pages = 0; pages < 400; pages++) {
+        let page: { rows: unknown[]; isDone: boolean; continueCursor: string | null };
+        try {
+          page = await convexQuery("ta/tables:page", { table, cursor, numItems });
+        } catch (e) {
+          if (numItems <= 50 || !/timed out|Server Error/i.test((e as Error).message)) throw e;
+          numItems = Math.floor(numItems / 2);
+          pages--;
+          continue;
+        }
         rows.push(...page.rows);
         if (page.isDone || !page.continueCursor) break;
         cursor = page.continueCursor;

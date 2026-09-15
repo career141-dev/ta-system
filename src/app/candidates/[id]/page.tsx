@@ -8,6 +8,8 @@ import { addToOpening } from "@/app/actions";
 import { dateAt } from "@/lib/format";
 import { allows } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
+import { assess } from "@/lib/assessment";
+import { FIT_BANDS } from "@/lib/scoring";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { fileSize, previewsInline, type CandidateProfile } from "@/lib/candidateProfile";
@@ -62,6 +64,17 @@ export default async function CandidatePage({
     .filter((o) => o.status === "open" && !apps.some((a) => a.openingId === o.id))
     .filter((o) => allows(user, "opening.act", { openingId: o.id, assignment: repo.assignmentFor(o.id, user.id) ?? null }));
   const clients = repo.clients();
+  // Reverse matching, candidate to openings: this person against every open
+  // opening this seat can add to, on the same assessment the opening's own
+  // screens use. Openings without an approved JD cannot be assessed and are left out.
+  const fits = mine
+    .map((o) => {
+      const a = assess(o.id, [c]);
+      return a.ok ? { opening: o, score: Math.round(a.scores.get(c.id)?.overall ?? 0) } : null;
+    })
+    .filter((x): x is { opening: (typeof mine)[number]; score: number } => !!x && x.score >= FIT_BANDS.worth)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
   const status = repo.overallStatus(c.id);
   const linkedin = externalUrl(c.linkedinUrl);
   const matchFor = new Map((profile?.matches ?? []).map((m) => [m.applicationId, m]));
@@ -328,6 +341,29 @@ export default async function CandidatePage({
               </ul>
             )}
           </section>
+
+          {fits.length > 0 && (
+            <section className="rounded-2xl border border-rule bg-surface px-5 py-4" id="fits">
+              <h2 className="text-[13px] font-semibold">Openings they may fit</h2>
+              <p className="mt-1 text-[12px] text-ink-faint">Scored against each open opening&rsquo;s approved JD.</p>
+              <ul className="mt-2 divide-y divide-rule">
+                {fits.map(({ opening: o, score }) => (
+                  <li key={o.id} className="flex items-center justify-between gap-3 py-2 text-[12.5px]">
+                    <span>
+                      <span className="tabular font-semibold">{score}</span>{" "}
+                      <span className="font-medium">{o.title}</span>
+                      <span className="text-ink-soft"> · {clients.find((x) => x.id === o.clientId)?.name}</span>
+                    </span>
+                    <form action={addToOpening}>
+                      <input type="hidden" name="candidateId" value={c.id} />
+                      <input type="hidden" name="openingId" value={o.id} />
+                      <button className="rounded-full border border-rule px-3 py-1 text-[12px] font-medium hover:bg-paper">Add</button>
+                    </form>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {mine.length > 0 && (
             <form action={addToOpening} className="rounded-2xl border border-rule bg-surface px-5 py-4">

@@ -107,6 +107,29 @@ export const get = query({
   },
 });
 
+/**
+ * The top-bar search: people by name first, then by job title — across the
+ * whole database, not the few hundred rows a page happens to have loaded.
+ * Returns ids in rank order; the page loads the records it shows.
+ */
+export const quickSearch = query({
+  args: { actorId: v.optional(v.string()), q: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<string[]> => {
+    const user = await optionalActor(ctx, args.actorId);
+    if (user) assertFullAccess(user);
+    const q = args.q.trim().slice(0, 120);
+    if (q.length < 2) return [];
+    const limit = Math.min(args.limit ?? 12, 50);
+    const [byName, byTitle] = await Promise.all([
+      ctx.db.query("candidates").withSearchIndex("search_name", (s) => s.search("fullName", q)).take(limit),
+      ctx.db.query("candidates").withSearchIndex("search_title", (s) => s.search("currentJobTitle", q)).take(limit),
+    ]);
+    const ids: string[] = [];
+    for (const c of [...byName, ...byTitle]) if (!ids.includes(c._id) && !(c as { mergedInto?: string }).mergedInto) ids.push(c._id);
+    return ids.slice(0, limit);
+  },
+});
+
 /** Every application this person has ever been on, across all openings. This
  *  is what the "rejected on two previous openings" warning is built from. */
 export const applicationsFor = query({

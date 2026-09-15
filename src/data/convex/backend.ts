@@ -236,7 +236,7 @@ export async function runReverseMatch(
   try {
     await convexMutation("jobs/jobs:triggerReverseMatch", {
       jobId: openingId,
-      ...(opts.taPreferences !== undefined ? { taPreferences: opts.taPreferences } : {}),
+      ...(opts.taPreferences !== undefined ? { customPreferences: opts.taPreferences } : {}),
     });
   } catch (e) {
     return { ok: false, reason: `could not start: ${(e as Error).message}` };

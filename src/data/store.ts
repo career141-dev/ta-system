@@ -1489,17 +1489,19 @@ const rawRepo = {
   },
 
   /** Top-nav search — openings and candidates by name. */
-  search(q: string) {
+  search(q: string, rankedIds: Id[] = []) {
     const db = load();
     const n = q.trim().toLowerCase();
     if (!n) return { openings: [], candidates: [] };
+    // People the database search ranked, in its order, then any loaded row that matches.
+    const ranked = rankedIds.map((id) => db.candidates.find((c) => c.id === id)).filter((c): c is Candidate => !!c);
     const clientName = (id: Id) => db.clients.find((c) => c.id === id)?.name ?? "";
     return {
       openings: db.openings
         .filter((o) => `${o.title} ${clientName(o.clientId)}`.toLowerCase().includes(n))
         .slice(0, 8),
-      candidates: db.candidates
-        .filter((c) => `${c.fullName} ${c.currentEmployer ?? ""} ${c.currentTitle ?? ""}`.toLowerCase().includes(n))
+      candidates: [...new Set([...ranked, ...db.candidates
+        .filter((c) => `${c.fullName} ${c.currentEmployer ?? ""} ${c.currentTitle ?? ""}`.toLowerCase().includes(n))])]
         .slice(0, 12)
         .map((c) => ({
           candidate: c,
