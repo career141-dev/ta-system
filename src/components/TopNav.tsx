@@ -6,7 +6,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import { ROLE_LABEL } from "@/data/types";
 import type { User } from "@/data/types";
-import { signOut, signInAs } from "@/app/actions";
+import { SignOutButton } from "@clerk/nextjs";
 import { HEADER_H } from "@/lib/chrome";
 import { SearchIcon } from "./icons";
 
@@ -34,11 +34,9 @@ const NAV = [
 
 export function TopNav({
   user,
-  users,
   alertCount = 0,
 }: {
   user: User;
-  users: User[];
   /** Unactioned alerts for this person — the reason to look. */
   alertCount?: number;
 }) {
@@ -142,40 +140,13 @@ export function TopNav({
               >
                 People and roles
               </Link>
-              <form action={signOut} className="border-t border-rule">
-                <button className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper">
-                  Sign out
-                </button>
-              </form>
-
-              {/* The account switcher is a development affordance and is built
-                  out of the production bundle entirely — finding 20. */}
-              {process.env.NODE_ENV !== "production" && (
-                <>
-              <div className="border-t border-rule px-3 py-1.5 text-[10.5px] uppercase tracking-wider text-ink-faint">
-                Sign in as — dev only
-              </div>
-              {/* Switching goes through the same signed sign-in the screen
-                  uses — a hand-written cookie no longer resolves to anybody. */}
-              {users.filter((u) => u.isActive).map((u) => (
-                <form key={u.id} action={signInAs}>
-                  <input type="hidden" name="userId" value={u.id} />
-                  <button
-                    type="submit"
-                    className={`flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-paper ${
-                      u.id === user.id ? "bg-paper" : ""
-                    }`}
-                  >
-                    <span className="grid h-5 w-5 place-items-center rounded-full bg-tag text-[9px] font-bold text-ink-soft">
-                      {u.initials}
-                    </span>
-                    <span className="text-[12.5px]">{u.name}</span>
-                    <span className="ml-auto text-[10.5px] text-ink-faint">{ROLE_LABEL[u.role]}</span>
+              <div className="border-t border-rule">
+                <SignOutButton redirectUrl="/signin">
+                  <button className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper">
+                    Sign out
                   </button>
-                </form>
-              ))}
-                </>
-              )}
+                </SignOutButton>
+              </div>
             </div>
           )}
         </div>

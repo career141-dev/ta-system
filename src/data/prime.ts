@@ -57,6 +57,16 @@ export interface PrimeScope {
 }
 
 /**
+ * Re-reads the roster alone. The small tables load once per process, so an
+ * account added after startup would otherwise stay invisible to sign-in until
+ * the server restarts.
+ */
+export async function refreshUsers(): Promise<void> {
+  if (!isConvex() || !state.snapshot) return;
+  state.snapshot.users = await backend.users({ id: null });
+}
+
+/**
  * Load the working set.
  *
  * Additive and idempotent: calling it again with a different scope adds to

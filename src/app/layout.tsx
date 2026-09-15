@@ -5,7 +5,7 @@ import { Flash } from "@/components/Flash";
 import { Suspense } from "react";
 import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
-import { repo } from "@/data/store";
+import { ClerkProvider } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import { primeStore } from "@/data/prime";
@@ -37,14 +37,16 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         />
       </head>
       <body suppressHydrationWarning>
-        <ConvexClientProvider>
-          {user ? <TopNav user={user} users={repo.users()} alertCount={alertCount} /> : null}
-          <Suspense fallback={null}>
-            <Flash />
-          </Suspense>
-          {children}
-          {user ? <DeskAssistant /> : null}
-        </ConvexClientProvider>
+        <ClerkProvider signInUrl="/signin" signUpUrl="/signup" afterSignOutUrl="/signin">
+          <ConvexClientProvider>
+            {user ? <TopNav user={user} alertCount={alertCount} /> : null}
+            <Suspense fallback={null}>
+              <Flash />
+            </Suspense>
+            {children}
+            {user ? <DeskAssistant /> : null}
+          </ConvexClientProvider>
+        </ClerkProvider>
       </body>
     </html>
   );
