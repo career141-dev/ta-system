@@ -11,6 +11,7 @@ import { isMeaningBased } from "@/lib/embed";
 import { dateAt } from "@/lib/format";
 import { LIMITS } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
+import { requireSourcingSeat } from "../sourcingGate";
 
 export default async function DatabasePage({
   params,
@@ -22,6 +23,7 @@ export default async function DatabasePage({
   const { id } = await params;
   const filters = await searchParams;
   await primeStore({ openingId: id });
+  await requireSourcingSeat(id);
   const user = await getCurrentUser();
   const everyone = repo
     .applications(id)

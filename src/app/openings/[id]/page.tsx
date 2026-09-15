@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/session";
 import { PIPELINE_STAGES, STAGE_LABEL, PRIORITY_TARGET, URGENT_ALERTS, type Stage } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { JdApproval } from "@/components/JdApproval";
+import { JobDetailsPanel } from "@/components/JobDetailsPanel";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
@@ -145,6 +146,17 @@ export default async function OverviewPage({
           approverLabel={o.assignedTaIds.map((t) => users.find((u) => u.id === t)?.name).join(" or ")}
           hasBrief={Boolean(brief && (brief.notesMarkdown.trim() || brief.recordingKey))}
           briefSummary={briefSummary}
+        />
+      )}
+
+      {o.requirements && (o.jdStatus === "approved" || o.requirements.editedAt) && (
+        <JobDetailsPanel
+          openingId={id}
+          title={o.title}
+          requirements={o.requirements}
+          jdApproved={o.jdStatus === "approved"}
+          canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+          editedByName={users.find((u) => u.id === o.requirements?.editedBy)?.name ?? null}
         />
       )}
 

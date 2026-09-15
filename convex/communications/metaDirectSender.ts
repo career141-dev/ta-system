@@ -7,13 +7,22 @@
  * Meta API docs: https://developers.facebook.com/docs/whatsapp/cloud-api/messages/text-messages
  */
 
+import { resolveRecipient } from "../lib/outreachSafety";
+
 export async function sendMetaFreeText(
   phoneNumberId: string,
   recipientPhone: string,
   message: string,
   accessToken: string
 ): Promise<{ success: boolean; messageId?: string; error?: string }> {
-  const cleanPhone = recipientPhone.replace(/[^0-9]/g, "");
+  // Every free-text WhatsApp — follow-ups, nudges, AI auto-replies — passes here.
+  const decision = resolveRecipient("whatsapp", recipientPhone);
+  if (!decision.ok) {
+    console.warn(`[Meta Direct Sender] ${decision.reason}`);
+    return { success: false, error: decision.reason };
+  }
+  if (decision.note) console.log(`[Meta Direct Sender] Sending WhatsApp${decision.note}`);
+  const cleanPhone = decision.to;
   const cleanPhoneId = phoneNumberId.replace(/[^0-9]/g, "");
 
   if (!cleanPhone || !cleanPhoneId || !accessToken) {

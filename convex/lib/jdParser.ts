@@ -56,6 +56,7 @@ Return ONLY valid JSON with these fields:
   "requiredSkills": ["core skills that strongly matter for the role"],
   "preferredSkills": ["nice-to-have or supporting skills"],
   "minYearsExperience": number or null,
+  "maxYearsExperience": "number if the JD gives an upper bound or a range such as 3-5 years, else null",
   "industry": "industry or null",
   "seniority": "junior, mid, senior, lead, executive, or null",
   "location": "location or null",

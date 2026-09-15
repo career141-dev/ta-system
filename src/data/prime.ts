@@ -57,6 +57,16 @@ export interface PrimeScope {
 }
 
 /**
+ * Re-reads the roster alone. The small tables load once per process, so an
+ * account added after startup would otherwise stay invisible to sign-in until
+ * the server restarts.
+ */
+export async function refreshUsers(): Promise<void> {
+  if (!isConvex() || !state.snapshot) return;
+  state.snapshot.users = await backend.users({ id: null });
+}
+
+/**
  * Load the working set.
  *
  * Additive and idempotent: calling it again with a different scope adds to
@@ -141,9 +151,15 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
       if (a.openingId === scope.openingId) wanted.add(a.candidateId);
     }
   }
+  /*
+   * The alerts, though, name people — and the root layout computes them on
+   * every page for the badge. They only read candidates on the late stages
+   * (follow-up chases, interviews, offers, joining), which is a few hundred
+   * rather than the whole desk, so those come along with `allApplications`.
+   */
   if (scope.allApplications) {
     for (const a of db.applications) {
-      if (a.stage === "follow_up") wanted.add(a.candidateId);
+      if (ALERT_STAGES.has(a.stage)) wanted.add(a.candidateId);
     }
   }
   const missing = [...wanted].filter((id) => !state.candidates.has(id));
@@ -163,6 +179,9 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+/** Stages whose people `computeAlerts` reads by name (src/lib/sla.ts). */
+const ALERT_STAGES = new Set<Application["stage"]>(["follow_up", "interview", "offer", "placed"]);
 
 function merge<T>(have: T[], incoming: T[], key: (x: T) => string): T[] {
   if (incoming.length === 0) return have;

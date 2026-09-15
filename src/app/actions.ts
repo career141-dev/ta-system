@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
-import { getCurrentUser, SESSION_COOKIE, sessionValue } from "@/lib/session";
+import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
@@ -25,6 +25,9 @@ import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
+import { isConvex } from "@/data/mode";
+import { convexMutation, convexQuery } from "@/lib/convexServer";
+import * as backend from "@/data/convex/backend";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -136,8 +139,35 @@ export async function moveStage(formData: FormData) {
     await back(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
   }
 
+  if (isConvex()) {
+    // The backend owns the pipeline: its state machine checks the move, stops
+    // any running follow-up on the way out, and (by design) sends nothing on
+    // the way in — follow-up is sent from the candidate's Chat tab.
+    try {
+      await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
+    } catch (e) {
+      await back(backendMessage(e, "That move could not be made."));
+    }
+    await afterBackendWrite(openingId);
+    return;
+  }
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
   if (!res.ok) await back(res.message);
+  revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+// ─── Backend writes (Convex store) ───────────────────────────────────────────
+
+/** The backend's own reason, without the transport's wrapping. */
+function backendMessage(e: unknown, fallback: string): string {
+  const raw = (e as Error)?.message ?? "";
+  return raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200) || fallback;
+}
+
+/** The primed copy is behind a backend write; drop it so the next read is fresh. */
+async function afterBackendWrite(openingId: string) {
+  const { resetStore } = await import("@/data/prime");
+  resetStore();
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -146,8 +176,62 @@ export async function claimCandidate(formData: FormData) {
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
+  if (isConvex()) {
+    let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+    try {
+      r = await backend.shortlist({ id: user.id }, appId);
+    } catch (e) {
+      await back(backendMessage(e, "Could not shortlist."));
+    }
+    // Named before the store is dropped — reading `repo` after that would throw.
+    const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
+    await afterBackendWrite(openingId);
+    if (owner) await back(`${owner} already claimed this candidate.`);
+    return;
+  }
   repo.shortlist(appId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+/**
+ * Send the next follow-up: the approved WhatsApp template and an email the
+ * first time, a reminder after that. Through the backend's outreach gate, so
+ * in test mode only the test recipient receives it.
+ */
+export async function sendFollowUpNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  if (!isConvex()) await back("Sending needs the Convex store.");
+  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number } | null = null;
+  try {
+    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId });
+  } catch (e) {
+    await back(backendMessage(e, "The follow-up could not be sent."));
+  }
+  await afterBackendWrite(openingId);
+  await back(
+    !r?.sent
+      ? r?.reason ?? "Nothing was sent."
+      : r.kind === "initial"
+        ? "Follow-up sent — WhatsApp template and email. Delivery shows below in a few seconds."
+        : `Reminder ${r.attempt} of ${r.maxAttempts} sent.`,
+  );
+}
+
+export async function stopFollowUpNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  try {
+    await convexMutation("ta/followUp:stop", { actorId: user.id, applicationId: appId });
+  } catch (e) {
+    await back(backendMessage(e, "Could not stop the follow-up."));
+  }
+  await afterBackendWrite(openingId);
+  await back("Follow-up stopped. Nothing further will be sent.");
 }
 
 /**
@@ -168,8 +252,21 @@ export async function confirmShortlist(formData: FormData) {
     const app = repo.application(id);
     if (!app || app.openingId !== openingId) { skipped++; continue; }
     if (!can(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId }).ok) { skipped++; continue; }
+    if (isConvex()) {
+      try {
+        const r = await backend.shortlist({ id: user.id }, id);
+        if (r.ok) done++; else skipped++;
+      } catch {
+        skipped++;
+      }
+      continue;
+    }
     const r = repo.shortlist(id, user.id);
     if (r.ok) done++; else skipped++;
+  }
+  if (isConvex()) {
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
   }
   revalidatePath(`/openings/${openingId}`, "layout");
   await back(
@@ -274,39 +371,65 @@ export async function createOpeningStep1(formData: FormData) {
 
   if (!clientId || !title || assigned.length === 0) return;
 
-  const extracted = notes.trim()
-    ? { ...extractFromText(notes), title }
-    : { ...EMPTY_EXTRACT, title };
+  const users = repo.users();
+  const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
+  const directorId = users.find((u) => u.role === "director")?.id ?? null;
 
-  const briefId = repo.createBrief({
-    clientId,
-    openingId: null,
-    kind: isLead ? "management_to_lead" : "lead_to_ta",
-    capturedBy: user.id,
-    capturedAt: Date.now(),
-    method: recordingKey ? (notes.trim() ? "both" : "recording") : "notes",
-    notesMarkdown: notes,
-    transcriptStatus: recordingKey ? "unavailable" : "none",
-    transcript: null,
-    recordingKey,
-    recordingDurationMs: durationMs,
-    consentAcknowledgedBy: consentText ? user.id : null,
-    consentAcknowledgedAt: consentText ? Date.now() : null,
-    consentText,
-    extracted,
-  });
+  let openingId: string;
 
-  // The JD stays empty here. It is written on screen two, by the TA.
-  const openingId = repo.createOpeningFromBrief(briefId, {
-    clientId,
-    country,
-    hiringFor,
-    targetGender: gender,
-    jdMarkdown: "",
-    taLeadId: isLead ? user.id : (repo.users().find((u) => u.role === "ta_lead")?.id ?? user.id),
-    assignedTaIds: assigned,
-    directorId: repo.users().find((u) => u.role === "director")?.id ?? null,
-  });
+  if (isConvex()) {
+    openingId = await backend.createOpening(
+      { id: user.id },
+      {
+        clientId,
+        title,
+        country,
+        hiringFor,
+        targetGender: gender,
+        jdMarkdown: "",
+        assignedTaIds: assigned,
+        taLeadId,
+        directorId,
+        notesMarkdown: notes,
+      },
+    );
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  } else {
+    const extracted = notes.trim()
+      ? { ...extractFromText(notes), title }
+      : { ...EMPTY_EXTRACT, title };
+
+    const briefId = repo.createBrief({
+      clientId,
+      openingId: null,
+      kind: isLead ? "management_to_lead" : "lead_to_ta",
+      capturedBy: user.id,
+      capturedAt: Date.now(),
+      method: recordingKey ? (notes.trim() ? "both" : "recording") : "notes",
+      notesMarkdown: notes,
+      transcriptStatus: recordingKey ? "unavailable" : "none",
+      transcript: null,
+      recordingKey,
+      recordingDurationMs: durationMs,
+      consentAcknowledgedBy: consentText ? user.id : null,
+      consentAcknowledgedAt: consentText ? Date.now() : null,
+      consentText,
+      extracted,
+    });
+
+    // The JD stays empty here. It is written on screen two, by the TA.
+    openingId = repo.createOpeningFromBrief(briefId, {
+      clientId,
+      country,
+      hiringFor,
+      targetGender: gender,
+      jdMarkdown: "",
+      taLeadId,
+      assignedTaIds: assigned,
+      directorId,
+    });
+  }
 
   revalidatePath("/openings", "layout");
 
@@ -320,6 +443,7 @@ export async function createOpeningStep1(formData: FormData) {
   // words, and then ran again on approval whenever it had found nobody.
   after(async () => {
     try {
+      if (isConvex()) await primeStore({ openingId });
       await draftJd(openingId);
     } catch (err) {
       console.error(`[prepare ${openingId}]`, err);
@@ -360,6 +484,26 @@ export async function approveJd(formData: FormData) {
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const jd = String(formData.get("jdMarkdown") ?? "");
+  if (isConvex()) {
+    // Approval in the backend also starts reading the JD's requirements
+    // (skills, seniority, years, location, salary …) into the Job details.
+    // Matching waits for that, so it scores against the real requirements.
+    const suggestionsBefore = repo.suggestions(openingId).length;
+    const owner = repo.opening(openingId)?.assignedTaIds[0];
+    try {
+      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined);
+    } catch (e) {
+      await back(backendMessage(e, "The JD could not be approved."));
+    }
+    after(async () => {
+      await rematchWhenRequirementsSettle(openingId, user.id);
+      if (suggestionsBefore === 0) await sourceFor(openingId, owner).catch(() => undefined);
+      revalidatePath(`/openings/${openingId}`, "layout");
+    });
+    await afterBackendWrite(openingId);
+    if (String(formData.get("thenGo") ?? "") === "opening") redirect(`/openings/${openingId}`);
+    return;
+  }
   if (jd.trim()) repo.updateJd(openingId, jd);
   repo.approveJd(openingId, user.id);
 
@@ -406,9 +550,145 @@ export async function amendJd(formData: FormData) {
   if (!o) return;
   if (!o.assignedTaIds.includes(user.id) && user.role === "ta") return;
   const jd = String(formData.get("jdMarkdown") ?? "");
+  if (isConvex()) {
+    if (jd.trim()) {
+      let r: { reextracting: boolean } | null = null;
+      try {
+        r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
+      } catch (e) {
+        await back(backendMessage(e, "The JD could not be saved."));
+      }
+      if (r?.reextracting) after(() => rematchWhenRequirementsSettle(openingId, user.id));
+    }
+    await afterBackendWrite(openingId);
+    redirect(`/openings/${openingId}/jd`);
+  }
   if (jd.trim()) repo.updateJd(openingId, jd);
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(`/openings/${openingId}/jd`);
+}
+
+// ─── Job details: requirements extracted from the approved JD ────────────────
+
+/**
+ * The JD with its reviewed Job details appended, for the LinkedIn / X-ray
+ * sourcing plan. The plan reads prose; a checked skills list and years floor
+ * steer its search vocabulary better than the parser can recover from wording.
+ */
+function withJobDetails(o: import("@/data/types").Opening): string {
+  const r = o.requirements;
+  const jd = o.jdMarkdown || o.title;
+  if (!r || (r.status !== "extracted" && !r.editedAt)) return jd;
+  const lines = [
+    r.requiredSkills.length ? `Required skills: ${r.requiredSkills.join(", ")}` : "",
+    r.niceToHaveSkills.length ? `Nice to have: ${r.niceToHaveSkills.join(", ")}` : "",
+    r.experienceMinYears ? `Experience: ${r.experienceMinYears}${r.experienceMaxYears ? `–${r.experienceMaxYears}` : "+"} years` : "",
+    r.seniorityLevel ? `Seniority: ${r.seniorityLevel.replace(/_/g, " ")}` : "",
+    r.location ? `Location: ${r.location}` : "",
+    r.educationLevel ? `Education: ${r.educationLevel.replace(/_/g, " ")}` : "",
+    r.languagesRequired.length ? `Languages: ${r.languagesRequired.join(", ")}` : "",
+  ].filter(Boolean);
+  return lines.length ? `${jd}\n\n## Job details (reviewed)\n${lines.map((l) => `- ${l}`).join("\n")}` : jd;
+}
+
+/** The structured salary range, as the sourcing salary rule reads it, when no free-text note exists. */
+function salaryNoteOf(o: import("@/data/types").Opening): string {
+  const r = o.requirements;
+  if (!r || (r.salaryMin == null && r.salaryMax == null)) return "";
+  const cur = r.salaryCurrency ?? "LKR";
+  const fmt = (n: number | null) => (n == null ? "" : n.toLocaleString("en-US"));
+  if (r.salaryMin != null && r.salaryMax != null) return `${cur} ${fmt(r.salaryMin)} - ${fmt(r.salaryMax)}`;
+  return r.salaryMax != null ? `up to ${cur} ${fmt(r.salaryMax)}` : `from ${cur} ${fmt(r.salaryMin)}`;
+}
+
+/**
+ * Wait for a requirements extraction to finish (it runs in the backend after
+ * approval), then run matching against the result. Bounded: if extraction is
+ * slow or failed, matching still runs on what the opening has.
+ */
+async function rematchWhenRequirementsSettle(openingId: string, actorId: string) {
+  for (let i = 0; i < 30; i++) {
+    const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
+    const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
+    if (status !== "extracting") break;
+    await new Promise((res) => setTimeout(res, 3_000));
+  }
+  const { resetStore } = await import("@/data/prime");
+  resetStore();
+  await primeStore({ openingId });
+  await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
+  revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+const listField = (formData: FormData, name: string) =>
+  String(formData.get(name) ?? "")
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+const optionalNumber = (formData: FormData, name: string): number | null => {
+  const raw = String(formData.get(name) ?? "").replace(/,/g, "").trim();
+  if (!raw) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+};
+
+/** Save the Job details panel. What is saved is locked against automatic re-extraction. */
+export async function saveJobDetails(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  if (!isConvex()) await back("Job details need the Convex store.");
+
+  const minYears = optionalNumber(formData, "experienceMinYears");
+  const maxYears = optionalNumber(formData, "experienceMaxYears");
+  const salaryMin = optionalNumber(formData, "salaryMin");
+  const salaryMax = optionalNumber(formData, "salaryMax");
+  if ([minYears, maxYears, salaryMin, salaryMax].some((n) => Number.isNaN(n))) {
+    await back("Years and salary must be numbers.");
+  }
+  try {
+    await convexMutation("ta/requirements:save", {
+      actorId: user.id,
+      openingId,
+      title: String(formData.get("title") ?? ""),
+      clientIndustry: String(formData.get("clientIndustry") ?? "Other"),
+      recruitmentType: String(formData.get("recruitmentType") ?? "both"),
+      isConfidential: formData.get("isConfidential") === "on",
+      status: String(formData.get("status") ?? "active"),
+      location: String(formData.get("location") ?? ""),
+      seniorityLevel: String(formData.get("seniorityLevel") ?? "other"),
+      experienceMinYears: minYears ?? 0,
+      experienceMaxYears: maxYears,
+      educationLevel: String(formData.get("educationLevel") ?? ""),
+      salaryMin,
+      salaryMax,
+      salaryCurrency: String(formData.get("salaryCurrency") ?? ""),
+      requiredSkills: listField(formData, "requiredSkills"),
+      niceToHaveSkills: listField(formData, "niceToHaveSkills"),
+      languagesRequired: listField(formData, "languagesRequired"),
+    });
+  } catch (e) {
+    await back(backendMessage(e, "The job details could not be saved."));
+  }
+  after(() => rematchWhenRequirementsSettle(openingId, user.id));
+  await afterBackendWrite(openingId);
+  await back("Job details saved. Matching is re-running against them.");
+}
+
+/** Read the approved JD again and replace the details — including hand corrections. */
+export async function reextractJobDetails(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  try {
+    await convexMutation("ta/requirements:reextract", { actorId: user.id, openingId });
+  } catch (e) {
+    await back(backendMessage(e, "Could not start the extraction."));
+  }
+  after(() => rematchWhenRequirementsSettle(openingId, user.id));
+  await afterBackendWrite(openingId);
+  await back("Reading the JD again — the details update in a few seconds.");
 }
 
 export async function addJobPost(formData: FormData) {
@@ -945,73 +1225,158 @@ export async function deleteReport(formData: FormData) {
 
 // ─── People (finding 11) ─────────────────────────────────────────────────────
 
-export async function addUser(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  const name = String(formData.get("name") ?? "").trim();
-  if (!name) return;
-  repo.addUser({
-    name,
-    email: String(formData.get("email") ?? "").trim(),
+// ─── People and roles — admin only ──────────────────────────────────────────
+//
+// In Convex mode the roster lives in the backend, and `repo`'s in-memory write
+// is discarded on commit — so these used to look saved and change nothing.
+// They now write through `ta/users`, which checks for an admin itself.
+
+const DESK_ROLES = ["admin", "director", "ta_lead", "ta", "ops", "client", "viewer"] as const;
+
+function personFrom(formData: FormData) {
+  const role = String(formData.get("role") ?? "ta");
+  return {
+    name: String(formData.get("name") ?? "").trim(),
+    email: String(formData.get("email") ?? "").trim().toLowerCase(),
     phone: String(formData.get("phone") ?? "").trim() || null,
     routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
-    role: String(formData.get("role") ?? "ta") as import("@/data/types").Role,
-  });
-  revalidatePath("/people");
+    role: (DESK_ROLES as readonly string[]).includes(role) ? (role as import("@/data/types").Role) : null,
+  };
+}
+
+/** Run a roster write in the backend, then make the next read see it. */
+async function saveRoster(run: () => Promise<unknown>, done: string): Promise<never> {
+  try {
+    await run();
+  } catch (e) {
+    // The backend's own message ("last active admin", "already has an account").
+    const raw = (e as Error).message ?? "";
+    const why = raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160);
+    await back(why || "That change could not be saved.");
+  }
+  const { refreshUsers } = await import("@/data/prime");
+  await refreshUsers();
+  revalidatePath("/", "layout");
+  return back(done);
+}
+
+async function adminOnly(formData: FormData): Promise<User> {
+  const actor = await authorize(formData, "user.manage");
+  if (actor.role !== "admin") await back("Only an admin can manage people and roles.");
+  return actor;
+}
+
+export async function addUser(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const p = personFrom(formData);
+  if (!p.name) await back("A name is required.");
+  if (!p.email) await back("An email is required — it is what they sign in with.");
+  if (!p.role) await back("Pick a role.");
+  if (!isConvex()) {
+    repo.addUser({ name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+    }),
+    `${p.name} added as ${p.role}.`,
+  );
 }
 
 export async function updateUser(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  repo.updateUser(String(formData.get("userId")), {
-    name: String(formData.get("name") ?? "").trim(),
-    email: String(formData.get("email") ?? "").trim(),
-    phone: String(formData.get("phone") ?? "").trim() || null,
-    routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
-    role: String(formData.get("role") ?? "ta") as import("@/data/types").Role,
-  });
+  const actor = await adminOnly(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const p = personFrom(formData);
+  if (!userId || !p.name || !p.email || !p.role) await back("Name, email and role are all required.");
+  if (!isConvex()) {
+    repo.updateUser(userId, { name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id, userId, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+    }),
+    `${p.name} saved.`,
+  );
+}
+
+/**
+ * Invite someone with a role already decided.
+ *
+ * The roster entry is written FIRST, so the role is in place before the email
+ * is even opened. An address already on the roster keeps its record and takes
+ * the new role (and is brought back if they had left).
+ */
+export async function inviteUser(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const actor = await adminOnly(formData);
+  const p = personFrom(formData);
+  if (!p.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) await back("Enter the email address to invite.");
+  if (!p.role) await back("Pick a role.");
+  const name = p.name || p.email.split("@")[0];
+  if (!isConvex()) await back("Invites need the Convex store (C141_STORE=convex).");
+
+  const existing = repo.users().find((u) => u.email.trim().toLowerCase() === p.email);
+  if (existing?.id === actor.id && p.role !== "admin") await back("You can't change your own role here.");
+  try {
+    await convexMutation("ta/users:adminSaveUser", {
+      actorId: actor.id,
+      userId: existing?.id,
+      fullName: existing && !p.name ? existing.name : name,
+      email: p.email,
+      phone: existing && !p.phone ? existing.phone : p.phone,
+      routingEmail: existing && !p.routingEmail ? existing.routingEmail : p.routingEmail,
+      taRole: p.role,
+    });
+    if (existing && !existing.isActive) {
+      await convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
+    }
+  } catch (e) {
+    const raw = (e as Error).message ?? "";
+    await back(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
+  }
+  const { refreshUsers } = await import("@/data/prime");
+  await refreshUsers();
+  revalidatePath("/", "layout");
+
+  const { sendInvite } = await import("@/lib/invites");
+  const sent = await sendInvite(p.email, p.role!);
+  await back(sent.ok ? `Invite sent to ${p.email} as ${p.role}.` : `Role saved for ${p.email}. ${sent.reason}`);
+}
+
+/** Withdraw an invite link. Their roster entry stays; mark them as left to remove access too. */
+export async function revokeUserInvite(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await adminOnly(formData);
+  const id = String(formData.get("invitationId") ?? "");
+  if (!id) await back("That invite could not be found.");
+  const { revokeInvite } = await import("@/lib/invites");
+  const r = await revokeInvite(id);
   revalidatePath("/people");
+  await back(r.ok ? "Invite revoked. Mark them as left too if they should not get in." : r.reason);
 }
 
 export async function setUserActive(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const actor = await getCurrentUser();
-  if (actor.role !== "admin" && actor.role !== "director") return;
-  repo.setUserActive(String(formData.get("userId")), String(formData.get("active")) === "1");
-  revalidatePath("/people");
+  const actor = await adminOnly(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const active = String(formData.get("active")) === "1";
+  if (!isConvex()) {
+    repo.setUserActive(userId, active);
+    revalidatePath("/people");
+    return;
+  }
+  await saveRoster(
+    () => convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId, isActive: active }),
+    active ? "Brought back." : "Marked as left.",
+  );
 }
 
-export async function signOut() {
-  await primeStore({ allApplications: true });
-  const { cookies } = await import("next/headers");
-  (await cookies()).delete(SESSION_COOKIE);
-  redirect("/signin");
-}
-
-/**
- * Sign in as an account. Stage-one auth: no password, but a signed cookie and
- * a deliberate act, so that signing out stays signed out.
- */
-export async function signInAs(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const id = String(formData.get("userId") ?? "");
-  const user = repo.users().find((u) => u.id === id);
-  if (!user || !user.isActive) redirect("/signin");
-  const { cookies } = await import("next/headers");
-  (await cookies()).set(SESSION_COOKIE, sessionValue(user.id), {
-    path: "/",
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 24 * 30,
-  });
-  redirect("/");
-}
 
 // ─── Database search (spec §6D) ──────────────────────────────────────────────
 
@@ -1136,11 +1501,11 @@ export async function runBenchmark(formData: FormData) {
       title: o.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: o.jdMarkdown || o.title,
+      jdText: withJobDetails(o),
       locations: o.locations,
       targetNationalities: o.targetNationalities,
       targetGender: o.targetGender,
-      salaryNote: o.packageNotes,
+      salaryNote: o.packageNotes || salaryNoteOf(o),
       targetEmployers: [],
       alreadyKnown: repo.suggestions(openingId).map((x) => canonicalProfile(x.linkedinUrl ?? "")).filter((x): x is string => Boolean(x)),
     },
@@ -1180,11 +1545,11 @@ async function sourceFor(openingId: string, forUserId?: string): Promise<{ found
       title: o.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: o.jdMarkdown || o.title,
+      jdText: withJobDetails(o),
       locations: o.locations,
       targetNationalities: o.targetNationalities,
       targetGender: o.targetGender,
-      salaryNote: o.packageNotes,
+      salaryNote: o.packageNotes || salaryNoteOf(o),
       targetEmployers: repo.benchmarks(openingId).filter((b) => b.isSelected).map((b) => b.company),
       alreadyKnown,
     },
@@ -1253,8 +1618,24 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
   if (!opening || !c) return null;
   const brief = opening.briefId ? repo.brief(opening.briefId) : null;
   const client = repo.client(opening.clientId);
-  const extracted = brief?.extracted ?? { ...EMPTY_EXTRACT, title: opening.title };
 
+  if (isConvex()) {
+    // The notes live in the backend's briefs table, joined to the opening; the
+    // draft is saved there too. Nothing is approved here — the TA reads it first.
+    const notes = await convexQuery<string>("ta/openings:briefNotes", { openingId }).catch(() => "");
+    const fromNotes = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
+    const template = buildJd(fromNotes, client?.name ?? "the client");
+    const res = await generateJdText(c, notes, template);
+    const actorId = opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
+    if (actorId) {
+      await convexMutation("ta/openings:saveJd", { actorId, openingId, jdMarkdown: res.ok ? res.text : template }).catch(
+        (e) => console.error(`[draftJd ${openingId}]`, e),
+      );
+    }
+    return res.ok ? { ok: true } : { ok: false, reason: res.reason };
+  }
+
+  const extracted = brief?.extracted ?? { ...EMPTY_EXTRACT, title: opening.title };
   repo.applyExtractedToOpening(openingId, extracted);
   const template = buildJd(extracted, client?.name ?? "the client");
 

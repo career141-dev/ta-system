@@ -7,6 +7,7 @@ import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
 import { readEodReply, readInboundReply } from "@/app/actions";
 import { timeAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { requireSourcingSeat } from "../sourcingGate";
 
 /**
  * The email that goes out at the end of the day, and the reply that comes back.
@@ -29,6 +30,7 @@ export default async function EodPage({
 }) {
   const { id } = await params;
   await primeStore({ openingId: id });
+  await requireSourcingSeat(id);
   const kind = "director" as const;
   const user = await getCurrentUser();
   const o = repo.opening(id);

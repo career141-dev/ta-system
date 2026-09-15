@@ -111,6 +111,30 @@ export async function approveJd(actor: Actor, openingId: Id, jdMarkdown?: string
   });
 }
 
+export async function createOpening(
+  actor: Actor,
+  input: {
+    clientId: string;
+    title: string;
+    country?: string;
+    hiringFor?: string;
+    targetGender?: string | null;
+    jdMarkdown?: string;
+    assignedTaIds: string[];
+    taLeadId?: string | null;
+    directorId?: string | null;
+    notesMarkdown?: string;
+    priorityTier?: string;
+  },
+): Promise<string> {
+  const res = await convexMutation<{ id: string }>("ta/openings:create", {
+    actorId: requireActorId(actor),
+    ...input,
+  });
+  return res.id;
+}
+
+
 // ─── Applications ────────────────────────────────────────────────────────────
 
 export async function applications(
