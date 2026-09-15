@@ -41,17 +41,19 @@ export function CaptureForm({
   clients,
   tas,
   isLead,
+  initialClientId,
 }: {
   clients: Client[];
   tas: User[];
   isLead: boolean;
+  initialClientId?: string | null;
 }) {
   const [rec, setRec] = useState<{ key: string; durationMs: number; consentText: string } | null>(
     null,
   );
   const [title, setTitle] = useState("");
   const [country, setCountry] = useState("Sri Lanka");
-  const [client, setClient] = useState<string | null>(null);
+  const [client, setClient] = useState<string | null>(initialClientId ?? null);
   const [assigned, setAssigned] = useState<string[]>([]);
 
   const ready = Boolean(title.trim() && client && (!isLead || assigned.length));
@@ -68,7 +70,7 @@ export function CaptureForm({
           <h2 className="text-[13.5px] font-semibold">Client</h2>
         </div>
         <div className="px-7 py-6">
-          <ClientPicker name="clientId" clients={clients} onChange={setClient} />
+          <ClientPicker name="clientId" clients={clients} initial={client} onChange={setClient} />
         </div>
       </section>
 

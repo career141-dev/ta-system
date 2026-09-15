@@ -8,6 +8,7 @@ import { criteriaFromParams, criteriaToParams, describe, parseBoolean, parseQuer
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
+import { DbCandidateDrawer } from "@/components/db/DbCandidateDrawer";
 import { saveSearch } from "@/app/actions";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
@@ -29,6 +30,7 @@ export default async function ResultsPage({
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
   const forOpening = typeof sp.for === "string" ? sp.for : null;
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const candidateId = typeof sp.candidate === "string" ? sp.candidate : null;
   const vocab = repo.vocabulary();
 
   // The sentence is parsed once; after that the URL's criteria win, so removing
@@ -195,8 +197,40 @@ export default async function ResultsPage({
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
     p.set("page", String(n));
     if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
     return `${base}?${p.toString()}`;
   };
+
+  const candidateHref = (id: string) => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (page > 1) p.set("page", String(page));
+    if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
+    p.set("candidate", id);
+    return `${base}?${p.toString()}`;
+  };
+
+  const closeHref = (() => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (page > 1) p.set("page", String(page));
+    if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
+    return `${base}?${p.toString()}`;
+  })();
+
+  const activeCandidate = candidateId ? repo.candidate(candidateId) : null;
+  const activeIndex = activeCandidate ? results.findIndex((r) => r.candidate.id === activeCandidate.id) : -1;
+  const prevCandidateId = activeIndex > 0 ? results[activeIndex - 1].candidate.id : null;
+  const nextCandidateId = activeIndex >= 0 && activeIndex < results.length - 1 ? results[activeIndex + 1].candidate.id : null;
+  const activeStatus = activeCandidate ? repo.overallStatus(activeCandidate.id) : null;
+  const statusLabel =
+    activeStatus?.busy && activeStatus.stage
+      ? activeStatus.stage === "placed"
+        ? "Placed elsewhere"
+        : `${STAGE_LABEL[activeStatus.stage]} on another opening`
+      : null;
 
   const appsFor = (candidateId: string): RowApp[] =>
     repo.applicationsForCandidate(candidateId).map((a) => {
@@ -209,6 +243,8 @@ export default async function ResultsPage({
         stageLabel: STAGE_LABEL[a.stage],
         ownerName: users.find((u) => u.id === a.ownerTaId)?.name ?? null,
         isLive: !["rejected", "dropped_out", "placed"].includes(a.stage),
+        lastStageChangedAt: a.lastStageChangedAt,
+        rejectReason: a.rejectReason ?? null,
       };
     });
 
@@ -370,6 +406,7 @@ export default async function ResultsPage({
                     apps={appsFor(r.candidate.id)}
                     openings={openingOptions}
                     defaultOpeningId={forOpening}
+                    candidateHref={candidateHref(r.candidate.id)}
                   />
                   {i === 1 && suggestions.length > 0 && (
                     <div className="border-b border-rule bg-paper/60 px-6 py-5">
@@ -428,6 +465,20 @@ export default async function ResultsPage({
           )}
         </div>
       </div>
+
+      {activeCandidate && (
+        <DbCandidateDrawer
+          candidate={activeCandidate}
+          apps={appsFor(activeCandidate.id)}
+          openings={openingOptions}
+          currentIndex={activeIndex >= 0 ? activeIndex : 0}
+          totalCandidates={results.length}
+          prevHref={prevCandidateId ? candidateHref(prevCandidateId) : null}
+          nextHref={nextCandidateId ? candidateHref(nextCandidateId) : null}
+          closeHref={closeHref}
+          statusLabel={statusLabel}
+        />
+      )}
     </main>
   );
 }

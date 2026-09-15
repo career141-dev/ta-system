@@ -686,8 +686,15 @@ export async function addClient(formData: FormData) {
       ]
     : [];
 
-  repo.addClient({ name, industry, contacts });
+  const newId = repo.addClient({ name, industry, contacts });
+  const intent = String(formData.get("action") ?? "save");
+
   revalidatePath("/clients");
+  revalidatePath("/openings/new");
+
+  if (intent === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
+  }
 }
 
 export async function updateClient(formData: FormData) {

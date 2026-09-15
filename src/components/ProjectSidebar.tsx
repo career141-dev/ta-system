@@ -5,6 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { SignOutButton } from "@clerk/nextjs";
+import { addJobPost } from "@/app/actions";
 import { RAIL_TOP } from "@/lib/chrome";
 
 export interface SidebarPost {
@@ -61,6 +62,7 @@ export function ProjectSidebar({
 
   const [pipeOpen, setPipeOpen] = useState(inPipeline);
   const [jobOpen, setJobOpen] = useState(inJob);
+  const [addingJob, setAddingJob] = useState(false);
 
   const row = (active: boolean) =>
     `rounded-lg px-3.5 py-2.5 text-[13.5px] transition-colors ${
@@ -192,22 +194,82 @@ export function ProjectSidebar({
                 on one opening is nearly always looking at one of them, not at
                 the merged pile — but the merged pile is still the first row,
                 because the pool is shared. */}
-            <button
-              onClick={() => setJobOpen((v) => !v)}
-              className={row(inJob && !jobOpen) + " flex w-full items-center text-left"}
-            >
-              LinkedIn Job
-              <span className="ml-auto">
-                <Chevron open={jobOpen} />
-              </span>
-            </button>
+            <div className={row(inJob && !jobOpen) + " flex w-full items-center justify-between"}>
+              <button
+                type="button"
+                onClick={() => setJobOpen((v) => !v)}
+                className="flex-1 text-left"
+              >
+                LinkedIn Job
+              </button>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setJobOpen(true);
+                    setAddingJob((v) => !v);
+                  }}
+                  title="Add a job post"
+                  aria-label="Add a job post"
+                  className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-all ${
+                    inJob && !jobOpen
+                      ? "border-white/30 bg-white/20 text-white hover:bg-white/30"
+                      : "border-rule bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-brand hover:bg-brand hover:text-white"
+                  }`}
+                >
+                  + Job
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setJobOpen((v) => !v)}
+                  aria-label="Toggle LinkedIn Job section"
+                  className="grid h-5 w-5 place-items-center rounded opacity-60 transition-opacity hover:opacity-100"
+                >
+                  <Chevron open={jobOpen} />
+                </button>
+              </div>
+            </div>
 
             {jobOpen && (
               <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
+                {addingJob && (
+                  <form
+                    action={async (formData) => {
+                      setAddingJob(false);
+                      await addJobPost(formData);
+                    }}
+                    className="my-1.5 flex flex-col gap-1.5 rounded-lg border border-rule bg-surface p-2 shadow-sm"
+                  >
+                    <input type="hidden" name="openingId" value={openingId} />
+                    <input
+                      name="title"
+                      placeholder="Job title..."
+                      required
+                      autoFocus
+                      className="w-full rounded border border-rule bg-paper px-2 py-1 text-[12px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand"
+                    />
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setAddingJob(false)}
+                        className="rounded px-2 py-0.5 text-[11px] text-ink-faint hover:text-ink"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="rounded bg-brand px-2.5 py-0.5 text-[11.5px] font-medium text-white transition-opacity hover:opacity-90"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </form>
+                )}
                 <Link href={jobBase} className={sub(inJob && !activePost)}>
                   All applicants
                 </Link>
-                {posts.length === 0 && (
+                {posts.length === 0 && !addingJob && (
                   <span className="px-2.5 py-[7px] text-[12px] text-ink-faint">No posts yet</span>
                 )}
                 {posts.map((p) => (
