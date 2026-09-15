@@ -16,6 +16,8 @@ export interface RowApp {
   stageLabel: string;
   ownerName: string | null;
   isLive: boolean;
+  lastStageChangedAt?: number;
+  rejectReason?: string | null;
 }
 
 const TONE: Record<CandidateSignal["tone"], string> = {
@@ -52,6 +54,7 @@ export function ResultRow({
   apps,
   openings,
   defaultOpeningId,
+  candidateHref,
 }: {
   candidate: Candidate;
   /** The same fit score the lists use. Only present when the search is tied
@@ -64,6 +67,7 @@ export function ResultRow({
   apps: RowApp[];
   openings: { id: string; label: string }[];
   defaultOpeningId: string | null;
+  candidateHref?: string;
 }) {
   const [allRoles, setAllRoles] = useState(false);
   const [allSkills, setAllSkills] = useState(false);
@@ -78,6 +82,8 @@ export function ResultRow({
   const otherSkills = c.skills.filter((s) => !matchedSkills.includes(s));
   const skills = allSkills ? [...matchedSkills, ...otherSkills] : [...matchedSkills, ...otherSkills].slice(0, 3);
 
+  const targetLink = candidateHref ?? `/candidates/${c.id}`;
+
   return (
     <article className="border-b border-rule px-6 py-5 last:border-b-0">
       <div className="flex gap-4">
@@ -87,11 +93,8 @@ export function ResultRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2.5">
-            {/* Only a link when there is somewhere to go. A name rendered as
-                a link to "#" looks clickable and does nothing. */}
-            {/* Their record in the platform. LinkedIn is linked further along
-                the row, as the outside source it is. */}
-            <Link href={`/candidates/${c.id}`} className="text-[15px] font-semibold text-accent hover:underline">
+            {/* Their record in the platform, opening in a drawer over results */}
+            <Link href={targetLink} className="text-[15px] font-semibold text-accent hover:underline">
               {c.fullName}
             </Link>
             {fit && <FitChip score={fit} />}
