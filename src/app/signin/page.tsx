@@ -1,7 +1,7 @@
-import { redirect } from "next/navigation";
 import { Show, SignIn, SignOutButton } from "@clerk/nextjs";
 import { clerkEmails, currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
+import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
 
 /**
  * The sign-in screen.
@@ -13,7 +13,8 @@ import { primeStore } from "@/data/prime";
  */
 export default async function SignInPage() {
   await primeStore({ allApplications: true });
-  if (await currentUser()) redirect("/");
+  // Signed in already: a full load, not redirect() — see ReloadWhenSignedIn.
+  if (await currentUser()) return <ReloadWhenSignedIn />;
   const emails = await clerkEmails();
 
   return (
@@ -35,9 +36,7 @@ export default async function SignInPage() {
             <SignIn routing="hash" forceRedirectUrl="/" />
           </Show>
           <Show when="signed-in">
-            <p className="text-[13px] text-ink-soft">
-              Signing you in… <a href="/" className="underline">Continue</a>
-            </p>
+            <ReloadWhenSignedIn />
           </Show>
         </>
       ) : (
