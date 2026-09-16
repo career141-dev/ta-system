@@ -31,3 +31,22 @@ export function dateAt(ts: number | null): string {
   if (!ts) return "—";
   return new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
+
+/**
+ * "Now X · expects Y · 30 days notice", with only the parts that are known.
+ * An empty record used to print "Now · expects · days notice".
+ */
+export function packageLine(c: {
+  currentSalary: string | null;
+  expectedSalary: string | null;
+  noticePeriodDays: number | null;
+}): string {
+  const parts = [
+    c.currentSalary?.trim() ? `Now ${c.currentSalary.trim()}` : null,
+    c.expectedSalary?.trim() ? `expects ${c.expectedSalary.trim()}` : null,
+    c.noticePeriodDays === 0 ? "immediate joiner" : c.noticePeriodDays != null ? `${c.noticePeriodDays} days notice` : null,
+  ].filter(Boolean) as string[];
+  if (parts.length === 0) return "Package not known";
+  const line = parts.join(" · ");
+  return line.charAt(0).toUpperCase() + line.slice(1);
+}

@@ -5,7 +5,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { addJobPost } from "@/app/actions";
-import { SignOutButton } from "@clerk/nextjs";
+import { SignOut } from "./SignOut";
 import { RAIL_TOP } from "@/lib/chrome";
 
 export interface SidebarPost {
@@ -212,13 +212,13 @@ export function ProjectSidebar({
                   }}
                   title="Add a job post"
                   aria-label="Add a job post"
-                  className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold transition-all ${
+                  className={`grid h-5 w-5 place-items-center rounded-md border text-[13px] font-semibold leading-none transition-all ${
                     inJob && !jobOpen
                       ? "border-white/30 bg-white/20 text-white hover:bg-white/30"
                       : "border-rule bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-brand hover:bg-brand hover:text-white"
                   }`}
                 >
-                  + Job
+                  +
                 </button>
                 <button
                   type="button"
@@ -303,17 +303,7 @@ export function ProjectSidebar({
       {/* Pinned to the foot of the rail, which is the foot of the window — the
           rail is exactly the space between the context band and the bottom. */}
       <div className="mt-8 flex shrink-0 flex-col gap-1 border-t border-rule pt-3 text-[13px]">
-        <a
-          href="mailto:uzmaan@career141.com?subject=TA%20platform"
-          className="rounded-lg px-3.5 py-2 text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink"
-        >
-          Help
-        </a>
-        <SignOutButton redirectUrl="/signin">
-          <button className="w-full rounded-lg px-3.5 py-2 text-left text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink">
-            Sign out
-          </button>
-        </SignOutButton>
+        <SignOut className="w-full rounded-lg px-3.5 py-2 text-left text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink" />
       </div>
     </aside>
   );

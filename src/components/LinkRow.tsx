@@ -2,11 +2,13 @@
 
 import { externalUrl } from "@/lib/url";
 import { useState } from "react";
-import { deleteLink, logOutreach, toggleEyeMark, updateLink } from "@/app/actions";
+import { addLinkToPipeline, deleteLink, logOutreach, toggleEyeMark, updateLink } from "@/app/actions";
+import Link from "next/link";
 import { inputClass } from "./form";
 import { Confirm } from "./Confirm";
 import { dateAt } from "@/lib/format";
-import type { LinkOutcome, LinkVaultEntry } from "@/data/types";
+import { STAGE_LABEL } from "@/data/types";
+import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
 
 const OUTCOMES: { value: LinkOutcome; label: string }[] = [
   { value: "no_contact", label: "Not contacted" },
@@ -45,11 +47,14 @@ export function LinkRow({
   openingId,
   addedByName,
   userNames,
+  onPipeline = null,
 }: {
   entry: LinkVaultEntry;
   openingId: string;
   addedByName: string;
   userNames: Record<string, string>;
+  /** Their application on this opening, once they have been added. */
+  onPipeline?: Pick<Application, "id" | "stage"> | null;
 }) {
   const [edit, setEdit] = useState(false);
   const [allLog, setAllLog] = useState(false);
@@ -99,12 +104,34 @@ export function LinkRow({
 
             <div className="flex shrink-0 flex-col items-end gap-2">
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
-                >
-                  Add to pipeline
-                </button>
+                {onPipeline ? (
+                  <Link
+                    href={`/openings/${openingId}/candidate/${onPipeline.id}`}
+                    className="rounded-full border border-brand-line bg-brand-soft px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:opacity-90"
+                  >
+                    In {STAGE_LABEL[onPipeline.stage]} →
+                  </Link>
+                ) : r.outcome === "shortlisted" ? (
+                  <form action={addLinkToPipeline}>
+                    <input type="hidden" name="openingId" value={openingId} />
+                    <input type="hidden" name="entryId" value={r.id} />
+                    <button
+                      title="Send to Director review"
+                      className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                    >
+                      Add to pipeline
+                    </button>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    title="Set the outcome to Shortlisted first"
+                    className="cursor-not-allowed rounded-full border border-rule px-4 py-1.5 text-[12.5px] font-medium text-ink-faint"
+                  >
+                    Add to pipeline
+                  </button>
+                )}
                 <button
                   onClick={() => setEdit((v) => !v)}
                   className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"
@@ -219,12 +246,15 @@ export function LinkRow({
                   <button className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
                     Save
                   </button>
-                  <button
-                    type="button"
-                    className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
-                  >
-                    Add to pipeline
-                  </button>
+                  {!onPipeline && (
+                    <button
+                      formAction={addLinkToPipeline}
+                      title="Saves this row; if the outcome is Shortlisted, sends them to Director review"
+                      className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                    >
+                      Save and add to pipeline
+                    </button>
+                  )}
                 </div>
               </form>
 

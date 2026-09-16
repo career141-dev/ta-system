@@ -3,6 +3,8 @@ import { Show, SignUp } from "@clerk/nextjs";
 import { currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
+import { redirect } from "next/navigation";
+import { uiOnly } from "@/lib/uiOnly";
 
 /**
  * Where an invite link lands.
@@ -13,6 +15,8 @@ import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
  * the moment they finish here.
  */
 export default async function SignUpPage() {
+  // No sign-up without a sign-in service (lib/uiOnly.ts): pick a test account instead.
+  if (uiOnly()) redirect("/signin");
   await primeStore({ allApplications: true });
   if (await currentUser()) return <ReloadWhenSignedIn />;
 
@@ -22,7 +26,7 @@ export default async function SignUpPage() {
         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Career141</div>
         <h1 className="mt-1 text-[22px] font-semibold tracking-tight">Accept your invite</h1>
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-soft">
-          Set up your sign-in. Access is by invitation only.
+          Create your sign-in. You'll see the desk once you've been added to the team.
         </p>
       </div>
       <Show when="signed-out">

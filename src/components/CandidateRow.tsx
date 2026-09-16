@@ -1,4 +1,4 @@
-import { dateAt } from "@/lib/format";
+import { dateAt, packageLine } from "@/lib/format";
 import Link from "next/link";
 import type { Application, Candidate, User } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
@@ -90,8 +90,7 @@ export function CandidateRow({
           </Field>
           <Field label="Package">
             <span className="text-ink-soft">
-              Now {candidate.currentSalary} · expects {candidate.expectedSalary} ·{" "}
-              {candidate.noticePeriodDays} days notice
+              {packageLine(candidate)}
             </span>
           </Field>
           {owner && (
@@ -135,6 +134,8 @@ export function CandidateRow({
           />
         )}
 
+        {/* Not on Database CVs: everyone there is a database match. */}
+        {app.stage !== "matched" && (
         <div className="rounded-lg border border-rule px-3.5 py-3 text-[12px] leading-[1.8] text-ink-faint">
           <span className="text-ink-soft">In {STAGE_LABEL[app.stage].toLowerCase()}</span>
           <br />
@@ -146,6 +147,7 @@ export function CandidateRow({
             </>
           )}
         </div>
+        )}
       </div>
     </article>
   );

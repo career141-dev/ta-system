@@ -20,12 +20,12 @@ import { InterviewPanel } from "@/components/InterviewPanel";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
+import { ReviewDetailsForm } from "@/components/ReviewDetailsForm";
 import { LiveFollowUp } from "@/components/LiveFollowUp";
 import { WebCallPanel } from "@/components/WebCallPanel";
 import { WebCallResults } from "@/components/WebCallResults";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
-import { removeApplication } from "@/app/actions";
 import { primeStore } from "@/data/prime";
 
 /**
@@ -170,7 +170,7 @@ export default async function CandidateDrawer({
         <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
           <div className="mx-auto flex max-w-[1000px] flex-col">
 
-      <section className="grid gap-5 rounded-2xl border border-rule bg-surface p-6 shadow-[0_1px_2px_rgba(23,28,24,0.04)] xl:grid-cols-[minmax(0,1fr)_264px]">
+      <section className="grid gap-5 rounded-2xl border border-rule bg-surface p-6 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex gap-5">
           <span className="grid h-[84px] w-[84px] shrink-0 place-items-center rounded-full bg-[#c9a227] text-[24px] font-semibold text-white">{initials}</span>
           <div className="min-w-0 flex-1">
@@ -227,51 +227,6 @@ export default async function CandidateDrawer({
           </div>
         </div>
 
-        {/* Where this application stands, kept out of the reading column so the
-            person and the paperwork are not interleaved. */}
-        <dl className="flex flex-col gap-3 self-start rounded-xl border border-rule bg-paper px-4 py-3.5 text-[12.5px]">
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-ink-faint">Stage</dt>
-            <dd className="font-medium">{STAGE_LABEL[app.stage]}</dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-ink-faint">Owner</dt>
-            <dd className="font-medium">{owner?.name ?? "Unclaimed"}</dd>
-          </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="text-ink-faint">Source</dt>
-            <dd className="font-medium">{app.sourcingChannel}</dd>
-          </div>
-          {app.setNumber && (
-            <div className="flex items-baseline justify-between gap-3">
-              <dt className="text-ink-faint">Set</dt>
-              <dd className="tabular font-medium">{app.setNumber}</dd>
-            </div>
-          )}
-          {interview && interview.outcome === "pending" && (
-            <div className="flex items-baseline justify-between gap-3 border-t border-rule pt-3">
-              <dt className="text-ink-faint">Interview</dt>
-              <dd className={`font-medium ${interview.confirmedAt ? "text-brand" : "text-warn"}`}>
-                {interview.confirmedAt ? "Confirmed" : "Awaiting confirmation"}
-              </dd>
-            </div>
-          )}
-
-          {/* Takes them off this role only — the CV and everything else the
-              database holds on them stays. */}
-          {!locked && (
-            <form action={removeApplication} className="border-t border-rule pt-3">
-              <input type="hidden" name="appId" value={app.id} />
-              <input type="hidden" name="openingId" value={id} />
-              <Confirm
-                label="Remove from this opening"
-                question={`Take ${c.fullName.split(" ")[0]} off ${opening.title}? Their record stays in the database.`}
-                confirmLabel="Remove"
-                className="text-[12px] text-ink-faint transition-colors hover:text-danger"
-              />
-            </form>
-          )}
-        </dl>
       </section>
 
 
@@ -314,6 +269,19 @@ export default async function CandidateDrawer({
           </span>
         ))}
       </div>
+
+      {/* Everything Director Review asks for, typed in by hand when it came in
+          outside the follow-up. Shown until they are past Follow-up. */}
+      {!locked && ["new_cv", "matched", "follow_up"].includes(app.stage) && (
+        <ReviewDetailsForm
+          applicationId={app.id}
+          openingId={id}
+          currentSalary={c.currentSalary}
+          expectedSalary={c.expectedSalary}
+          noticePeriodDays={c.noticePeriodDays}
+          hasCv={Boolean(c.cvFileName)}
+        />
+      )}
 
       <nav className="mt-4 flex gap-6 border-b border-rule px-1">
         {TABS.map((t) => {
@@ -393,18 +361,6 @@ export default async function CandidateDrawer({
               )}
             </div>
 
-            <h3 className="mb-2.5 text-[13px] font-semibold">What we hold on file</h3>
-            <dl className="grid grid-cols-[130px_1fr] gap-x-4 gap-y-3 text-[13px]">
-            <dt className="font-semibold">Experience</dt><dd className="text-ink-soft">{c.totalExperienceYears} years · {c.currentTitle} at {c.currentEmployer}</dd>
-            <dt className="font-semibold">Education</dt><dd className="text-ink-soft">{c.educationDegree} — {c.educationInstitution}</dd>
-            <dt className="font-semibold">English</dt><dd className="tabular text-ink-soft">{c.englishLevel}/10</dd>
-            <dt className="font-semibold">Age</dt><dd className="tabular text-ink-soft">{c.age}</dd>
-            <dt className="font-semibold">Nationality</dt><dd className="text-ink-soft">{c.nationality}</dd>
-            <dt className="font-semibold">Current</dt><dd className="text-ink-soft">{c.currentSalary}</dd>
-            <dt className="font-semibold">Expected</dt><dd className="text-ink-soft">{c.expectedSalary}</dd>
-            <dt className="font-semibold">Notice</dt><dd className="tabular text-ink-soft">{c.noticePeriodDays} days</dd>
-            <dt className="font-semibold">Notes</dt><dd className="whitespace-pre-line text-ink-soft">{app.notes.join("\n")}</dd>
-          </dl>
           </>
         )}
 

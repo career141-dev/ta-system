@@ -6,7 +6,6 @@ import { assess } from "@/lib/assessment";
 import type { Score } from "@/lib/scoring";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
-import { confirmShortlist } from "@/app/actions";
 import { Pager } from "./Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 
@@ -277,51 +276,6 @@ export function CandidateList({
         </span>
       </form>
 
-      {/*
-        High scorers are pre-shortlisted and the TA confirms them in one click
-        (13 September). Nothing moves until they press it: the AI call starts
-        the moment somebody is in Follow-up, so a person decides who that is.
-      */}
-      {(() => {
-        if (!claimable || !ranked) return null;
-        const bar = Number(repo.setting("autoShortlistScore", "75")) || 75;
-        const suggested = order.filter((a) => {
-          const sc = value(a.id);
-          return (
-            sc !== undefined && sc >= bar && !a.ownerTaId && (a.stage === "new_cv" || a.stage === "matched") &&
-            allows(currentUser, "opening.act", { openingId, assignment, ownerTaId: a.ownerTaId })
-          );
-        });
-        if (suggested.length === 0) return null;
-        return (
-          <form action={confirmShortlist} className="border-b border-rule bg-brand-soft/40 px-8 py-4">
-            <input type="hidden" name="openingId" value={openingId} />
-            <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <p className="text-[13px] font-medium">
-                {suggested.length} scored {bar} or more — shortlisted for you, waiting on your confirm
-              </p>
-              <button className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90">
-                Confirm shortlist
-              </button>
-            </div>
-            <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1.5">
-              {suggested.map((a) => {
-                const c = repo.candidate(a.candidateId);
-                return (
-                  <label key={a.id} className="flex items-center gap-2 text-[12.5px]">
-                    <input type="checkbox" name="appId" value={a.id} defaultChecked />
-                    <span>{c?.fullName}</span>
-                    <span className="tabular text-ink-faint">{value(a.id)}</span>
-                  </label>
-                );
-              })}
-            </div>
-            <p className="mt-2 text-[11.5px] text-ink-faint">
-              Untick anyone you do not want. Confirming sends them to Follow-up, where the AI call goes first.
-            </p>
-          </form>
-        );
-      })()}
 
       {shown.length === 0 ? (
         <div className="px-8 py-20 text-center">

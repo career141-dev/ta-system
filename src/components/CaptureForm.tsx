@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { BriefRecorder, type SavedRecording } from "./BriefRecorder";
 import { createOpeningInline, createOpeningStep1 } from "@/app/actions";
 import { ClientPicker, PeoplePicker, inputClass } from "./form";
@@ -68,6 +68,15 @@ export function CaptureForm({
   // A client added from the picker joins the list and is selected; the picker
   // is remounted (`pickerKey`) so it starts from the new selection.
   const [clientList, setClientList] = useState(clients);
+  // The page can hand over a newer list without remounting this form (a
+  // client created in another tab or pop-up, then back here). Take it in,
+  // keeping any client added from this form's own pop-up.
+  useEffect(() => {
+    setClientList((list) => [
+      ...list.filter((c) => !clients.some((x) => x.id === c.id)),
+      ...clients,
+    ]);
+  }, [clients]);
   const [pickerKey, setPickerKey] = useState(0);
   const [addingClient, setAddingClient] = useState(false);
   // The brief (lead) or details (TA) box. Kept in state so a transcribed

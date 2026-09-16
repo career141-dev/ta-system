@@ -1556,6 +1556,25 @@ const rawRepo = {
     if (liveOnLinkedIn && opening.jdStatus !== "approved") {
       return { ok: false, message: JD_NOT_APPROVED };
     }
+    // The same post twice (a double submit, or added from both the rail and
+    // the post manager) showed up as duplicate rows under LinkedIn Job. Posts
+    // with the same title for another recruiter, region or channel are normal
+    // and still allowed.
+    const owner =
+      createdBy && opening.assignedTaIds.includes(createdBy)
+        ? createdBy
+        : opening.assignedTaIds.length === 1
+          ? opening.assignedTaIds[0]
+          : createdBy ?? opening.assignedTaIds[0] ?? null;
+    const twin = load().jobPosts.find(
+      (p) =>
+        p.openingId === openingId &&
+        p.title.trim().toLowerCase() === title.trim().toLowerCase() &&
+        p.channel === channel &&
+        p.assignedTaId === owner &&
+        p.country === (opening.locations[0] ?? null),
+    );
+    if (twin) return { ok: false, message: `There is already a post called "${twin.title}" on this job.` };
     mutate((db) => {
       const o = db.openings.find((x) => x.id === openingId);
       if (!o) return;
@@ -1671,6 +1690,110 @@ const rawRepo = {
         l.openingId === openingId &&
         l.linkedinUrl.toLowerCase().includes(canonical.toLowerCase()),
     );
+  },
+
+  /**
+   * A shortlisted headhunted person, onto the opening's pipeline.
+   *
+   * Headhunting has no CV intake: the TA found them on LinkedIn, talked to
+   * them and shortlisted them in Excel Tables. This makes them a candidate (or
+   * reuses the one the row already points at, or one with the same LinkedIn
+   * profile), puts them on the opening at Follow-up, and ties the row to them.
+   * The caller then moves them to Director Review through the normal stage
+   * rules, so the same checks apply as for anyone else.
+   */
+  linkToApplication(entryId: Id, byUserId: Id):
+    | { ok: true; applicationId: Id; stage: Stage }
+    | { ok: false; message: string } {
+    const db = load();
+    const e = db.linkVault.find((l) => l.id === entryId);
+    if (!e) return { ok: false, message: "That row no longer exists." };
+    if (e.outcome !== "shortlisted") return { ok: false, message: "Set the outcome to Shortlisted first." };
+    const name = (e.name ?? e.capture?.fullName ?? "").trim();
+    if (!name) return { ok: false, message: "Add their name first (Change outcome ⇕ → Name)." };
+
+    const profile = (u: string | null | undefined) => (u ?? "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[/?#].*$|\/+$/, "");
+    const sameProfile = (c: Candidate) => {
+      const a = profile(c.linkedinUrl);
+      const b = profile(e.linkedinUrl);
+      return Boolean(a) && a === b;
+    };
+    const existingCandidate =
+      (e.candidateId && db.candidates.find((c) => c.id === e.candidateId)) ||
+      (profile(e.linkedinUrl).includes("linkedin.com/in") ? db.candidates.find(sameProfile) : undefined);
+    const candidateId = existingCandidate?.id ?? `ca_${Math.random().toString(36).slice(2, 10)}`;
+    const onOpening = db.applications.find((a) => a.candidateId === candidateId && a.openingId === e.openingId);
+    if (onOpening) {
+      if (e.candidateId !== candidateId) mutate((d) => { const row = d.linkVault.find((l) => l.id === entryId); if (row) row.candidateId = candidateId; });
+      return { ok: true, applicationId: onOpening.id, stage: onOpening.stage };
+    }
+
+    const by = db.users.find((u) => u.id === byUserId)?.name ?? "a TA";
+    const now = Date.now();
+    const applicationId = `app_${Math.random().toString(36).slice(2, 10)}`;
+    mutate((d) => {
+      if (!existingCandidate) {
+        const cap = e.capture ?? null;
+        d.candidates.push({
+          id: candidateId,
+          fullName: name,
+          email: null,
+          phone: e.phoneNumber,
+          linkedinUrl: e.linkedinUrl,
+          location: cap?.location ?? null,
+          nationality: null,
+          age: null,
+          gender: null,
+          currentEmployer: e.company ?? cap?.currentCompany ?? null,
+          currentTitle: e.title ?? cap?.currentTitle ?? null,
+          totalExperienceYears: null,
+          educationDegree: null,
+          educationInstitution: null,
+          qualifications: null,
+          englishLevel: null,
+          languages: [],
+          skills: [],
+          industries: [],
+          noticePeriodDays: null,
+          currentSalary: null,
+          expectedSalary: null,
+          cvFileName: null,
+          workHistory: [],
+          createdAt: now,
+        });
+      }
+      d.applications.push({
+        id: applicationId,
+        openingId: e.openingId,
+        jobPostId: null,
+        candidateId,
+        stage: "follow_up",
+        answers: {},
+        sourcingChannel: e.sourcingChannel,
+        ownerTaId: null,
+        shortlistedAt: null,
+        setNumber: null,
+        rating: null,
+        notes: [`Headhunted — shortlisted in Excel Tables by ${by}`],
+        statusA: null,
+        statusB: null,
+        rankTier: null,
+        rankWeight: null,
+        isAddOn: false,
+        addedOnAt: null,
+        backupForApplicationId: null,
+        offerDeclinedAt: null,
+        offerDeclineReason: null,
+        rejectedBy: null,
+        rejectReason: null,
+        droppedOutReason: null,
+        createdAt: now,
+        lastStageChangedAt: now,
+      });
+      const row = d.linkVault.find((l) => l.id === entryId);
+      if (row) row.candidateId = candidateId;
+    });
+    return { ok: true, applicationId: realId(applicationId), stage: "follow_up" };
   },
 
   addLink(openingId: Id, url: string, addedBy: Id): Id {
