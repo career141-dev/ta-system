@@ -8,9 +8,10 @@
 # Memory is capped on every container, so a runaway import is killed inside
 # staging instead of pushing the kernel into killing production processes.
 #
-# Only the app is published on the public address. Convex, its dashboard,
-# Qdrant and Postgres listen on 127.0.0.1; reach them with an SSH tunnel
-# (see docs/STAGING.md). Secrets come from .env.staging (chmod 600).
+# Published on the public address: the app (3110), the Convex backend and its
+# dashboard (3220, 6792 — every call needs the admin key, and the TA functions
+# are internal), and Qdrant (6336 — requires the API key). Postgres is never
+# published. Secrets come from .env.staging (chmod 600).
 
 name: ta-staging
 
@@ -48,15 +49,15 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:3220:3210"
-      - "127.0.0.1:3221:3211"
+      - "3220:3210"
+      - "3221:3211"
     environment:
       INSTANCE_NAME: ta-staging
       INSTANCE_SECRET: ${STAGING_INSTANCE_SECRET:?set in .env.staging}
       POSTGRES_URL: postgresql://convex:${STAGING_POSTGRES_PASSWORD}@postgres:5432?sslmode=disable
       DO_NOT_REQUIRE_SSL: "true"
-      CONVEX_CLOUD_ORIGIN: http://127.0.0.1:3220
-      CONVEX_SITE_ORIGIN: http://127.0.0.1:3221
+      CONVEX_CLOUD_ORIGIN: http://94.136.189.48:3220
+      CONVEX_SITE_ORIGIN: http://94.136.189.48:3221
       DISABLE_BEACON: "true"
       APPLICATION_MAX_CONCURRENT_MUTATIONS: "8"
       APPLICATION_MAX_CONCURRENT_NODE_ACTIONS: "4"
@@ -74,9 +75,9 @@ services:
     container_name: ta-staging-convex-dashboard
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6792:6791"
+      - "6792:6791"
     environment:
-      NEXT_PUBLIC_DEPLOYMENT_URL: http://127.0.0.1:3220
+      NEXT_PUBLIC_DEPLOYMENT_URL: http://94.136.189.48:3220
       PORT: "6791"
       HOSTNAME: 0.0.0.0
     depends_on: [convex]
@@ -89,8 +90,10 @@ services:
     container_name: ta-staging-qdrant
     restart: unless-stopped
     ports:
-      - "127.0.0.1:6336:6333"
-      - "127.0.0.1:6337:6334"
+      - "6336:6333"
+      - "6337:6334"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY:?set in .env.staging}
     volumes:
       - ta-staging-qdrant-data:/qdrant/storage
     mem_limit: 1536m

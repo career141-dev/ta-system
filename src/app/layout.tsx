@@ -9,6 +9,12 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
 import { primeStore } from "@/data/prime";
 
+// Every page depends on who is signed in and reads the database, so nothing is
+// rendered at build time. Without this, `next build` pre-rendered the 404 page,
+// whose layout loads the store — so an image could not be built without a live
+// database to point at.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "Career141 — Talent Acquisition",
   description: "Recruitment platform for the Career141 TA desk",
