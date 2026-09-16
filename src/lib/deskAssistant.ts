@@ -218,7 +218,7 @@ const SYSTEM = [
   "You are the Intelligent Desk Assistant and Platform Guide inside Career141's recruitment platform, answering a member of the TA desk.",
   "",
   "You have two primary capabilities:",
-  "1. PLATFORM & WORKFLOW GUIDE: Explain how features work, guide recruiters through workflows, and provide direct markdown links to pages (e.g. [Database Search](/database), [Clients](/clients), [New Opening](/openings/new), [Openings](/openings), [Sourcing](/hh/suggestions)).",
+  "1. PLATFORM & WORKFLOW GUIDE: Explain how features work, guide recruiters through workflows, and provide direct markdown links to pages (e.g. [Database Search](/database), [Clients](/clients), [New Opening](/openings/new), [Openings](/openings)).",
   "2. LIVE DESK ASSISTANT: Answer questions about the recruiter's live openings, candidates, pipeline stages, upcoming interviews, and alerts using the provided JSON snapshot.",
   "",
   "Guidelines:",
@@ -229,6 +229,8 @@ const SYSTEM = [
   "- Sets are numbered per recruiter and a set closes once it reaches five candidates (The Rule of 5).",
   "- A strong match has a fit score of 70+ (or >= 0.70 in semantic vector search).",
   "- People waiting for review means new CVs plus database matches nobody has claimed yet.",
+  "- Be brief: answer in at most 6 short lines or bullets. No greeting, no closing offer of more help.",
+  "- Link only to pages listed in the sitemap below, or to a `link` value given in the snapshot. Never make up a page address; if a page belongs to one opening, say where to find it on that opening instead.",
   "",
   PLATFORM_KNOWLEDGE,
 ].join("\n");
@@ -239,7 +241,7 @@ export async function askDesk(
   user: User,
   question: string,
   history: AssistantTurn[] = [],
-  call: ModelCall = (s, p) => write(s, p, 900, "assist"),
+  call: ModelCall = (s, p) => write(s, p, 600, "assist"),
 ): Promise<{ ok: true; answer: string; instant: boolean } | { ok: false; reason: string }> {
   const q = question.trim().slice(0, 600);
   if (!q) return { ok: false, reason: "empty" };
@@ -259,8 +261,37 @@ export async function askDesk(
     `\nQuestion: ${q}`,
   ].join("\n");
   const r = await call(SYSTEM, prompt);
-  if (!r.ok) return { ok: false, reason: r.reason };
-  return { ok: true, answer: r.text.trim(), instant: false };
+  if (!r.ok) {
+    // The reason alone ("bad_response") hid a 404 from the provider for weeks.
+    console.error(`[desk assistant] model call failed: ${r.reason}${"detail" in r && r.detail ? ` — ${String(r.detail).slice(0, 300)}` : ""}`);
+    return { ok: false, reason: r.reason };
+  }
+  return { ok: true, answer: onlyRealLinks(r.text.trim()), instant: false };
+}
+
+/**
+ * Page addresses in this app. A link the model writes that is not one of these
+ * is shown as plain text, so the Copilot never sends someone to a page that
+ * does not exist — the one navigation mistake a prompt alone cannot rule out.
+ */
+const REAL_PAGE = [
+  /^\/$/,
+  /^\/(clients|openings|database|alerts|reports|people|intake|search)$/,
+  /^\/openings\/new$/,
+  /^\/database\/(results|scan)$/,
+  /^\/candidates\/[a-z0-9_]+$/,
+  /^\/openings\/[a-z0-9_]+$/,
+  /^\/openings\/[a-z0-9_]+\/(jd|eod|database|linkedin-job|snippets|reference|hh|hh\/(suggestions|links|research))$/,
+  /^\/openings\/[a-z0-9_]+\/pipeline\/[a-z_]+$/,
+  /^\/openings\/[a-z0-9_]+\/candidate\/[a-z0-9_]+$/,
+];
+
+export function onlyRealLinks(answer: string): string {
+  return answer.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (whole, label: string, href: string) => {
+    if (/^https?:\/\//i.test(href)) return whole;
+    const path = href.split(/[?#]/)[0];
+    return REAL_PAGE.some((re) => re.test(path)) ? whole : label;
+  });
 }
 
 type Snapshot = ReturnType<typeof snapshotFor>;

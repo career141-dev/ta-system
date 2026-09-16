@@ -94,14 +94,21 @@ Return ONLY valid JSON with these fields:
 If the query is vague, infer the most likely role and include likely related skills so the search remains broad enough.
 For occupationSynonyms, include alternative job titles that represent the same occupation as the primary title — not seniority variations, but genuinely equivalent role names a candidate might use on their CV.`;
 
+  // Clients are made per attempt, inside the try. Building both up front threw
+  // "NVIDIA_API_KEY is not set" wherever that fallback key is absent — the web
+  // app, which runs this for Database search — before DeepSeek was ever asked,
+  // so the whole search fell back to words only. The fallback is offered only
+  // where its key exists.
   const candidateProviders = [
-    { client: getOpenAI("jd_extraction"), model: OPENROUTER_PRIMARY_MODEL, isNvidia: false },
-    { client: getNvidiaOpenAI(), model: "meta/llama-3.1-70b-instruct", isNvidia: true },
+    { client: () => getOpenAI("jd_extraction"), model: OPENROUTER_PRIMARY_MODEL, isNvidia: false },
+    ...(process.env.NVIDIA_API_KEY
+      ? [{ client: () => getNvidiaOpenAI(), model: "meta/llama-3.1-70b-instruct", isNvidia: true }]
+      : []),
   ];
 
   for (const provider of candidateProviders) {
     try {
-      const response = await provider.client.chat.completions.create({
+      const response = await provider.client().chat.completions.create({
         model: provider.model,
         temperature: 0.1,
         max_tokens: 1400,

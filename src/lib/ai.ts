@@ -79,10 +79,16 @@ const OPENROUTER_MODEL: Record<Task, string> = {
   rank: "google/gemini-3.6-flash",
   plan: "google/gemini-3.6-flash",
   parse: "google/gemini-2.5-flash-lite",
-  // The desk assistant: someone is waiting for the answer. Measured 13 September
-  // through OpenRouter, "Say OK." took 0.7 s here against 1.6–3.9 s on Gemini
-  // Flash Lite, at a similar price.
-  assist: "openai/gpt-4o-mini",
+  // The desk assistant: someone is waiting for the answer. It was
+  // openai/gpt-4o-mini, which this account's OpenRouter guardrails do not
+  // serve: every request came back 404 ("0 endpoints … matching your guardrail
+  // restrictions and data policy") and the Copilot said "The model returned
+  // something unusable". Checked 16 September: of gpt-4o-mini, gpt-4.1-nano,
+  // gpt-5-nano, Gemini 2.5 Flash Lite and 3.6 Flash, Mistral Small, Qwen3 30B
+  // and Llama 3.3 70B, only DeepSeek V4 Flash is served — zero-retention, about
+  // 0.6–0.8 s to first answer and a fraction of a cent a question. Change it
+  // with C141_MODEL_ASSIST once another model is allowed on the account.
+  assist: "deepseek/deepseek-v4-flash",
 };
 
 const DIRECT_MODEL: Record<Task, string> = {

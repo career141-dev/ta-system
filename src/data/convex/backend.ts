@@ -525,39 +525,18 @@ export type CvLink =
  * caller against the person's access first.
  */
 export async function cvLink(actor: Actor, candidateId: Id, download = false): Promise<CvLink> {
-  const found = await convexQuery<{
-    url: string | null;
-    fileName?: string;
-    fileType?: string;
-    isMissingMigrationFile?: boolean;
-    message?: string;
-  } | null>("candidates/candidates:getCvUploadUrl", { cvUploadId: candidateId });
-
-  if (!found) return { ok: false, reason: "no_cv", detail: "No CV file is on record for this candidate.", fileName: null };
-  const fileName = found.fileName ?? null;
-  if (!found.url) {
-    return { ok: false, reason: "file_missing", detail: found.message ?? "The CV is recorded but its file could not be found.", fileName };
-  }
-
+  const found = await findCvFile(candidateId);
+  if (!found.ok) return found;
+  const { fileName, fileType } = found;
   const proxied = found.url.match(/^\/api\/r2-file\?key=(.+)$/);
-  if (!proxied) return { ok: true, url: found.url, fileName, fileType: found.fileType ?? null };
-
-  // Asked, not tried: signing a link on a deployment without R2 fails inside
-  // the backend and is logged there as an uncaught error on every profile
-  // view. The answer is kept for five minutes either way.
-  if (Date.now() - r2Checked.at > 5 * 60_000) {
-    r2Checked = { at: Date.now(), configured: await convexQuery<boolean>("ta/storage:r2Configured", {}).catch(() => true) };
-  }
-  if (!r2Checked.configured) {
-    return { ok: false, reason: "storage_unavailable", detail: unconfiguredDetail(fileName), fileName };
-  }
+  if (!proxied) return { ok: true, url: found.url, fileName, fileType };
 
   try {
     const url = await convexAction<string>("storage/r2:generateDownloadUrl", {
       key: decodeURIComponent(proxied[1]),
       ...(download && fileName ? { downloadFilename: fileName.replace(/["\r\n]/g, "") } : {}),
     });
-    return { ok: true, url, fileName, fileType: found.fileType ?? null };
+    return { ok: true, url, fileName, fileType };
   } catch (e) {
     const message = (e as Error).message;
     // The SDK's words for "nothing is configured" are about HTTP labels and
@@ -573,6 +552,48 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
       fileName,
     };
   }
+}
+
+/**
+ * Whether a candidate has a CV file that can be opened, and what it is — the
+ * same lookup as `cvLink`, without signing a link. For a page deciding how to
+ * show the CV before the browser asks for the file itself.
+ */
+export async function cvFile(
+  candidateId: Id,
+): Promise<{ ok: true; fileName: string | null; fileType: string | null } | Extract<CvLink, { ok: false }>> {
+  const found = await findCvFile(candidateId);
+  return found.ok ? { ok: true, fileName: found.fileName, fileType: found.fileType } : found;
+}
+
+async function findCvFile(
+  candidateId: Id,
+): Promise<{ ok: true; url: string; fileName: string | null; fileType: string | null } | Extract<CvLink, { ok: false }>> {
+  const found = await convexQuery<{
+    url: string | null;
+    fileName?: string;
+    fileType?: string;
+    isMissingMigrationFile?: boolean;
+    message?: string;
+  } | null>("candidates/candidates:getCvUploadUrl", { cvUploadId: candidateId });
+
+  if (!found) return { ok: false, reason: "no_cv", detail: "No CV file is on record for this candidate.", fileName: null };
+  const fileName = found.fileName ?? null;
+  if (!found.url) {
+    return { ok: false, reason: "file_missing", detail: found.message ?? "The CV is recorded but its file could not be found.", fileName };
+  }
+  if (/^\/api\/r2-file\?key=/.test(found.url)) {
+    // Asked, not tried: signing a link on a deployment without R2 fails inside
+    // the backend and is logged there as an uncaught error on every profile
+    // view. The answer is kept for five minutes either way.
+    if (Date.now() - r2Checked.at > 5 * 60_000) {
+      r2Checked = { at: Date.now(), configured: await convexQuery<boolean>("ta/storage:r2Configured", {}).catch(() => true) };
+    }
+    if (!r2Checked.configured) {
+      return { ok: false, reason: "storage_unavailable", detail: unconfiguredDetail(fileName), fileName };
+    }
+  }
+  return { ok: true, url: found.url, fileName, fileType: found.fileType ?? null };
 }
 
 let r2Checked = { at: 0, configured: true };

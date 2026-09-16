@@ -16,6 +16,8 @@ import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCand
 import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
+import * as backend from "@/data/convex/backend";
+import type { DrawerCv } from "@/components/db/DbCandidateDrawer";
 import { keywordRetrieve } from "@/lib/retrieve";
 import {
   cachedEngineSearch,
@@ -495,6 +497,22 @@ async function ResultsView({
   const prevCandidateId = activeIndex > 0 ? results[activeIndex - 1].candidate.id : null;
   const nextCandidateId = activeIndex >= 0 && activeIndex < results.length - 1 ? results[activeIndex + 1].candidate.id : null;
   const activeStatus = activeCandidate ? repo.overallStatus(activeCandidate.id) : null;
+  // The open candidate's own CV file, for the side panel. Only looked up, not
+  // signed: the browser asks /api/cv for the file itself.
+  let activeCv: DrawerCv | null = null;
+  if (activeCandidate && isConvex()) {
+    const found = await backend
+      .cvFile(activeCandidate.id)
+      .catch((e) => ({ ok: false as const, detail: `The CV could not be looked up (${(e as Error).message}).`, fileName: null }));
+    activeCv = found.ok
+      ? {
+          href: `/api/cv/${encodeURIComponent(activeCandidate.id)}`,
+          fileName: found.fileName,
+          inline: /pdf/i.test(found.fileType ?? "") || /\.pdf$/i.test(found.fileName ?? ""),
+          problem: null,
+        }
+      : { href: null, fileName: found.fileName, inline: false, problem: found.detail };
+  }
   const statusLabel =
     activeStatus?.busy && activeStatus.stage
       ? activeStatus.stage === "placed"
@@ -746,6 +764,7 @@ async function ResultsView({
           nextHref={nextCandidateId ? candidateHref(nextCandidateId) : null}
           closeHref={closeHref}
           statusLabel={statusLabel}
+          cv={activeCv}
         />
       )}
     </>
