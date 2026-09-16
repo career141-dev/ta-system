@@ -25,7 +25,19 @@ export default async function JdPage({
 
   const client = repo.client(o.clientId);
   if (!client) notFound();
-  const brief = o.briefId ? repo.brief(o.briefId) : null;
+  // Every brief on the opening: the lead's from creation and each TA's notes.
+  const briefs = repo.briefsForOpening(id);
+  const brief = briefs[0] ?? (o.briefId ? repo.brief(o.briefId) : null);
+  const mine = briefs.filter((b) => b.capturedBy === user.id).pop() ?? null;
+  const others = briefs
+    .filter((b) => b.capturedBy !== user.id && (b.notesMarkdown.trim() || b.transcript))
+    .map((b) => ({
+      id: b.id,
+      author: repo.user(b.capturedBy)?.name ?? "Someone on the desk",
+      isLead: repo.user(b.capturedBy)?.role !== "ta",
+      notes: [b.notesMarkdown.trim(), b.transcriptStatus === "ready" ? b.transcript ?? "" : ""].filter(Boolean).join("\n\n"),
+      at: dateAt(b.capturedAt),
+    }));
   const e = brief?.extracted;
   const lead = repo.user(o.taLeadId);
   const canWrite = o.assignedTaIds.includes(user.id) || user.role === "admin";
@@ -75,9 +87,11 @@ export default async function JdPage({
     <div className="mx-auto max-w-[860px]">
       <h1 className="text-[21px] font-semibold tracking-tight">Job description</h1>
       <p className="mb-6 text-[12.5px] leading-relaxed text-ink-soft">
-        {brief?.notesMarkdown.trim() || brief?.recordingKey
-          ? `Brief left by ${lead?.name ?? "the lead"}.`
-          : "No brief was left."}{" "}
+        {others.length
+          ? `Brief left by ${[...new Set(others.map((b) => b.author))].join(" and ")}.`
+          : brief?.recordingKey
+            ? `Brief left by ${lead?.name ?? "the lead"}.`
+            : "No brief was left."}{" "}
         Write it and approve it — the job cannot go live until you do.
       </p>
 
@@ -86,10 +100,10 @@ export default async function JdPage({
           openingId={id}
           title={o.title}
           clientName={client.name}
-          initialNotes={brief?.notesMarkdown ?? ""}
+          initialNotes={mine?.notesMarkdown ?? ""}
+          otherBriefs={others}
           jd={o.jdMarkdown}
           extractedSummary={summary}
-          fromLead={Boolean(brief && brief.capturedBy !== user.id)}
         />
       ) : (
         <div className="rounded-2xl border border-rule bg-surface px-7 py-14 text-center">
@@ -99,6 +113,21 @@ export default async function JdPage({
           <p className="mt-1.5 text-[12.5px] text-ink-faint">
             Assigned to {o.assignedTaIds.map((t) => repo.user(t)?.name).join(", ")}.
           </p>
+        </div>
+      )}
+
+      {/* Read from the brief and the TA's notes while the JD is drafted, so the
+          details are there to check before approval, not only after it. */}
+      {o.requirements && (
+        <div className="mt-8">
+          <JobDetailsPanel
+            openingId={id}
+            title={o.title}
+            requirements={o.requirements}
+            jdApproved={false}
+            canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+            editedByName={repo.user(o.requirements.editedBy ?? "")?.name ?? null}
+          />
         </div>
       )}
     </div>

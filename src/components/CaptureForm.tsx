@@ -202,6 +202,27 @@ export function CaptureForm({
         </div>
       </section>
 
+      {!isLead && (
+        <section className={card}>
+          <div className={head}>
+            <h2 className="text-[13.5px] font-semibold">
+              Details <span className="ml-1.5 font-normal text-[12px] text-ink-faint">optional</span>
+            </h2>
+            <p className="mt-0.5 text-[12.5px] text-ink-soft">
+              Anything you know about the role. The JD draft is written from these and the lead’s brief.
+            </p>
+          </div>
+          <div className={inline ? "px-6 py-5" : "px-7 py-6"}>
+            <textarea
+              name="notes"
+              rows={5}
+              placeholder={`Package around LKR 650,000. Colombo. CA or CIMA qualified, 10+ years in manufacturing.`}
+              className={`${inputClass} leading-[1.75]`}
+            />
+          </div>
+        </section>
+      )}
+
       {isLead && (
         <>
           <section className={card}>
@@ -222,7 +243,7 @@ export function CaptureForm({
                 Brief <span className="ml-1.5 font-normal text-[12px] text-ink-faint">optional</span>
               </h2>
               <p className="mt-0.5 text-[12.5px] text-ink-soft">
-                Whatever the client said. The TA writes the JD from this.
+                Whatever the client said. The JD draft is written from this and the TA’s own notes.
               </p>
             </div>
             <div className="flex flex-col gap-5 px-7 py-6">

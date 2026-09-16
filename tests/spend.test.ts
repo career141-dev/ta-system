@@ -40,7 +40,11 @@ eq("at a tenth of a cent", spentSoFar(), 0.401);
 const top = reserve("filler", 4.5);
 top(4.5);
 const before = calls.length;
+// A dear model, named outright: the JD task's default is DeepSeek now, and at
+// its price this call would fit under the cap and prove nothing.
+process.env.C141_MODEL_JD = "anthropic/claude-opus-5";
 const r2 = await write("s", "p".repeat(2000), 8000, "jd");
+delete process.env.C141_MODEL_JD;
 eq("a call that could pass the cap is refused", r2.ok ? "ran" : r2.reason, "spend_cap");
 eq("and nothing was sent", calls.length, before);
 eq("a cheap search still fits under it", (await search("x")).error ?? null, null);

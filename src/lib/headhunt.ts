@@ -22,6 +22,17 @@ export interface OpeningContext {
   locations: string[];
   packageNotes: string;
   mustHaves: string[];
+  /** Whose passport the client wants, as set when the opening was created. */
+  nationalities?: string[];
+  /** Only where the client specified it. */
+  gender?: string | null;
+}
+
+/** One person's details about the role — the lead's brief, or a TA's notes. */
+export interface JdBrief {
+  author: string;
+  role: "lead" | "ta";
+  notes: string;
 }
 
 const HOUSE_RULES = `You are supporting a recruitment desk at Career141, a Sri Lankan talent acquisition firm.
@@ -38,6 +49,8 @@ function ctxLines(c: OpeningContext): string {
     `Role: ${c.title}`,
     `Client: ${c.clientName}${c.industry ? ` (${c.industry})` : ""}`,
     c.locations.length ? `Location: ${c.locations.join(", ")}` : null,
+    c.nationalities?.length ? `Hiring: ${c.nationalities.join(", ")} nationals` : null,
+    c.gender ? `Gender (as the client specified): ${c.gender}` : null,
     c.packageNotes ? `Package: ${c.packageNotes}` : null,
     c.mustHaves.length ? `Requirements: ${c.mustHaves.join("; ")}` : null,
   ]
@@ -194,21 +207,25 @@ export function parseBenchmark(text: string, openingId: string, sources: Source[
 
 export async function generateJdText(
   c: OpeningContext,
-  notes: string,
+  briefs: JdBrief[],
   houseTemplate: string,
 ): Promise<AiResult> {
+  const given = briefs.filter((b) => b.notes.trim());
+  const sections = given.length
+    ? given
+        .map((b) => `${b.role === "lead" ? "The TA lead's brief" : "The TA's notes"} (${b.author}):\n"""\n${b.notes.trim()}\n"""`)
+        .join("\n\n")
+    : "(no notes were left — work from the opening details above only)";
   return write(
     `${HOUSE_RULES}
 
 You are writing a job description that goes out under Career141's name to candidates in Sri Lanka.`,
-    `Write the job description for this role, working only from the brief below. Do not invent requirements, benefits, or facts about the client that are not here.
+    `Write the job description for this role, working only from the details below. Do not invent requirements, benefits, or facts about the client that are not here.
 
+The opening, as it was set up:
 ${ctxLines(c)}
 
-The lead's notes from the client call:
-"""
-${notes || "(no notes were taken)"}
-"""
+${sections}
 
 For reference, the desk's current template output for this role — match its structure and headings, improve the writing:
 """
@@ -216,6 +233,8 @@ ${houseTemplate}
 """
 
 Rules:
+- Use everything above: the opening's details, the TA lead's brief and the TA's notes together. Nothing either of them wrote is to be dropped.
+- Where they disagree, follow the TA's notes — they were written later, usually after speaking to the client again.
 - Markdown, with the same headings as the template.
 - Anything the brief does not cover, leave out. Do not write "competitive salary" or similar filler to fill a gap.
 - If the brief is too thin to write a section, omit the section rather than padding it.
