@@ -76,9 +76,15 @@ const OPENROUTER_MODEL: Record<Task, string> = {
   jd: "deepseek/deepseek-v4-flash",
   extract: "anthropic/claude-sonnet-5",
   research: "google/gemini-3.1-pro-preview",
-  rank: "google/gemini-3.6-flash",
-  plan: "google/gemini-3.6-flash",
-  parse: "google/gemini-2.5-flash-lite",
+  // rank, plan and parse read text into a fixed structure. They were Gemini
+  // 3.6 Flash and 2.5 Flash Lite, which this account's OpenRouter guardrails do
+  // not serve (404, checked 16 September) — Reports' sentence box, reading the
+  // Director's and client's replies, and headhunting plans all failed with "The
+  // model returned something unusable". DeepSeek V4 Flash is served. Each is
+  // still overridable (C141_MODEL_RANK, C141_MODEL_PARSE).
+  rank: "deepseek/deepseek-v4-flash",
+  plan: "deepseek/deepseek-v4-flash",
+  parse: "deepseek/deepseek-v4-flash",
   // The desk assistant: someone is waiting for the answer. It was
   // openai/gpt-4o-mini, which this account's OpenRouter guardrails do not
   // serve: every request came back 404 ("0 endpoints … matching your guardrail

@@ -18,6 +18,13 @@ COPY . .
 # Clerk's publishable key is public and is baked into the browser bundle.
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
+# Next salts every server action's id with this key, and generates a random one
+# per build when it is not set — so each deploy renamed every button's action,
+# and a page left open from before the deploy did nothing when clicked ("Failed
+# to find Server Action"). A fixed key keeps the ids of unchanged actions stable.
+# Build stage only: the image that runs reads the same value from its env file.
+ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 RUN npm run build
 
 FROM node:22-bookworm-slim AS run

@@ -12,6 +12,8 @@ import { dateAt } from "@/lib/format";
 import { LIMITS } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
+import { isConvex } from "@/data/mode";
+import * as backend from "@/data/convex/backend";
 
 export default async function DatabasePage({
   params,
@@ -37,6 +39,11 @@ export default async function DatabasePage({
   const searchSeed = repo.opening(id)?.title ?? "";
   const opening = repo.opening(id);
   const lastRun = repo.matchRuns(id)[0] ?? null;
+  // The whole database, from the backend's counter — the in-memory store holds
+  // only the people this page loaded, so its length was a meaningless number.
+  const databaseTotal = isConvex()
+    ? await backend.candidateStats({ id: null }).then((s) => `${s.total.toLocaleString()}${s.sampled ? "+" : ""}`).catch(() => "—")
+    : repo.candidates().length.toLocaleString();
   const canRun = allows(user, "opening.sourcing", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
 
   // The filter rail offers what this list actually contains, not the whole
@@ -75,7 +82,7 @@ export default async function DatabasePage({
         items={[
           { n: everyone.length, label: "Matched to this opening" },
           { n: unclaimed, label: "Nobody has claimed" },
-          { n: repo.candidates().length.toLocaleString(), label: "In the database" },
+          { n: databaseTotal, label: "In the whole database" },
         ]}
       />
 

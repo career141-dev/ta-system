@@ -128,7 +128,10 @@ export function mapOpening(o: BackendOpening): MappedOpening {
     directorId: typeof o.directorId === "string" ? o.directorId : null,
 
     requirementReceivedAt: numOrNull(o.requirementReceivedAt) ?? (ms(o.createdAt) || null),
-    assignedAt: numOrNull(o.assignedAt),
+    // Openings from the old system carry no assignment date, so the list read
+    // "Assigned —" and every day counter started at 0. When it was created is
+    // the nearest fact on record.
+    assignedAt: numOrNull(o.assignedAt) ?? (ms(o.createdAt) || null),
     closedAt: numOrNull(o.closedAt),
 
     valueOnProgressing: o.valueOnProgressing ?? null,
