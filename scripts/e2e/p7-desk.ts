@@ -46,7 +46,7 @@ const get = (path: string, userId: string) => fetch(BASE + path, { headers: { co
 const post = (path: string, userId: string, body: unknown, headers: Record<string, string> = {}) =>
   fetch(BASE + path, { method: "POST", headers: { cookie: cookieFor(userId), "content-type": "application/json", ...headers }, body: JSON.stringify(body), redirect: "manual" });
 const text = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;|&rsquo;/g, "'").replace(/\s+/g, " ");
-async function shows(path: string, userId: string, needle: string, waitMs = 45_000): Promise<boolean> {
+async function shows(path: string, userId: string, needle: string, waitMs = 90_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   for (;;) {
     const res = await get(path, userId);

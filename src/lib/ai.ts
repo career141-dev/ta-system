@@ -177,8 +177,6 @@ async function openRouterRequest(
         headers: {
           authorization: `Bearer ${key}`,
           "content-type": "application/json",
-          "HTTP-Referer": "https://career141.com",
-          "X-Title": "Career141 TA Platform",
         },
         body: JSON.stringify({
           model,

@@ -28,7 +28,9 @@ for (const file of files) {
   process.stdout.write(`\n== ${label} ${"=".repeat(Math.max(0, 60 - label.length))}\n`);
   const r = spawnSync(
     process.execPath,
-    ["--import", rel(path.join(here, "alias.mjs")), rel(path.join(here, file))],
+    // Node 22 only loads .ts files with the flag (23.6+ does it by default and
+    // still accepts it), so without it every suite failed before running.
+    ["--experimental-strip-types", "--no-warnings", "--import", rel(path.join(here, "alias.mjs")), rel(path.join(here, file))],
     {
       stdio: "inherit",
       cwd: path.resolve(here, ".."),

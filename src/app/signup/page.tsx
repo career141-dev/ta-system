@@ -1,8 +1,8 @@
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import { SignUp } from "@clerk/nextjs";
+import { Show, SignUp } from "@clerk/nextjs";
 import { currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
+import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
 
 /**
  * Where an invite link lands.
@@ -14,7 +14,7 @@ import { primeStore } from "@/data/prime";
  */
 export default async function SignUpPage() {
   await primeStore({ allApplications: true });
-  if (await currentUser()) redirect("/");
+  if (await currentUser()) return <ReloadWhenSignedIn />;
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[440px] flex-col justify-center px-6 py-16">
@@ -25,7 +25,12 @@ export default async function SignUpPage() {
           Set up your sign-in. Access is by invitation only.
         </p>
       </div>
-      <SignUp routing="hash" signInUrl="/signin" forceRedirectUrl="/" />
+      <Show when="signed-out">
+        <SignUp routing="hash" signInUrl="/signin" forceRedirectUrl="/signin" />
+      </Show>
+      <Show when="signed-in">
+        <ReloadWhenSignedIn />
+      </Show>
       <p className="mt-4 text-[12px] text-ink-faint">
         Already set up? <Link href="/signin" className="underline">Sign in</Link>
       </p>

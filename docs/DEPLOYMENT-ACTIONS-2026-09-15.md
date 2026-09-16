@@ -61,6 +61,10 @@ Convex backend at `api.career141.com`. Nothing below has been done to production
 4. Environment on the production deployment:
    - `C141_OUTBOUND_LOCK` **unset** (or `false`) — on production messages must reach people.
    - `C141_DISABLE_CRONS` **unset** — production crons stay on.
+   - `OUTREACH_LIVE=true` — the fail-closed outreach gate (`convex/lib/outreachSafety.ts`,
+     from main). Without it every WhatsApp and email is redirected to
+     `OUTREACH_TEST_EMAIL` / `OUTREACH_TEST_PHONE`, or blocked when those are unset.
+     Test and staging deployments leave it unset.
    - `MS_GRAPH_TENANT_ID`, `MS_GRAPH_CLIENT_ID`, `MS_GRAPH_CLIENT_SECRET` — the **new** secret.
    - `C141_TA_INTAKE` — per decision B2.
    - R2, OpenRouter/NVIDIA/OpenAI, Qdrant, Meta, ElevenLabs as today (unchanged).

@@ -69,6 +69,8 @@ export const messagesFor = internalQuery({
       stoppedSequence: c.stoppedSequence,
       sequenceDay: c.sequenceDay ?? null,
       sentAt: at(c),
+      // Why a send failed — including the outreach gate's "test mode: blocked".
+      errorMessage: c.errorMessage ?? null,
     }));
   },
 });

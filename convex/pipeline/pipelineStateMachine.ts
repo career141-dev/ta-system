@@ -46,6 +46,11 @@ export interface TransitionOptions {
   actorId?: Id<"users"> | string;
   reason?: string;
   bypassRoleCheck?: boolean;
+  /**
+   * Do not START the outreach sequence on entering follow_up. The TA platform
+   * sends only when a person presses Send; stopping on leave still happens.
+   */
+  skipAutoOutreach?: boolean;
 }
 
 /**
@@ -55,7 +60,7 @@ export async function executeStageTransition(
   ctx: MutationCtx,
   opts: TransitionOptions
 ) {
-  const { applicationId, targetStage, actorId, reason, bypassRoleCheck } = opts;
+  const { applicationId, targetStage, actorId, reason, bypassRoleCheck, skipAutoOutreach } = opts;
 
   const app = await ctx.db.get(applicationId);
   if (!app) throw new Error(`[StateMachine] Application ${applicationId} not found`);
@@ -176,7 +181,7 @@ export async function executeStageTransition(
 
   // 7. Automated Sequence Triggers & Stops
   if (targetStage === "follow_up") {
-    await initiateFollowUpOutreach(ctx, applicationId);
+    if (!skipAutoOutreach) await initiateFollowUpOutreach(ctx, applicationId);
   } else {
     await stopFollowUpSequenceForApp(ctx, applicationId);
   }

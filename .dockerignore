@@ -4,6 +4,7 @@
 !.env.production.example
 .git
 .claude
+.convex
 node_modules
 .next
 .data

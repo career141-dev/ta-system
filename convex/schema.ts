@@ -412,6 +412,23 @@ export default defineSchema({
       id: v.string(),
       label: v.string(),
     }))),
+    /**
+     * The structured requirements (skills, seniority, years, location, salary,
+     * education, languages, industry) as extracted from the approved JD.
+     * `requirementsLockedFields` names what a person corrected by hand — an
+     * automatic re-extraction fills blanks around them and never overwrites them.
+     */
+    requirementsStatus: v.optional(v.union(
+      v.literal("extracting"),
+      v.literal("extracted"),
+      v.literal("failed"),
+    )),
+    requirementsExtractedAt: v.optional(v.number()),
+    requirementsModel: v.optional(v.string()),
+    requirementsError: v.optional(v.string()),
+    requirementsLockedFields: v.optional(v.array(v.string())),
+    requirementsEditedBy: v.optional(v.id("users")),
+    requirementsEditedAt: v.optional(v.number()),
     taLeadId: v.optional(v.id("users")),
     /** Denormalised mirror of jobAssignments, as the new UI reads it. */
     assignedTaIds: v.optional(v.array(v.id("users"))),

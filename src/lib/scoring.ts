@@ -992,6 +992,57 @@ export function requirementsFromOpening(input: {
   /** The skills the database actually knows about — repo.vocabulary().skills.
    *  Without it there is nothing to match a JD's wording against. */
   knownSkills?: string[];
+  /**
+   * The Job details a TA reviewed (or the extractor read from the approved
+   * JD). Where a field is set it wins over what the JD text is parsed into:
+   * a person checked it, and the parser can only guess from wording.
+   */
+  structured?: {
+    requiredSkills?: string[];
+    niceToHaveSkills?: string[];
+    experienceMinYears?: number | null;
+    seniorityLevel?: string | null;
+    location?: string | null;
+  };
+}): Requirements {
+  const base = requirementsFromJdText(input);
+  const s = input.structured;
+  if (!s) return base;
+  const required = (s.requiredSkills ?? []).filter(Boolean);
+  const preferred = (s.niceToHaveSkills ?? []).filter((p) => !required.some((r) => r.toLowerCase() === p.toLowerCase()));
+  const seniority = seniorityFromLevel(s.seniorityLevel);
+  return {
+    ...base,
+    requiredSkills: required.length ? required.slice(0, 12) : base.requiredSkills,
+    preferredSkills: required.length || preferred.length ? preferred.slice(0, 10) : base.preferredSkills,
+    // The creation placeholder (2 years, mid-level) is not a requirement anyone read.
+    minYears: typeof s.experienceMinYears === "number" && s.experienceMinYears > 0 ? s.experienceMinYears : base.minYears,
+    seniority: seniority ?? base.seniority,
+    locations: s.location && !base.locations.length ? [s.location] : base.locations,
+  };
+}
+
+/** The backend's eleven job levels onto this scorer's six. */
+export function seniorityFromLevel(level: string | null | undefined): Seniority | null {
+  switch (level) {
+    case "entry_level": return "junior";
+    case "mid_level": return "mid";
+    case "executive": return "mid";
+    case "senior_executive": return "senior";
+    case "manager": case "senior_manager": case "agm": return "lead";
+    case "gm": case "director": case "c_suite": return "executive";
+    default: return null;
+  }
+}
+
+function requirementsFromJdText(input: {
+  title: string;
+  jdMarkdown: string;
+  locations: string[];
+  targetNationalities: string[];
+  industry: string | null;
+  negativeKeywords?: string[];
+  knownSkills?: string[];
 }): Requirements {
   // Most JDs pasted from elsewhere have no bullet markers at all — plain lines
   // under headings. Read those as bullets, or nothing is found (13 September:

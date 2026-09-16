@@ -11,6 +11,8 @@ export const extractDetailsFromText = internalAction({
     channel: v.optional(v.string()),
     inboxEmail: v.optional(v.string()),
     messageId: v.optional(v.string()),
+    /** The From address of the email being answered — a thread reply goes back to it. */
+    senderEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // Guard: skip extraction if text is empty or trivially short
@@ -413,6 +415,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
                 messageId: args.messageId,
                 replyText: replyMessage,
                 replyHtml,
+                originalSender: args.senderEmail || updatedCandidate?.email || candidate?.email || undefined,
               });
             } else {
               await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {

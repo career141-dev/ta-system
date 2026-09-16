@@ -139,6 +139,8 @@ export const shortlist = internalMutation({
         // state machine's own check would look for a Clerk identity and find
         // none — see convex/ta/guard.ts.
         bypassRoleCheck: true,
+        // Nothing is sent by moving a card; the TA presses Send (ta/followUp).
+        skipAutoOutreach: true,
       });
     }
 
@@ -202,6 +204,7 @@ export const moveStage = internalMutation({
       actorId: user._id,
       reason: args.reason,
       bypassRoleCheck: true,
+      skipAutoOutreach: true,
     });
     return { ...result, stage: toTaStage(target) };
   },

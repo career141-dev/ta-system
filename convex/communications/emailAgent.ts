@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
+import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
 
 
 // ----------------------------------------------------------------------------------
@@ -279,15 +280,10 @@ export const pollEmailInbox = action({
           isCandidateMatched = !!checkResult.isCandidateMatched;
 
           if (checkResult.isFollowUpReply) {
-            // Trigger automatic AI reply email
-            await ctx.scheduler.runAfter(0, internal.communications.emailAgent.generateAndSendAiEmailReply, {
-              inboxEmail: targetInboxEmail,
-              messageId: message.id,
-              candidateId: checkResult.candidateId as any,
-              jobId: checkResult.jobId as any,
-              applicationId: checkResult.applicationId as any,
-              incomingBody: emailBody,
-            });
+            // The reply itself is answered by extractDetailsFromText, which
+            // checkAndRecordEmailReply has already scheduled. This used to ALSO
+            // schedule generateAndSendAiEmailReply, so one candidate email got
+            // two AI replies.
             isReplyProcessed = true;
           }
         }
@@ -537,10 +533,11 @@ export const checkAndRecordEmailReply = internalMutation({
   },
   handler: async (ctx, args) => {
     let targetEmail = args.senderEmail;
-    const isTestMode = process.env.EMAIL_TEST_MODE === "true";
-    const testRecipient = process.env.EMAIL_TEST_RECIPIENT;
+    // In test mode every outbound email went to the test mailbox, so a reply
+    // FROM the test mailbox belongs to whichever candidate was written to last.
+    const testRecipient = (process.env.OUTREACH_TEST_EMAIL ?? "").trim();
 
-    if (isTestMode && testRecipient && args.senderEmail.toLowerCase() === testRecipient.toLowerCase()) {
+    if (!outreachLive() && testRecipient && args.senderEmail.toLowerCase() === testRecipient.toLowerCase()) {
       const lastOutbound = await ctx.db
         .query("communications")
         .withIndex("by_channel_time", (q: any) => q.eq("channel", "email"))
@@ -590,6 +587,7 @@ export const checkAndRecordEmailReply = internalMutation({
       channel: "email",
       inboxEmail: args.inboxEmail,
       messageId: args.messageId,
+      senderEmail: args.senderEmail,
     });
 
 
@@ -683,6 +681,7 @@ Do not mention database fields, variables, or system internals. Write the email 
       taEmail: args.inboxEmail,
       messageId: args.messageId,
       replyText: replyText,
+      originalSender: candidate.email,
     });
 
     await ctx.runMutation(internal.communications.emailAgent.markOutboundEmailAsSent, {
@@ -1096,10 +1095,27 @@ export const sendFollowUpEmail = internalAction({
     if (!senderEmail) {
       throw new Error("[EmailAgent] MS_SENDER_EMAIL or OUTBOUND_EMAIL_SENDER environment variable is not configured.");
     }
-    if (!emailAllowed(args.candidateEmail)) {
-      throw new Error(suppressed("follow-up email", args.candidateEmail));
+    // Outreach gate (fail closed). This nudge sender used to have no test-mode
+    // check at all.
+    const decision = resolveRecipient("email", args.candidateEmail);
+    if (!decision.ok) {
+      console.warn(`[EmailAgent] ${decision.reason}`);
+      if (args.communicationId) {
+        await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {
+          communicationId: args.communicationId,
+          status: "failed",
+          errorMessage: decision.reason,
+        });
+      }
+      return { success: false, error: decision.reason };
     }
-    console.log(`[EmailAgent] Sending outbound follow-up email to ${args.candidateEmail} from ${senderEmail}`);
+    const toAddress = decision.to;
+    // Second gate: with the outbound lock on (a test deployment) only
+    // allow-listed addresses receive anything, whatever the redirect decided.
+    if (!emailAllowed(toAddress)) {
+      throw new Error(suppressed("follow-up email", toAddress));
+    }
+    console.log(`[EmailAgent] Sending outbound follow-up email to ${toAddress}${decision.note} from ${senderEmail}`);
 
     const token = await getGraphToken();
     let sentSuccess = false;
@@ -1125,7 +1141,7 @@ export const sendFollowUpEmail = internalAction({
               toRecipients: [
                 {
                   emailAddress: {
-                    address: args.candidateEmail,
+                    address: toAddress,
                   },
                 },
               ],
@@ -1154,36 +1170,9 @@ export const sendFollowUpEmail = internalAction({
       }
     }
 
-    // Fallback: If direct MS Graph call failed or token was unavailable on Docker, proxy through Next.js API route
-    if (!sentSuccess) {
-      try {
-        console.log(`[EmailAgent] Attempting Next.js API route fallback (http://127.0.0.1:3000/api/email/send-followup)...`);
-        const nextApiRes = await fetch("http://127.0.0.1:3000/api/email/send-followup", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            candidateEmail: args.candidateEmail,
-            subject: args.subject,
-            body: args.body,
-          }),
-        });
-
-        if (nextApiRes.ok) {
-          const resData = await nextApiRes.json();
-          if (resData.success) {
-            sentSuccess = true;
-            errorMessage = "";
-            console.log(`[EmailAgent] Outbound email sent successfully via Next.js API route to ${args.candidateEmail}`);
-          } else {
-            errorMessage = resData.error || "Next.js API route returned failure";
-          }
-        } else {
-          errorMessage = `Next.js API route returned HTTP ${nextApiRes.status}: ${await nextApiRes.text()}`;
-        }
-      } catch (nextApiErr: any) {
-        console.error("[EmailAgent] Next.js API route fallback exception:", nextApiErr.message || nextApiErr);
-      }
-    }
+    // (A fallback through http://127.0.0.1:3000/api/email/send-followup used to
+    // live here. That route does not exist in this app, and a second path that
+    // sends mail is a second place a gate can be missed.)
 
     if (args.communicationId) {
       await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {

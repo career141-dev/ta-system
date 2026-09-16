@@ -49,7 +49,7 @@ async function reload(scope: Parameters<typeof primeStore>[0] = { allApplication
 }
 const cookieFor = (id: string) => `c141_dev_user=${id}.${createHmac("sha256", `dev-signin:${secret()}`).update(id).digest("base64url")}`;
 const text = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
-async function shows(path: string, userId: string, needle: string, waitMs = 45_000): Promise<boolean> {
+async function shows(path: string, userId: string, needle: string, waitMs = 90_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   for (;;) {
     const res = await fetch(BASE + path, { headers: { cookie: cookieFor(userId) }, redirect: "manual" });

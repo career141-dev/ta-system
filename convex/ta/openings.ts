@@ -12,6 +12,7 @@ import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
+import { scheduleExtraction } from "./requirements";
 
 
 export const list = internalQuery({
@@ -160,6 +161,174 @@ export const approveJd = internalMutation({
       jdApprovedAt: Date.now(),
       updatedAt: new Date().toISOString(),
     });
+    // The approved JD is what matching scores against, so its structured
+    // requirements are read out of it now — filling blanks, never overwriting
+    // what a person corrected (ta/requirements.ts).
+    await scheduleExtraction(ctx, jobId, "fill");
     return { ok: true, approvedBy: user._id as string };
   },
 });
+
+/** The notes captured with an opening — what the JD is written from. Newest first, joined. */
+export const briefNotes = internalQuery({
+  args: { actorId: v.optional(v.string()), openingId: v.string() },
+  handler: async (ctx, args) => {
+    await optionalActor(ctx, args.actorId);
+    const rows = (await ctx.db.query("briefs").collect()).filter(
+      (b) => String(b.openingId ?? "") === args.openingId,
+    );
+    rows.sort((a, b) => (b.capturedAt ?? 0) - (a.capturedAt ?? 0));
+    return rows.map((b) => b.notesMarkdown ?? "").filter((n) => n.trim()).join("\n\n");
+  },
+});
+
+/**
+ * Save the JD text — a generated draft, or an edit after approval. An approved
+ * JD that changes is read again for requirements, in fill mode.
+ */
+export const saveJd = internalMutation({
+  args: { actorId: v.string(), openingId: v.string(), jdMarkdown: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const jobId = args.openingId as Id<"jobs">;
+    const job = await ctx.db.get(jobId);
+    if (!job) throw new Error("Opening not found");
+    await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
+    const changed = (job.jobDescription ?? "") !== args.jdMarkdown;
+    await ctx.db.patch(jobId, { jobDescription: args.jdMarkdown, updatedAt: new Date().toISOString() });
+    if (changed && job.jdStatus === "approved" && args.jdMarkdown.trim()) {
+      await scheduleExtraction(ctx, jobId, "fill");
+    }
+    return { ok: true, reextracting: changed && job.jdStatus === "approved" };
+  },
+});
+
+function makeKeyword(title: string): string {
+  const prefix = title.replace(/[^A-Za-z0-9]/g, "").toUpperCase().slice(0, 5) || "JOB";
+  const year = new Date().getFullYear().toString().slice(-2);
+  const rand = Math.random().toString(36).toUpperCase().slice(2, 5);
+  return `${prefix}${year}${rand}`;
+}
+
+/**
+ * Create a new Opening (jobs row) along with its assignments.
+ */
+export const create = internalMutation({
+  args: {
+    actorId: v.optional(v.string()),
+    clientId: v.string(),
+    title: v.string(),
+    country: v.optional(v.string()),
+    hiringFor: v.optional(v.string()),
+    targetGender: v.optional(v.union(v.string(), v.null())),
+    jdMarkdown: v.optional(v.string()),
+    assignedTaIds: v.array(v.string()),
+    taLeadId: v.optional(v.union(v.string(), v.null())),
+    directorId: v.optional(v.union(v.string(), v.null())),
+    notesMarkdown: v.optional(v.string()),
+    priorityTier: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+
+    let clientName = "Client";
+    let clientIndustry = "Other";
+    let clientIdVal: Id<"clients"> | undefined;
+
+    try {
+      const clientDoc = await ctx.db.get(args.clientId as Id<"clients">);
+      if (clientDoc) {
+        clientName = clientDoc.name;
+        clientIndustry = clientDoc.industry || "Other";
+        clientIdVal = clientDoc._id;
+      }
+    } catch {
+      // Fallback if client is not in clients table
+    }
+
+    let keyword = makeKeyword(args.title);
+    let attempts = 0;
+    while (attempts < 10) {
+      const existing = await ctx.db
+        .query("jobs")
+        .withIndex("by_keyword", (q) => q.eq("keyword", keyword))
+        .first();
+      if (!existing) break;
+      keyword = makeKeyword(args.title);
+      attempts++;
+    }
+
+    const now = new Date().toISOString();
+    const primaryRecruiterId = (args.assignedTaIds[0] ?? user._id) as Id<"users">;
+    const tier = (["P1", "P2", "P3", "P4", "P5"].includes(args.priorityTier ?? "")
+      ? args.priorityTier
+      : "P3") as Doc<"jobs">["priorityTier"];
+
+    const jobId = await ctx.db.insert("jobs", {
+      title: args.title,
+      clientName,
+      clientIndustry,
+      clientId: clientIdVal,
+      recruitmentType: "both",
+      isConfidential: false,
+      jobDescription: args.jdMarkdown ?? "",
+      requiredSkills: [],
+      seniorityLevel: "mid_level",
+      experienceMinYears: 2,
+      location: args.country || "Sri Lanka",
+      keyword,
+      status: "active",
+      positionStatus: "active",
+      jdStatus: "pending_ta_approval",
+      targetGender: args.targetGender ?? null,
+      targetNationalities: args.hiringFor ? [args.hiringFor] : [],
+      priorityTier: tier,
+      headcount: 1,
+      primaryRecruiterId,
+      assignedTaIds: args.assignedTaIds.map((id) => id as Id<"users">),
+      taLeadId: (args.taLeadId ?? user._id) as Id<"users">,
+      directorId: args.directorId ? (args.directorId as Id<"users">) : undefined,
+      directorReviewEnabled: true,
+      clientReviewEnabled: true,
+      esaCheckEnabled: false,
+      rejectionLoopAction: "ask_ta_each_time",
+      agent3AfterDay7: "mark_unresponsive",
+      agent5Enabled: false,
+      agent5Trigger: "manual_only",
+      agent5CallScript: "default",
+      agent5NoAnswerAction: "notify_ta",
+      headhuntingEnabled: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    for (let i = 0; i < args.assignedTaIds.length; i++) {
+      const taId = args.assignedTaIds[i] as Id<"users">;
+      await ctx.db.insert("jobAssignments", {
+        jobId,
+        userId: taId,
+        assignmentRole: i === 0 ? "primary_recruiter" : "supporting_recruiter",
+        assignedBy: user._id,
+        assignedAt: now,
+        isActive: true,
+      });
+    }
+
+    if (args.notesMarkdown) {
+      await ctx.db.insert("briefs", {
+        clientId: clientIdVal,
+        openingId: jobId,
+        kind: "management_to_lead",
+        capturedBy: user._id,
+        capturedAt: Date.now(),
+        method: "notes",
+        notesMarkdown: args.notesMarkdown,
+        transcriptStatus: "none",
+        extracted: {},
+      });
+    }
+
+    return { id: jobId as string };
+  },
+});
+

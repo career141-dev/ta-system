@@ -6,6 +6,8 @@ import { JdRead } from "./JdRead";
 import { ProjectHeader } from "../ProjectHeader";
 import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { JobDetailsPanel } from "@/components/JobDetailsPanel";
+import { allows } from "@/lib/auth";
 
 export default async function JdPage({
   params,
@@ -53,6 +55,18 @@ export default async function JdPage({
           approvedAt={o.jdApprovedAt ? dateAt(o.jdApprovedAt) : null}
           canAmend={canWrite}
         />
+        {o.requirements && (
+          <div className="mt-8">
+            <JobDetailsPanel
+              openingId={id}
+              title={o.title}
+              requirements={o.requirements}
+              jdApproved
+              canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+              editedByName={repo.user(o.requirements.editedBy ?? "")?.name ?? null}
+            />
+          </div>
+        )}
       </>
     );
   }

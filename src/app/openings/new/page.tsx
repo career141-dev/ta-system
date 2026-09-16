@@ -51,7 +51,10 @@ export default async function NewOpeningPage({
       <CaptureForm
         key={`${created ?? "new"}-${initialClientId ?? "none"}`}
         clients={repo.clients()}
-        tas={repo.users().filter((u) => u.role === "ta")}
+        tas={repo
+          .users()
+          .filter((u) => u.isActive && (u.role === "ta" || u.role === "ta_lead" || u.role === "admin"))
+          .sort((a, b) => a.name.localeCompare(b.name))}
         isLead={isLead}
         initialClientId={initialClientId}
       />

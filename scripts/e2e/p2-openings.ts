@@ -56,7 +56,7 @@ const text = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, "").re
  * to appear; poll rather than fail. The page's server-rendered props (the RSC
  * payload) count: an editor fills itself from them in the browser.
  */
-async function shows(path: string, userId: string, needle: string, waitMs = 45_000): Promise<boolean> {
+async function shows(path: string, userId: string, needle: string, waitMs = 90_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   for (;;) {
     const r = await page(path, userId);

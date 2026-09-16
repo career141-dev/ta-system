@@ -26,6 +26,7 @@
     "@qdrant/js-client-rest": "^1.19.0",
     "convex": "^1.45.0",
     "jimp": "^1.6.1",
+    "livekit-client": "^2.22.3",
     "livekit-server-sdk": "^2.17.0",
     "mammoth": "^1.12.0",
     "next": "16.2.9",

@@ -6,6 +6,7 @@ import { internal } from "../_generated/api";
 import { getGraphToken } from "../lib/graphClient";
 import { buildStructuredEmailHtml } from "./emailHtml";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
+import { mayReplyTo, resolveRecipient } from "../lib/outreachSafety";
 
 export { buildStructuredEmailHtml };
 
@@ -39,47 +40,21 @@ export const sendGraphEmail = internalAction({
       }
     }
 
-    // ── Test-mode redirect ─────────────────────────────────────────────────
-    const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-    const isTestMode = 
-      process.env.EMAIL_TEST_MODE === "true" || 
-      process.env.OUTREACH_TEST_MODE === "true" || 
-      process.env.TEST_MODE === "true" || 
-      systemSettings?.testModeEnabled === true;
-
-    const testRecipient = 
-      systemSettings?.testEmailAddress ||
-      process.env.EMAIL_TEST_RECIPIENT || 
-      process.env.TEST_EMAIL_ADDRESS ||
-      "sanjaysanjeev2000@gmail.com";
-
-    let targetAddress = args.toAddress;
-    let logNote = "";
-
-    if (isTestMode) {
-      const candidateEmailNorm = args.toAddress.toLowerCase().trim();
-      const testEmailNorm = testRecipient ? testRecipient.toLowerCase().trim() : "";
-
-      if (testEmailNorm && candidateEmailNorm === testEmailNorm) {
-        targetAddress = args.toAddress;
-        logNote = ` [TEST CANDIDATE]`;
-      } else if (testRecipient) {
-        targetAddress = testRecipient;
-        logNote = ` [REDIRECTED TO TEST: ${testRecipient}]`;
-      } else {
-        console.warn(`[Graph Email] Test mode active: Suppressed email outreach to real candidate ${args.toAddress}`);
-        await ctx.runMutation(
-          internal.communications.graphEmailMutations.updateEmailStatus,
-          {
-            communicationId: args.communicationId,
-            status: "failed",
-            error:
-              "Test mode is active: Automated email outreach to real candidates is suppressed during testing phase.",
-          }
-        );
-        return;
-      }
+    // ── Outreach gate (fail closed — see convex/lib/outreachSafety.ts) ──────
+    // Replaces a local test-mode check whose recipient fell back to a
+    // hardcoded personal Gmail address, so it could never actually block.
+    const decision = resolveRecipient("email", args.toAddress);
+    if (!decision.ok) {
+      console.warn(`[Graph Email] ${decision.reason}`);
+      await ctx.runMutation(internal.communications.graphEmailMutations.updateEmailStatus, {
+        communicationId: args.communicationId,
+        status: "failed",
+        error: decision.reason,
+      });
+      return;
     }
+    const targetAddress = decision.to;
+    const logNote = decision.note;
 
     try {
       const token = await getGraphToken();
@@ -224,12 +199,22 @@ export const replyToMessage = internalAction({
     messageId: v.string(),
     replyText: v.string(),
     replyHtml: v.optional(v.string()),
+    /** Who wrote the message being replied to — a thread reply goes to them. */
+    originalSender: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
-    // A reply goes to whoever wrote the original, which this cannot see without
-    // fetching it — so while outbound is locked, replies are not sent at all.
+    // Two gates, both must allow it. A reply goes to whoever wrote the original,
+    // which this cannot see without fetching it, so while the outbound lock is on
+    // (a test deployment) replies are not sent at all. Otherwise the fail-closed
+    // outreach rule applies: in test mode only to the test recipient, and a
+    // caller that cannot say who it replies to is refused.
     if (outboundLocked()) {
       suppressed("email reply", `message ${args.messageId}`);
+      return;
+    }
+    const decision = mayReplyTo("email", args.originalSender);
+    if (!decision.ok) {
+      console.warn(`[Graph Email] ${decision.reason}`);
       return;
     }
     const token = await getGraphToken();

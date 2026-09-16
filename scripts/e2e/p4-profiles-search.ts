@@ -47,8 +47,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const cookieFor = (id: string) => `c141_dev_user=${id}.${createHmac("sha256", `dev-signin:${secret()}`).update(id).digest("base64url")}`;
 const get = (path: string, userId: string) => fetch(BASE + path, { headers: { cookie: cookieFor(userId) }, redirect: "manual" });
 const text = (html: string) => html.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;|&rsquo;/g, "'").replace(/\s+/g, " ");
-/** Polls: the dev server keeps its loaded tables for up to 30s. */
-async function shows(path: string, userId: string, needle: string, waitMs = 45_000): Promise<boolean> {
+/** Polls: the dev server keeps its loaded tables for up to 30s, and compiles a page on its first visit. */
+async function shows(path: string, userId: string, needle: string, waitMs = 90_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   for (;;) {
     const res = await get(path, userId);

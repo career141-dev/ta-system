@@ -80,10 +80,6 @@ export function getOpenAI(_taskType?: TaskType | string): OpenAI {
   return new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey,
-    defaultHeaders: {
-      "HTTP-Referer": "https://career141.com",
-      "X-Title": "Career141 System",
-    },
     timeout: 30000,
     maxRetries: 0,
   });

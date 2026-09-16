@@ -5,7 +5,7 @@ import { Flash } from "@/components/Flash";
 import { Suspense } from "react";
 import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
-import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkProvider, Show } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
 import { primeStore } from "@/data/prime";
 
@@ -52,12 +52,21 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       */}
       <body suppressHydrationWarning>
         <ClerkProvider signInUrl="/signin" signUpUrl="/signup" afterSignOutUrl="/signin">
-          {user ? <TopNav user={user} alertCount={alertCount} /> : null}
+          {/* Hidden the moment Clerk signs out, even before this layout re-renders. */}
+          {user ? (
+            <Show when="signed-in">
+              <TopNav user={user} alertCount={alertCount} />
+            </Show>
+          ) : null}
           <Suspense fallback={null}>
             <Flash />
           </Suspense>
           {children}
-          {user ? <DeskAssistant /> : null}
+          {user ? (
+            <Show when="signed-in">
+              <DeskAssistant />
+            </Show>
+          ) : null}
         </ClerkProvider>
       </body>
     </html>
