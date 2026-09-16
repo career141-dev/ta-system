@@ -6,7 +6,7 @@
  * Changing the search or the filters starts again at page 1.
  */
 
-type Params = Record<string, string | string[] | undefined>;
+export type Params = Record<string, string | string[] | undefined>;
 
 /** The page asked for, clamped to the pages that exist. */
 export function pageFrom(sp: Params, total: number, pageSize: number, key = "page"): number {
@@ -36,6 +36,18 @@ export function pageLink(path: string, sp: Params, key = "page"): (page: number)
     if (page > 1) p.set(key, String(page));
     const qs = p.toString();
     return qs ? `${path}?${qs}` : path;
+  };
+}
+
+/**
+ * One page of one list on a screen that has several (a dashboard): each list
+ * pages on its own key, so paging one leaves the others where they were.
+ */
+export function pageOf<T>(items: T[], sp: Params, key: string, pageSize: number, path: string) {
+  const page = pageFrom(sp, items.length, pageSize, key);
+  return {
+    rows: slicePage(items, page, pageSize),
+    pager: { page, pageSize, total: items.length, href: pageLink(path, sp, key) },
   };
 }
 

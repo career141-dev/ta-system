@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { PIPELINE_STAGES, STAGE_LABEL } from "@/data/types";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 
 /**
  * The Director's view — spec §13: agency-wide health, client by client, and the
  * queue of sets waiting on him. Money is here because it is the only screen
  * where it belongs; a recruiter's day is not improved by seeing it.
  */
-export function DirectorDashboard() {
-  const clients = repo.clients();
+export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
+  const q = typeof sp.q === "string" ? sp.q : "";
+  const allClients = repo.clients();
   const openings = repo.openings();
   const open = openings.filter((o) => o.status === "open");
 
@@ -21,6 +24,24 @@ export function DirectorDashboard() {
     n: open.reduce((sum, o) => sum + (stageCounts(o.id)[s] ?? 0), 0),
   }));
   const widest = Math.max(...totals.map((t) => t.n), 1);
+
+  // The header search narrows the two lists; the totals stay agency-wide.
+  const review = pageOf(
+    waiting.filter(({ o, a }) =>
+      matchesQuery(q, repo.candidate(a.candidateId)?.fullName, o.title, repo.client(o.clientId)?.name, repo.user(a.ownerTaId ?? "")?.name),
+    ),
+    sp,
+    "wpage",
+    10,
+    "/",
+  );
+  const byClient = pageOf(
+    allClients.filter((cl) => matchesQuery(q, cl.name, ...open.filter((o) => o.clientId === cl.id).map((o) => o.title))),
+    sp,
+    "cpage",
+    15,
+    "/",
+  );
 
   const value = open.reduce((n, o) => n + (o.valueOnProgressing ?? 0), 0);
   const placed = openings.reduce((n, o) => n + (o.valueOfPlacement ?? 0), 0);
@@ -48,7 +69,10 @@ export function DirectorDashboard() {
           <h2 className="mb-3.5 text-[13px] font-semibold">Sets waiting on your review</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
-              {waiting.slice(0, 10).map(({ o, a }) => {
+              {review.pager.total === 0 && (
+                <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">Nothing here matches that search.</p>
+              )}
+              {review.rows.map(({ o, a }) => {
                 const c = repo.candidate(a.candidateId);
                 return (
                   <Link
@@ -71,6 +95,7 @@ export function DirectorDashboard() {
               })}
             </div>
           </div>
+          <Pager {...review.pager} scroll={false} className="mt-4" />
         </section>
       )}
 
@@ -94,7 +119,10 @@ export function DirectorDashboard() {
           <h2 className="mb-3.5 text-[13px] font-semibold">By client</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
-              {clients.map((cl) => {
+              {byClient.pager.total === 0 && (
+                <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">No client matches that search.</p>
+              )}
+              {byClient.rows.map((cl) => {
                 const mine = open.filter((o) => o.clientId === cl.id);
                 const sets = mine.reduce(
                   (n, o) => n + setsForOpening(o.id).filter((s) => s.status === "closed").length,
@@ -118,6 +146,7 @@ export function DirectorDashboard() {
               })}
             </div>
           </div>
+          <Pager {...byClient.pager} scroll={false} className="mt-4" />
         </section>
       </div>
     </>

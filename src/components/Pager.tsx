@@ -11,12 +11,15 @@ export function Pager({
   total,
   href,
   className = "mt-5",
+  scroll = true,
 }: {
   page: number;
   pageSize: number;
   total: number;
   href: (page: number) => string;
   className?: string;
+  /** false on a screen with several lists, so paging one does not jump to the top. */
+  scroll?: boolean;
 }) {
   if (total <= pageSize) return null;
   const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -24,13 +27,13 @@ export function Pager({
   return (
     <div className={`${className} flex items-center justify-center gap-3 text-[12.5px]`}>
       {current > 1 ? (
-        <Link href={href(current - 1)} className="rounded-full border border-rule px-3.5 py-1.5 hover:bg-tag">Previous</Link>
+        <Link href={href(current - 1)} scroll={scroll} className="rounded-full border border-rule px-3.5 py-1.5 hover:bg-tag">Previous</Link>
       ) : (
         <span className="rounded-full border border-rule px-3.5 py-1.5 text-ink-faint">Previous</span>
       )}
       <span className="tabular text-ink-soft">Page {current} of {pages}</span>
       {current < pages ? (
-        <Link href={href(current + 1)} className="rounded-full border border-rule px-3.5 py-1.5 hover:bg-tag">Next</Link>
+        <Link href={href(current + 1)} scroll={scroll} className="rounded-full border border-rule px-3.5 py-1.5 hover:bg-tag">Next</Link>
       ) : (
         <span className="rounded-full border border-rule px-3.5 py-1.5 text-ink-faint">Next</span>
       )}

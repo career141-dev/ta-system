@@ -15,7 +15,8 @@ ok("the applicants keep the post", searchScopeFor("/openings/o1/linkedin-job").k
 ok("the database searches the database", searchScopeFor("/database").action === "/database/results");
 ok("a candidate searches their activity, on the same tab", searchScopeFor("/openings/o1/candidate/a1").keep.includes("tab"));
 ok("a trailing slash is the same page", searchScopeFor("/clients/").action === "/clients");
-ok("a page with no list uses the desk-wide search", searchScopeFor("/").action === "/search" && searchScopeFor("/reports").action === "/search");
+ok("the dashboard searches its own lists", searchScopeFor("/").action === "/");
+ok("a page with no list uses the desk-wide search", searchScopeFor("/reports").action === "/search");
 ok("an opening's overview uses the desk-wide search", searchScopeFor("/openings/o1").action === "/search");
 
 console.log(`\n${passed} passed, ${failed} failed`);

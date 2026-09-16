@@ -2,12 +2,15 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { computeAlerts } from "@/lib/sla";
 import { relDays } from "@/lib/format";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 
 /**
  * Ops — spec §13 and notebook page 9, which routes the client-review chase here
  * specifically rather than to a generic flag. This screen is a chasing list.
  */
-export function OpsDashboard({ opsId }: { opsId: string }) {
+export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params }) {
+  const q = typeof sp.q === "string" ? sp.q : "";
   const mine = computeAlerts().filter((a) => a.assignedTo.includes(opsId));
   const open = repo.openings().filter((o) => o.status === "open");
 
@@ -22,6 +25,20 @@ export function OpsDashboard({ opsId }: { opsId: string }) {
     .interviews()
     .filter((i) => i.outcome === "pending")
     .sort((a, b) => a.scheduledAt - b.scheduledAt);
+
+  // The header search narrows the lists; the counts above stay whole.
+  const clientList = pageOf(
+    withClient.filter(({ o, a }) => matchesQuery(q, repo.candidate(a.candidateId)?.fullName, o.title, repo.client(o.clientId)?.name)),
+    sp, "spage", 10, "/",
+  );
+  const interviewList = pageOf(
+    interviews.filter((iv) => {
+      const a = repo.application(iv.applicationId);
+      return matchesQuery(q, a ? repo.candidate(a.candidateId)?.fullName : undefined, a ? repo.opening(a.openingId)?.title : undefined);
+    }),
+    sp, "ipage", 10, "/",
+  );
+  const chaseList = pageOf(mine.filter((a) => matchesQuery(q, a.detail, a.action)), sp, "apage", 10, "/");
 
   return (
     <>
@@ -44,13 +61,13 @@ export function OpsDashboard({ opsId }: { opsId: string }) {
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Waiting on client feedback</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
-            {withClient.length === 0 ? (
+            {clientList.pager.total === 0 ? (
               <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
-                Nothing with a client.
+                {q ? "Nothing here matches that search." : "Nothing with a client."}
               </p>
             ) : (
               <div className="divide-y divide-rule">
-                {withClient.map(({ o, a }) => {
+                {clientList.rows.map(({ o, a }) => {
                   const c = repo.candidate(a.candidateId);
                   const waiting = Math.floor((Date.now() - a.lastStageChangedAt) / 86_400_000);
                   return (
@@ -76,18 +93,19 @@ export function OpsDashboard({ opsId }: { opsId: string }) {
               </div>
             )}
           </div>
+          <Pager {...clientList.pager} scroll={false} className="mt-4" />
         </section>
 
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Interviews to coordinate</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
-            {interviews.length === 0 ? (
+            {interviewList.pager.total === 0 ? (
               <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
-                Nothing scheduled.
+                {q ? "Nothing here matches that search." : "Nothing scheduled."}
               </p>
             ) : (
               <div className="divide-y divide-rule">
-                {interviews.map((iv) => {
+                {interviewList.rows.map((iv) => {
                   const a = repo.application(iv.applicationId);
                   const c = a ? repo.candidate(a.candidateId) : null;
                   const o = a ? repo.opening(a.openingId) : null;
@@ -118,15 +136,16 @@ export function OpsDashboard({ opsId }: { opsId: string }) {
               </div>
             )}
           </div>
+          <Pager {...interviewList.pager} scroll={false} className="mt-4" />
         </section>
       </div>
 
-      {mine.length > 0 && (
+      {chaseList.pager.total > 0 && (
         <section className="mt-8">
           <h2 className="mb-3.5 text-[13px] font-semibold">Assigned to you</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
-              {mine.map((a) => (
+              {chaseList.rows.map((a) => (
                 <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4">
                   <p className="min-w-[260px] flex-1 text-[13.5px]">{a.detail}</p>
                   <Link
@@ -139,6 +158,7 @@ export function OpsDashboard({ opsId }: { opsId: string }) {
               ))}
             </div>
           </div>
+          <Pager {...chaseList.pager} scroll={false} className="mt-4" />
         </section>
       )}
     </>
