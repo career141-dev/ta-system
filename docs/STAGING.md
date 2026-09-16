@@ -99,6 +99,10 @@ python3 count.py            # compares every table's row count with the snapshot
 
 ## Updating the code
 
+Merge to `main`: the **Deploy Staging** workflow builds the app, deploys Convex
+and replaces the app container, with a health check and automatic rollback
+(docs/CI-CD.md). The manual route below is for emergencies only.
+
 From a machine with the repository:
 
 ```bash

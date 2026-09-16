@@ -1,0 +1,62 @@
+name: CI
+
+# Checks every change before it can be deployed.
+#
+# Runs on its own for pull requests and for pushes to working branches. The
+# deploy workflows call it first (workflow_call), so nothing reaches staging or
+# production without passing the same checks.
+
+on:
+  pull_request:
+  push:
+    branches-ignore: [main, production]
+  workflow_call:
+    inputs:
+      build:
+        description: Also run `next build`. The deploy workflows skip it, because the Docker image build runs it anyway.
+        type: boolean
+        default: true
+      ref:
+        description: Commit to check (defaults to the triggering commit).
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck the app
+        run: npm run typecheck
+
+      # The same check `convex deploy` makes, found here rather than half-way
+      # through a deployment.
+      - name: Typecheck the Convex functions
+        run: npx tsc -p convex --noEmit
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        if: ${{ inputs.build != false }}
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+          # Clerk's publishable key is public and only read in the browser. A
+          # well-formed placeholder is enough to build.
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS5jbGVyay5hY2NvdW50cy5kZXYk

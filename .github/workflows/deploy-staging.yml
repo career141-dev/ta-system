@@ -1,77 +1,85 @@
 name: Deploy Staging
 
+# main is the development line. Every push to it is checked and, if it passes,
+# deployed to staging — https://ta-system.career141.com — with its Convex
+# functions. Staging holds a copy of real data with crons off and outbound
+# locked, so nothing here reaches a candidate or a live mailbox.
+#
+# Run it by hand (Actions → Deploy Staging → Run workflow) to deploy only the
+# app or only Convex, to redeploy an older commit, or to run a one-off Convex
+# function such as a migration.
+
 on:
   push:
-    branches:
-      - staging
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      components:
+        description: What to deploy
+        type: choice
+        options: [all, app, convex]
+        default: all
+      ref:
+        description: Branch, tag or commit (empty = the branch selected above)
+        type: string
+        default: ""
+      run_function:
+        description: Convex function to run after deploying (optional, e.g. migrations/foo:run)
+        type: string
+        default: ""
+      run_args:
+        description: JSON arguments for that function
+        type: string
+        default: "{}"
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: pipeline-staging
+  cancel-in-progress: false
 
 jobs:
-  build-and-push-image:
+  resolve:
+    name: Resolve commit
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
         with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ inputs.ref || github.sha }}
+      - id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=staging
+  ci:
+    name: CI
+    needs: resolve
+    uses: ./.github/workflows/ci.yml
+    with:
+      build: false
+      ref: ${{ needs.resolve.outputs.sha }}
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Public, and baked into the browser bundle: set it as a repository secret.
-          build-args: |
-            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
-
-  deploy-to-vps:
-    needs: build-and-push-image
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Deploy to VPS via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USERNAME }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          # Staging lives in /opt/ta-staging-src with its own compose project
-          # (deploy/staging/docker-compose.yml, docs/STAGING.md). Only the app is
-          # replaced here; Convex functions are deployed separately, and the
-          # database, Postgres and Qdrant are never touched by this job.
-          script: |
-            set -e
-            cd /opt/ta-staging-src
-            docker compose --env-file .env.staging pull app
-            docker compose --env-file .env.staging up -d --no-deps app
-
-            echo "Waiting for the app to start..."
-            for i in $(seq 1 30); do
-              if curl -fs -o /dev/null http://localhost:3110/signin; then echo "Deployment successful."; exit 0; fi
-              sleep 5
-            done
-            echo "Health check failed!"
-            docker logs --tail 50 ta-staging-app
-            exit 1
+  deploy:
+    name: Staging
+    needs: [resolve, ci]
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    with:
+      environment: staging
+      ref: ${{ needs.resolve.outputs.sha }}
+      components: ${{ inputs.components || 'all' }}
+      run_function: ${{ inputs.run_function || '' }}
+      run_args: ${{ inputs.run_args || '{}' }}
+      # Where staging lives on the VPS (docs/STAGING.md).
+      deploy_dir: /opt/ta-staging-src
+      env_file: .env.staging
+      compose_source: deploy/staging/docker-compose.yml
+      app_service: app
+      app_container: ta-staging-app
+      health_url: http://127.0.0.1:3110/signin
+      convex_port: "3220"

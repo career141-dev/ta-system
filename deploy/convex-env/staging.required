@@ -1,0 +1,18 @@
+# Convex settings that must already be set on the staging deployment, or the
+# deploy stops before touching anything. Secrets are set once on the deployment
+# (dashboard, or `npx convex env set NAME value` through the tunnel) — never in
+# git or in GitHub.
+#
+#   NAME        must be set
+#   A|B         at least one of them
+#   !NAME       must NOT be set
+C141_DISABLE_CRONS
+C141_OUTBOUND_LOCK
+OPENAI_API_KEY|OPENROUTER_API_KEY
+QDRANT_URL
+QDRANT_API_KEY
+R2_ACCESS_KEY_ID
+R2_SECRET_ACCESS_KEY
+R2_ENDPOINT
+R2_BUCKET_NAME
+!OUTREACH_LIVE
