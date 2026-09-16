@@ -78,6 +78,7 @@ export interface BackendOpening {
   positionStatus: string | null;
   status: string;
   followUpQuestions: { id: string; label: string }[];
+  autoFollowUp?: boolean;
   taLeadId: string | null;
   assignedTaIds: string[];
   primaryRecruiterId: string;
@@ -104,6 +105,7 @@ export function mapOpening(o: BackendOpening): MappedOpening {
     jobOrderNumber: typeof o.jobOrderNumber === "string" ? o.jobOrderNumber : "",
     jdMarkdown: o.jdMarkdown ?? "",
     followUpQuestions: o.followUpQuestions ?? [],
+    autoFollowUp: o.autoFollowUp === true,
     jdStatus: (o.jdStatus as Opening["jdStatus"]) ?? "draft",
     jdApprovedBy: typeof o.jdApprovedBy === "string" ? o.jdApprovedBy : null,
     jdApprovedAt: o.jdApprovedAt ?? null,

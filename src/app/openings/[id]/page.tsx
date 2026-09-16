@@ -10,7 +10,7 @@ import { JobDetailsPanel } from "@/components/JobDetailsPanel";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
-import { setOpeningQuestions } from "@/app/actions";
+import { setOpeningAutoFollowUp, setOpeningQuestions } from "@/app/actions";
 import { primeStore } from "@/data/prime";
 
 const STAGE_DESCRIPTIONS: Partial<Record<Stage, string>> = {
@@ -323,6 +323,32 @@ export default async function OverviewPage({
                 </div>
               )}
             </dl>
+
+            {/* Automatic follow-up: reminders after the TA's first Send. */}
+            <div className="mt-4 rounded-lg border border-rule bg-paper px-3.5 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[12px] font-medium text-ink">
+                  Automatic follow-up
+                  <span className={`ml-1.5 font-normal ${o.autoFollowUp ? "text-brand" : "text-ink-faint"}`}>
+                    · {o.autoFollowUp ? "on" : "off"}
+                  </span>
+                </span>
+                {allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null }) && (
+                  <form action={setOpeningAutoFollowUp}>
+                    <input type="hidden" name="openingId" value={id} />
+                    <input type="hidden" name="enabled" value={o.autoFollowUp ? "off" : "on"} />
+                    <button className="rounded-full border border-rule px-3 py-1 text-[11.5px] font-medium hover:bg-tag">
+                      {o.autoFollowUp ? "Turn off" : "Turn on"}
+                    </button>
+                  </form>
+                )}
+              </div>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+                {o.autoFollowUp
+                  ? "After you send a candidate the first follow-up, WhatsApp and email reminders go out every 24 hours until the details are in or the reminders run out."
+                  : "Follow-ups go out only when you press Send on a candidate."}
+              </p>
+            </div>
 
             {/* The TA's own follow-up questions for this job. */}
             <details className="mt-4 rounded-lg border border-rule bg-paper px-3.5 py-2.5">

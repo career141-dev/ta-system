@@ -8,11 +8,14 @@ import { sendFollowUpNow, stopFollowUpNow } from "@/app/actions";
  * The sequence is the older app's proven one: the first Send is the approved
  * WhatsApp template plus an email; each later Send is a reminder. Replies are
  * read by the backend and fill the checklist in. Nothing goes out by moving a
- * card — only this button sends.
+ * card — only this button starts it. With the opening's automatic follow-up
+ * on, the reminders after the first Send go out by themselves, every 24 hours.
  */
 
 interface State {
   attemptCount: number;
+  autoFollowUp: boolean;
+  nextScheduledAt: number | null;
   maxAttempts: number | null;
   lastCandidateReplyAt: number | null;
   flaggedForTaReview: boolean;
@@ -103,6 +106,16 @@ export async function LiveFollowUp({
             </li>
           ))}
         </ul>
+
+        {state.autoFollowUp && missing > 0 && !exhausted && (
+          <p className="mt-3 text-[12px] text-ink-soft">
+            {sent === 0
+              ? "Automatic follow-up is on: after you send the first message, reminders go out every 24 hours by themselves."
+              : state.nextScheduledAt
+                ? `Automatic follow-up is on — next reminder ${timeAt(state.nextScheduledAt)}.`
+                : "Automatic follow-up is on, but no reminder is scheduled (it was stopped)."}
+          </p>
+        )}
 
         {state.flaggedForTaReview && (
           <p className="mt-3 text-[12px] text-warn">Needs you: {state.taReviewReason ?? "flagged for review"}</p>

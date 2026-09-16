@@ -285,6 +285,19 @@ export function CaptureForm({
         </>
       )}
 
+      <section className={card}>
+        <label className={`flex cursor-pointer items-start gap-3 ${inline ? "px-6 py-4" : "px-7 py-5"}`}>
+          <input type="checkbox" name="autoFollowUp" value="on" className="mt-0.5" />
+          <span>
+            <span className="block text-[13.5px] font-semibold">Automatic follow-up</span>
+            <span className="mt-0.5 block text-[12.5px] leading-relaxed text-ink-soft">
+              After you send a candidate the first follow-up, WhatsApp and email reminders go out every
+              24 hours until the details are in or the reminders run out. Replies on WhatsApp are read into the record.
+            </span>
+          </span>
+        </label>
+      </section>
+
       {inline ? (
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <input type="hidden" name="next" value="save" />

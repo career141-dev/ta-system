@@ -311,6 +311,9 @@ export default defineSchema({
     customFollowUpQuestions: v.optional(v.array(v.string())),
     maxFollowUpDays: v.optional(v.number()),
     maxFollowUpAttempts: v.optional(v.number()),
+    /** Switched on from the TA System: a TA sends the first message, the sweep
+     *  runs the reminders after it (convex/lib/followUpScope.ts). */
+    followUpStartsOnSend: v.optional(v.boolean()),
     conversationTone: v.optional(v.string()),
 
     agent3TriggerStages: v.optional(v.array(v.string())),

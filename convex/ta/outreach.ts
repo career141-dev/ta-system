@@ -19,6 +19,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
+import { followUpOn } from "../lib/followUpScope";
 
 export const messagesFor = internalQuery({
   args: {
@@ -108,6 +109,8 @@ export const followUpState = internalQuery({
       customQuestions: job?.customFollowUpQuestions ?? [],
       maxAttempts: job?.maxFollowUpAttempts ?? null,
       agentEnabled: job?.agent3Enabled ?? false,
+      // Reminders run themselves after the first Send (ta/followUp.ts `setAuto`).
+      autoFollowUp: followUpOn(job),
     };
   },
 });

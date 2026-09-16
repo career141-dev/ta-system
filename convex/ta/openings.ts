@@ -13,6 +13,7 @@ import { Doc, Id } from "../_generated/dataModel";
 import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
 import { scheduleExtraction } from "./requirements";
+import { autoFollowUpPatch } from "../lib/followUpScope";
 
 
 export const list = internalQuery({
@@ -227,6 +228,8 @@ export const create = internalMutation({
     directorId: v.optional(v.union(v.string(), v.null())),
     notesMarkdown: v.optional(v.string()),
     priorityTier: v.optional(v.string()),
+    /** Automatic follow-up reminders after the TA's first Send (ta/followUp.ts `setAuto`). */
+    autoFollowUp: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -298,6 +301,7 @@ export const create = internalMutation({
       agent5CallScript: "default",
       agent5NoAnswerAction: "notify_ta",
       headhuntingEnabled: false,
+      ...(args.autoFollowUp ? autoFollowUpPatch(true) : {}),
       createdAt: now,
       updatedAt: now,
     });

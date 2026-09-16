@@ -148,6 +148,7 @@ const openings: Opening[] = openingSpecs.map((o, i) => ({
   // the ranked list was forty people tied on the same number.
   jdMarkdown: "",
   followUpQuestions: [],
+  autoFollowUp: false,
   jdStatus: o.jdStatus,
   jdApprovedBy: o.jdStatus === "approved" ? "u_lead" : null,
   jdApprovedAt: o.jdStatus === "approved" ? ago(o.assignedDaysAgo - 1) : null,

@@ -436,6 +436,7 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   const country = String(formData.get("country") ?? "").trim();
   const hiringFor = String(formData.get("hiringFor") ?? "local");
   const gender = String(formData.get("targetGender") ?? "").trim() || null;
+  const autoFollowUp = formData.get("autoFollowUp") === "on";
 
   const isLead = user.role === "ta_lead" || user.role === "admin";
   // A lead assigns from the active TAs only (lib/assignable); anyone else sent
@@ -467,6 +468,7 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
         taLeadId,
         directorId,
         notesMarkdown: notes,
+        autoFollowUp,
       },
     );
     const { resetStore } = await import("@/data/prime");
@@ -504,6 +506,7 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
       taLeadId,
       assignedTaIds: assigned,
       directorId,
+      autoFollowUp,
     });
   }
 
@@ -2308,6 +2311,33 @@ export async function saveFollowUpAnswers(formData: FormData) {
   });
   revalidatePath("/alerts");
   redirect(`/openings/${openingId}/candidate/${appId}?tab=chat&msg=${encodeURIComponent("Saved.")}`);
+}
+
+/**
+ * The opening's automatic follow-up switch. On: after a TA's first Send, the
+ * reminders go out every 24 hours by themselves, up to the attempt ceiling.
+ */
+export async function setOpeningAutoFollowUp(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  const enabled = String(formData.get("enabled")) === "on";
+  if (isConvex()) {
+    try {
+      await backend.setAutoFollowUp({ id: user.id }, openingId, enabled);
+    } catch (e) {
+      await back(backendMessage(e, "Automatic follow-up could not be changed."));
+    }
+    await afterBackendWrite(openingId);
+  } else {
+    repo.setOpeningAutoFollowUp(openingId, enabled);
+    revalidatePath(`/openings/${openingId}`, "layout");
+  }
+  await back(
+    enabled
+      ? "Automatic follow-up is on. Reminders go out every 24 hours after the first message you send."
+      : "Automatic follow-up is off. Follow-ups go out only when you press Send.",
+  );
 }
 
 /** The opening's own follow-up questions, one per line. */

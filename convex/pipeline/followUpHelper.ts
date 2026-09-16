@@ -404,7 +404,9 @@ export async function initiateFollowUpOutreach(
       const taEmail = recruiter?.email;
       const candidateEmail = candidate.email;
 
-      if (taEmail && candidateEmail) {
+      // Sent from the system inbox through Microsoft Graph (lib/graphMail.ts);
+      // the recruiter's own address is not needed to send it.
+      if (candidateEmail) {
         const htmlBody = buildStructuredEmailHtml({
           candidateName: candidate.fullName || "there",
           jobTitle: job.title,
@@ -415,21 +417,16 @@ export async function initiateFollowUpOutreach(
         await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {
           communicationId: emailCommId,
           candidateJobId: app._id as string,
-          taEmail,
+          taEmail: taEmail ?? "",
           toAddress: candidateEmail,
           subject: `Action Required: Missing info for your ${job.title} application`,
           bodyHtml: htmlBody,
         });
       } else {
-        console.warn(
-          `[Follow-up Outreach] Skipped email: taEmail=${taEmail ?? "missing"}, candidateEmail=${candidateEmail ?? "missing"}`
-        );
-        // Mark the email comm as failed if we can't send it
+        console.warn(`[Follow-up Outreach] Skipped email for application ${applicationId}: candidate has no email address`);
         await ctx.db.patch(emailCommId, {
           deliveryStatus: "failed",
-          errorMessage: !taEmail
-            ? "Recruiter has no email configured"
-            : "Candidate has no email address",
+          errorMessage: "Candidate has no email address",
         });
       }
     }

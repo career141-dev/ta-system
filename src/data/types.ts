@@ -82,6 +82,13 @@ export interface Opening {
    * standard ones — "Do you hold a valid driving licence?".
    */
   followUpQuestions: { id: Id; label: string }[];
+  /**
+   * Automatic follow-up: after a TA sends the first message, WhatsApp and email
+   * reminders go out every 24 hours up to the attempt ceiling, and replies on
+   * the WhatChimp number are read into the record. Written only through
+   * `ta/followUp:setAuto`.
+   */
+  autoFollowUp: boolean;
   jdStatus: "draft" | "pending_ta_approval" | "approved";
   jdApprovedBy: Id | null;
   jdApprovedAt: number | null;

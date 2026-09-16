@@ -4,6 +4,7 @@ import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
+import { followUpCancelledReason, sendFollowUpMail } from "../lib/graphMail";
 
 
 // ----------------------------------------------------------------------------------
@@ -1091,98 +1092,60 @@ export const sendFollowUpEmail = internalAction({
     bodyHtml: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const senderEmail = process.env.OUTBOUND_EMAIL_SENDER || process.env.MS_SENDER_EMAIL;
-    if (!senderEmail) {
-      throw new Error("[EmailAgent] MS_SENDER_EMAIL or OUTBOUND_EMAIL_SENDER environment variable is not configured.");
-    }
-    // Outreach gate (fail closed). This nudge sender used to have no test-mode
-    // check at all.
-    const decision = resolveRecipient("email", args.candidateEmail);
-    if (!decision.ok) {
-      console.warn(`[EmailAgent] ${decision.reason}`);
-      if (args.communicationId) {
-        await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {
-          communicationId: args.communicationId,
-          status: "failed",
-          errorMessage: decision.reason,
-        });
-      }
-      return { success: false, error: decision.reason };
-    }
-    const toAddress = decision.to;
-    // Second gate: with the outbound lock on (a test deployment) only
-    // allow-listed addresses receive anything, whatever the redirect decided.
-    if (!emailAllowed(toAddress)) {
-      throw new Error(suppressed("follow-up email", toAddress));
-    }
-    console.log(`[EmailAgent] Sending outbound follow-up email to ${toAddress}${decision.note} from ${senderEmail}`);
-
-    const token = await getGraphToken();
-    let sentSuccess = false;
-    let errorMessage = "";
-    const replyTo = process.env.MS_SENDER_EMAIL || senderEmail;
-
-    if (token) {
-      try {
-        const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(senderEmail)}/sendMail`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: {
-              subject: args.subject,
-              body: {
-                contentType: args.bodyHtml ? "HTML" : "Text",
-                content: args.bodyHtml || args.body,
-              },
-              toRecipients: [
-                {
-                  emailAddress: {
-                    address: toAddress,
-                  },
-                },
-              ],
-              replyTo: [
-                {
-                  emailAddress: {
-                    address: replyTo,
-                  },
-                },
-              ],
-            },
-            saveToSentItems: "true",
-          }),
-        });
-
-        if (res.ok) {
-          sentSuccess = true;
-          console.log(`[EmailAgent] Outbound email sent successfully via MS Graph to ${args.candidateEmail}`);
-        } else {
-          errorMessage = await res.text();
-          console.error(`[EmailAgent] MS Graph sendMail failed (${res.status}): ${errorMessage}`);
+    // A reminder queued before the TA stopped the sequence, or before the
+    // candidate moved on, does not go — the same guard as the Day 0 email and
+    // the WhatsApp sender.
+    let candidateJobId: string | undefined;
+    if (args.communicationId) {
+      const comm = await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, {
+        communicationId: args.communicationId,
+      });
+      const app = comm?.applicationId
+        ? await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: comm.applicationId })
+        : null;
+      const cancelled = followUpCancelledReason(comm, app);
+      if (cancelled) {
+        console.log(`[EmailAgent] ${cancelled} (communication ${args.communicationId})`);
+        if (comm?.deliveryStatus !== "failed") {
+          await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {
+            communicationId: args.communicationId,
+            status: "failed",
+            errorMessage: cancelled,
+          });
         }
-      } catch (err: any) {
-        errorMessage = err.message || String(err);
-        console.error(`[EmailAgent] MS Graph exception: ${errorMessage}`);
+        return { success: false, error: cancelled };
       }
+      candidateJobId = comm?.applicationId ? String(comm.applicationId) : undefined;
     }
 
-    // (A fallback through http://127.0.0.1:3000/api/email/send-followup used to
-    // live here. That route does not exist in this app, and a second path that
-    // sends mail is a second place a gate can be missed.)
+    // Sent through Microsoft Graph, gates first (lib/graphMail.ts).
+    const senderEmail = process.env.OUTBOUND_EMAIL_SENDER || process.env.MS_SENDER_EMAIL;
+    const result = await sendFollowUpMail(
+      {
+        from: senderEmail,
+        to: args.candidateEmail,
+        subject: args.subject,
+        html: args.bodyHtml,
+        text: args.body,
+        replyTo: process.env.MS_SENDER_EMAIL || senderEmail,
+        candidateJobId,
+      },
+      getGraphToken,
+    );
 
+    if (result.ok) {
+      console.log(`[EmailAgent] Follow-up email sent via Microsoft Graph from ${senderEmail} to ${result.to}${result.note}`);
+    } else {
+      console.warn(`[EmailAgent] Follow-up email not sent: ${result.error}`);
+    }
     if (args.communicationId) {
       await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {
         communicationId: args.communicationId,
-        status: sentSuccess ? "sent" : "failed",
-        errorMessage: sentSuccess ? undefined : errorMessage,
+        status: result.ok ? "sent" : "failed",
+        errorMessage: result.ok ? undefined : result.error,
       });
     }
-
-    return { success: sentSuccess, error: errorMessage };
+    return result.ok ? { success: true, error: "" } : { success: false, error: result.error };
   },
 });
 

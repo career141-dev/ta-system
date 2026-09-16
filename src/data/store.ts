@@ -175,6 +175,7 @@ function backfill(db: Partial<Database>): Database {
   }
   for (const o of out.openings) {
     o.followUpQuestions ??= [];
+    o.autoFollowUp ??= false;
     if (o.status === "closed" && o.positionStatus !== "lost") o.positionStatus = "lost";
     if (o.status === "filled") o.positionStatus = "filled";
   }
@@ -1069,6 +1070,7 @@ const rawRepo = {
     /** "local" for that country's own nationals, or a nationality to send there. */
     hiringFor?: string;
     targetGender?: string | null;
+    autoFollowUp?: boolean;
   }): Id {
     const id = `op_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => {
@@ -1083,6 +1085,7 @@ const rawRepo = {
         jobOrderNumber: `JO-2026-${String(n + 100).padStart(3, "0")}`,
         jdMarkdown: input.jdMarkdown,
         followUpQuestions: [],
+        autoFollowUp: input.autoFollowUp ?? false,
         jdStatus: "pending_ta_approval",
         jdApprovedBy: null,
         jdApprovedAt: null,
@@ -2879,6 +2882,16 @@ const rawRepo = {
 
   setFollowUpStandard(rows: { id: string; enabled: boolean; label: string }[]) {
     repo.setSetting("followUpQuestions", JSON.stringify(rows));
+  },
+
+  /** Local mode only; with Convex the switch is `ta/followUp:setAuto`. */
+  setOpeningAutoFollowUp(openingId: Id, enabled: boolean) {
+    mutate((db) => {
+      const o = db.openings.find((x) => x.id === openingId);
+      if (!o) return;
+      o.autoFollowUp = enabled;
+      o.updatedAt = Date.now();
+    });
   },
 
   setOpeningQuestions(openingId: Id, questions: { id: Id; label: string }[]) {
