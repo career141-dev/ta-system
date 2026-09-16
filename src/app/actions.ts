@@ -2792,3 +2792,32 @@ export async function devSignOut() {
   (await cookies()).delete(DEV_SESSION_COOKIE);
   redirect("/signin");
 }
+
+// ─── Settings → Mailboxes ────────────────────────────────────────────────────
+
+/** Read a shared mailbox into the TA System, or stop. Admins only. */
+export async function setMailboxEnabled(formData: FormData) {
+  await authorize(formData, "user.manage");
+  const mailbox = String(formData.get("mailbox") ?? "");
+  const enabled = formData.get("enabled") === "on";
+  try {
+    await backend.setMailboxEnabled(mailbox, enabled);
+  } catch (e) {
+    await back(backendMessage(e, "The mailbox could not be changed."));
+  }
+  revalidatePath("/settings");
+  await back(enabled ? `${mailbox} is being read. The first sync imports the last 30 days.` : `${mailbox} is no longer read.`);
+}
+
+/** Look at a mailbox now rather than at the next five-minute sync. */
+export async function syncMailboxNow(formData: FormData) {
+  await authorize(formData, "user.manage");
+  const mailbox = String(formData.get("mailbox") ?? "");
+  try {
+    await backend.syncMailboxNow(mailbox);
+  } catch (e) {
+    await back(backendMessage(e, "The sync could not be started."));
+  }
+  revalidatePath("/settings");
+  await back(`Syncing ${mailbox}. New messages appear below within a minute; each waits 20 minutes before it is filed.`);
+}

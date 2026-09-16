@@ -154,6 +154,15 @@ export function TopNav({
               >
                 People and roles
               </Link>
+              {user.role === "admin" && (
+                <Link
+                  href="/settings"
+                  onClick={() => setOpen(false)}
+                  className="block px-3 py-2 text-[12.5px] hover:bg-paper"
+                >
+                  Settings
+                </Link>
+              )}
               <div className="border-t border-rule">
                 <SignOutButton redirectUrl="/signin">
                   <button className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper">

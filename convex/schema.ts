@@ -2589,5 +2589,69 @@ export default defineSchema({
     totalFlaggedForReview: v.number(),
   }).index("by_key", ["key"]),
 
+  /**
+   * TA System mail intake — the desk's shared mailboxes read through Microsoft
+   * Graph (convex/mailIntake). One row per mailbox: whether it is read, where
+   * the delta sync stands, and running totals for Settings → Mailboxes.
+   *
+   * Read-only by design: nothing here marks mail read, moves it or replies, so
+   * the CV platform's own poller sees every message exactly as before.
+   */
+  mailIntakeMailboxes: defineTable({
+    mailbox: v.string(),
+    enabled: v.boolean(),
+    /** Graph's delta token URL; absent until the first full sync completes. */
+    deltaLink: v.optional(v.string()),
+    /** A page to resume from when a sync stopped part-way through. */
+    nextLink: v.optional(v.string()),
+    /** Messages received before this are never read (the backfill window). */
+    backfillFrom: v.number(),
+    lastSyncAt: v.optional(v.number()),
+    lastSyncError: v.optional(v.string()),
+    totals: v.object({
+      seen: v.number(),
+      filed: v.number(),
+      database: v.number(),
+      duplicate: v.number(),
+      noCv: v.number(),
+      skipped: v.number(),
+      failed: v.number(),
+    }),
+    updatedAt: v.number(),
+  }).index("by_mailbox", ["mailbox"]),
+
+  /** One row per message the mail intake has seen, so none is handled twice or lost. */
+  mailIntakeMessages: defineTable({
+    mailbox: v.string(),
+    messageId: v.string(),
+    receivedAt: v.number(),
+    subject: v.string(),
+    fromAddress: v.string(),
+    hasAttachments: v.boolean(),
+    /** waiting → processing → extracting (a CV is being read) → done. */
+    status: v.union(v.literal("waiting"), v.literal("processing"), v.literal("extracting"), v.literal("done")),
+    /** filed: on an opening · database: no advert matched · duplicate: already held and placed ·
+     *  no_cv: nothing to read · skipped: not an application · failed: gave up. */
+    outcome: v.optional(v.union(
+      v.literal("filed"), v.literal("database"), v.literal("duplicate"),
+      v.literal("no_cv"), v.literal("skipped"), v.literal("failed"),
+    )),
+    attempts: v.number(),
+    nextAttemptAt: v.number(),
+    openingIds: v.array(v.id("jobs")),
+    jobPostId: v.optional(v.id("jobPosts")),
+    /** Where each opening's post came from, carried until the CV is read. */
+    route: v.optional(v.any()),
+    candidateIds: v.array(v.id("candidates")),
+    cvUploadIds: v.array(v.id("cvUploads")),
+    note: v.optional(v.string()),
+    error: v.optional(v.string()),
+    processedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_messageId", ["messageId"])
+    .index("by_status_next", ["status", "nextAttemptAt"])
+    .index("by_receivedAt", ["receivedAt"]),
+
 }, { schemaValidation: false });
 

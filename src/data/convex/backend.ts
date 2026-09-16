@@ -578,3 +578,45 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
 let r2Checked = { at: 0, configured: true };
 const unconfiguredDetail = (fileName: string | null) =>
   `${fileName ?? "The CV"} is stored in R2 file storage, which is not configured on this deployment (R2_BUCKET_NAME and its access keys are not set), so it cannot be opened here.`;
+
+// ─── Mail intake (Settings → Mailboxes) ──────────────────────────────────────
+
+export interface MailIntakeStatus {
+  mailboxes: {
+    mailbox: string;
+    enabled: boolean;
+    synced: boolean;
+    backfillFrom: number;
+    lastSyncAt: number | null;
+    lastSyncError: string | null;
+    totals: { seen: number; filed: number; database: number; duplicate: number; noCv: number; skipped: number; failed: number };
+  }[];
+  queue: { waiting: number; extracting: number };
+  recent: {
+    id: string;
+    mailbox: string;
+    receivedAt: number;
+    subject: string;
+    fromAddress: string;
+    status: "waiting" | "processing" | "extracting" | "done";
+    outcome: "filed" | "database" | "duplicate" | "no_cv" | "skipped" | "failed" | null;
+    openings: { id: string; title: string }[];
+    candidateIds: string[];
+    note: string | null;
+    error: string | null;
+  }[];
+}
+
+/** The shared mailboxes the TA System reads, and what came in. Creates the mailbox rows on first use. */
+export async function mailIntakeStatus(): Promise<MailIntakeStatus> {
+  await convexMutation("mailIntake/model:ensureMailboxes", {});
+  return convexQuery<MailIntakeStatus>("mailIntake/model:status", { limit: 50 });
+}
+
+export async function setMailboxEnabled(mailbox: string, enabled: boolean) {
+  return convexMutation<{ ok: boolean }>("mailIntake/model:setEnabled", { mailbox, enabled });
+}
+
+export async function syncMailboxNow(mailbox: string) {
+  return convexMutation<{ ok: boolean }>("mailIntake/model:syncNow", { mailbox });
+}

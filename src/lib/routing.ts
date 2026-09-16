@@ -275,6 +275,17 @@ export function routeInbound(
     if (inRegion.length >= 1) tied = inRegion;
   }
 
+  // The more specific advert wins a tie: "Chief Operating Officer - Gloves"
+  // contains "Chief Operating Officer", and a subject naming the first matched
+  // both (16 September, 39 of 507 real LinkedIn applications). Identical titles
+  // stay tied — one advert serving two clients. Mirrors convex/lib/postRouting.ts.
+  if (tied.length > 1) {
+    const specific = tied.filter(
+      (t) => !tied.some((o) => o !== t && norm(o.post.title).length > norm(t.post.title).length && norm(o.post.title).includes(norm(t.post.title))),
+    );
+    if (specific.length >= 1) tied = specific;
+  }
+
   if (tied.length > 1) {
     // One post per opening — the newest where an opening has several.
     const byOpening = new Map<Id, Scored>();
