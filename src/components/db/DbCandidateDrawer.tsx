@@ -9,6 +9,17 @@ import { externalUrl } from "@/lib/url";
 import type { RowApp } from "./ResultRow";
 import { useState } from "react";
 
+/** The open candidate's CV file, as the results page found it. */
+export interface DrawerCv {
+  /** /api/cv/<candidate>, or null when there is no file to open. */
+  href: string | null;
+  fileName: string | null;
+  /** A PDF, which the browser can show in the panel. */
+  inline: boolean;
+  /** Why there is no file to show, when there is not. */
+  problem: string | null;
+}
+
 export function DbCandidateDrawer({
   candidate: c,
   apps,
@@ -19,6 +30,7 @@ export function DbCandidateDrawer({
   nextHref,
   closeHref,
   statusLabel,
+  cv = null,
 }: {
   candidate: Candidate;
   apps: RowApp[];
@@ -29,6 +41,7 @@ export function DbCandidateDrawer({
   nextHref: string | null;
   closeHref: string;
   statusLabel?: string | null;
+  cv?: DrawerCv | null;
 }) {
   const [adding, setAdding] = useState(false);
 
@@ -238,6 +251,50 @@ export function DbCandidateDrawer({
                 )}
               </aside>
             </div>
+
+            {/* The candidate's own CV — the file on record, not a summary of it.
+                Keyed by candidate so Previous / Next loads the next person's. */}
+            {cv && (
+              <section className="overflow-hidden rounded-2xl border border-rule bg-surface">
+                <div className="flex flex-wrap items-center gap-3 border-b border-rule px-5 py-3">
+                  <h3 className="text-[13px] font-semibold">CV</h3>
+                  {cv.fileName && <span className="truncate text-[12px] text-ink-faint">{cv.fileName}</span>}
+                  {cv.href && (
+                    <div className="ml-auto flex items-center gap-2">
+                      <a
+                        href={cv.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                      >
+                        Open in a new tab
+                      </a>
+                      <a
+                        href={`${cv.href}?download=1`}
+                        className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  )}
+                </div>
+                {cv.href && cv.inline ? (
+                  <iframe key={c.id} src={cv.href} title={`CV — ${c.fullName}`} className="h-[760px] w-full bg-paper" />
+                ) : cv.href ? (
+                  <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
+                    This CV is not a PDF, so the browser cannot show it here.{" "}
+                    <a href={`${cv.href}?download=1`} className="text-brand hover:underline">
+                      Download it
+                    </a>
+                    .
+                  </p>
+                ) : (
+                  <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
+                    {cv.problem ?? "No CV file is on record for this candidate."}
+                  </p>
+                )}
+              </section>
+            )}
           </div>
         </div>
       </div>
