@@ -5,6 +5,7 @@ import type { Id } from "../_generated/dataModel";
 import { api } from "../_generated/api";
 import { checkAndAdvanceFollowUp, updateFollowUpFlags } from "../pipeline/followUpHelper";
 import { requireFullAccess } from "../lib/permissions";
+import { answersById } from "../lib/followUpScope";
 
 export const listCandidates = query({
   args: {
@@ -259,7 +260,14 @@ export const updateCandidateDetails = mutation({
     }
 
     if (applicationId && customFollowUpAnswers) {
-      await ctx.db.patch(applicationId, { customFollowUpAnswers });
+      // The TA System reads the same answers by its question ids.
+      const app = await ctx.db.get(applicationId);
+      const job = app ? await ctx.db.get(app.jobId) : null;
+      const byId = answersById(job?.followUpQuestions ?? [], customFollowUpAnswers);
+      await ctx.db.patch(applicationId, {
+        customFollowUpAnswers,
+        ...(Object.keys(byId).length > 0 ? { answers: { ...(app?.answers ?? {}), ...byId } } : {}),
+      });
     }
 
     // Sync follow-up flags on all candidate applications

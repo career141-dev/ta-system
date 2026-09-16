@@ -3,12 +3,18 @@ import { internalMutation } from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import { adjustJobStageStat } from "./jobs/stats";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
+import { v } from "convex/values";
+import { awaitingFirstSend, sweepCovers } from "./lib/followUpScope";
 
 const crons = cronJobs();
 
 export const evaluateFollowUpStage = internalMutation({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    /** Only TA System openings (`followUpStartsOnSend`) — the staging sweep, see the bottom of this file. */
+    taOnly: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const taOnly = args.taOnly === true;
     // 1. Check Kill Switch
     const configRow = await ctx.db.query("appSettings")
       .withIndex("by_key", (q) => q.eq("key", "system"))
@@ -29,26 +35,28 @@ export const evaluateFollowUpStage = internalMutation({
       .withIndex("by_status", (q) => q.eq("status", "active"))
       .collect();
 
-    const followUpJobs = activeJobs.filter(
-      (j) => j.agent3Enabled === true && (j.enableWhatsAppFollowUp === true || j.enableEmailFollowUp === true)
-    );
-    const followUpJobIds = new Set(followUpJobs.map((j) => j._id));
+    const followUpJobs = activeJobs.filter((j) => sweepCovers(j, taOnly));
 
-    // 2. Fetch applications ONLY for active follow-up jobs (Capped to 10 per stage to prevent cron lock)
-    const followUpApps = await ctx.db
-      .query("applications")
-      .withIndex("by_stage", (q) => q.eq("currentStage", "follow_up"))
-      .take(10);
-
-    const taShortlistApps = await ctx.db
-      .query("applications")
-      .withIndex("by_stage", (q) => q.eq("currentStage", "ta_shortlist"))
-      .take(10);
-
-    const appsToEvaluate = [
-      ...followUpApps.filter((a) => followUpJobIds.has(a.jobId)),
-      ...taShortlistApps.filter((a) => followUpJobIds.has(a.jobId)),
-    ];
+    // 2. Fetch applications per follow-up job (capped to prevent cron lock).
+    // Read per job rather than the first ten in the stage overall: those ten
+    // could all belong to jobs with follow-up off, and the jobs that have it on
+    // would never be reached. A TA System opening's candidates are read only
+    // once a TA has sent the first message — the sweep does not start them.
+    const PER_JOB_STAGE = 10;
+    const MAX_APPS_PER_RUN = 60;
+    const appsToEvaluate: any[] = [];
+    for (const job of followUpJobs) {
+      for (const stage of ["follow_up", "ta_shortlist"] as const) {
+        if (appsToEvaluate.length >= MAX_APPS_PER_RUN) break;
+        let q = ctx.db
+          .query("applications")
+          .withIndex("by_job_stage", (i) => i.eq("jobId", job._id).eq("currentStage", stage));
+        if (job.followUpStartsOnSend === true) {
+          q = q.filter((f) => f.gt(f.field("followUpAttemptCount"), 0));
+        }
+        appsToEvaluate.push(...(await q.take(PER_JOB_STAGE)));
+      }
+    }
 
     const now = Date.now();
     const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -107,12 +115,18 @@ export const evaluateFollowUpStage = internalMutation({
       
       if (!job) continue;
       if (job.status !== "active") continue;
+      // A TA System opening: nothing happens until a TA has sent the first message.
+      if (awaitingFirstSend(job, app)) continue;
 
       // 3. Enforce Max Attempt Ceiling (Terminal Stop Condition)
       const maxAttempts = job.maxFollowUpAttempts ?? 3;
       const currentAttempts = app.followUpAttemptCount || 0;
+      // A TA System opening gives the last reminder its 24 hours before closing,
+      // rather than closing at the next sweep, minutes after it went.
+      const lastReminderStillOpen =
+        job.followUpStartsOnSend === true && !!app.nextFollowUpScheduledAt && now < app.nextFollowUpScheduledAt;
 
-      if (currentAttempts >= maxAttempts) {
+      if (currentAttempts >= maxAttempts && !lastReminderStillOpen) {
         console.log(`[Follow-Up Cron] Max attempts (${maxAttempts}) reached for application ${app._id}. Moving to unresponsive.`);
         await ctx.db.patch(app._id, {
           currentStage: "unresponsive",
@@ -374,6 +388,11 @@ export const evaluateFollowUpStage = internalMutation({
           console.log(`[Dynamic Follow-up] Sent scheduled message to ${candidate.fullName}. Auto-rescheduling next nudge in 24 hours (attempt ${currentAttempts + 1}).`);
           continue;
         }
+
+      // A TA System opening runs on the scheduled reminders above only. The
+      // day-tier flow below would send a second message on day 4 and 6 on top
+      // of them, and its email is logged as sent without being sent.
+      if (job.followUpStartsOnSend === true) continue;
 
       // --- LEGACY STATIC FLOW ---
       // 1. First, check if 7 days have elapsed without collecting all required fields.
@@ -645,7 +664,8 @@ export const evaluateFollowUpStage = internalMutation({
 crons.interval(
   "evaluate-follow-up",
   { minutes: 7 },
-  internal.crons.evaluateFollowUpStage
+  internal.crons.evaluateFollowUpStage,
+  {}
 );
 
 crons.interval(
@@ -870,6 +890,20 @@ function addMailIntake(registry: ReturnType<typeof cronJobs>) {
 addMailIntake(crons);
 const quiet = cronJobs();
 addMailIntake(quiet);
+
+/**
+ * The follow-up reminders for TA System openings only, where the rest is off.
+ *
+ * `C141_TA_FOLLOW_UP=on` registers the sweep with `taOnly`, so a deployment
+ * with `C141_DISABLE_CRONS=true` (staging) can run the reminders for openings
+ * switched on from the TA System without waking the CV platform's own jobs.
+ * It does message people, so it only belongs where the outreach gate and the
+ * outbound lock keep those messages to the test recipients. Where every cron
+ * runs, the full sweep above already covers these openings.
+ */
+if ((process.env.C141_TA_FOLLOW_UP ?? "").trim().toLowerCase() === "on") {
+  quiet.interval("ta-evaluate-follow-up", { minutes: 7 }, internal.crons.evaluateFollowUpStage, { taOnly: true });
+}
 
 export default disabled ? quiet : crons;
 

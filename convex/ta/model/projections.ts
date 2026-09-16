@@ -10,6 +10,7 @@
 
 import type { Doc } from "../../_generated/dataModel";
 import { toTaStage } from "../stages";
+import { followUpOn } from "../../lib/followUpScope";
 
 const n = <T>(v: T | undefined): T | null => (v === undefined ? null : v);
 
@@ -60,6 +61,7 @@ export function projectOpening(job: Doc<"jobs">) {
     requirementsEditedBy: (job.requirementsEditedBy ?? null) as string | null,
     requirementsEditedAt: job.requirementsEditedAt ?? null,
     followUpQuestions: job.followUpQuestions ?? [],
+    autoFollowUp: followUpOn(job),
     taLeadId: (job.taLeadId ?? null) as string | null,
     directorId: (job.directorId ?? null) as string | null,
     assignedTaIds: (job.assignedTaIds ?? []) as string[],

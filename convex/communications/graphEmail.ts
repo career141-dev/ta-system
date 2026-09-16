@@ -6,7 +6,8 @@ import { internal } from "../_generated/api";
 import { getGraphToken } from "../lib/graphClient";
 import { buildStructuredEmailHtml } from "./emailHtml";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
-import { mayReplyTo, resolveRecipient } from "../lib/outreachSafety";
+import { mayReplyTo } from "../lib/outreachSafety";
+import { followUpCancelledReason, sendFollowUpMail } from "../lib/graphMail";
 
 export { buildStructuredEmailHtml };
 
@@ -19,131 +20,56 @@ export const sendGraphEmail = internalAction({
   args: {
     communicationId: v.id("communications"),
     candidateJobId: v.string(), // applicationId stringified for header
-    taEmail: v.string(),        // "from" mailbox — the recruiter's M365 email
+    taEmail: v.string(),        // the recruiter; kept for callers — mail goes from the system inbox
     toAddress: v.string(),      // recipient email
     subject: v.string(),
     bodyHtml: v.string(),
   },
   handler: async (ctx, args) => {
-    // Check communication status & stage guard — DO NOT send automated follow-up email if candidate moved out of follow_up stage (e.g. to ta_shortlist)
+    // Not sent if the sequence was stopped or the candidate left Follow-up —
+    // and the row says so, rather than staying "pending".
     const commRecord = await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, { communicationId: args.communicationId });
-    if (commRecord?.stoppedSequence || commRecord?.deliveryStatus === "failed") {
-      console.log(`[Graph Email] Communication ${args.communicationId} was cancelled/stopped. Skipping email delivery.`);
-      return;
-    }
-
-    if (commRecord?.applicationId) {
-      const appRecord = await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: commRecord.applicationId });
-      if (appRecord && appRecord.currentStage !== "follow_up" && appRecord.currentStage !== "ta_shortlist" && appRecord.currentStage !== "matched_candidates") {
-        console.log(`[Graph Email] Application ${commRecord.applicationId} is in stage "${appRecord.currentStage}" (not "follow_up", "ta_shortlist", or "matched_candidates"). Aborting Email follow-up delivery.`);
-        return;
-      }
-    }
-
-    // ── Outreach gate (fail closed — see convex/lib/outreachSafety.ts) ──────
-    // Replaces a local test-mode check whose recipient fell back to a
-    // hardcoded personal Gmail address, so it could never actually block.
-    const decision = resolveRecipient("email", args.toAddress);
-    if (!decision.ok) {
-      console.warn(`[Graph Email] ${decision.reason}`);
-      await ctx.runMutation(internal.communications.graphEmailMutations.updateEmailStatus, {
-        communicationId: args.communicationId,
-        status: "failed",
-        error: decision.reason,
-      });
-      return;
-    }
-    const targetAddress = decision.to;
-    const logNote = decision.note;
-
-    try {
-      const token = await getGraphToken();
-
-      // Resolve the actual sending mailbox & system reply-to inbox
-      const systemInbox = process.env.MS_SENDER_EMAIL || process.env.OUTBOUND_EMAIL_SENDER || "job@career141.com";
-      let senderEmail: string = systemInbox;
-
-      // CRITICAL: Reply-To MUST always be set to systemInbox (job@career141.com)
-      // so candidate replies return directly to the system inbox for AI processing & DB logging.
-      const replyToRecipients = [
-        {
-          emailAddress: { address: systemInbox }
-        }
-      ];
-      console.log(`[Graph Email] Outbound email configured from ${senderEmail} with Reply-To set to ${systemInbox}.`);
-
-      const payload: any = {
-        message: {
-          subject: args.subject,
-          body: {
-            contentType: "HTML",
-            content: args.bodyHtml,
-          },
-          toRecipients: [
-            {
-              emailAddress: { address: targetAddress },
-            },
-          ],
-          internetMessageHeaders: [
-            {
-              name: "x-c141-candidatejobid",
-              value: args.candidateJobId,
-            },
-          ],
-        },
-        saveToSentItems: true,
-      };
-
-      if (replyToRecipients.length > 0) {
-        payload.message.replyTo = replyToRecipients;
-      }
-
-      console.log(
-        `[Graph Email] Sending email from ${senderEmail} to ${targetAddress}${logNote}`
-      );
-
-      if (!emailAllowed(targetAddress)) {
-        throw new Error(suppressed("email", targetAddress));
-      }
-
-      const res = await fetch(
-        `${GRAPH_BASE}/users/${encodeURIComponent(senderEmail)}/sendMail`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        }
-      );
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Graph API returned ${res.status}: ${errorText}`);
-      }
-
-      // Success — update communication status
-      await ctx.runMutation(
-        internal.communications.graphEmailMutations.updateEmailStatus,
-        {
-          communicationId: args.communicationId,
-          status: "sent",
-        }
-      );
-
-      console.log(`[Graph Email] Email sent successfully.`);
-    } catch (err: any) {
-      console.error("[Graph Email] Failed to send:", err.message);
-      await ctx.runMutation(
-        internal.communications.graphEmailMutations.updateEmailStatus,
-        {
+    const appRecord = commRecord?.applicationId
+      ? await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: commRecord.applicationId })
+      : null;
+    const cancelled = followUpCancelledReason(commRecord, appRecord);
+    if (cancelled) {
+      console.log(`[Graph Email] ${cancelled} (communication ${args.communicationId})`);
+      if (commRecord?.deliveryStatus !== "failed") {
+        await ctx.runMutation(internal.communications.graphEmailMutations.updateEmailStatus, {
           communicationId: args.communicationId,
           status: "failed",
-          error: err.message,
-        }
-      );
+          error: cancelled,
+        });
+      }
+      return;
     }
+
+    // Replies MUST come back to the system inbox (job@), which is polled for
+    // follow-up replies and read into the record.
+    const systemInbox = process.env.MS_SENDER_EMAIL || process.env.OUTBOUND_EMAIL_SENDER || "job@career141.com";
+    const result = await sendFollowUpMail(
+      {
+        from: systemInbox,
+        to: args.toAddress,
+        subject: args.subject,
+        html: args.bodyHtml,
+        replyTo: systemInbox,
+        candidateJobId: args.candidateJobId,
+      },
+      getGraphToken,
+    );
+
+    if (result.ok) {
+      console.log(`[Graph Email] Sent via Microsoft Graph from ${systemInbox} to ${result.to}${result.note}`);
+    } else {
+      console.error(`[Graph Email] Not sent: ${result.error}`);
+    }
+    await ctx.runMutation(internal.communications.graphEmailMutations.updateEmailStatus, {
+      communicationId: args.communicationId,
+      status: result.ok ? "sent" : "failed",
+      error: result.ok ? undefined : result.error,
+    });
   },
 });
 

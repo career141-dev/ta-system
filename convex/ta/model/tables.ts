@@ -20,6 +20,7 @@ import type { Id } from "@/data/types";
 import { channelOf, mapApplication, mapCandidateDoc, mapJobPost, mapOpening, mapUser } from "../../../src/data/convex/map";
 import { toBackendStage, toTaStage } from "../stages";
 import { projectApplication, projectOpening } from "./projections";
+import { answersByLabel, questionLabels } from "../../lib/followUpScope";
 
 export type Row = Record<string, unknown>;
 type Doc = Record<string, unknown> & { _id: string; _creationTime?: number };
@@ -211,6 +212,13 @@ export const TABLES: Record<string, TableModel> = {
         doc.clientName = client.name;
         doc.clientIndustry = client.industry ?? "";
       }
+      // The CV pipeline's follow-up asks, and reads replies, by the question's
+      // wording. Kept in step — except on a job never backfilled, whose own
+      // old questions must not be wiped by an empty list it has not seen.
+      const questions = (r.followUpQuestions as { id: string; label: string }[]) ?? [];
+      if (insert || questions.length > 0 || current?.followUpQuestions !== undefined) {
+        doc.customFollowUpQuestions = questionLabels(questions);
+      }
       if (insert) {
         const lead = (r.taLeadId as string) || ((r.assignedTaIds as string[]) ?? [])[0];
         if (!lead) throw new Error("An opening needs a lead or an assigned recruiter before it can be saved.");
@@ -244,6 +252,18 @@ export const TABLES: Record<string, TableModel> = {
     fromDoc: (d) => mapApplication(projectApplication(d as never) as never) as unknown as Row,
     toDoc: async (r, _cx, insert) => {
       const stage = String(r.stage);
+      // The same answers where the CV pipeline's follow-up looks for them: by
+      // question wording, merged over what its reply reading already stored.
+      const answers = (r.answers as Record<string, string>) ?? {};
+      let customFollowUpAnswers: Record<string, string> | undefined;
+      if (Object.keys(answers).length > 0) {
+        const opening = await _cx.get(String(r.openingId));
+        const mirrored = answersByLabel((opening?.followUpQuestions as { id: string; label: string }[]) ?? [], answers);
+        if (Object.keys(mirrored).length > 0) {
+          const current = insert ? null : await _cx.get(String(r.id));
+          customFollowUpAnswers = { ...((current?.customFollowUpAnswers as Record<string, string>) ?? {}), ...mirrored };
+        }
+      }
       const doc: Record<string, unknown> = {
         jobId: r.openingId,
         candidateId: r.candidateId,
@@ -271,6 +291,7 @@ export const TABLES: Record<string, TableModel> = {
         lastStageChangedAt: r.lastStageChangedAt,
         isActive: stage !== "rejected" && stage !== "dropped_out",
       };
+      if (customFollowUpAnswers) doc.customFollowUpAnswers = customFollowUpAnswers;
       if (insert) {
         Object.assign(doc, {
           sourceChannel: LEGACY_CHANNEL[String(r.sourcingChannel)] ?? "manual_upload",

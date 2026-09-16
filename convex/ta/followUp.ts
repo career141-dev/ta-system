@@ -12,7 +12,9 @@
 //
 // What is different on this desk is only WHO starts it. Moving a card into
 // Follow-up sends nothing (see `skipAutoOutreach` in ta/applications.ts); a TA
-// presses Send. Every message still passes the outreach gate
+// presses Send. With the opening's switch on (`setAuto` below) the sweep in
+// convex/crons.ts sends the reminders after that first Send, as it does for
+// the CV pipeline's jobs. Every message still passes the outreach gate
 // (convex/lib/outreachSafety.ts), so in test mode it reaches only the test
 // recipient.
 
@@ -23,6 +25,7 @@ import { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "../pipeline/followUpHelper";
 import { toTaStage } from "./stages";
+import { autoFollowUpPatch, questionLabels } from "../lib/followUpScope";
 
 /**
  * Send the next follow-up for one candidate: the Day 0 outreach if nothing has
@@ -87,6 +90,34 @@ export const gateStatus = internalQuery({
     metaConfigured: !!(process.env.META_ACCESS_TOKEN ?? "").trim(),
     graphSenderConfigured: !!(process.env.MS_SENDER_EMAIL || process.env.OUTBOUND_EMAIL_SENDER),
   }),
+});
+
+/**
+ * The opening's automatic follow-up switch.
+ *
+ * On: WhatsApp and email reminders every 24 hours after a TA's first Send, up
+ * to the opening's attempt ceiling (3 unless set), then Unresponsive — the CV
+ * pipeline's sequence, run by the seven-minute sweep. Replies arrive through
+ * the WhatChimp webhook and are read into the record. Off: nothing automatic;
+ * Send still works by hand.
+ */
+export const setAuto = internalMutation({
+  args: { actorId: v.string(), openingId: v.string(), enabled: v.boolean() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const jobId = args.openingId as Id<"jobs">;
+    const job = await ctx.db.get(jobId);
+    if (!job) throw new Error("Opening not found");
+    await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
+
+    await ctx.db.patch(jobId, {
+      ...autoFollowUpPatch(args.enabled),
+      // The CV pipeline asks and reads replies by these; keep them in step.
+      customFollowUpQuestions: questionLabels(job.followUpQuestions ?? []),
+      updatedAt: new Date().toISOString(),
+    });
+    return { ok: true, enabled: args.enabled, maxAttempts: job.maxFollowUpAttempts ?? 3 };
+  },
 });
 
 /** Stop the sequence: cancels anything still pending and clears the schedule. */

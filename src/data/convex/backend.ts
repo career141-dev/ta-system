@@ -126,6 +126,7 @@ export async function createOpening(
     directorId?: string | null;
     notesMarkdown?: string;
     priorityTier?: string;
+    autoFollowUp?: boolean;
   },
 ): Promise<string> {
   const res = await convexMutation<{ id: string }>("ta/openings:create", {
@@ -135,6 +136,14 @@ export async function createOpening(
   return res.id;
 }
 
+/** The opening's automatic follow-up switch (convex/ta/followUp.ts `setAuto`). */
+export async function setAutoFollowUp(actor: Actor, openingId: Id, enabled: boolean) {
+  return convexMutation<{ ok: boolean; enabled: boolean; maxAttempts: number }>("ta/followUp:setAuto", {
+    actorId: requireActorId(actor),
+    openingId,
+    enabled,
+  });
+}
 
 // ─── Applications ────────────────────────────────────────────────────────────
 
