@@ -9,7 +9,7 @@ import path from "node:path";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-assist-"));
 process.chdir(tmp);
 const { repo } = await import("@/data/store");
-const { askDesk, safeLinks, snapshotFor } = await import("@/lib/deskAssistant");
+const { askDesk, onlyRealLinks, safeLinks, snapshotFor } = await import("@/lib/deskAssistant");
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -103,6 +103,13 @@ console.log("\nonly platform links survive");
 eq("internal link kept", safeLinks("see [Brand Manager](/openings/op_brand)")[1], { text: "Brand Manager", href: "/openings/op_brand" });
 eq("outside link becomes text", safeLinks("[click](https://evil.example)")[0], { text: "click" });
 eq("protocol-relative link becomes text", safeLinks("[x](//evil.example)")[0], { text: "x" });
+
+console.log("\na link to a page that does not exist is shown as text");
+eq("a real page stays a link", onlyRealLinks("go to [Clients](/clients)"), "go to [Clients](/clients)");
+eq("an opening's own page stays a link", onlyRealLinks("[Suggestions](/openings/op_brand/hh/suggestions)"), "[Suggestions](/openings/op_brand/hh/suggestions)");
+eq("a candidate on an opening, with its tab, stays a link", onlyRealLinks("[Call](/openings/op_1/candidate/app_2?tab=call)"), "[Call](/openings/op_1/candidate/app_2?tab=call)");
+eq("a made-up page becomes plain text", onlyRealLinks("try [Sourcing](/hh/suggestions) now"), "try Sourcing now");
+eq("so does another invented one", onlyRealLinks("[Settings](/settings/team)"), "Settings");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

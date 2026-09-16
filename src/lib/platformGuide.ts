@@ -18,8 +18,8 @@ export const PLATFORM_NAVIGATION = [
   { label: "New Opening", path: "/openings/new", description: "Create a new role under a client, assign recruiters, and write briefs." },
   { label: "Clients", path: "/clients", description: "Client accounts, commercial terms, signed ESA records, and primary contacts." },
   { label: "Database Search", path: "/database", description: "Search 79,000+ candidate CVs by Plain English, Semantic Meaning, or Boolean." },
-  { label: "Review Queue", path: "/review", description: "Unreviewed CVs and incoming applications waiting for recruiter triage." },
-  { label: "Sourcing & Headhunt", path: "/hh/suggestions", description: "AI-assisted market mapping and LinkedIn profile discovery." },
+  { label: "CV Intake", path: "/intake", description: "CVs that have arrived and are waiting to be admitted, merged or turned away." },
+  { label: "Alerts", path: "/alerts", description: "What needs attention now: follow-ups due, quiet adverts, waiting CVs." },
   { label: "People & Directory", path: "/people", description: "Team directory, recruiter roles, and active TA assignments." },
   { label: "Reports", path: "/reports", description: "Commercial pipeline value, time-to-fill analytics, and recruiter yield." },
 ] as const;
@@ -33,8 +33,9 @@ export const PLATFORM_KNOWLEDGE = `
 - Openings: [/openings](/openings) — Active jobs, stage counts, and pipeline boards.
 - Create Opening: [/openings/new](/openings/new) — Create a new opening under a client with target terms.
 - Clients Directory: [/clients](/clients) — Client companies, primary contacts, industry, and signed ESA terms.
-- Sourcing Suggestions: [/hh/suggestions](/hh/suggestions) — AI market mapping & candidate sourcing.
-- Review Queue: [/review](/review) — Triage incoming CVs and unassigned database matches.
+- Sourcing (headhunting): on each opening — open it from [/openings](/openings), then Headhunting → Suggestions, Excel Tables or Research. There is no desk-wide sourcing page.
+- CV Intake: [/intake](/intake) — CVs that have arrived and are waiting to be admitted.
+- Alerts: [/alerts](/alerts) — what needs attention now.
 - Reports: [/reports](/reports) — Analytics, time-to-fill, and fee projections.
 
 2. CANDIDATE DATABASE SEARCH (3 MODES):
@@ -46,7 +47,7 @@ The search engine at [/database](/database) searches over 79,000 candidates with
 - Candidate Drawer: Clicking a candidate in search results opens the slide-over Candidate Drawer for quick inspection, allowing you to browse through candidates without losing search position.
 
 3. CLIENT & OPENING WORKFLOW:
-- Creating a Client: Go to [/clients](/clients) and click "+ Add a client". Enter Company Name, Industry, and Main Contact details. Clients are persisted directly in Convex DB. You can also click "Save & Create Job" to immediately proceed to opening creation.
+- Creating a Client: Go to [/clients](/clients) and click "+ Add a client". A pop-up asks for Company name, Industry, Main contact, their title and email. "Save and create opening" saves the client and carries straight on into its first opening in the same pop-up; "Save client only" just saves it.
 - ESA (Exclusive Search Agreement): Tracked on each client card. Record the date when terms are signed.
 - Creating an Opening: Go to [/openings/new](/openings/new). Select the Client, enter Job Title, Job Order Number, Salary Range, and Priority Tier.
 - Priority Tiers (Target Time-to-Fill):
@@ -73,7 +74,7 @@ A candidate progresses through defined stages:
 10. Rejected (rejected) / Dropped Out (dropped_out): Candidate did not pass or withdrew.
 
 5. SOURCING & LINKEDIN TOOLS:
-- Sourcing tool at [/hh/suggestions](/hh/suggestions): Generates search strategies, extracts target companies, and searches Google/Serper for public LinkedIn profiles.
+- Sourcing, on each opening (open it from [/openings](/openings), then Headhunting → Suggestions): generates search strategies, extracts target companies, and searches for public LinkedIn profiles.
 - Link Vault: Sourced profile links can be pinned to an opening. Recruiter eye-marks indicate review status.
 
 6. DESK ASSISTANT CAPABILITIES:
@@ -118,10 +119,10 @@ export function quickWorkflowHelp(question: string): string | null {
       "**To create a new client:**",
       "1. Navigate to the [Clients page](/clients).",
       "2. Click the **'+ Add a client'** button at the top right.",
-      "3. Fill in **Company Name**, **Industry**, and **Main Contact** details (Name, Title, Email).",
-      "4. Click **'Add client'** to save, or **'Save & Create Job'** to immediately open the job creation form.",
+      "3. Fill in **Company name**, **Industry**, and the **Main contact** (name, title, email).",
+      "4. Click **'Save and create opening'** to go straight on to the client's first opening in the same pop-up, or **'Save client only'**.",
       "",
-      "The client record will be persisted directly to Convex DB and will be available in all opening forms.",
+      "The client is then available in every opening form.",
     ].join("\n");
   }
 
