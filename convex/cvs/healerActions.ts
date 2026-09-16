@@ -4,46 +4,62 @@ import { internalAction } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 
 /**
- * 24/7 Background Healer Worker — Runs every 2 minutes.
- * Claims strictly 1 unextracted or incomplete candidate/upload missing 5 core fields (name, contact, skills, experience, summary),
- * attempts AI LLM re-extraction ONCE, and cleanly moves to the next file if any error occurs.
+ * Background Healer Worker — runs every 31 minutes (see crons.ts "bg-healer-cv-extractor").
+ * Each tick claims up to 5 records (stuck "healing" retries first, then unextracted uploads,
+ * then completely empty candidates) and dispatches AI re-extraction for each, staggered to
+ * avoid provider rate limits. Every tick is recorded in `healerState` for status reporting.
  */
 export const healNextUnparsedCandidate = internalAction({
   args: {},
-  handler: async (ctx): Promise<{ healed: boolean; cvUploadId?: string }> => {
-    // 1. Claim 1 unextracted or incomplete candidate/upload record (single-attempt policy)
-    const target = await ctx.runMutation(internal.cvs.healer.claimNextUnparsedRecord, {});
-    if (!target) {
-      return { healed: false };
+  handler: async (ctx): Promise<{ healed: boolean; dispatched: number }> => {
+    const { targets, recoveredStuck, flaggedForReview, candidatesChecked } =
+      await ctx.runMutation(internal.cvs.healer.claimHealBatch, {});
+
+    let dispatched = 0;
+    let dispatchErrors = 0;
+    let lastError: string | undefined;
+
+    for (let i = 0; i < targets.length; i++) {
+      const target = targets[i];
+      try {
+        await ctx.scheduler.runAfter(3000 + i * 5000, api.cvs.cvExtraction.processCvExtraction, {
+          cvUploadId: target.cvUploadId,
+          storageId: target.storageId,
+          s3Key: target.s3Key || undefined,
+          storageProvider: target.storageProvider || "r2",
+          fileType: target.fileType,
+          sourceChannel: target.source,
+          uploadedBy: target.uploadedBy,
+        });
+        dispatched++;
+        console.log(`[Healer] Dispatched extraction for ${target.cvUploadId} (${target.fileName}), heal attempt ${target.healAttempt}`);
+      } catch (err: any) {
+        dispatchErrors++;
+        const errorMessage: string = err?.message || String(err);
+        lastError = errorMessage;
+        console.warn(`[Healer] Extraction dispatch failed for ${target.cvUploadId} (${errorMessage}). Moving to next record...`);
+        await ctx.runMutation(internal.cvs.healer.releaseFailedClaim, {
+          cvUploadId: target.cvUploadId,
+          candidateId: target.candidateId,
+          errorMessage,
+        });
+      }
     }
 
-    console.log(`[Healer 24/7] Claimed record ${target.cvUploadId} (${target.fileName}) for single-attempt extraction sweep...`);
+    await ctx.runMutation(internal.cvs.healer.recordHealerRun, {
+      dispatched,
+      recoveredStuck,
+      flaggedForReview,
+      candidatesChecked,
+      dispatchErrors,
+      lastError,
+    });
 
-    try {
-      // Dispatch AI extraction asynchronously via scheduler with 3s pacing delay
-      await ctx.scheduler.runAfter(3000, api.cvs.cvExtraction.processCvExtraction, {
-        cvUploadId: target.cvUploadId as any,
-        storageId: target.storageId,
-        s3Key: target.s3Key || undefined,
-        storageProvider: target.storageProvider || "r2",
-        fileType: target.fileType,
-        sourceChannel: target.source,
-        uploadedBy: target.uploadedBy,
-      });
+    console.log(
+      `[Healer] Tick complete: dispatched=${dispatched}, recoveredStuck=${recoveredStuck}, ` +
+      `flaggedForReview=${flaggedForReview}, candidatesChecked=${candidatesChecked}, dispatchErrors=${dispatchErrors}`
+    );
 
-      console.log(`[Healer 24/7] Dispatched extraction for record ${target.cvUploadId}`);
-      return { healed: true, cvUploadId: target.cvUploadId };
-    } catch (err: any) {
-      const errorMsg = err?.message || String(err);
-      console.warn(`[Healer 24/7] Extraction dispatch failed for ${target.cvUploadId} (${errorMsg}). Moving to next candidate...`);
-      
-      // Record single-attempt failure and leave record intact so healer moves to next file
-      await ctx.runMutation(internal.cvs.healer.releaseFailedClaim, {
-        cvUploadId: target.cvUploadId as any,
-        candidateId: target.candidateId as any,
-        errorMessage: errorMsg,
-      });
-      return { healed: false };
-    }
+    return { healed: dispatched > 0, dispatched };
   },
 });

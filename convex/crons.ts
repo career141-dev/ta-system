@@ -811,6 +811,8 @@ crons.interval(
   internal.cvs.cvExtraction.processUnextractedQueueCron
 );
 
+// Background healer: recovers stuck "healing" uploads and re-extracts empty profiles
+// (up to 5 per tick). Keep HEALER_INTERVAL_MINUTES in cvs/healer.ts in sync.
 crons.interval(
   "bg-healer-cv-extractor",
   { minutes: 31 },

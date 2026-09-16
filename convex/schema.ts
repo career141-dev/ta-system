@@ -607,6 +607,8 @@ export default defineSchema({
     processingStartedAt: v.optional(v.number()), // Timestamp when extraction action began; used by stuck-upload recovery
     extractionAttempts: v.optional(v.number()), // Number of extraction attempts (max 1 retry)
     lastAttemptAt: v.optional(v.number()), // Timestamp of last extraction attempt
+    healAttempts: v.optional(v.number()), // Number of times the background healer dispatched extraction
+    lastHealAt: v.optional(v.number()), // Timestamp of the latest healer dispatch; used to detect stuck "healing"
   })
     .index("by_uploadedBy", ["uploadedBy"])
     .index("by_status", ["status"])
@@ -2566,6 +2568,25 @@ export default defineSchema({
     key: v.string(),
     value: v.string(),
     updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  healerState: defineTable({
+    key: v.string(), // "singleton"
+    lastRunAt: v.number(),
+    lastDispatchAt: v.optional(v.number()),
+    lastRun: v.object({
+      at: v.number(),
+      dispatched: v.number(),
+      recoveredStuck: v.number(),
+      flaggedForReview: v.number(),
+      candidatesChecked: v.number(),
+      dispatchErrors: v.number(),
+      lastError: v.optional(v.string()),
+    }),
+    totalRuns: v.number(),
+    totalDispatched: v.number(),
+    totalRecoveredStuck: v.number(),
+    totalFlaggedForReview: v.number(),
   }).index("by_key", ["key"]),
 
 }, { schemaValidation: false });
