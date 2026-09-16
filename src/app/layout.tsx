@@ -18,6 +18,9 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = {
   title: "Career141 — Talent Acquisition",
   description: "Recruitment platform for the Career141 TA desk",
+  // Without an icon the browser asked for /favicon.ico, which does not exist,
+  // and the request fell through to a page render.
+  icons: { icon: "/career141-logo.png" },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

@@ -25,7 +25,16 @@ export { signText, verifyText } from "./sign";
 
 /** The Clerk account's verified email addresses, lower-cased. Empty when signed out. */
 export async function clerkEmails(): Promise<string[]> {
-  const { userId } = await auth();
+  // A request the Clerk middleware deliberately skips (a missing favicon or other
+  // static-looking path that falls through to a page) has no session to read.
+  // That is "nobody signed in", not a server error — it used to answer 500.
+  let userId: string | null = null;
+  try {
+    ({ userId } = await auth());
+  } catch (e) {
+    if (/clerkMiddleware/.test((e as Error).message ?? "")) return [];
+    throw e;
+  }
   if (!userId) return [];
   const account = await clerkUser();
   if (!account) return [];
