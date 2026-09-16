@@ -95,6 +95,34 @@ export const setEnabled = internalMutation({
   },
 });
 
+/**
+ * Narrow a mailbox's intake window to the last `days` days.
+ *
+ * The first sync reads BACKFILL_DAYS of old mail; on linkedin@ that was over
+ * 9,000 messages, days of filing at a few a minute (16 September). This moves
+ * the window forward — the sync then records nothing older — and closes the
+ * waiting messages already recorded from before it as skipped, a batch at a
+ * time (call again while `more` is true). Nothing is deleted.
+ */
+export const setBackfillWindow = internalMutation({
+  args: { mailbox: v.string(), days: v.number() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", args.mailbox)).first();
+    if (!row) throw new Error(`${args.mailbox} is not one of the intake mailboxes.`);
+    const cutoff = Date.now() - Math.max(1, args.days) * 86_400_000;
+    if (row.backfillFrom < cutoff) await ctx.db.patch(row._id, { backfillFrom: cutoff, updatedAt: Date.now() });
+    const old = await ctx.db
+      .query("mailIntakeMessages")
+      .withIndex("by_receivedAt", (q) => q.lt("receivedAt", cutoff))
+      .filter((q) => q.and(q.eq(q.field("mailbox"), args.mailbox), q.eq(q.field("status"), "waiting")))
+      .take(400);
+    for (const m of old) {
+      await finish(ctx, m, { outcome: "skipped", note: `Older than the intake window (last ${args.days} days), not filed.` });
+    }
+    return { skipped: old.length, more: old.length === 400, from: cutoff };
+  },
+});
+
 /** Settings → Mailboxes: sync one now rather than at the next tick. */
 export const syncNow = internalMutation({
   args: { mailbox: v.string() },

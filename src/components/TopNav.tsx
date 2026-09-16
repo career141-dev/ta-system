@@ -127,11 +127,6 @@ export function TopNav({
           />
         </form>
 
-        <span className="hidden items-center gap-1.5 text-[11.5px] text-ink-faint lg:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-ink-faint/60" />
-          Test data
-        </span>
-
         <div className="relative">
           <button
             onClick={() => setOpen((v) => !v)}
