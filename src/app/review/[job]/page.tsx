@@ -5,6 +5,10 @@ import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, reviewList, reviewRequirements, type ReviewDecision } from "@/lib/review";
 import { recordReview } from "../actions";
 import { primeStore } from "@/data/prime";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 20;
 
 const CHOICES: { value: ReviewDecision; label: string; on: string }[] = [
   { value: "shortlist", label: "Shortlist", on: "bg-brand text-white border-brand" },
@@ -23,7 +27,14 @@ const REASONS = [
   "CV doesn't say enough",
 ];
 
-export default async function ReviewJob({ params }: { params: Promise<{ job: string }> }) {
+export default async function ReviewJob({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ job: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const job = Number((await params).job);
@@ -34,6 +45,14 @@ export default async function ReviewJob({ params }: { params: Promise<{ job: str
   const client = repo.client(o.clientId);
   const done = ids.filter((id) => decided.has(id)).length;
   const reqs = reviewRequirements(job);
+  // Numbered against the whole list, so #12 is #12 on any page or search.
+  const matching = ids
+    .map((id, i) => ({ id, i }))
+    .filter(({ id }) => {
+      const c = repo.candidate(id);
+      return !!c && matchesQuery(sp.q, c.fullName, c.currentTitle, c.currentEmployer, c.location, ...c.workHistory.map((h) => h.employer));
+    });
+  const page = pageFrom(sp, matching.length, PAGE_SIZE);
 
   return (
     <main className="mx-auto w-full max-w-[920px] px-6 py-8">
@@ -78,7 +97,10 @@ export default async function ReviewJob({ params }: { params: Promise<{ job: str
       </details>
 
       <div className="mt-5 flex flex-col gap-4">
-        {ids.map((id, i) => {
+        {sp.q && matching.length === 0 && (
+          <p className="py-10 text-center text-[12.5px] text-ink-faint">Nobody on this list matches that search.</p>
+        )}
+        {slicePage(matching, page, PAGE_SIZE).map(({ id, i }) => {
           const c = repo.candidate(id);
           if (!c) return null;
           const mine = decided.get(id);
@@ -162,6 +184,7 @@ export default async function ReviewJob({ params }: { params: Promise<{ job: str
           );
         })}
       </div>
+      <Pager page={page} pageSize={PAGE_SIZE} total={matching.length} href={pageLink(`/review/${job}`, sp)} />
       <p className="mt-6 text-center text-[12px] text-ink-faint">Decisions save as you click. Change any of them at any time.</p>
     </main>
   );

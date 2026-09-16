@@ -8,18 +8,35 @@ import { pageUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { can } from "@/lib/auth";
 import { assignableTas } from "@/lib/assignable";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 20;
 
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ held?: string }>;
+  searchParams: Promise<{ held?: string; q?: string; page?: string }>;
 }) {
-  const { held } = await searchParams;
+  const sp = await searchParams;
+  const { held, q = "" } = sp;
   await primeStore({ allApplications: true });
   const user = await pageUser("database.read");
-  const clients = repo.clients();
   const openings = repo.openings();
   const users = repo.users();
+  // The header search, on this page, searches clients: the name, the industry,
+  // a contact, or an opening filed under the client.
+  const matching = repo.clients().filter((c) =>
+    matchesQuery(
+      q,
+      c.name,
+      c.industry,
+      ...c.contacts.flatMap((x) => [x.name, x.email, x.title]),
+      ...openings.filter((o) => o.clientId === c.id).map((o) => o.title),
+    ),
+  );
+  const page = pageFrom(sp, matching.length, PAGE_SIZE);
+  const clients = slicePage(matching, page, PAGE_SIZE);
 
   return (
     <main className="mx-auto max-w-[1180px] px-8 py-9">
@@ -48,6 +65,12 @@ export default async function ClientsPage({
           delete those first — deleting the client would take their candidates and outreach
           history with them.
         </p>
+      )}
+
+      {q && matching.length === 0 && (
+        <div className="rounded-xl border border-rule bg-surface px-8 py-20 text-center">
+          <p className="text-[13.5px] text-ink-soft">No client matches that search.</p>
+        </div>
       )}
 
       <div className="flex flex-col gap-6">
@@ -90,6 +113,7 @@ export default async function ClientsPage({
           );
         })}
       </div>
+      <Pager page={page} pageSize={PAGE_SIZE} total={matching.length} href={pageLink("/clients", sp)} className="mt-6" />
     </main>
   );
 }

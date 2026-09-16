@@ -109,9 +109,10 @@ services:
       context: .
       args:
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set in .env.staging}
-    # The image the "Deploy Staging" workflow builds and pushes; `up --build`
-    # on the server builds the same tag locally.
-    image: ghcr.io/career141-dev/ta-system:staging
+    # The pipeline sets TA_APP_IMAGE to the commit's image (staging-<commit>)
+    # and retags it :staging once healthy, so a plain `docker compose up` runs
+    # the last good version. `up --build` on the server builds :staging locally.
+    image: ${TA_APP_IMAGE:-ghcr.io/career141-dev/ta-system:staging}
     container_name: ta-staging-app
     restart: unless-stopped
     depends_on: [convex, qdrant]

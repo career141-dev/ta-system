@@ -8,13 +8,17 @@ import { LeadDashboard } from "@/components/dash/LeadDashboard";
 import { DirectorDashboard } from "@/components/dash/DirectorDashboard";
 import { OpsDashboard } from "@/components/dash/OpsDashboard";
 import { primeStore } from "@/data/prime";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 
 /**
  * The day, not the database. What is urgent, what is scheduled, what each of my
  * openings needs from me next — and nothing about the agency as a whole, which
  * is the Director's view, not a recruiter's.
  */
-export default async function Dashboard() {
+export default async function Dashboard({ searchParams }: { searchParams: Promise<Params> }) {
+  const sp = await searchParams;
+  const q = typeof sp.q === "string" ? sp.q : "";
   await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
   const openings = repo.openingsForUser(user).filter((o) => o.status === "open");
@@ -45,7 +49,7 @@ export default async function Dashboard() {
             {urgent.length > 0 && ` · ${urgent.length} urgent`}
           </p>
         </header>
-        <LeadDashboard leadId={user.id} />
+        <LeadDashboard leadId={user.id} sp={sp} />
       </main>
     );
   }
@@ -59,7 +63,7 @@ export default async function Dashboard() {
           </h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">Agency-wide</p>
         </header>
-        <DirectorDashboard />
+        <DirectorDashboard sp={sp} />
       </main>
     );
   }
@@ -73,10 +77,20 @@ export default async function Dashboard() {
           </h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">Chasing and coordination</p>
         </header>
-        <OpsDashboard opsId={user.id} />
+        <OpsDashboard opsId={user.id} sp={sp} />
       </main>
     );
   }
+
+  // The TA's own view: the header search narrows the lists, each pages on its own.
+  const urgentList = pageOf(urgent.filter((a) => matchesQuery(q, a.detail, a.kind.replace(/_/g, " "))), sp, "upage", 10, "/");
+  const myOpenings = pageOf(
+    openings.filter((o) => matchesQuery(q, o.title, clients.find((c) => c.id === o.clientId)?.name)),
+    sp,
+    "opage",
+    10,
+    "/",
+  );
 
   return (
     <main className="mx-auto max-w-[1180px] px-8 py-9">
@@ -91,13 +105,13 @@ export default async function Dashboard() {
         </p>
       </header>
 
-      {urgent.length > 0 && (
+      {urgentList.pager.total > 0 && (
         <section className="mb-8 rounded-xl border border-rule bg-surface">
           <h2 className="border-b border-rule px-7 py-4 text-[13px] font-semibold">
             Today, in order
           </h2>
           <div className="divide-y divide-rule">
-            {urgent.map((a) => (
+            {urgentList.rows.map((a) => (
               <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4">
                 <div className="min-w-[260px] flex-1">
                   <p className="text-[13.5px]">{a.detail}</p>
@@ -115,6 +129,7 @@ export default async function Dashboard() {
               </div>
             ))}
           </div>
+          <Pager {...urgentList.pager} scroll={false} className="border-t border-rule py-4" />
         </section>
       )}
 
@@ -122,12 +137,12 @@ export default async function Dashboard() {
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">My openings</h2>
           <div className="flex flex-col gap-4">
-            {openings.length === 0 && (
+            {myOpenings.pager.total === 0 && (
               <div className="rounded-xl border border-rule bg-surface px-7 py-14 text-center text-[13px] text-ink-faint">
-                Nothing assigned to you.
+                {q && openings.length > 0 ? "None of your openings match that search." : "Nothing assigned to you."}
               </div>
             )}
-            {openings.map((o) => {
+            {myOpenings.rows.map((o) => {
               const client = clients.find((c) => c.id === o.clientId);
               const counts = stageCounts(o.id);
               const sets = setsForOpening(o.id);
@@ -185,6 +200,7 @@ export default async function Dashboard() {
               );
             })}
           </div>
+          <Pager {...myOpenings.pager} scroll={false} className="mt-4" />
         </section>
 
         <aside className="flex flex-col gap-8">

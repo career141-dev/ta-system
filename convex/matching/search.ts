@@ -154,6 +154,25 @@ export const aiSearch = action({
     const fetchLimit = 100;
     const isQueryEmpty = !args.query || !args.query.trim();
     const tokenLogs: any[] = [];
+    // How long each step took, logged once per search — the first thing to read
+    // when a search feels slow.
+    const t0 = Date.now();
+    const timings: Record<string, number> = {};
+    const mark = (step: string, since: number) => { timings[step] = Date.now() - since; };
+
+    /*
+     * The query embedding needs only the sentence, not the model's reading of it,
+     * so it starts now and runs alongside the reading instead of after it. Both
+     * are network calls to a model, and waiting for one before starting the
+     * other added the whole embedding time to every search.
+     */
+    const embedStarted = Date.now();
+    const embedding: Promise<{ embedding: number[]; usage: { promptTokens: number; model: string } } | { error: unknown }> = isQueryEmpty
+      ? Promise.resolve({ error: "empty query" })
+      : import("./agent2.js")
+          .then(({ embedText }) => embedText(args.query, "query"))
+          .catch((error: unknown) => ({ error }))
+          .finally(() => mark("embed", embedStarted));
 
     let parsedReq: SearchRequirements;
     if (isQueryEmpty) {
@@ -176,7 +195,9 @@ export const aiSearch = action({
         salaryRange: null,
       };
     } else {
+      const parseStarted = Date.now();
       const parseResult = await extractSearchRequirements(args.query, "natural_language");
+      mark("read_query", parseStarted);
       parsedReq = parseResult.requirements;
       tokenLogs.push({
         taskType: "jd_extraction",
@@ -204,12 +225,11 @@ export const aiSearch = action({
       keywords: effectiveReq.keywords,
     };
 
-    // 1. Embed query with a fallback
+    // 1. The query embedding, started above alongside the reading.
     let queryEmbedding: number[] | null = null;
     if (!isQueryEmpty) {
-      try {
-        const { embedText } = await import("./agent2.js");
-        const embedResult = await embedText(args.query, "query");
+      const embedResult = await embedding;
+      if ("embedding" in embedResult) {
         queryEmbedding = embedResult.embedding;
         tokenLogs.push({
           taskType: "embedding",
@@ -218,9 +238,9 @@ export const aiSearch = action({
           completionTokens: 0,
           success: true,
         });
-      } catch (err) {
+      } else {
+        const err = embedResult.error;
         console.error("NVIDIA embedding call failed, falling back to keyword-only search:", err);
-        queryEmbedding = null;
         tokenLogs.push({
           taskType: "embedding",
           model: "nvidia/llama-3.2-nv-embedqa-1b-v2",
@@ -234,6 +254,7 @@ export const aiSearch = action({
 
     // 2. Run High-Recall Vector Search (Qdrant Primary with Convex Fail-Open Fallback)
     let vectorCandidateIds: { candidateId: Id<"candidates">; vectorScore: number }[] = [];
+    const retrieveStarted = Date.now();
 
     if (queryEmbedding) {
       // Try Stage 1 High-Throughput Scan in Qdrant (top 200 vectors — capped to prevent DB timeout)
@@ -342,6 +363,8 @@ export const aiSearch = action({
         searchBatches = [];
       }
     }
+
+    mark("retrieve", retrieveStarted);
 
     // 5. Merge and deduplicate candidate IDs in memory
     const seen = new Set<Id<"candidates">>();
@@ -604,8 +627,10 @@ export const aiSearch = action({
 
       let scoredAmbiguousBatch: typeof batchToScore = [];
       if (batchToScore.length > 0) {
+        const rescoreStarted = Date.now();
         try {
           const { evaluations, usage } = await scoreBatchWithLLM(batchToScore, effectiveReq, "search_ranking");
+          mark("rescore", rescoreStarted);
           tokenLogs.push({
             taskType: "search_ranking",
             model: usage.model,
@@ -693,6 +718,8 @@ export const aiSearch = action({
       }
     }
 
+    mark("total", t0);
+    console.log(`[aiSearch] timings ms ${JSON.stringify(timings)} candidates=${candidates.length} results=${results.length}`);
     return { interpretation: interp, results };
   },
 });

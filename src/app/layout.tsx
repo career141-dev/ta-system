@@ -7,6 +7,7 @@ import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
 import { ClerkProvider, Show } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
+import { NavigationProgress } from "@/components/NavigationProgress";
 import { primeStore } from "@/data/prime";
 
 // Every page depends on who is signed in and reads the database, so nothing is
@@ -58,6 +59,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
               <TopNav user={user} alertCount={alertCount} />
             </Show>
           ) : null}
+          <Suspense fallback={null}>
+            <NavigationProgress />
+          </Suspense>
           <Suspense fallback={null}>
             <Flash />
           </Suspense>

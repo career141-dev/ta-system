@@ -6,18 +6,29 @@ import { setFollowUpStandard, setAutoShortlistScore } from "@/app/actions";
 import { inputClass } from "@/components/form";
 import { primeStore } from "@/data/prime";
 import { pendingInvites, offDeskAccounts } from "@/lib/invites";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 25;
 
 export default async function PeoplePage({
   searchParams,
 }: {
-  searchParams: Promise<{ msg?: string }>;
+  searchParams: Promise<{ msg?: string; q?: string; page?: string }>;
 }) {
-  const { msg } = await searchParams;
+  const sp = await searchParams;
+  const q = sp.q ?? "";
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   // The same test the server makes on every change here.
   const canEdit = allows(user, "user.manage");
   const questions = repo.followUpStandard();
+  // The header search, on this page, searches the people on the desk.
+  const matching = repo
+    .users()
+    .filter((u) => matchesQuery(q, u.name, u.email, u.role, u.phone))
+    .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  const page = pageFrom(sp, matching.length, PAGE_SIZE);
 
   return (
     <main className="mx-auto max-w-[1100px] px-8 py-9">
@@ -29,13 +40,17 @@ export default async function PeoplePage({
           : " Only an admin can change this."}
       </p>
       <PeopleAdmin
-        users={repo.users()}
+        users={slicePage(matching, page, PAGE_SIZE)}
         canEdit={canEdit}
         currentUserId={user.id}
         shortlistInbox={repo.shortlistInbox()}
         invites={canEdit ? await pendingInvites() : []}
         otherAccounts={canEdit ? await offDeskAccounts(user.id) : []}
       />
+      {q && matching.length === 0 && (
+        <p className="mt-4 text-center text-[12.5px] text-ink-faint">Nobody matches that search.</p>
+      )}
+      <Pager page={page} pageSize={PAGE_SIZE} total={matching.length} href={pageLink("/people", sp)} />
 
       {/* The bar for pre-shortlisting a new CV. Worth tuning once there is a
           month of scores to look at. */}

@@ -7,6 +7,10 @@ import { inHours } from "@/lib/format";
 import { dropIntake } from "@/app/actions";
 import type { IntakeItem, IntakeStatus } from "@/data/types";
 import { primeStore } from "@/data/prime";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 25;
 
 /**
  * The CV queue — everything that has arrived and has not yet been let in.
@@ -119,12 +123,25 @@ function Row({ item, routeTarget }: { item: IntakeItem; routeTarget: string | nu
 export default async function IntakePage({
   searchParams,
 }: {
-  searchParams: Promise<{ msg?: string; all?: string }>;
+  searchParams: Promise<{ msg?: string; all?: string; q?: string; rpage?: string; wpage?: string; hpage?: string }>;
 }) {
-  const { msg, all } = await searchParams;
+  const sp = await searchParams;
+  const { all, q = "" } = sp;
   await primeStore({ allApplications: true });
   await pageUser("intake.handle");
-  const items = repo.intake();
+  // The header search, on this page, narrows the queue: the name read off the
+  // CV, the role, the employer, the file, or where it came from.
+  const items = repo.intake().filter((i) =>
+    matchesQuery(
+      q,
+      i.parsed?.fullName,
+      i.parsed?.currentTitle,
+      i.parsed?.currentEmployer,
+      i.fileName,
+      SOURCE_LABEL[i.source] ?? i.source,
+      i.match?.candidateName,
+    ),
+  );
   const counts = repo.intakeCounts();
   const states = channelStates();
   const openings = repo.openings().filter((o) => o.status === "open");
@@ -142,7 +159,10 @@ export default async function IntakePage({
     return null;
   };
 
-  const section = (title: string, sub: string, rows: IntakeItem[], emptyText: string) => (
+  const section = (title: string, sub: string, every: IntakeItem[], emptyText: string, key: string) => {
+    const page = pageFrom(sp, every.length, PAGE_SIZE, key);
+    const rows = slicePage(every, page, PAGE_SIZE);
+    return (
     <section className="mb-7">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-[13.5px] font-semibold">{title}</h2>
@@ -150,7 +170,7 @@ export default async function IntakePage({
       </div>
       <Card className="overflow-hidden shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         {rows.length === 0 ? (
-          <Empty>{emptyText}</Empty>
+          <Empty>{q ? "Nothing here matches that search." : emptyText}</Empty>
         ) : (
           <div className="divide-y divide-rule">
             {rows.map((i) => (
@@ -159,8 +179,10 @@ export default async function IntakePage({
           </div>
         )}
       </Card>
+      <Pager page={page} pageSize={PAGE_SIZE} total={every.length} href={pageLink("/intake", sp, key)} className="mt-4" />
     </section>
-  );
+    );
+  };
 
   return (
     <main className="mx-auto max-w-[1120px] px-8 py-7">
@@ -211,14 +233,15 @@ export default async function IntakePage({
         "The identity check found something it will not decide on its own",
         review,
         "Nothing waiting on a person.",
+        "rpage",
       )}
-      {section("Waiting", "Read and checked, ready to be admitted", ready, "The queue is empty.")}
+      {section("Waiting", "Read and checked, ready to be admitted", ready, "The queue is empty.", "wpage")}
       {all === "1"
-        ? section("Handled", `${done.length} settled`, done, "Nothing handled yet.")
+        ? section("Handled", `${done.length} settled`, done, "Nothing handled yet.", "hpage")
         : done.length > 0 && (
             <p className="mb-7 text-[12.5px] text-ink-soft">
               {done.length} already handled.{" "}
-              <Link href="/intake?all=1" className="underline underline-offset-2">
+              <Link href={`/intake?all=1${q ? `&q=${encodeURIComponent(q)}` : ""}`} className="underline underline-offset-2">
                 Show them
               </Link>
             </p>

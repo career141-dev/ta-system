@@ -3,15 +3,24 @@ import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { computeAlerts } from "@/lib/sla";
 import { PRIORITY_TARGET } from "@/data/types";
 import { relDays } from "@/lib/format";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 
 /**
  * The TA Lead's view — spec §13: allocation across the team, who is under the
  * line, and which roles have gone stale. Deliberately not a copy of the TA's
  * screen; a lead is looking at people and throughput, not at candidates.
  */
-export function LeadDashboard({ leadId }: { leadId: string }) {
+export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params }) {
+  const q = typeof sp.q === "string" ? sp.q : "";
+  // The header search, on the dashboard, narrows its lists: a role, its client, a TA.
+  const roleMatches = (o: { title: string; clientId: string }) => matchesQuery(q, o.title, repo.client(o.clientId)?.name);
   const openings = repo.openings().filter((o) => o.status === "open");
-  const tas = repo.users().filter((u) => u.role === "ta");
+  // A TA matches by name, or by carrying a role that matches.
+  const tas = repo
+    .users()
+    .filter((u) => u.role === "ta")
+    .filter((u) => matchesQuery(q, u.name) || openings.some((o) => o.assignedTaIds.includes(u.id) && roleMatches(o)));
   const alerts = computeAlerts();
 
   const load = tas.map((t) => {
@@ -48,12 +57,27 @@ export function LeadDashboard({ leadId }: { leadId: string }) {
   const theirs = openings.filter((o) => o.taLeadId === leadId);
   const scope = theirs.length > 0 ? theirs : openings;
 
-  const stale = scope.filter((o) => {
+  const stale = scope.filter(roleMatches).filter((o) => {
     const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
     return days > PRIORITY_TARGET[o.priorityTier].days;
   });
-  const unassigned = scope.filter((o) => o.assignedTaIds.length === 0);
-  const awaitingJd = scope.filter((o) => o.jdStatus === "pending_ta_approval");
+  const unassigned = scope.filter(roleMatches).filter((o) => o.assignedTaIds.length === 0);
+  const awaitingJd = scope.filter(roleMatches).filter((o) => o.jdStatus === "pending_ta_approval");
+
+  // Each list pages on its own.
+  const team = pageOf(load, sp, "tpage", 10, "/");
+  const decisions = pageOf(
+    [
+      ...unassigned.map((o) => ({ kind: "unassigned" as const, o })),
+      ...awaitingJd.map((o) => ({ kind: "jd" as const, o })),
+      ...stale.map((o) => ({ kind: "stale" as const, o })),
+    ],
+    sp,
+    "dpage",
+    10,
+    "/",
+  );
+  const roles = pageOf(openings.filter(roleMatches), sp, "rpage", 15, "/");
 
   return (
     <>
@@ -61,7 +85,10 @@ export function LeadDashboard({ leadId }: { leadId: string }) {
         <h2 className="mb-3.5 text-[13px] font-semibold">The team today</h2>
         <div className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <div className="divide-y divide-rule">
-            {load.map((l) => (
+            {load.length === 0 && (
+              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">Nobody matches that search.</p>
+            )}
+            {team.rows.map((l) => (
               <div key={l.ta.id} className="flex flex-wrap items-center gap-x-6 gap-y-3 px-7 py-4">
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-tag text-[11px] font-bold text-ink-soft">
                   {l.ta.initials}
@@ -111,6 +138,7 @@ export function LeadDashboard({ leadId }: { leadId: string }) {
             ))}
           </div>
         </div>
+        <Pager {...team.pager} scroll={false} className="mt-4" />
       </section>
 
       <div className="grid gap-8 lg:grid-cols-2">
@@ -119,29 +147,27 @@ export function LeadDashboard({ leadId }: { leadId: string }) {
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             {stale.length + unassigned.length + awaitingJd.length === 0 ? (
               <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
-                Nothing waiting on you.
+                {q ? "Nothing here matches that search." : "Nothing waiting on you."}
               </p>
             ) : (
               <div className="divide-y divide-rule">
-                {unassigned.map((o) => (
-                  <Link key={o.id} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
+                {decisions.rows.map(({ kind, o }) => kind === "unassigned" ? (
+                  <Link key={`u-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
                     <p className="text-[13.5px]">{o.title}</p>
                     <p className="mt-0.5 text-[11.5px] text-danger">Nobody assigned</p>
                   </Link>
-                ))}
-                {awaitingJd.map((o) => (
-                  <Link key={o.id} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
+                ) : kind === "jd" ? (
+                  <Link key={`j-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
                     <p className="text-[13.5px]">{o.title}</p>
                     <p className="mt-0.5 text-[11.5px] text-warn">
                       JD not approved by{" "}
                       {o.assignedTaIds.map((t) => repo.user(t)?.name).join(" or ")}
                     </p>
                   </Link>
-                ))}
-                {stale.map((o) => {
+                ) : (() => {
                   const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
                   return (
-                    <Link key={o.id} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
+                    <Link key={`s-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
                       <p className="text-[13.5px]">{o.title}</p>
                       <p className="mt-0.5 text-[11.5px] text-ink-soft">
                         Day {days} against a {o.priorityTier} target of{" "}
@@ -149,17 +175,23 @@ export function LeadDashboard({ leadId }: { leadId: string }) {
                       </p>
                     </Link>
                   );
-                })}
+                })())}
               </div>
             )}
           </div>
+          <Pager {...decisions.pager} scroll={false} className="mt-4" />
         </section>
 
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Every open role</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
+            {roles.pager.total === 0 && (
+              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
+                {q ? "No open role matches that search." : "No open roles."}
+              </p>
+            )}
             <div className="divide-y divide-rule">
-              {openings.map((o) => {
+              {roles.rows.map((o) => {
                 const c = stageCounts(o.id);
                 return (
                   <Link
@@ -181,6 +213,7 @@ export function LeadDashboard({ leadId }: { leadId: string }) {
               })}
             </div>
           </div>
+          <Pager {...roles.pager} scroll={false} className="mt-4" />
         </section>
       </div>
     </>

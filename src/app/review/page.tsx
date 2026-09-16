@@ -4,8 +4,10 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, reviewJobs, reviewList } from "@/lib/review";
 import { primeStore } from "@/data/prime";
+import { matchesQuery } from "@/lib/paging";
 
-export default async function ReviewIndex() {
+export default async function ReviewIndex({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  const { q = "" } = await searchParams;
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const jobs = reviewJobs();
@@ -21,7 +23,10 @@ export default async function ReviewIndex() {
         nothing moves in any pipeline.
       </p>
       <div className="mt-7 overflow-hidden rounded-2xl border border-rule bg-surface">
-        {jobs.map((n, i) => {
+        {jobs.filter((n) => {
+          const o = openings[n - 1];
+          return matchesQuery(q, o?.title, repo.client(o?.clientId ?? "")?.name, o?.locations.join(" "));
+        }).map((n, i) => {
           const o = openings[n - 1];
           const total = reviewList(n).length;
           const done = reviewDecisions(user.id, n).size;

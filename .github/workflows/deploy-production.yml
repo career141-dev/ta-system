@@ -1,0 +1,111 @@
+name: Deploy Production
+
+# The `production` branch is what runs live. A release is a fast-forward of
+# production to a commit that is already on main — and so has already been
+# through staging:
+#
+#   git push origin main:production
+#
+# Three locks before anything is touched:
+#   1. PRODUCTION_ENABLED (repository variable) must be "true". It is off until
+#      the production target is provisioned and approved (docs/CI-CD.md).
+#   2. The commit must already be on main.
+#   3. The "production" GitHub Environment requires a reviewer to approve the
+#      deploy job, and allows only the production branch.
+#
+# A database backup is taken on the server before Convex is deployed.
+# Production settings (where it lives on the server) are repository variables,
+# so they can be set when the target exists without changing this file.
+
+on:
+  push:
+    branches: [production]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  workflow_dispatch:
+    inputs:
+      components:
+        description: What to deploy
+        type: choice
+        options: [all, app, convex]
+        default: all
+      run_function:
+        description: Convex function to run after deploying (optional, e.g. migrations/foo:run)
+        type: string
+        default: ""
+      run_args:
+        description: JSON arguments for that function
+        type: string
+        default: "{}"
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: pipeline-production
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Release checks
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      - name: Production enabled
+        if: ${{ vars.PRODUCTION_ENABLED != 'true' }}
+        run: |
+          echo "::error::Production deploys are switched off (repository variable PRODUCTION_ENABLED is not 'true'). See docs/CI-CD.md."
+          exit 1
+
+      - name: Only from the production branch
+        if: ${{ github.ref != 'refs/heads/production' }}
+        run: |
+          echo "::error::Run this workflow on the production branch."
+          exit 1
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: The commit has been through main (and staging)
+        id: check
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$(git rev-parse --short HEAD) is not on main. Merge to main first, let staging deploy it, then fast-forward production."
+            exit 1
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  ci:
+    name: CI
+    needs: gate
+    uses: ./.github/workflows/ci.yml
+    with:
+      build: false
+      ref: ${{ needs.gate.outputs.sha }}
+
+  deploy:
+    name: Production
+    needs: [gate, ci]
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    with:
+      environment: production
+      ref: ${{ needs.gate.outputs.sha }}
+      components: ${{ inputs.components || 'all' }}
+      run_function: ${{ inputs.run_function || '' }}
+      run_args: ${{ inputs.run_args || '{}' }}
+      deploy_dir: ${{ vars.PRODUCTION_DEPLOY_DIR }}
+      env_file: ${{ vars.PRODUCTION_ENV_FILE }}
+      compose_source: ${{ vars.PRODUCTION_COMPOSE_SOURCE }}
+      app_service: ${{ vars.PRODUCTION_APP_SERVICE }}
+      app_container: ${{ vars.PRODUCTION_APP_CONTAINER }}
+      health_url: ${{ vars.PRODUCTION_HEALTH_URL }}
+      convex_port: ${{ vars.PRODUCTION_CONVEX_PORT }}
+      backup_postgres_container: ${{ vars.PRODUCTION_POSTGRES_CONTAINER }}
+      backup_postgres_db: ${{ vars.PRODUCTION_POSTGRES_DB }}
+      backup_postgres_user: ${{ vars.PRODUCTION_POSTGRES_USER }}

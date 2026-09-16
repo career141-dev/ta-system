@@ -123,6 +123,10 @@ sudo crontab -e
 
 ## 6 · Updating later
 
+Once production is enabled in the pipeline, releases go through the
+**Deploy Production** workflow instead (docs/CI-CD.md). The commands below are
+the manual fallback.
+
 ```bash
 cd /srv/ta-system && git pull
 npx convex deploy --url http://127.0.0.1:3210 --admin-key "$CONVEX_SELF_HOSTED_ADMIN_KEY"   # if convex/ changed

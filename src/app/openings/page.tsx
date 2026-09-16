@@ -8,6 +8,10 @@ import { computeAlerts } from "@/lib/sla";
 import { relDays } from "@/lib/format";
 import { SearchIcon } from "@/components/icons";
 import { primeStore } from "@/data/prime";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 20;
 
 const BUCKETS = [
   { key: "mine", label: "My openings" },
@@ -19,9 +23,10 @@ const BUCKETS = [
 export default async function OpeningsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ bucket?: string; q?: string }>;
+  searchParams: Promise<{ bucket?: string; q?: string; page?: string }>;
 }) {
-  const { bucket = "mine", q = "" } = await searchParams;
+  const sp = await searchParams;
+  const { bucket = "mine", q = "" } = sp;
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const clients = repo.clients();
@@ -42,12 +47,14 @@ export default async function OpeningsPage({
           : all.filter((o) => o.status === "open");
 
   if (q) {
-    const needle = q.toLowerCase();
     list = list.filter((o) => {
       const client = clients.find((c) => c.id === o.clientId);
-      return `${o.title} ${client?.name ?? ""}`.toLowerCase().includes(needle);
+      return matchesQuery(q, o.title, client?.name, o.locations.join(" "));
     });
   }
+  const total = list.length;
+  const page = pageFrom(sp, total, PAGE_SIZE);
+  list = slicePage(list, page, PAGE_SIZE);
 
   const counts = {
     mine: mine.filter((o) => o.status === "open").length,
@@ -206,6 +213,7 @@ export default async function OpeningsPage({
           })}
         </div>
       )}
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} href={pageLink("/openings", sp)} className="mt-6" />
     </main>
   );
 }

@@ -1,5 +1,15 @@
 import { repo } from "@/data/store";
 import { timeAt } from "@/lib/format";
+import { Pager } from "./Pager";
+import { matchesQuery, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 20;
+
+/** The header search and the page, for a log that can run long. */
+type LogPaging = { q?: string; page?: number; pageHref?: (page: number) => string };
+
+const clampPage = (page: number | undefined, total: number) =>
+  Math.min(Math.max(1, page ?? 1), Math.max(1, Math.ceil(total / PAGE_SIZE)));
 
 /**
  * Two records, kept apart.
@@ -23,7 +33,7 @@ const OUTCOME_WORDS: Record<string, string> = {
   not_interested: "not interested",
 };
 
-export function CallLog({ applicationId }: { applicationId: string }) {
+export function CallLog({ applicationId, q = "", page, pageHref }: { applicationId: string } & LogPaging) {
   const calls = repo.callFeedback(applicationId).slice().sort((a, b) => b.recordedAt - a.recordedAt);
   // Follow-up calls are logged with the contact history, and belong here with
   // the other calls rather than in the chat.
@@ -36,9 +46,27 @@ export function CallLog({ applicationId }: { applicationId: string }) {
     return <p className="py-6 text-center text-[13px] text-ink-faint">No calls logged yet.</p>;
   }
 
+  // Both kinds in one list for paging, follow-up calls first as before.
+  const entries = [
+    ...followUpCalls
+      .filter((m) => matchesQuery(q, m.body, OUTCOME_WORDS[m.callOutcome ?? ""], repo.user(m.byUserId ?? "")?.name))
+      .map((m) => ({ kind: "followUp" as const, m })),
+    ...calls
+      .filter((f) => matchesQuery(q, f.body, f.kind.replace(/_/g, " "), f.outcome.replace(/_/g, " "), repo.user(f.recordedBy)?.name))
+      .map((f) => ({ kind: "call" as const, f })),
+  ];
+  if (entries.length === 0) {
+    return <p className="py-6 text-center text-[13px] text-ink-faint">No call matches that search.</p>;
+  }
+  const current = clampPage(page, entries.length);
+  const onPage = slicePage(entries, current, PAGE_SIZE);
+  const followUpShown = onPage.flatMap((x) => (x.kind === "followUp" ? [x.m] : []));
+  const callsShown = onPage.flatMap((x) => (x.kind === "call" ? [x.f] : []));
+
   return (
+    <>
     <ol className="flex flex-col gap-3">
-      {followUpCalls.map((m) => (
+      {followUpShown.map((m) => (
         <li key={m.id} className="rounded-xl border border-rule bg-surface px-4 py-3">
           <div className="mb-1 flex flex-wrap items-baseline gap-x-2.5 text-[11px]">
             <span className="rounded bg-brand px-1.5 py-px font-medium text-white">Follow-up call</span>
@@ -54,7 +82,7 @@ export function CallLog({ applicationId }: { applicationId: string }) {
           {m.body && <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed">{m.body}</p>}
         </li>
       ))}
-      {calls.map((f) => (
+      {callsShown.map((f) => (
         <li key={f.id} className="rounded-xl border border-rule bg-surface px-4 py-3">
           <div className="mb-1 flex flex-wrap items-baseline gap-x-2.5 text-[11px]">
             <span
@@ -76,6 +104,8 @@ export function CallLog({ applicationId }: { applicationId: string }) {
         </li>
       ))}
     </ol>
+    {pageHref && <Pager page={current} pageSize={PAGE_SIZE} total={entries.length} href={pageHref} />}
+    </>
   );
 }
 
@@ -86,7 +116,7 @@ export function CallLog({ applicationId }: { applicationId: string }) {
  * indented and tinted — because the one thing a TA needs to see at a glance is
  * whether the last word was ours or theirs.
  */
-export function Chat({ applicationId, channel }: { applicationId: string; channel?: "whatsapp" | "email" }) {
+export function Chat({ applicationId, channel, q = "", page, pageHref }: { applicationId: string; channel?: "whatsapp" | "email" } & LogPaging) {
   const messages = repo.outreach(applicationId).filter((m) => m.channel !== "ai_call" && (!channel || m.channel === channel)).sort((a, b) => {
     const at = (m: (typeof a)) => m.sentAt ?? m.createdAt;
     return at(a) - at(b);
@@ -100,9 +130,18 @@ export function Chat({ applicationId, channel }: { applicationId: string; channe
     );
   }
 
+  // Page 1 is the latest messages; each page still reads top to bottom in order.
+  const matching = messages.filter((m) => matchesQuery(q, m.subject, m.body));
+  if (matching.length === 0) {
+    return <p className="py-6 text-center text-[13px] text-ink-faint">No message matches that search.</p>;
+  }
+  const current = clampPage(page, matching.length);
+  const shown = slicePage(matching.slice().reverse(), current, PAGE_SIZE).reverse();
+
   return (
+    <>
     <ol className="flex flex-col gap-2.5">
-      {messages.map((m) => {
+      {shown.map((m) => {
         const inbound = m.direction === "in";
         return (
           <li
@@ -128,5 +167,7 @@ export function Chat({ applicationId, channel }: { applicationId: string; channe
         );
       })}
     </ol>
+    {pageHref && <Pager page={current} pageSize={PAGE_SIZE} total={matching.length} href={pageHref} />}
+    </>
   );
 }

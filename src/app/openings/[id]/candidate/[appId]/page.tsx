@@ -15,6 +15,7 @@ import { Confirm } from "@/components/Confirm";
 import { ChevronIcon, CloseIcon } from "@/components/icons";
 import { ClosingPanel } from "@/components/ClosingPanel";
 import { Timeline } from "@/components/Timeline";
+import { pageLink } from "@/lib/paging";
 import { InterviewPanel } from "@/components/InterviewPanel";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
@@ -42,10 +43,12 @@ export default async function CandidateDrawer({
   params, searchParams,
 }: {
   params: Promise<{ id: string; appId: string }>;
-  searchParams: Promise<{ tab?: string; msg?: string }>;
+  searchParams: Promise<{ tab?: string; msg?: string; q?: string; page?: string }>;
 }) {
   const { id, appId } = await params;
-  const { tab = "cv" } = await searchParams;
+  const sp = await searchParams;
+  const { tab = "cv", q = "" } = sp;
+  const logPage = Math.max(1, Math.floor(Number(sp.page)) || 1);
   await primeStore({ openingId: id });
   const user = await getCurrentUser();
 
@@ -105,6 +108,7 @@ export default async function CandidateDrawer({
 
   const base = `/openings/${id}/candidate/${appId}`;
   const tabHref = (t: string) => (t === "cv" ? `${base}` : `${base}?tab=${t}`);
+  const logHref = pageLink(base, sp);
 
   // One test, the same one every action on this page makes on the server.
   const locked = !allows(user, "opening.act", { openingId: id, assignment, ownerTaId: app.ownerTaId });
@@ -368,6 +372,9 @@ export default async function CandidateDrawer({
             applicationId={app.id}
             createdAt={app.createdAt}
             sourcingChannel={app.sourcingChannel}
+            q={q}
+            page={logPage}
+            pageHref={logHref}
           />
         )}
 
@@ -396,7 +403,7 @@ export default async function CandidateDrawer({
                 defaultKind={interview ? "pre_interview" : app.stage === "offer" ? "post_offer" : "ad_hoc"}
               />
             )}
-            <CallLog applicationId={app.id} />
+            <CallLog applicationId={app.id} q={q} page={logPage} pageHref={logHref} />
           </div>
         )}
 
@@ -410,7 +417,7 @@ export default async function CandidateDrawer({
             ) : (
               <>
                 {!locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="chat" />}
-                <Chat applicationId={app.id} />
+                <Chat applicationId={app.id} q={q} page={logPage} pageHref={logHref} />
               </>
             )}
           </div>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { Pager } from "@/components/Pager";
 import { repo } from "@/data/store";
 import { assess } from "@/lib/assessment";
 import type { Score } from "@/lib/scoring";
@@ -33,10 +34,83 @@ const ENGINE_LIMIT = 100;
 
 type Params = Record<string, string | string[] | undefined>;
 
+/**
+ * The page frame renders at once; the results stream in.
+ *
+ * A search can take twenty seconds — a model reads the sentence and a second one
+ * re-scores the uncertain band — and a server page that waited for all of it
+ * sent nothing until then, so the screen looked stuck. The frame, the search box
+ * and a "Searching" note are sent immediately, and the results replace the note
+ * when they are ready.
+ *
+ * The boundary is keyed on the search itself (not the page or the open
+ * candidate), so a new search shows the note straight away, while paging and
+ * opening a candidate — both answered from the search cache in a fraction of a
+ * second — keep the list on screen.
+ */
 export default async function ResultsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const sp = await searchParams;
   await primeStore({ allApplications: true });
   await pageUser("database.read");
+  const q = typeof sp.q === "string" ? sp.q : "";
+  const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
+  const forOpening = typeof sp.for === "string" ? sp.for : null;
+  const searchKey = (() => {
+    const p = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
+      if (k === "page" || k === "candidate" || k === "msg" || typeof v !== "string") continue;
+      p.set(k, v);
+    }
+    return p.toString();
+  })();
+
+  return (
+    <main className="px-6 py-5">
+      <div className="mb-4 flex items-center gap-3">
+        <Link href="/database" className="text-[12.5px] text-ink-soft hover:text-ink">← Database</Link>
+        {forOpening && (
+          <span className="rounded-full bg-brand-soft px-3 py-1 text-[11.5px] text-brand">
+            Searching for {repo.opening(forOpening)?.title ?? "an opening"}
+          </span>
+        )}
+      </div>
+      <Suspense key={searchKey} fallback={<Searching q={q} mode={mode} forOpening={forOpening} />}>
+        <Results sp={sp} />
+      </Suspense>
+    </main>
+  );
+}
+
+/** What is on screen while a new search runs: the same frame, the box still usable. */
+function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "boolean" | "meaning"; forOpening: string | null }) {
+  const vocab = repo.vocabulary();
+  return (
+    <div className="grid items-start gap-6 xl:grid-cols-[400px_1fr]">
+      <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px]">
+        <div className="rounded-xl border border-rule bg-surface p-4">
+          <SearchBox
+            vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
+            initialQuery={q}
+            initialMode={mode}
+            openingId={forOpening}
+            compact
+          />
+        </div>
+      </aside>
+      <div className="min-w-0">
+        <div className="overflow-hidden rounded-xl border border-rule bg-surface px-8 py-16 text-center" role="status" aria-live="polite">
+          <p className="text-[14px] font-medium">Searching the database…</p>
+          <p className="mx-auto mt-2 max-w-[460px] text-[12.5px] leading-relaxed text-ink-soft">
+            {q ? <>Reading &ldquo;{q}&rdquo; and ranking the people who fit. A new search can take up to half a minute; the same search again is instant.</> : "Loading the results."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+async function Results({ sp }: { sp: Params }) {
+  await primeStore({ allApplications: true });
   const q = typeof sp.q === "string" ? sp.q : "";
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
   const forOpening = typeof sp.for === "string" ? sp.for : null;
@@ -316,11 +390,6 @@ async function ResultsView({
     ...(forOpening ? { for: forOpening } : {}),
   };
 
-  // The full URL of the current results page — passed to candidate profile so
-  // "← Back to results" returns exactly here, including page number.
-  const currentSearchParams = new URLSearchParams(extra);
-  if ((page - 1) > 0) currentSearchParams.set("page", String(page));
-  const backToResults = `${base}?${currentSearchParams.toString()}`;
 
   /*
    * Widening — only offered where it would actually find someone.
@@ -416,6 +485,10 @@ async function ResultsView({
     if (showBelow) p.set("below", "1");
     return `${base}?${p.toString()}`;
   })();
+  // "← Back to results" from a candidate's profile returns to exactly this list —
+  // the search, every filter chip, the page. It used to keep only the sentence
+  // and the page, so coming back re-read the sentence and lost the chips.
+  const backToResults = closeHref;
 
   const activeCandidate = candidateId ? repo.candidate(candidateId) : null;
   const activeIndex = activeCandidate ? results.findIndex((r) => r.candidate.id === activeCandidate.id) : -1;
@@ -446,16 +519,7 @@ async function ResultsView({
     });
 
   return (
-    <main className="px-6 py-5">
-      <div className="mb-4 flex items-center gap-3">
-        <Link href="/database" className="text-[12.5px] text-ink-soft hover:text-ink">← Database</Link>
-        {forOpening && (
-          <span className="rounded-full bg-brand-soft px-3 py-1 text-[11.5px] text-brand">
-            Searching for {repo.opening(forOpening)?.title ?? "an opening"}
-          </span>
-        )}
-      </div>
-
+    <>
       <div className="grid items-start gap-6 xl:grid-cols-[400px_1fr]">
         <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px]">
           <AiPanel
@@ -667,21 +731,7 @@ async function ResultsView({
             )}
           </div>
 
-          {total > PAGE && (
-            <div className="mt-5 flex items-center justify-center gap-3 text-[12.5px]">
-              {page > 1 ? (
-                <Link href={pageHref(page - 1)} className="rounded-full border border-rule px-3.5 py-1.5 hover:bg-tag">Previous</Link>
-              ) : (
-                <span className="rounded-full border border-rule px-3.5 py-1.5 text-ink-faint">Previous</span>
-              )}
-              <span className="tabular text-ink-soft">Page {page} of {Math.ceil(total / PAGE)}</span>
-              {page * PAGE < total ? (
-                <Link href={pageHref(page + 1)} className="rounded-full border border-rule px-3.5 py-1.5 hover:bg-tag">Next</Link>
-              ) : (
-                <span className="rounded-full border border-rule px-3.5 py-1.5 text-ink-faint">Next</span>
-              )}
-            </div>
-          )}
+          <Pager page={page} pageSize={PAGE} total={total} href={pageHref} />
         </div>
       </div>
 
@@ -698,6 +748,6 @@ async function ResultsView({
           statusLabel={statusLabel}
         />
       )}
-    </main>
+    </>
   );
 }
