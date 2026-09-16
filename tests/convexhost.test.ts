@@ -28,6 +28,8 @@ ok("a named host without the production flag is refused", !backendHostAllowed("h
 ok("production alone, without naming the host, is refused", !backendHostAllowed("http://backend:3210", { deployment: "production" }).ok);
 ok("production naming its own backend is allowed", backendHostAllowed("http://backend:3210", { deployment: "production", allowedHost: "backend" }).ok);
 ok("a different host than the one named is refused", !backendHostAllowed("https://api.career141.com", { deployment: "production", allowedHost: "backend" }).ok);
+ok("staging naming its own backend is allowed", backendHostAllowed("http://convex:3210", { deployment: "staging", allowedHost: "convex" }).ok);
+ok("any other deployment value is refused", !backendHostAllowed("http://convex:3210", { deployment: "test", allowedHost: "convex" }).ok);
 ok("the name is compared without case", backendHostAllowed("http://Backend:3210", { deployment: "production", allowedHost: "backend" }).ok);
 
 console.log(`\n${passed} passed, ${failed} failed`);

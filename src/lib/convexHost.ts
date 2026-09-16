@@ -10,8 +10,9 @@
  * `C141_CONVEX_HOST` exists for one situation: the app runs in a container next
  * to the backend, where the backend is reachable as a service name (`backend`)
  * rather than on the loopback address. It is honoured only on a deployment that
- * has also set `C141_DEPLOYMENT=production`, so a test copy cannot reach a
- * remote backend by setting one variable.
+ * has also declared what it is — `C141_DEPLOYMENT=production` or `staging` — so
+ * a copy cannot reach a remote backend by setting one variable. Staging keeps
+ * the safe-backend check (src/lib/safety.ts); only production skips it.
  *
  * Pure, so it is tested on its own (tests/convexhost.test.ts) — no server-only
  * import, and no environment read of its own.
@@ -34,12 +35,13 @@ export function backendHostAllowed(
   if (LOOPBACK.has(host)) return { ok: true };
 
   const named = (env.allowedHost ?? "").trim().toLowerCase();
-  if (env.deployment === "production" && named && named === host.toLowerCase()) return { ok: true };
+  const declared = env.deployment === "production" || env.deployment === "staging";
+  if (declared && named && named === host.toLowerCase()) return { ok: true };
 
   return {
     ok: false,
     message:
       `Refusing to call ${host}: this build may only talk to a Convex backend on this machine. ` +
-      `On the production server, set C141_DEPLOYMENT=production and C141_CONVEX_HOST=${host} to allow it.`,
+      `On the production or staging server, set C141_DEPLOYMENT (production or staging) and C141_CONVEX_HOST=${host} to allow it.`,
   };
 }
