@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { BriefRecorder } from "./BriefRecorder";
+import { BriefRecorder, type SavedRecording } from "./BriefRecorder";
 import { createOpeningInline, createOpeningStep1 } from "@/app/actions";
 import { ClientPicker, PeoplePicker, inputClass } from "./form";
 import { NewClientDialog, Spinner, type NewClient } from "./NewClientDialog";
@@ -70,7 +70,12 @@ export function CaptureForm({
   const [clientList, setClientList] = useState(clients);
   const [pickerKey, setPickerKey] = useState(0);
   const [addingClient, setAddingClient] = useState(false);
-  const [rec, setRec] = useState<{ key: string; durationMs: number; consentText: string } | null>(
+  // The brief (lead) or details (TA) box. Kept in state so a transcribed
+  // recording can be added to what has already been typed.
+  const [notes, setNotes] = useState("");
+  const addTranscript = (text: string) =>
+    setNotes((prev) => `${prev.trim() ? `${prev.trimEnd()}\n\n` : ""}From the recording:\n${text.trim()}`);
+  const [rec, setRec] = useState<SavedRecording | null>(
     null,
   );
   const [title, setTitle] = useState("");
@@ -213,8 +218,20 @@ export function CaptureForm({
             </p>
           </div>
           <div className={inline ? "px-6 py-5" : "px-7 py-6"}>
+            <div className="mb-4">
+              <BriefRecorder label="Record the details" onSaved={setRec} onTranscript={addTranscript} />
+            </div>
+            {rec?.key && (
+              <>
+                <input type="hidden" name="recordingKey" value={rec.key} />
+                <input type="hidden" name="durationMs" value={rec.durationMs} />
+                <input type="hidden" name="consentText" value={rec.consentText} />
+              </>
+            )}
             <textarea
               name="notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
               rows={5}
               placeholder={`Package around LKR 650,000. Colombo. CA or CIMA qualified, 10+ years in manufacturing.`}
               className={`${inputClass} leading-[1.75]`}
@@ -247,8 +264,8 @@ export function CaptureForm({
               </p>
             </div>
             <div className="flex flex-col gap-5 px-7 py-6">
-              <BriefRecorder onSaved={setRec} />
-              {rec && (
+              <BriefRecorder onSaved={setRec} onTranscript={addTranscript} />
+              {rec?.key && (
                 <>
                   <input type="hidden" name="recordingKey" value={rec.key} />
                   <input type="hidden" name="durationMs" value={rec.durationMs} />
@@ -257,6 +274,8 @@ export function CaptureForm({
               )}
               <textarea
                 name="notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
                 rows={7}
                 placeholder={`Package around LKR 650,000 with fuel and a vehicle allowance. Sri Lankan only. Colombo. Fairly urgent — about 3 weeks.`}
                 className={`${inputClass} leading-[1.75]`}

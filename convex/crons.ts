@@ -811,6 +811,8 @@ crons.interval(
   internal.cvs.cvExtraction.processUnextractedQueueCron
 );
 
+// Background healer: recovers stuck "healing" uploads and re-extracts empty profiles
+// (up to 5 per tick). Keep HEALER_INTERVAL_MINUTES in cvs/healer.ts in sync.
 crons.interval(
   "bg-healer-cv-extractor",
   { minutes: 31 },
@@ -846,6 +848,29 @@ crons.interval(
  */
 const disabled = (process.env.C141_DISABLE_CRONS ?? "").trim().toLowerCase() === "true";
 
-export default disabled ? cronJobs() : crons;
+/**
+ * TA System mail intake (convex/mailIntake), kept apart from everything above.
+ *
+ * It reads linkedin@, cv@ and job@ through Graph delta queries and never marks
+ * mail read, moves it or replies — so the CV platform's own polling above sees
+ * every message exactly as before, and nothing here depends on it.
+ *
+ * Registered only with `C141_MAIL_INTAKE=on`, and each mailbox is switched on
+ * separately in Settings → Mailboxes. Because it contacts nobody it also runs
+ * where `C141_DISABLE_CRONS=true` has switched the rest off (staging).
+ */
+const mailIntakeOn = (process.env.C141_MAIL_INTAKE ?? "").trim().toLowerCase() === "on";
+
+function addMailIntake(registry: ReturnType<typeof cronJobs>) {
+  if (!mailIntakeOn) return;
+  registry.interval("ta-mail-intake-sync", { minutes: 5 }, internal.mailIntake.sync.syncAll, {});
+  registry.interval("ta-mail-intake-process", { minutes: 1 }, internal.mailIntake.process.processReady, {});
+}
+
+addMailIntake(crons);
+const quiet = cronJobs();
+addMailIntake(quiet);
+
+export default disabled ? quiet : crons;
 
 
