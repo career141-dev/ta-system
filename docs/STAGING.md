@@ -7,24 +7,24 @@ touches. Code in `/opt/ta-staging-src` (this repository's branch), secrets in
 
 ## Addresses
 
-- **App:** https://94-136-189-48.sslip.io — use this one. Clerk's session
-  refresh needs HTTPS; on plain `http://94.136.189.48:3110` sign-in loops and
-  pages lose the session.
-- **Convex dashboard:** http://94.136.189.48:6792 — deployment URL
-  `http://94.136.189.48:3220`, admin key from `.env.staging`.
-- **Qdrant:** http://94.136.189.48:6336/dashboard — API key `QDRANT_API_KEY`
-  from `.env.staging`.
+| What | Address | Needs |
+|---|---|---|
+| TA System app | https://ta-system.career141.com | Clerk sign-in |
+| Convex backend (deployment URL) | https://ta-system-api.career141.com | admin key |
+| Convex HTTP actions | https://ta-system-actions.career141.com | — |
+| Convex dashboard | https://ta-system-dashboard.career141.com | deployment URL above + admin key |
+| Qdrant | https://ta-system-qdrant.career141.com/dashboard | `QDRANT_API_KEY` |
 
-HTTPS comes from the host's Caddy (the same one that serves the live sites), with
-one block added on 16 September; a backup of the previous file sits next to it as
-`/etc/caddy/Caddyfile.bak-*`:
+The five names are Cloudflare DNS records (A, DNS only) pointing at the server.
+HTTPS comes from the host's Caddy — the same one that serves the live sites —
+with one block per name, each proxying to a staging container on 127.0.0.1.
+Every change to `/etc/caddy/Caddyfile` was validated before a graceful reload,
+and backups sit next to it as `Caddyfile.bak-*`. Nothing staging runs is
+published on the server's public IP any more.
 
-```
-94-136-189-48.sslip.io {
-	encode zstd gzip
-	reverse_proxy 127.0.0.1:3110
-}
-```
+Sign-in needs HTTPS: Clerk's session refresh does not work on plain HTTP off
+localhost. The Clerk instance is still a development one; a real launch needs a
+production Clerk instance for the domain.
 
 ## Data
 
@@ -37,11 +37,11 @@ table's row count was checked against the export after the import.
 
 | Container | Purpose | Listens on |
 |---|---|---|
-| `ta-staging-app` | the TA System | `0.0.0.0:3110`, and https://94-136-189-48.sslip.io via Caddy |
-| `ta-staging-convex` | Convex backend, instance `ta-staging`, 5 GB memory cap | `0.0.0.0:3220`, `:3221` (admin key required) |
+| `ta-staging-app` | the TA System | `127.0.0.1:3110` |
+| `ta-staging-convex` | Convex backend, instance `ta-staging`, 5 GB memory cap | `127.0.0.1:3220`, `:3221` |
 | `ta-staging-postgres` | its own Postgres 16, database `ta_staging`, 1.5 GB cap | Docker network only |
-| `ta-staging-convex-dashboard` | Convex dashboard | `0.0.0.0:6792` |
-| `ta-staging-qdrant` | search vectors | `0.0.0.0:6336` (API key required) |
+| `ta-staging-convex-dashboard` | Convex dashboard | `127.0.0.1:6792` |
+| `ta-staging-qdrant` | search vectors | `127.0.0.1:6336` (API key required) |
 
 Compose file: `deploy/staging/docker-compose.yml`, copied to
 `/opt/ta-staging-src/docker-compose.yml`. Every command below runs from
@@ -74,18 +74,6 @@ Compose file: `deploy/staging/docker-compose.yml`, copied to
   (`C141_DEPLOYMENT=staging`).
 - **Postgres is never published.** The backend and dashboard need the admin key;
   Qdrant needs its API key; the TA functions are internal.
-
-## Reaching the internal services
-
-```bash
-ssh -i github_deploy_key -N \
-  -L 3220:127.0.0.1:3220 -L 6792:127.0.0.1:6792 -L 6336:127.0.0.1:6336 \
-  root@94.136.189.48
-```
-
-Then open `http://localhost:6792` (dashboard; deployment URL
-`http://127.0.0.1:3220`, admin key from `.env.staging`) and
-`http://localhost:6336/dashboard` (Qdrant).
 
 ## Common operations
 
