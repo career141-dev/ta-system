@@ -4,6 +4,10 @@ import { getCurrentUser } from "@/lib/session";
 import { alertsFor, computeAlerts, isWorkingDay } from "@/lib/sla";
 import { inHours } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 25;
 
 const KIND_LABEL: Record<string, string> = {
   low_volume: "Low volume",
@@ -23,13 +27,26 @@ const KIND_LABEL: Record<string, string> = {
 export default async function AlertsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ all?: string }>;
+  searchParams: Promise<{ all?: string; q?: string; upage?: string; tpage?: string; hpage?: string }>;
 }) {
-  const { all } = await searchParams;
+  const sp = await searchParams;
+  const { all, q = "" } = sp;
   await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
   const everyones = all === "1";
-  const alerts = everyones ? computeAlerts() : alertsFor(user.id);
+  const users = repo.users();
+  // The header search, on this page, narrows the alerts: what it says, the
+  // kind, the opening, or whose it is.
+  const alerts = (everyones ? computeAlerts() : alertsFor(user.id)).filter((a) =>
+    matchesQuery(
+      q,
+      a.detail,
+      KIND_LABEL[a.kind] ?? a.kind,
+      a.action,
+      repo.opening(a.openingId)?.title,
+      ...a.assignedTo.map((t) => users.find((u) => u.id === t)?.name),
+    ),
+  );
   const working = isWorkingDay(new Date());
   // Follow-up runs every day, 07:00–21:00, so its alerts are never held for a
   // working day — a weekend candidate is chased on the weekend.
@@ -37,9 +54,11 @@ export default async function AlertsPage({
   const urgent = alerts.filter((a) => a.urgent);
   const today = alerts.filter((a) => !a.urgent && (working || everyDay(a.kind)));
   const held = alerts.filter((a) => !a.urgent && !working && !everyDay(a.kind));
-  const users = repo.users();
 
-  const group = (title: string, sub: string, items: typeof alerts, held: boolean) => (
+  const group = (title: string, sub: string, every: typeof alerts, held: boolean, key: string) => {
+    const page = pageFrom(sp, every.length, PAGE_SIZE, key);
+    const items = slicePage(every, page, PAGE_SIZE);
+    return (
     <section className="mb-7">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
         <h2 className="text-[13.5px] font-semibold">{title}</h2>
@@ -47,7 +66,7 @@ export default async function AlertsPage({
       </div>
       <div className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         {items.length === 0 ? (
-          <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">Nothing here.</p>
+          <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">{q ? "Nothing here matches that search." : "Nothing here."}</p>
         ) : (
           <div className="divide-y divide-rule">
             {items.map((a) => {
@@ -83,8 +102,10 @@ export default async function AlertsPage({
           </div>
         )}
       </div>
+      <Pager page={page} pageSize={PAGE_SIZE} total={every.length} href={pageLink("/alerts", sp, key)} className="mt-4" />
     </section>
-  );
+    );
+  };
 
   return (
     <main className="mx-auto max-w-[1100px] px-8 py-9">
@@ -99,7 +120,7 @@ export default async function AlertsPage({
         </div>
         {(user.role === "ta_lead" || user.role === "director" || user.role === "admin") && (
           <Link
-            href={everyones ? "/alerts" : "/alerts?all=1"}
+            href={everyones ? (q ? `/alerts?q=${encodeURIComponent(q)}` : "/alerts") : `/alerts?all=1${q ? `&q=${encodeURIComponent(q)}` : ""}`}
             className="rounded-full border border-rule-strong px-4 py-2 text-[12.5px] font-medium text-ink transition-colors hover:border-ink-faint"
           >
             {everyones ? "Just mine" : "Everyone's"}
@@ -107,9 +128,9 @@ export default async function AlertsPage({
         )}
       </div>
 
-      {group("Urgent", "Any day, including weekends", urgent, false)}
-      {group("Today", working ? "Everything routine" : "Follow-up runs at weekends too", today, false)}
-      {!working && held.length > 0 && group("Next working day", "Routine desk work, held over the weekend", held, true)}
+      {group("Urgent", "Any day, including weekends", urgent, false, "upage")}
+      {group("Today", working ? "Everything routine" : "Follow-up runs at weekends too", today, false, "tpage")}
+      {!working && held.length > 0 && group("Next working day", "Routine desk work, held over the weekend", held, true, "hpage")}
     </main>
   );
 }

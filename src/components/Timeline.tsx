@@ -2,6 +2,10 @@ import { repo } from "@/data/store";
 import type { PipelineEvent } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 import { timeAt } from "@/lib/format";
+import { Pager } from "./Pager";
+import { matchesQuery, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 30;
 
 /**
  * Everything that has happened to one application, from the record.
@@ -45,29 +49,42 @@ export function Timeline({
   applicationId,
   createdAt,
   sourcingChannel,
+  q = "",
+  page = 1,
+  pageHref,
 }: {
   applicationId: string;
   createdAt: number;
   sourcingChannel: string;
+  /** The header search, narrowing the log. */
+  q?: string;
+  page?: number;
+  pageHref?: (page: number) => string;
 }) {
-  const events = repo.events(applicationId);
+  const all = repo.events(applicationId);
+  const whoOf = (e: PipelineEvent) =>
+    e.actorType === "user" ? (repo.user(e.actorId ?? "")?.name ?? "someone") : ACTOR_LABEL[e.actorType];
+  const events = all
+    .filter((e) => matchesQuery(q, label(e), e.note, e.eventType, whoOf(e)))
+    .sort((a, b) => b.at - a.at);
+  const pages = Math.max(1, Math.ceil(events.length / PAGE_SIZE));
+  const current = Math.min(Math.max(1, page), pages);
+  const lastPage = current === pages;
 
   return (
+    <>
     <ol className="flex flex-col gap-3 text-[13px]">
       {events.length === 0 && (
         <li className="text-[12.5px] text-ink-faint">
-          Nothing recorded yet — the log starts at the first stage change.
+          {q && all.length > 0
+            ? "Nothing in the log matches that search."
+            : "Nothing recorded yet — the log starts at the first stage change."}
         </li>
       )}
 
-      {events
-        .slice()
-        .sort((a, b) => b.at - a.at)
+      {slicePage(events, current, PAGE_SIZE)
         .map((e) => {
-          const who =
-            e.actorType === "user"
-              ? (repo.user(e.actorId ?? "")?.name ?? "someone")
-              : ACTOR_LABEL[e.actorType];
+          const who = whoOf(e);
           return (
             <li key={e.id} className="flex gap-3">
               <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${ACTOR_TONE[e.actorType]}`} />
@@ -85,6 +102,7 @@ export function Timeline({
         })}
 
       {/* The one thing that predates the log: how they arrived. */}
+      {lastPage && !q && (
       <li className="flex gap-3">
         <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-rule-strong" />
         <div>
@@ -92,6 +110,9 @@ export function Timeline({
           <div className="text-[11.5px] text-ink-faint">{timeAt(createdAt)}</div>
         </div>
       </li>
+      )}
     </ol>
+    {pageHref && <Pager page={current} pageSize={PAGE_SIZE} total={events.length} href={pageHref} />}
+    </>
   );
 }

@@ -7,6 +7,10 @@ import type { Score } from "@/lib/scoring";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { confirmShortlist } from "@/app/actions";
+import { Pager } from "./Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 25;
 
 export type ListFilters = {
   q?: string;
@@ -30,6 +34,8 @@ export type ListFilters = {
   msg?: string;
   /** Only show one band — "the strong ones", which is the first cut a TA makes. */
   band?: string;
+  /** Which page of the list — 25 to a page. */
+  page?: string;
 };
 
 /** Filtering that actually filters. Applied server-side from the URL, so a
@@ -38,10 +44,7 @@ export function applyFilters(apps: Application[], f: ListFilters, userId: string
   return apps.filter((a) => {
     const c = repo.candidate(a.candidateId);
     if (!c) return false;
-    if (f.q) {
-      const hay = `${c.fullName} ${c.currentTitle} ${c.currentEmployer} ${c.location}`.toLowerCase();
-      if (!hay.includes(f.q.toLowerCase())) return false;
-    }
+    if (f.q && !matchesQuery(f.q, c.fullName, c.currentTitle, c.currentEmployer, c.location)) return false;
     if (f.minExp && (c.totalExperienceYears ?? 0) < Number(f.minExp)) return false;
     if (f.maxNotice && (c.noticePeriodDays ?? 999) > Number(f.maxNotice)) return false;
     if (f.location && c.location !== f.location) return false;
@@ -114,7 +117,7 @@ export function CandidateList({
   const canDecideClient = allows(currentUser, "decide.client", { openingId, assignment });
   const apps = visibleToSeat(given, seat);
 
-  const active = Object.entries(filters).filter(([, v]) => v);
+  const active = Object.entries(filters).filter(([k, v]) => v && k !== "page" && k !== "msg");
   const keep = new URLSearchParams(keepQuery).toString();
   const clearHref = keep ? `${basePath}?${keep}` : basePath;
 
@@ -164,6 +167,13 @@ export function CandidateList({
   // filter is on — "#3 of the lot" is more use than "#1 of the three I filtered".
   const order = [...apps].sort((a, b) => (value(b.id) ?? -1) - (value(a.id) ?? -1));
   const rankOf = (id: string) => order.findIndex((a) => a.id === id) + 1;
+
+  // One page of the list at a time. A page link keeps the post being viewed,
+  // the search and every filter, and changes only the page.
+  const linkParams: Record<string, string> = { ...keepQuery };
+  for (const [k, v] of Object.entries(filters)) if (typeof v === "string" && v) linkParams[k] = v;
+  const page = pageFrom(filters, shown.length, PAGE_SIZE);
+  const onPage = slicePage(shown, page, PAGE_SIZE);
 
   return (
     <section className="rounded-xl border border-rule bg-surface">
@@ -324,7 +334,7 @@ export function CandidateList({
         </div>
       ) : (
         <div className="divide-y divide-rule">
-          {shown.map((a) => {
+          {onPage.map((a) => {
             const c = repo.candidate(a.candidateId);
             if (!c) return null;
             const owner = users.find((u) => u.id === a.ownerTaId);
@@ -349,6 +359,7 @@ export function CandidateList({
           })}
         </div>
       )}
+      <Pager page={page} pageSize={PAGE_SIZE} total={shown.length} href={pageLink(basePath, linkParams)} className="border-t border-rule py-4" />
     </section>
   );
 }

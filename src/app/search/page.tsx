@@ -4,9 +4,14 @@ import { pageUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { storeMode } from "@/data/mode";
 import { convexQuery } from "@/lib/convexServer";
+import { Pager } from "@/components/Pager";
+import { pageFrom, pageLink, slicePage } from "@/lib/paging";
 
-export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const { q = "" } = await searchParams;
+const PAGE_SIZE = 20;
+
+export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string; opage?: string; cpage?: string }> }) {
+  const sp = await searchParams;
+  const { q = "" } = sp;
   // Load first: knowing who is signed in reads the users table.
   await primeStore({ allApplications: true });
   await pageUser("database.read");
@@ -15,7 +20,11 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const ids = storeMode() === "convex" && q.trim().length >= 2 ? await convexQuery<string[]>("ta/candidates:quickSearch", { q }) : [];
   if (ids.length) await primeStore({ allApplications: true, candidateIds: ids });
   const found = repo.search(q, ids);
-  const { openings, candidates } = found;
+  // Each column pages on its own, so paging candidates keeps the openings where they were.
+  const opage = pageFrom(sp, found.openings.length, PAGE_SIZE, "opage");
+  const cpage = pageFrom(sp, found.candidates.length, PAGE_SIZE, "cpage");
+  const openings = slicePage(found.openings, opage, PAGE_SIZE);
+  const candidates = slicePage(found.candidates, cpage, PAGE_SIZE);
   const clients = repo.clients();
 
   return (
@@ -28,7 +37,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       {q && (
         <div className="mt-7 grid gap-8 lg:grid-cols-2">
           <section>
-            <h2 className="mb-3 text-[13px] font-semibold">Openings <span className="ml-1 font-normal text-ink-faint">{openings.length}</span></h2>
+            <h2 className="mb-3 text-[13px] font-semibold">Openings <span className="ml-1 font-normal text-ink-faint">{found.openings.length}</span></h2>
             <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
               {openings.length === 0 ? <p className="px-6 py-8 text-center text-[12.5px] text-ink-faint">None</p> : (
                 <div className="divide-y divide-rule">
@@ -41,9 +50,10 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 </div>
               )}
             </div>
+            <Pager page={opage} pageSize={PAGE_SIZE} total={found.openings.length} href={pageLink("/search", sp, "opage")} className="mt-4" />
           </section>
           <section>
-            <h2 className="mb-3 text-[13px] font-semibold">Candidates <span className="ml-1 font-normal text-ink-faint">{candidates.length}</span></h2>
+            <h2 className="mb-3 text-[13px] font-semibold">Candidates <span className="ml-1 font-normal text-ink-faint">{found.candidates.length}</span></h2>
             <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
               {candidates.length === 0 ? <p className="px-6 py-8 text-center text-[12.5px] text-ink-faint">None</p> : (
                 <div className="divide-y divide-rule">
@@ -62,6 +72,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 </div>
               )}
             </div>
+            <Pager page={cpage} pageSize={PAGE_SIZE} total={found.candidates.length} href={pageLink("/search", sp, "cpage")} className="mt-4" />
           </section>
         </div>
       )}

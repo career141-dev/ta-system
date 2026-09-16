@@ -3,6 +3,10 @@ import { addLink } from "@/app/actions";
 import { LinkRow } from "./LinkRow";
 import { scopeLinks } from "@/lib/visibility";
 import type { User } from "@/data/types";
+import { Pager } from "./Pager";
+import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 25;
 
 /**
  * Excel Tables — spec §4.5, laid out to the Figma frame.
@@ -13,12 +17,27 @@ import type { User } from "@/data/types";
  * two. What was a spreadsheet column — outcome, the number, how it was got — is
  * now the row's own state, and the approach log sits underneath it.
  */
-export function LinkVaultTable({ openingId, user }: { openingId: string; user: User }) {
+export function LinkVaultTable({
+  openingId,
+  user,
+  q = "",
+  page = 1,
+}: {
+  openingId: string;
+  user: User;
+  /** The header search, narrowing the table. */
+  q?: string;
+  page?: number;
+}) {
   const users = repo.users();
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
   // A TA's table is their own. The exception is somebody the other TA has
   // already shortlisted, which appears marked so it is not worked twice.
-  const scoped = scopeLinks(repo.linkVault(openingId), user);
+  const everyRow = scopeLinks(repo.linkVault(openingId), user);
+  const matching = everyRow.filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber));
+  const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
+  const current = Math.min(Math.max(1, page), pages);
+  const scoped = slicePage(matching, current, PAGE_SIZE);
   const rows = scoped.map((x) => x.row);
 
   return (
@@ -43,7 +62,11 @@ export function LinkVaultTable({ openingId, user }: { openingId: string; user: U
       </form>
 
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">
-        {rows.length === 0 ? (
+        {rows.length === 0 && q && everyRow.length > 0 ? (
+          <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
+            Nobody in this table matches that search.
+          </p>
+        ) : rows.length === 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
             Nothing here yet. Paste a competitor&rsquo;s profile above, or keep someone on
             Suggestions and they land here with their name and company already filled in.
@@ -72,6 +95,12 @@ export function LinkVaultTable({ openingId, user }: { openingId: string; user: U
           </div>
         )}
       </div>
+      <Pager
+        page={current}
+        pageSize={PAGE_SIZE}
+        total={matching.length}
+        href={pageLink(`/openings/${openingId}/hh/links`, q ? { q } : {})}
+      />
     </>
   );
 }

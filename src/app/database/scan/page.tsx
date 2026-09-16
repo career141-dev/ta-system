@@ -5,6 +5,10 @@ import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { listScans } from "@/lib/scan";
 import { relDays } from "@/lib/format";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 20;
 
 /**
  * The CV scanner.
@@ -19,10 +23,14 @@ import { relDays } from "@/lib/format";
  * eighty are worth opening — and it does not belong in the pipeline the desk
  * works every day.
  */
-export default async function ScanPage() {
+export default async function ScanPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+  const sp = await searchParams;
   await primeStore({ allApplications: true });
   const user = await pageUser("database.read");
-  const scans = isConvex() ? await listScans() : [];
+  const allScans = isConvex() ? await listScans() : [];
+  const matching = allScans.filter((s) => matchesQuery(sp.q, s.title, ...s.criteria));
+  const page = pageFrom(sp, matching.length, PAGE_SIZE);
+  const scans = slicePage(matching, page, PAGE_SIZE);
 
   return (
     <main className="mx-auto max-w-[880px] px-8 py-9">
@@ -51,7 +59,7 @@ export default async function ScanPage() {
         <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
           {scans.length === 0 ? (
             <p className="px-6 py-10 text-center text-[12.5px] leading-relaxed text-ink-faint">
-              No scans yet.
+              {sp.q && allScans.length > 0 ? "No scan matches that search." : "No scans yet."}
               <br />
               A scan keeps its results for seven days, then clears itself.
             </p>
@@ -87,6 +95,7 @@ export default async function ScanPage() {
             </ul>
           )}
         </div>
+        <Pager page={page} pageSize={PAGE_SIZE} total={matching.length} href={pageLink("/database/scan", sp)} className="mt-4" />
       </section>
 
       <p className="mt-6 text-[11.5px] leading-relaxed text-ink-faint">

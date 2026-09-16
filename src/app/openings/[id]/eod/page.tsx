@@ -8,6 +8,10 @@ import { readEodReply, readInboundReply } from "@/app/actions";
 import { timeAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 10;
 
 /**
  * The email that goes out at the end of the day, and the reply that comes back.
@@ -26,7 +30,7 @@ export default async function EodPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kind?: string; msg?: string }>;
+  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -54,7 +58,24 @@ export default async function EodPage({
   const awaiting = waiting.length
     ? repo.reviewRounds(id).filter((r) => r.kind === kind && r.status !== "returned").sort((a, b) => b.sentAt - a.sentAt)[0]
     : undefined;
-  const history = repo.reviewRounds(id).filter((r) => r.kind === kind && r.status === "returned");
+  // The replies already in, newest first, narrowed by the header search (the
+  // reply itself, or a name in it) and a page at a time.
+  const allHistory = repo
+    .reviewRounds(id)
+    .filter((r) => r.kind === kind && r.status === "returned")
+    .sort((a, b) => (b.returnedAt ?? b.sentAt) - (a.returnedAt ?? a.sentAt));
+  const matchingHistory = allHistory.filter((r) =>
+    matchesQuery(
+      sp.q,
+      r.replyBody,
+      ...r.decisions.map((d) => {
+        const app = repo.application(d.applicationId);
+        return app ? repo.candidate(app.candidateId)?.fullName : undefined;
+      }),
+    ),
+  );
+  const historyPage = pageFrom(sp, matchingHistory.length, PAGE_SIZE);
+  const history = slicePage(matchingHistory, historyPage, PAGE_SIZE);
 
   return (
     <main className="mx-auto max-w-[1100px] px-8 py-9">
@@ -208,6 +229,10 @@ export default async function EodPage({
         }
       />
 
+      {sp.q && allHistory.length > 0 && matchingHistory.length === 0 && (
+        <p className="mt-6 text-center text-[12.5px] text-ink-faint">No reply matches that search.</p>
+      )}
+
       {history.length > 0 && (
         <section className="mt-6">
           <h2 className="mb-3 text-[13.5px] font-semibold">Replies already in</h2>
@@ -232,6 +257,7 @@ export default async function EodPage({
               ))}
             </div>
           </div>
+          <Pager page={historyPage} pageSize={PAGE_SIZE} total={matchingHistory.length} href={pageLink(`/openings/${id}/eod`, sp)} />
         </section>
       )}
     </main>

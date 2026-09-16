@@ -99,7 +99,7 @@ export function ResultRow({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-x-2.5">
             {/* Their record in the platform, opening in a drawer over results or navigating to profile */}
-            <Link href={targetLink} className="text-[15px] font-semibold text-accent hover:underline">
+            <Link href={targetLink} scroll={false} className="text-[15px] font-semibold text-accent hover:underline">
               {c.fullName}
             </Link>
             {fit && <FitChip score={fit} />}

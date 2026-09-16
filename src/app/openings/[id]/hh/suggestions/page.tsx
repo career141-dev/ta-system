@@ -12,6 +12,10 @@ import { getCurrentUser } from "@/lib/session";
 import { ChevronIcon } from "@/components/icons";
 import { scopeSuggestions } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
+import { Pager } from "@/components/Pager";
+import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+
+const PAGE_SIZE = 20;
 
 const TIER_TONE = {
   priority: "bg-brand-soft text-brand",
@@ -34,6 +38,7 @@ export default async function Page({
   searchParams: Promise<{
     err?: string; found?: string; scanned?: string; queries?: string;
     cost?: string; rejected?: string; note?: string; sort?: string; show?: string;
+    q?: string; page?: string;
   }>;
 }) {
   const { id } = await params;
@@ -60,11 +65,15 @@ export default async function Page({
 
   const showing = sp.show === "kept" ? kept : sp.show === "dismissed" ? dismissed : open;
   const sort = sp.sort ?? "strength";
-  const rows = [...showing].sort((a, b) =>
+  const matching = [...showing].filter((s) => matchesQuery(sp.q, s.name, s.headline, s.company, s.location, s.why)).sort((a, b) =>
     sort === "recent"
       ? b.generatedAt - a.generatedAt
       : (a.tier === "priority" ? 0 : 1) - (b.tier === "priority" ? 0 : 1) || b.round - a.round,
   );
+  const page = pageFrom(sp, matching.length, PAGE_SIZE);
+  const rows = slicePage(matching, page, PAGE_SIZE);
+  // Paging and sorting keep the tab and the search; the one-off run summary is not carried.
+  const listParams = { show: sp.show, sort: sp.sort, q: sp.q, page: sp.page };
 
   const tab = (key: string, label: string, n: number) => {
     const active = (sp.show ?? "new") === key;
@@ -158,10 +167,10 @@ export default async function Page({
         {rows.length > 0 && (
           <div className="flex items-center gap-4 border-b border-rule px-6 py-2.5">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-soft">
-              <span className="tabular">{rows.length}</span> results
+              <span className="tabular">{matching.length}</span> results
             </span>
             <Link
-              href={`?show=${sp.show ?? "new"}&sort=${sort === "strength" ? "recent" : "strength"}`}
+              href={`?show=${sp.show ?? "new"}&sort=${sort === "strength" ? "recent" : "strength"}${sp.q ? `&q=${encodeURIComponent(sp.q)}` : ""}`}
               className="ml-auto flex items-center gap-1.5 text-[12px] text-ink-soft hover:text-ink"
             >
               Sort by: {sort === "strength" ? "Strength of match" : "Most recent"}
@@ -174,7 +183,9 @@ export default async function Page({
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
             {all.length === 0
               ? "Nothing suggested yet. These are people to approach, not CVs we hold — for the database of people we do hold, use Database search."
-              : "Nothing here. Try another tab."}
+              : sp.q && showing.length > 0
+                ? "Nobody here matches that search."
+                : "Nothing here. Try another tab."}
           </p>
         ) : (
           <div className="divide-y divide-rule">
@@ -246,6 +257,7 @@ export default async function Page({
             ))}
           </div>
         )}
+        <Pager page={page} pageSize={PAGE_SIZE} total={matching.length} href={pageLink(`/openings/${id}/hh/suggestions`, listParams)} className="border-t border-rule py-4" />
       </div>
 
       <Assistant

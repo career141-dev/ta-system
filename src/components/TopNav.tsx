@@ -2,13 +2,14 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { ROLE_LABEL } from "@/data/types";
 import type { User } from "@/data/types";
 import { SignOutButton } from "@clerk/nextjs";
 import { HEADER_H } from "@/lib/chrome";
 import { SearchIcon } from "./icons";
+import { searchScopeFor } from "@/lib/searchScope";
 
 const NAV = [
   { href: "/clients", label: "Clients" },
@@ -41,7 +42,13 @@ export function TopNav({
   alertCount?: number;
 }) {
   const path = usePathname();
+  const params = useSearchParams();
   const [open, setOpen] = useState(false);
+  // The box searches the list on this page — clients on Clients, the stage's
+  // candidates on a stage — keeping the page's own filters and tab.
+  const scope = searchScopeFor(path);
+  const onThisPage = scope.action !== "/search" || path === "/search";
+  const current = onThisPage ? params.get("q") ?? "" : "";
 
   return (
     <header
@@ -104,11 +111,18 @@ export function TopNav({
       </nav>
 
       <div className="ml-auto flex items-center gap-4">
-        <form action="/search" method="GET" className="relative hidden md:block">
+        <form action={scope.action} method="GET" className="relative hidden md:block">
+          {scope.keep.map((k) => {
+            const v = params.get(k);
+            return v ? <input key={k} type="hidden" name={k} value={v} /> : null;
+          })}
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"><SearchIcon /></span>
           <input
+            key={`${scope.action}|${current}`}
             name="q"
-            placeholder="Search openings and candidates"
+            defaultValue={current}
+            aria-label={scope.placeholder}
+            placeholder={scope.placeholder}
             className="w-[300px] rounded-full border border-rule bg-paper py-2 pl-9 pr-4 text-[13px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand-line focus:bg-surface"
           />
         </form>

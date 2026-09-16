@@ -5,6 +5,7 @@ import { ChevronIcon, CloseIcon } from "@/components/icons";
 import { addToOpening } from "@/app/actions";
 import { dateAt } from "@/lib/format";
 import type { Candidate } from "@/data/types";
+import { externalUrl } from "@/lib/url";
 import type { RowApp } from "./ResultRow";
 import { useState } from "react";
 
@@ -43,6 +44,7 @@ export function DbCandidateDrawer({
       {/* Dimmed backdrop over search results */}
       <Link
         href={closeHref}
+              scroll={false}
         aria-label="Close"
         className="fixed inset-0 z-40 bg-[#0b1a12]/60"
       />
@@ -58,6 +60,7 @@ export function DbCandidateDrawer({
             {prevHref ? (
               <Link
                 href={prevHref}
+              scroll={false}
                 className="grid h-7 w-7 place-items-center rounded hover:bg-tag hover:text-ink"
                 title="Previous"
               >
@@ -74,6 +77,7 @@ export function DbCandidateDrawer({
             {nextHref ? (
               <Link
                 href={nextHref}
+              scroll={false}
                 className="grid h-7 w-7 place-items-center rounded hover:bg-tag hover:text-ink"
                 title="Next"
               >
@@ -86,6 +90,7 @@ export function DbCandidateDrawer({
             )}
             <Link
               href={closeHref}
+              scroll={false}
               className="ml-2 grid h-7 w-7 place-items-center rounded hover:bg-tag hover:text-ink"
               title="Close"
             >
@@ -114,7 +119,7 @@ export function DbCandidateDrawer({
               </div>
               {c.linkedinUrl && (
                 <a
-                  href={c.linkedinUrl}
+                  href={externalUrl(c.linkedinUrl) ?? undefined}
                   target="_blank"
                   rel="noreferrer"
                   className="text-[12.5px] text-accent hover:underline"
