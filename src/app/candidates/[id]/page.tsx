@@ -369,7 +369,7 @@ export default async function CandidatePage({
             <form action={addToOpening} className="rounded-2xl border border-rule bg-surface px-5 py-4">
               <input type="hidden" name="candidateId" value={c.id} />
               <h2 className="text-[13px] font-semibold">Add to an opening</h2>
-              <p className="mt-1 text-[12px] text-ink-faint">Goes in as a database match, ready to shortlist.</p>
+              <p className="mt-1 text-[12px] text-ink-faint">Goes straight into Follow-up, claimed by you.</p>
               <select name="openingId" className="mt-2.5 w-full rounded border border-rule bg-paper px-2.5 py-2 text-[12.5px]">
                 {mine.map((o) => (
                   <option key={o.id} value={o.id}>

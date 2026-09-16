@@ -1636,19 +1636,76 @@ export async function deleteSearch(formData: FormData) {
   revalidatePath("/database", "layout");
 }
 
-/** Put a database candidate onto an opening — lands at Matched, unclaimed. */
+/**
+ * Put a candidate someone found — in the database search, on their profile, or
+ * in the openings they may fit — into an opening's pipeline.
+ *
+ * They go straight to Follow-up, claimed by the person adding them, in their
+ * current set: the same thing the Shortlist button does on Database CVs.
+ * Until 16 September they landed at Matched, unclaimed — a stage that lives on
+ * the Database CVs tab, not in the pipeline — so the candidate read as "on the
+ * opening" everywhere except the pipeline the TA then went to look in.
+ *
+ * Someone already on the opening but still unclaimed at Matched or New CVs (for
+ * one, every candidate added the old way) is claimed rather than refused.
+ */
 export async function addToOpening(formData: FormData) {
   await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
   if (!openingId) await back("Pick an opening.");
-  const r = repo.addCandidateToOpening(candidateId, openingId, user.id);
-  revalidatePath("/database", "layout");
-  revalidatePath(`/candidates/${candidateId}`);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  if (!r.ok) await back(r.reason ?? "Could not add them.");
-  await back("Added as a database match.");
+  const title = repo.opening(openingId)?.title ?? "the opening";
+  const refresh = () => {
+    revalidatePath("/database", "layout");
+    revalidatePath(`/candidates/${candidateId}`);
+    revalidatePath(`/openings/${openingId}`, "layout");
+  };
+
+  const onOpening = () => repo.applications(openingId).find((a) => a.candidateId === candidateId);
+  const existing = onOpening();
+  if (existing && !["matched", "new_cv"].includes(existing.stage)) {
+    await back(`Already in ${title}'s pipeline.`);
+  }
+  if (existing?.ownerTaId && existing.ownerTaId !== user.id) {
+    const owner = repo.users().find((u) => u.id === existing.ownerTaId)?.name ?? "another recruiter";
+    await back(`${owner} has already claimed this candidate on ${title}.`);
+  }
+  if (!existing) {
+    const r = repo.addCandidateToOpening(candidateId, openingId, user.id);
+    if (!r.ok) {
+      refresh();
+      await back(r.reason ?? "Could not add them.");
+    }
+  }
+  const appId = onOpening()?.id;
+  if (!appId) {
+    refresh();
+    await back("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.");
+  }
+
+  if (isConvex()) {
+    // The backend's shortlist: the collision lock, the set number and the move
+    // to Follow-up in one transaction, exactly as Database CVs claims.
+    let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+    let problem: string | null = null;
+    try {
+      r = await backend.shortlist({ id: user.id }, appId!);
+    } catch (e) {
+      problem = backendMessage(e, "could not be moved to Follow-up");
+    }
+    const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
+    await afterBackendWrite(openingId);
+    refresh();
+    if (problem) await back(`Added to ${title} under Database CVs, but not moved to Follow-up: ${problem}`);
+    if (owner) await back(`${owner} has already claimed this candidate on ${title}.`);
+    await back(`Added to ${title} in Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
+  }
+
+  const claimed = repo.shortlist(appId!, user.id);
+  refresh();
+  if (!claimed.ok) await back("Somebody else claimed this candidate first.");
+  await back(`Added to ${title} in Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
 }
 
 // ─── Headhunting intelligence (spec §8A) ─────────────────────────────────────
