@@ -81,7 +81,7 @@ export function ClientMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         className={`grid h-8 w-8 place-items-center rounded-lg text-ink-faint transition-all hover:bg-tag hover:text-ink ${
-          open || pane ? "bg-tag text-ink opacity-100" : "opacity-0 group-hover/card:opacity-100 focus:opacity-100"
+          open || pane ? "bg-tag text-ink" : ""
         }`}
       >
         <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true">
@@ -127,6 +127,37 @@ export function ClientMenu({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Delete, visible on the card itself.
+ *
+ * It lived only in the "…" menu, and that button shows only while the pointer
+ * is over the card — so on the Clients page there was no delete to be seen
+ * (16 September). A client with openings filed under it still cannot go: the
+ * button says why instead of disappearing.
+ */
+export function ClientDeleteButton({ clientId, name, openingCount }: { clientId: string; name: string; openingCount: number }) {
+  const pill = "rounded-full border border-rule px-3 py-1 text-[12px] transition-colors";
+  if (openingCount > 0) {
+    const why = `${openingCount} opening${openingCount === 1 ? "" : "s"} filed under this client — move or delete them first`;
+    return (
+      <button type="button" disabled title={why} aria-label={`Delete ${name} (not available: ${why})`} className={`${pill} cursor-not-allowed text-ink-faint opacity-60`}>
+        Delete
+      </button>
+    );
+  }
+  return (
+    <form action={deleteClient} className="shrink-0">
+      <input type="hidden" name="clientId" value={clientId} />
+      <Confirm
+        label="Delete"
+        question={`Delete ${name}? This cannot be undone.`}
+        confirmLabel="Delete client"
+        className={`${pill} text-ink-soft hover:border-danger/40 hover:text-danger`}
+      />
+    </form>
   );
 }
 
