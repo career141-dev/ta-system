@@ -371,6 +371,55 @@ export async function createOpeningStep1(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
+  const openingId = await saveNewOpening(formData, user);
+  if (!openingId) return;
+
+  if (next === "jd") redirect(`/openings/${openingId}/jd`);
+  if (next === "again") redirect(`/openings/new?created=${openingId}`);
+  redirect(`/openings/${openingId}`);
+}
+
+export type InlineResult<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+/** Why the signed-in person may not do this, or null. For saves that answer rather than redirect. */
+async function refusal(capability: Capability): Promise<string | null> {
+  const user = await getCurrentUser();
+  if (!user) return "Your session has ended. Sign in again.";
+  const decision = can(user, capability);
+  return decision.ok ? null : decision.message;
+}
+
+/**
+ * The same save, for the create-client pop-up: it answers instead of
+ * navigating, so the pop-up can say what was made and offer where to go next
+ * without the page jumping away underneath it.
+ */
+export async function createOpeningInline(
+  formData: FormData,
+): Promise<InlineResult<{ openingId: string; title: string; clientName: string }>> {
+  await primeStore({ allApplications: true });
+  const refused = await refusal("opening.create");
+  if (refused) return { ok: false, error: refused };
+  const user = await authorize(formData, "opening.create");
+  try {
+    const openingId = await saveNewOpening(formData, user);
+    if (!openingId) {
+      return { ok: false, error: "Choose a client, a position and — for a lead — at least one TA." };
+    }
+    const clientId = String(formData.get("clientId") ?? "");
+    return {
+      ok: true,
+      openingId: withRealIds(openingId),
+      title: String(formData.get("title") ?? "").trim(),
+      clientName: repo.clients().find((c) => c.id === clientId)?.name ?? "",
+    };
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The opening could not be saved. Try again.") };
+  }
+}
+
+/** Screen one's write. Returns the new opening's id, or null when something required is missing. */
+async function saveNewOpening(formData: FormData, user: User): Promise<string | null> {
   const clientId = String(formData.get("clientId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const notes = String(formData.get("notes") ?? "");
@@ -390,7 +439,7 @@ export async function createOpeningStep1(formData: FormData) {
     ? formData.getAll("assignedTaIds").map(String).filter(Boolean)
     : [user.id];
 
-  if (!clientId || !title || assigned.length === 0) return;
+  if (!clientId || !title || assigned.length === 0) return null;
 
   const users = repo.users();
   const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
@@ -472,9 +521,7 @@ export async function createOpeningStep1(formData: FormData) {
     revalidatePath(`/openings/${openingId}`, "layout");
   });
 
-  if (next === "jd") redirect(`/openings/${openingId}/jd`);
-  if (next === "again") redirect(`/openings/new?created=${openingId}`);
-  redirect(`/openings/${openingId}`);
+  return openingId;
 }
 
 /** Screen two — the TA saves their notes before generating from them. */
@@ -876,9 +923,37 @@ export async function setOpeningTeam(formData: FormData) {
 export async function addClient(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "client.manage");
+  const saved = await saveNewClient(formData, user);
+  if (!saved) return;
+  if (String(formData.get("action") ?? "save") === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(saved.id)}`);
+  }
+}
+
+/**
+ * The create-client pop-up's save. It returns the client rather than
+ * redirecting, so the pop-up can carry straight on into the opening form.
+ */
+export async function createClientInline(
+  formData: FormData,
+): Promise<InlineResult<{ client: { id: string; name: string; industry: string } }>> {
+  await primeStore({ allApplications: true });
+  const refused = await refusal("client.manage");
+  if (refused) return { ok: false, error: refused };
+  const user = await authorize(formData, "client.manage");
+  try {
+    const saved = await saveNewClient(formData, user);
+    if (!saved) return { ok: false, error: "Give the company a name." };
+    return { ok: true, client: saved };
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The client could not be saved. Try again.") };
+  }
+}
+
+async function saveNewClient(formData: FormData, user: User): Promise<{ id: string; name: string; industry: string } | null> {
   const name = String(formData.get("name") ?? "").trim();
   const industry = String(formData.get("industry") ?? "").trim() || "—";
-  if (!name) return;
+  if (!name) return null;
 
   // The form has always asked for the main contact. Until the 12 Sep sweep it
   // was read off the request and thrown away.
@@ -909,14 +984,9 @@ export async function addClient(formData: FormData) {
     newId = repo.addClient({ name, industry, contacts });
   }
 
-  const intent = String(formData.get("action") ?? "save");
-
   revalidatePath("/clients");
   revalidatePath("/openings/new");
-
-  if (intent === "create_job") {
-    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
-  }
+  return { id: withRealIds(newId), name, industry };
 }
 
 export async function updateClient(formData: FormData) {
