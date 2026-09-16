@@ -7,6 +7,7 @@ import { ClientCard } from "@/components/ClientCard";
 import { pageUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { can } from "@/lib/auth";
+import { assignableTas } from "@/lib/assignable";
 
 export default async function ClientsPage({
   searchParams,
@@ -32,9 +33,7 @@ export default async function ClientsPage({
         <div className="flex items-center gap-4">
           {can(user, "client.manage").ok && (
           <AddClient
-            tas={users
-              .filter((u) => u.isActive && (u.role === "ta" || u.role === "ta_lead" || u.role === "admin"))
-              .sort((a, b) => a.name.localeCompare(b.name))}
+            tas={assignableTas(users)}
             isLead={user.role === "ta_lead" || user.role === "admin"}
             canCreateOpening={can(user, "opening.create").ok}
           />
