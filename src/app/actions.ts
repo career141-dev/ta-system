@@ -10,6 +10,8 @@ import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from 
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
+import { assignableTas } from "@/lib/assignable";
+import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -30,6 +32,7 @@ import {
   generateResearch,
   parseResearch,
   toCitations,
+  type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
 import { aiStatus, gemini } from "@/lib/ai";
@@ -371,6 +374,55 @@ export async function createOpeningStep1(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
+  const openingId = await saveNewOpening(formData, user);
+  if (!openingId) return;
+
+  if (next === "jd") redirect(`/openings/${openingId}/jd`);
+  if (next === "again") redirect(`/openings/new?created=${openingId}`);
+  redirect(`/openings/${openingId}`);
+}
+
+export type InlineResult<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+/** Why the signed-in person may not do this, or null. For saves that answer rather than redirect. */
+async function refusal(capability: Capability): Promise<string | null> {
+  const user = await getCurrentUser();
+  if (!user) return "Your session has ended. Sign in again.";
+  const decision = can(user, capability);
+  return decision.ok ? null : decision.message;
+}
+
+/**
+ * The same save, for the create-client pop-up: it answers instead of
+ * navigating, so the pop-up can say what was made and offer where to go next
+ * without the page jumping away underneath it.
+ */
+export async function createOpeningInline(
+  formData: FormData,
+): Promise<InlineResult<{ openingId: string; title: string; clientName: string }>> {
+  await primeStore({ allApplications: true });
+  const refused = await refusal("opening.create");
+  if (refused) return { ok: false, error: refused };
+  const user = await authorize(formData, "opening.create");
+  try {
+    const openingId = await saveNewOpening(formData, user);
+    if (!openingId) {
+      return { ok: false, error: "Choose a client, a position and — for a lead — at least one TA." };
+    }
+    const clientId = String(formData.get("clientId") ?? "");
+    return {
+      ok: true,
+      openingId: withRealIds(openingId),
+      title: String(formData.get("title") ?? "").trim(),
+      clientName: repo.clients().find((c) => c.id === clientId)?.name ?? "",
+    };
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The opening could not be saved. Try again.") };
+  }
+}
+
+/** Screen one's write. Returns the new opening's id, or null when something required is missing. */
+async function saveNewOpening(formData: FormData, user: User): Promise<string | null> {
   const clientId = String(formData.get("clientId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const notes = String(formData.get("notes") ?? "");
@@ -386,11 +438,14 @@ export async function createOpeningStep1(formData: FormData) {
   const gender = String(formData.get("targetGender") ?? "").trim() || null;
 
   const isLead = user.role === "ta_lead" || user.role === "admin";
+  // A lead assigns from the active TAs only (lib/assignable); anyone else sent
+  // is dropped rather than trusted from the form.
+  const tas = new Set(assignableTas(repo.users()).map((u) => u.id));
   const assigned = isLead
-    ? formData.getAll("assignedTaIds").map(String).filter(Boolean)
+    ? formData.getAll("assignedTaIds").map(String).filter((id) => tas.has(id))
     : [user.id];
 
-  if (!clientId || !title || assigned.length === 0) return;
+  if (!clientId || !title || assigned.length === 0) return null;
 
   const users = repo.users();
   const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
@@ -472,9 +527,7 @@ export async function createOpeningStep1(formData: FormData) {
     revalidatePath(`/openings/${openingId}`, "layout");
   });
 
-  if (next === "jd") redirect(`/openings/${openingId}/jd`);
-  if (next === "again") redirect(`/openings/new?created=${openingId}`);
-  redirect(`/openings/${openingId}`);
+  return openingId;
 }
 
 /** Screen two — the TA saves their notes before generating from them. */
@@ -482,16 +535,58 @@ export async function saveBriefNotes(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const notes = String(formData.get("notes") ?? "");
-  const opening = repo.opening(openingId);
-  if (!opening?.briefId) return;
-  repo.updateBrief(opening.briefId, {
-    notesMarkdown: notes,
-    extracted: notes.trim()
-      ? { ...extractFromText(notes), title: opening.title }
-      : { ...EMPTY_EXTRACT, title: opening.title },
-  });
+  const user = await getCurrentUser();
+  saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
   revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+/**
+ * A person's own notes on an opening, kept as their own brief.
+ *
+ * The TA's notes box used to write into the lead's brief, so saving it replaced
+ * what the lead had left. Each person now has a brief of their own, and the JD
+ * is written from all of them (see `jdBriefsFor`).
+ */
+function saveOwnNotes(openingId: string, userId: string, notes: string) {
+  const opening = repo.opening(openingId);
+  if (!opening) return;
+  const extracted = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
+  const mine = repo.briefsForOpening(openingId).filter((b) => b.capturedBy === userId).pop();
+  if (mine) {
+    if (mine.notesMarkdown !== notes) repo.updateBrief(mine.id, { notesMarkdown: notes, extracted });
+    return;
+  }
+  if (!notes.trim()) return;
+  repo.createBrief({
+    clientId: opening.clientId,
+    openingId,
+    kind: "lead_to_ta",
+    capturedBy: userId,
+    capturedAt: Date.now(),
+    method: "notes",
+    notesMarkdown: notes,
+    transcriptStatus: "none",
+    transcript: null,
+    recordingKey: null,
+    recordingDurationMs: null,
+    consentAcknowledgedBy: null,
+    consentAcknowledgedAt: null,
+    consentText: null,
+    extracted,
+  });
+}
+
+/** Everyone's details about an opening, for the JD: the lead's brief and each TA's notes. */
+function jdBriefsFor(openingId: string): JdBrief[] {
+  return repo.briefsForOpening(openingId).map((b) => {
+    const author = repo.user(b.capturedBy);
+    const transcript = b.transcriptStatus === "ready" && b.transcript ? `\n\nFrom the recording:\n${b.transcript}` : "";
+    return {
+      author: author?.name ?? "someone on the desk",
+      role: author?.role === "ta" ? ("ta" as const) : ("lead" as const),
+      notes: `${b.notesMarkdown ?? ""}${transcript}`,
+    };
+  });
 }
 
 /**
@@ -876,9 +971,37 @@ export async function setOpeningTeam(formData: FormData) {
 export async function addClient(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "client.manage");
+  const saved = await saveNewClient(formData, user);
+  if (!saved) return;
+  if (String(formData.get("action") ?? "save") === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(saved.id)}`);
+  }
+}
+
+/**
+ * The create-client pop-up's save. It returns the client rather than
+ * redirecting, so the pop-up can carry straight on into the opening form.
+ */
+export async function createClientInline(
+  formData: FormData,
+): Promise<InlineResult<{ client: { id: string; name: string; industry: string } }>> {
+  await primeStore({ allApplications: true });
+  const refused = await refusal("client.manage");
+  if (refused) return { ok: false, error: refused };
+  const user = await authorize(formData, "client.manage");
+  try {
+    const saved = await saveNewClient(formData, user);
+    if (!saved) return { ok: false, error: "Give the company a name." };
+    return { ok: true, client: saved };
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The client could not be saved. Try again.") };
+  }
+}
+
+async function saveNewClient(formData: FormData, user: User): Promise<{ id: string; name: string; industry: string } | null> {
   const name = String(formData.get("name") ?? "").trim();
   const industry = String(formData.get("industry") ?? "").trim() || "—";
-  if (!name) return;
+  if (!name) return null;
 
   // The form has always asked for the main contact. Until the 12 Sep sweep it
   // was read off the request and thrown away.
@@ -909,14 +1032,9 @@ export async function addClient(formData: FormData) {
     newId = repo.addClient({ name, industry, contacts });
   }
 
-  const intent = String(formData.get("action") ?? "save");
-
   revalidatePath("/clients");
   revalidatePath("/openings/new");
-
-  if (intent === "create_job") {
-    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
-  }
+  return { id: withRealIds(newId), name, industry };
 }
 
 export async function updateClient(formData: FormData) {
@@ -1499,6 +1617,8 @@ function contextFor(openingId: string): OpeningContext | null {
     locations: o.locations,
     packageNotes: o.packageNotes,
     mustHaves: brief?.extracted?.mustHaves ?? [],
+    nationalities: o.targetNationalities,
+    gender: o.targetGender,
   };
 }
 
@@ -1641,16 +1761,29 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
   const opening = repo.opening(openingId);
   const c = contextFor(openingId);
   if (!opening || !c) return null;
-  const brief = opening.briefId ? repo.brief(opening.briefId) : null;
   const client = repo.client(opening.clientId);
 
-  if (isConvex()) {
-    // The notes live in the backend's briefs table, joined to the opening; the
-    // draft is saved there too. Nothing is approved here — the TA reads it first.
+  // The lead's brief and every TA's notes, together. On Convex a brief written
+  // by the backend in this same request may not be in the loaded tables yet,
+  // so its joined notes stand in when the store has none.
+  let briefs = jdBriefsFor(openingId);
+  if (isConvex() && !briefs.some((b) => b.notes.trim())) {
     const notes = await convexQuery<string>("ta/openings:briefNotes", { openingId }).catch(() => "");
-    const fromNotes = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
-    const template = buildJd(fromNotes, client?.name ?? "the client");
-    const res = await generateJdText(c, notes, template);
+    const lead = repo.user(opening.taLeadId ?? "");
+    if (notes.trim()) briefs = [{ author: lead?.name ?? "the TA lead", role: "lead", notes }];
+  }
+  const allNotes = briefs.map((b) => b.notes).filter((n) => n.trim()).join("\n\n");
+  const extracted = allNotes.trim() ? { ...extractFromText(allNotes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
+  const template = buildJd(extracted, client?.name ?? "the client");
+  const context = { ...c, mustHaves: extracted.mustHaves?.length ? extracted.mustHaves : c.mustHaves };
+
+  if (isConvex()) {
+    // The draft is saved in the backend. Nothing is approved here — the TA reads it first.
+    // The Job details are read from the same notes at the same time.
+    const [res] = await Promise.all([
+      generateJdText(context, briefs, template),
+      extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)),
+    ]);
     const actorId = opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
     if (actorId) {
       await convexMutation("ta/openings:saveJd", { actorId, openingId, jdMarkdown: res.ok ? res.text : template }).catch(
@@ -1660,14 +1793,90 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
     return res.ok ? { ok: true } : { ok: false, reason: res.reason };
   }
 
-  const extracted = brief?.extracted ?? { ...EMPTY_EXTRACT, title: opening.title };
   repo.applyExtractedToOpening(openingId, extracted);
-  const template = buildJd(extracted, client?.name ?? "the client");
-
-  const res = await generateJdText(c, brief?.notesMarkdown ?? "", template);
+  const res = await generateJdText(context, briefs, template);
   // The template is not a failure state — it is what the desk has always had.
   repo.updateJd(openingId, res.ok ? res.text : template);
   return res.ok ? { ok: true } : { ok: false, reason: res.reason };
+}
+
+/**
+ * The Job details — skills, nice-to-haves, seniority, years, location,
+ * education, salary, languages, industry — read from the opening and from what
+ * the lead and the TA wrote, before any JD is approved.
+ *
+ * Uses the backend's own JD extractor and normalisation (convex/lib/jdParser —
+ * DeepSeek through OpenRouter; convex/lib/jobRequirements — skills split on
+ * commas, salary "450k LKR" into numbers, seniority onto the schema's levels),
+ * so a value read here is one the panel can show and save back. A field a
+ * person corrected is never overwritten. Approving the JD later reads the JD
+ * too, filling only what is still blank.
+ */
+async function extractJobDetails(openingId: string, c: OpeningContext, briefs: JdBrief[]): Promise<void> {
+  const given = briefs.filter((b) => b.notes.trim());
+  if (given.length === 0) return;
+  const text = [
+    `Job title: ${c.title}`,
+    `Client: ${c.clientName}${c.industry ? ` (${c.industry})` : ""}`,
+    c.locations.length ? `Location: ${c.locations.join(", ")}` : null,
+    c.nationalities?.length ? `Hiring: ${c.nationalities.join(", ")} nationals` : null,
+    "",
+    ...given.map((b) => `${b.role === "lead" ? "TA lead's brief" : "TA's notes"} (${b.author}):\n${b.notes.trim()}\n`),
+    given.some((b) => b.role === "ta") && given.some((b) => b.role === "lead")
+      ? "Where the TA's notes and the lead's brief disagree, the TA's notes are later and are correct."
+      : null,
+    // 16 September: without this the package and hybrid working came back as
+    // nice-to-have "skills" — "vehicle allowance management".
+    "Salary, allowances, benefits and working arrangements are not skills: leave them out of the skill lists.",
+  ]
+    .filter((l) => l !== null)
+    .join("\n");
+
+  const [{ extractSearchRequirements }, { valuesFromExtraction, mapSeniority, SENIORITY_LEVELS }] = await Promise.all([
+    import("../../convex/lib/jdParser"),
+    import("../../convex/lib/jobRequirements"),
+  ]);
+  const model = "deepseek/deepseek-v4-flash";
+  const settle = reserve("job details from notes", maxModelCost(model, text.length + 3000, 1400));
+  let result: Awaited<ReturnType<typeof extractSearchRequirements>>;
+  try {
+    result = await extractSearchRequirements(text, "job_description");
+    settle(modelCost(model, result.usage.promptTokens, result.usage.completionTokens));
+  } catch (e) {
+    settle(0);
+    throw e;
+  }
+  // Every model failed and the parser split words instead: not an extraction.
+  if (result.usage.model === "regex-fallback") return;
+  const values = valuesFromExtraction(result.requirements);
+  // The extractor guesses a level from the duties ("mid", "senior"); a title
+  // that names one ("Finance Manager") is the client's own word for it, so the
+  // title wins wherever it names a higher level (16 September: a Finance
+  // Manager managing four accountants came back Mid-Level, then Senior Executive).
+  const byTitle = mapSeniority(c.title);
+  const rank = (level: string | undefined) =>
+    !level || level === "other" ? -1 : SENIORITY_LEVELS.indexOf(level as (typeof SENIORITY_LEVELS)[number]);
+  if (byTitle && byTitle !== "other" && rank(byTitle) > rank(values.seniorityLevel)) {
+    values.seniorityLevel = byTitle;
+  }
+  // A language is asked for once, under Languages — "fluent English" as a
+  // skill as well only matches CVs that repeat the phrase.
+  const languages = (values.languagesRequired ?? []).map((l) => l.toLowerCase());
+  const notLanguage = (skill: string) => !languages.some((l) => skill.toLowerCase().includes(l));
+  if (values.requiredSkills) values.requiredSkills = values.requiredSkills.filter(notLanguage);
+  if (values.niceToHaveSkills) values.niceToHaveSkills = values.niceToHaveSkills.filter(notLanguage);
+  if (values.requiredSkills?.length === 0) delete values.requiredSkills;
+  if (values.niceToHaveSkills?.length === 0) delete values.niceToHaveSkills;
+  const args = { jobId: openingId, values, model: result.usage.model };
+  try {
+    await convexMutation("ta/requirements:applyExtraction", { ...args, mode: "replace", keepLocks: true });
+  } catch (e) {
+    // A backend not yet deployed with `keepLocks` refuses the argument; filling
+    // blanks is still right, and a later notes change can be re-extracted.
+    if (!/keepLocks|extra field|Validator/i.test((e as Error).message)) throw e;
+    await convexMutation("ta/requirements:applyExtraction", { ...args, mode: "fill" });
+  }
+  markTablesStale();
 }
 
 /** Market research for an opening, keeping any field a TA corrected by hand. */
@@ -1702,8 +1911,11 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
 
 export async function generateJdWithModel(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.manage", { opening: "openingId" });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  // The notes box as it stands when Generate is pressed — typed but not yet
+  // saved notes are still the TA's notes, and the draft must include them.
+  if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
   const res = await draftJd(openingId);
   if (!res) return;
   redirect(

@@ -106,7 +106,7 @@ if (step === "jd") {
     for (const model of ["anthropic/claude-opus-5", "anthropic/claude-sonnet-5"]) {
       process.env.C141_MODEL_JD = model;
       const t = Date.now();
-      const r = await generateJdText(ctx, notes, "");
+      const r = await generateJdText(ctx, [{ author: "the live system", role: "lead", notes }], "");
       drafts[model] = { text: r.ok ? r.text : "", error: r.ok ? null : r.reason, seconds: Math.round((Date.now() - t) / 1000) };
     }
     delete process.env.C141_MODEL_JD;

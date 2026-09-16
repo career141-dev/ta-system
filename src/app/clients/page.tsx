@@ -6,6 +6,8 @@ import { AddClient } from "@/components/AddClient";
 import { ClientCard } from "@/components/ClientCard";
 import { pageUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
+import { can } from "@/lib/auth";
+import { assignableTas } from "@/lib/assignable";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 
@@ -46,7 +48,13 @@ export default async function ClientsPage({
           </p>
         </div>
         <div className="flex items-center gap-4">
-          <AddClient />
+          {can(user, "client.manage").ok && (
+          <AddClient
+            tas={assignableTas(users)}
+            isLead={user.role === "ta_lead" || user.role === "admin"}
+            canCreateOpening={can(user, "opening.create").ok}
+          />
+          )}
         </div>
       </div>
 

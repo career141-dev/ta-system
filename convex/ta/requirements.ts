@@ -8,6 +8,9 @@
 // until something fills them the engines score every opening as "mid-level, two
 // years, no skills". This is what fills them:
 //
+//   Brief / TA notes     → extracted in the app from the lead's brief and the
+//                          TA's notes (keepLocks: every field a person has not
+//                          corrected follows the latest notes)
 //   JD approved / edited → extract (fill mode: blanks and placeholders only,
 //                          never a field a person corrected)
 //   TA presses Re-extract → extract (replace mode, locks cleared)
@@ -54,20 +57,28 @@ export const applyExtraction = internalMutation({
     mode: v.union(v.literal("fill"), v.literal("replace")),
     values: v.any(),
     model: v.string(),
+    /**
+     * With `replace`: overwrite every field a person has not corrected, and keep
+     * their corrections locked. For re-reading notes that have changed, where
+     * `fill` would keep the first reading and `replace` would drop the locks.
+     */
+    keepLocks: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) return { applied: [] as string[] };
     const locked = job.requirementsLockedFields ?? [];
     const current = Object.fromEntries(REQUIREMENT_FIELDS.map((f) => [f, (job as Record<string, unknown>)[f]]));
-    const patch = mergeRequirements(current, args.values as Partial<RequirementValues>, { mode: args.mode, locked });
+    let values = args.values as Partial<RequirementValues>;
+    if (args.keepLocks) values = Object.fromEntries(Object.entries(values).filter(([k]) => !locked.includes(k))) as Partial<RequirementValues>;
+    const patch = mergeRequirements(current, values, { mode: args.mode, locked });
     await ctx.db.patch(args.jobId, {
       ...cleanPatch(patch),
       requirementsStatus: "extracted",
       requirementsExtractedAt: Date.now(),
       requirementsModel: args.model,
       requirementsError: undefined,
-      ...(args.mode === "replace" ? { requirementsLockedFields: [] } : {}),
+      ...(args.mode === "replace" && !args.keepLocks ? { requirementsLockedFields: [] } : {}),
       embedding: undefined,
       updatedAt: new Date().toISOString(),
     });

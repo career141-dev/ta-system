@@ -17,9 +17,20 @@ import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { keywordRetrieve } from "@/lib/retrieve";
-import { deskCriteria, engineSearch, scoreFromEngine, hitsAndMisses, type EngineHit } from "@/lib/engineSearch";
+import {
+  cachedEngineSearch,
+  deskCriteria,
+  engineSearch,
+  hitsAndMisses,
+  quickEngineSearch,
+  scoreFromEngine,
+  type EngineHit,
+  type EngineSearch,
+} from "@/lib/engineSearch";
+import type { SearchCriteria } from "@/data/types";
 
 const PAGE = 25;
+const ENGINE_LIMIT = 100;
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -118,7 +129,91 @@ async function Results({ sp }: { sp: Params }) {
   const criteria = edited ? criteriaFromParams(sp) : (parsed?.criteria ?? criteriaFromParams(sp));
   const ignored = edited ? [] : (parsed?.ignored ?? []);
   const booleanError = mode === "boolean" ? parseBoolean(q).error : null;
+  const view: ViewProps = { sp, q, mode, forOpening, page, candidateId, vocab, edited, criteria, ignored, booleanError };
 
+  /*
+   * How the engine's answer reaches the screen.
+   *
+   * The engine runs for the ordinary case — Boolean is a literal word search
+   * and by-meaning a deliberate request for raw similarity, both the recruiter
+   * overriding the ranking on purpose.
+   *
+   * A full run reads the sentence with a model and has a second model re-rank
+   * the uncertain band: ten seconds or more, most of it waiting on those two
+   * calls. So unless the answer is already held (page 2, back from a profile),
+   * the same retrieval is ranked by the engine's deterministic score first —
+   * about a second — and the page shows that while the full run streams in
+   * behind it and replaces it.
+   */
+  if (isConvex() && q && mode === "natural") {
+    const held = cachedEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+    if (held) return <ResultsView {...view} engine={held} />;
+    const full = engineSearch(q, criteria, ENGINE_LIMIT, edited);
+    // Started above, so an unawaited failure here is not an unhandled one; the
+    // streamed half reports it.
+    full.catch(() => undefined);
+    let quick: EngineSearch | null = null;
+    try {
+      quick = await quickEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+    } catch {
+      // No quick answer: wait for the full one, as before.
+    }
+    if (!quick) return <EngineResults {...view} full={full} />;
+    return (
+      <Suspense fallback={<ResultsView {...view} engine={quick} refining />}>
+        <EngineResults {...view} full={full} />
+      </Suspense>
+    );
+  }
+  return <ResultsView {...view} />;
+}
+
+interface ViewProps {
+  sp: Params;
+  q: string;
+  mode: "natural" | "boolean" | "meaning";
+  forOpening: string | null;
+  page: number;
+  candidateId: string | null;
+  vocab: ReturnType<typeof repo.vocabulary>;
+  edited: boolean;
+  criteria: SearchCriteria;
+  ignored: string[];
+  booleanError: string | null;
+}
+
+/** The streamed half: the engine's full answer, or the words when it cannot run. */
+async function EngineResults({ full, ...view }: ViewProps & { full: Promise<EngineSearch> }) {
+  try {
+    return <ResultsView {...view} engine={await full} />;
+  } catch (e) {
+    return <ResultsView {...view} engineError={(e as Error).message} />;
+  }
+}
+
+async function ResultsView({
+  sp,
+  q,
+  mode,
+  forOpening,
+  page,
+  candidateId,
+  vocab,
+  edited,
+  criteria,
+  ignored,
+  booleanError,
+  engine,
+  engineError,
+  refining = false,
+}: ViewProps & {
+  /** The engine's answer, when it ran. */
+  engine?: EngineSearch;
+  /** Why the engine could not run, when it could not; the words stand in. */
+  engineError?: string;
+  /** `engine` is the quick deterministic pass and the full one is still coming. */
+  refining?: boolean;
+}) {
   // Searched once, in full. The spotlight counts below were taken from a list
   // cut to 25 × the page number, so they changed as you paged (audit finding
   // 37); they now describe every match, the same set the headline counts.
@@ -139,57 +234,55 @@ async function Results({ sp }: { sp: Params }) {
    * good at turning up people whose CV never uses the words the recruiter
    * typed. The matching engine already does it, and does it well enough that
    * the desk corrected it into its present shape over months rather than
-   * replacing it. It is called; it is not reimplemented.
+   * replacing it. Its own functions run it (lib/engineSearch); the page above
+   * decides whether this render has its quick answer or its full one.
    */
   let engineHits = new Map<string, EngineHit>();
   let engineRead: string | null = null;
   let engineTerms: string[] | null = null;
 
-  // Boolean is a literal word search and by-meaning is a deliberate request for
-  // raw similarity; both are the recruiter overriding the ranking on purpose.
-  // The engine runs for the ordinary case, which is the one they type into.
-  if (isConvex() && q && mode === "natural") {
+  if (engine) {
+    /*
+     * The engine does the finding and the ranking.
+     *
+     * It reads the sentence with a model rather than against a vocabulary,
+     * searches Qdrant and the full-text indexes together, and scores what
+     * comes back with the rules the desk corrected over months. Its order is
+     * the order shown.
+     *
+     * The platform's own criteria still apply on top — place, years, notice,
+     * salary, availability — because those are the desk's rules about who
+     * may be approached, and the engine has no notion of them. They narrow
+     * the engine's list; they never reorder it.
+     */
+    engineHits = new Map(engine.hits.map((h) => [h.candidateId, h]));
+    engineRead = engine.interpretation?.interpretation || null;
+    engineTerms = engine.interpretation?.keywords?.length ? engine.interpretation.keywords : null;
+    await primeStore({ candidateIds: engine.hits.map((h) => h.candidateId) });
+    // Fed in as the ranking signal the existing filter path already accepts,
+    // scaled to its 0–1 scale. The floor is 0: the engine has already
+    // decided who is worth showing and applies its own safety floor.
+    similarity = new Map(engine.hits.map((h) => [h.candidateId, h.score / 100]));
+    if (engine.hits.length === 0) retrievalProblem = "Nothing in the database matched that search.";
+  } else if (engineError !== undefined) {
+    // The engine needs a model. Where it cannot run, the words still can —
+    // the backend's full-text indexes need no key at all, so the screen
+    // degrades to a worse search rather than to an empty one.
+    retrievalProblem = `Ranked on words only — the matching engine could not run (${engineError}).`;
     try {
-      /*
-       * The engine does the finding and the ranking.
-       *
-       * It reads the sentence with a model rather than against a vocabulary,
-       * searches Qdrant and the full-text indexes together, and scores what
-       * comes back with the rules the desk corrected over months. Its order is
-       * the order shown.
-       *
-       * The platform's own criteria still apply on top — place, years, notice,
-       * salary, availability — because those are the desk's rules about who
-       * may be approached, and the engine has no notion of them. They narrow
-       * the engine's list; they never reorder it.
-       */
-      const engine = await engineSearch(q, criteria, 100, edited);
-      engineHits = new Map(engine.hits.map((h) => [h.candidateId, h]));
-      engineRead = engine.interpretation?.interpretation ?? null;
-      engineTerms = engine.interpretation?.keywords ?? null;
-      await primeStore({ candidateIds: engine.hits.map((h) => h.candidateId) });
-      // Fed in as the ranking signal the existing filter path already accepts,
-      // scaled to its 0–1 scale. The floor is 0: the engine has already
-      // decided who is worth showing and applies its own safety floor.
-      similarity = new Map(engine.hits.map((h) => [h.candidateId, h.score / 100]));
-      if (engine.hits.length === 0) retrievalProblem = "Nothing in the database matched that search.";
-    } catch (e) {
-      // The engine needs a model. Where it cannot run, the words still can —
-      // the backend's full-text indexes need no key at all, so the screen
-      // degrades to a worse search rather than to an empty one.
-      retrievalProblem = `Ranked on words only — the matching engine could not run (${(e as Error).message}).`;
-      try {
-        const terms = [q, ...criteria.titles, ...criteria.skills.slice(0, 3), ...criteria.employers.slice(0, 2)];
-        const hits = await keywordRetrieve(terms, 150);
-        await primeStore({ candidateIds: hits });
-      } catch (inner) {
-        retrievalProblem = `The database could not be searched (${(inner as Error).message}).`;
-      }
+      const terms = [q, ...criteria.titles, ...criteria.skills.slice(0, 3), ...criteria.employers.slice(0, 2)];
+      const hits = await keywordRetrieve(terms, 150);
+      await primeStore({ candidateIds: hits });
+    } catch (inner) {
+      retrievalProblem = `The database could not be searched (${(inner as Error).message}).`;
     }
   }
 
   if (mode === "meaning" && q) {
-    const vectors = await refreshCandidateVectors();
+    // Backed by Convex the vectors are Qdrant's, built by the reindexer — the
+    // same reason findDatabaseMatches skips this. Refreshing the local file
+    // here re-embedded every primed candidate: ~17 s and a paid API call.
+    const vectors = isConvex() ? { ok: true as const } : await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
     if (query.ok) {
       const hits = await nearestCandidates(query.vectors[0], 1000);
@@ -311,9 +404,22 @@ async function Results({ sp }: { sp: Params }) {
    */
   const suggestions: { label: string; found: number; href: string }[] = [];
   if (criteria.locations.length && !engineRanked) {
+    // One search with the place dropped, counted by place — rather than the
+    // whole search again per city (~350 of them, ~1.1 s). Place is an exact,
+    // one-value match per candidate, so adding a city adds exactly the people
+    // who live there and match everything else.
+    const anywhere = repo.searchDatabase(
+      { ...criteria, locations: [] },
+      { boolean: mode === "boolean" ? q : null, limit: Number.MAX_SAFE_INTEGER, similarity, floor },
+    );
+    const byPlace = new Map<string, number>();
+    for (const r of anywhere.results) {
+      const place = (r.candidate.location ?? "").toLowerCase();
+      byPlace.set(place, (byPlace.get(place) ?? 0) + 1);
+    }
+    const chosen = new Set(criteria.locations.map((l) => l.toLowerCase()));
     for (const city of vocab.cities.filter((c) => !criteria.locations.includes(c))) {
-      const widened = { ...criteria, locations: [...criteria.locations, city] };
-      const found = repo.searchDatabase(widened, { boolean: mode === "boolean" ? q : null, limit: 1, similarity, floor }).total - total;
+      const found = chosen.has(city.toLowerCase()) ? 0 : (byPlace.get(city.toLowerCase()) ?? 0);
       if (found > 0) suggestions.push({ label: city, found, href: `${base}${withValue(criteria, "locations", city, extra)}` });
     }
     suggestions.sort((a, b) => b.found - a.found);
@@ -454,6 +560,15 @@ async function Results({ sp }: { sp: Params }) {
         </aside>
 
         <div className="min-w-0">
+          {refining && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-soft px-4 py-3 text-[12.5px]">
+              <span aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+              <p className="leading-relaxed">
+                <span className="font-medium">First results — AI is still refining them.</span>
+                <span className="text-ink-soft"> It is reading your search and re-ranking the closest people; this list updates on its own.</span>
+              </p>
+            </div>
+          )}
           {retrievalProblem && (
             <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
               {retrievalProblem}

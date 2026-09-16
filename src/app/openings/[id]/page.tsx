@@ -54,7 +54,9 @@ export default async function OverviewPage({
   const inPipeline = PIPELINE_STAGES.reduce((n, s) => n + (counts[s] ?? 0), 0);
 
   // What the lead's brief actually yielded, shown before the TA generates.
-  const brief = o.briefId ? repo.brief(o.briefId) : null;
+  // Found by opening: the Convex backend does not set `briefId`. The first
+  // brief is the lead's from creation; TAs' notes come after it.
+  const brief = repo.briefsForOpening(id)[0] ?? (o.briefId ? repo.brief(o.briefId) : null);
   const be = brief?.extracted;
   const briefSummary = [
     be?.salaryMin
@@ -149,7 +151,9 @@ export default async function OverviewPage({
         />
       )}
 
-      {o.requirements && (o.jdStatus === "approved" || o.requirements.editedAt) && (
+      {/* Shown as soon as there is something in it: read from the lead's brief
+          and the TA's notes when the JD is drafted, before approval. */}
+      {o.requirements && (o.jdStatus === "approved" || o.requirements.editedAt || o.requirements.status !== null) && (
         <JobDetailsPanel
           openingId={id}
           title={o.title}

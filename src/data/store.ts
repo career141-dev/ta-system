@@ -1038,6 +1038,15 @@ const rawRepo = {
     return id;
   },
 
+  /**
+   * Every brief left on an opening, oldest first — the lead's from creation and
+   * each TA's own notes. Found by opening rather than through `briefId`, which
+   * the Convex backend does not set when it creates the opening.
+   */
+  briefsForOpening(openingId: Id): Brief[] {
+    return (load().briefs ?? []).filter((b) => b.openingId === openingId).sort((a, b) => a.capturedAt - b.capturedAt);
+  },
+
   updateBrief(id: Id, patch: Partial<Brief>) {
     mutate((db) => {
       const b = (db.briefs ?? []).find((x) => x.id === id);

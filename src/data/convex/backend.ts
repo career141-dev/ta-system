@@ -369,8 +369,18 @@ export async function candidate(actor: Actor, candidateId: Id): Promise<Candidat
  * gather their ids first and ask once.
  */
 export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, Candidate>> {
-  if (ids.length === 0) return new Map();
   const out = new Map<Id, Candidate>();
+  for (const d of await candidateDocsByIds(actor, ids)) out.set(d._id, mapCandidateDoc(d));
+  return out;
+}
+
+/**
+ * The same rows in the backend's own shape — for the matching engine's scorer
+ * (convex/cvs/cvScoring), which reads fields the platform's type does not keep.
+ */
+export async function candidateDocsByIds(actor: Actor, ids: Id[]): Promise<LiveCandidate[]> {
+  if (ids.length === 0) return [];
+  const out: LiveCandidate[] = [];
   // The backend caps a batch at 500; page rather than silently truncating, and
   // send the pages together — they do not depend on each other, so waiting for
   // one before asking for the next only adds up the latencies.
@@ -389,7 +399,7 @@ export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, 
         }),
       ),
     );
-    for (const docs of results) for (const d of docs) out.set(d._id, mapCandidateDoc(d));
+    for (const docs of results) out.push(...docs);
   }
   return out;
 }

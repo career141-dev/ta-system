@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { BriefRecorder } from "./BriefRecorder";
-import { createOpeningStep1 } from "@/app/actions";
+import { createOpeningInline, createOpeningStep1 } from "@/app/actions";
 import { ClientPicker, PeoplePicker, inputClass } from "./form";
+import { NewClientDialog, Spinner, type NewClient } from "./NewClientDialog";
 import type { Client, User } from "@/data/types";
 
 /**
@@ -11,6 +12,10 @@ import type { Client, User } from "@/data/types";
  *
  * A lead gets the brief here because they have no screen two — the JD is the
  * TA's to write. A TA gets client and position only, then moves on to it.
+ *
+ * Two homes. On the New opening page it posts and navigates, as it always has.
+ * Inside the create-client pop-up (`onCreated` given) the client is already
+ * chosen, the save happens in place, and the pop-up decides what comes next.
  */
 const COUNTRIES = [
   "Sri Lanka", "Bangladesh", "India", "Maldives", "Saudi Arabia",
@@ -42,18 +47,35 @@ export function CaptureForm({
   tas,
   isLead,
   initialClientId,
+  lockedClient,
+  onCreated,
+  canAddClient = false,
 }: {
-  clients: Client[];
+  clients: Pick<Client, "id" | "name" | "industry">[];
   tas: User[];
   isLead: boolean;
   initialClientId?: string | null;
+  /** Inside the pop-up: the client just saved, shown rather than picked. */
+  lockedClient?: NewClient;
+  /** Inside the pop-up: called with the new opening instead of navigating. */
+  onCreated?: (created: { openingId: string; title: string }) => void;
+  /** Offers "+ New client" beside the picker; only for people who may add one. */
+  canAddClient?: boolean;
 }) {
+  const inline = Boolean(onCreated);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  // A client added from the picker joins the list and is selected; the picker
+  // is remounted (`pickerKey`) so it starts from the new selection.
+  const [clientList, setClientList] = useState(clients);
+  const [pickerKey, setPickerKey] = useState(0);
+  const [addingClient, setAddingClient] = useState(false);
   const [rec, setRec] = useState<{ key: string; durationMs: number; consentText: string } | null>(
     null,
   );
   const [title, setTitle] = useState("");
   const [country, setCountry] = useState("Sri Lanka");
-  const [client, setClient] = useState<string | null>(initialClientId ?? null);
+  const [client, setClient] = useState<string | null>(lockedClient?.id ?? initialClientId ?? null);
   const [assigned, setAssigned] = useState<string[]>([]);
 
   const ready = Boolean(title.trim() && client && (!isLead || assigned.length));
@@ -61,27 +83,68 @@ export function CaptureForm({
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-10`;
   const card =
     "overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]";
-  const head = "border-b border-rule px-7 py-4";
+  const head = inline ? "border-b border-rule px-6 py-3.5" : "border-b border-rule px-7 py-4";
+
+  const submitInline = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!ready || pending) return;
+    setError(null);
+    const data = new FormData(e.currentTarget);
+    startTransition(async () => {
+      const r = await createOpeningInline(data);
+      if (!r.ok) setError(r.error);
+      else onCreated!({ openingId: r.openingId, title: r.title });
+    });
+  };
 
   return (
-    <form action={createOpeningStep1} className="flex flex-col gap-5">
-      <section className={card}>
-        <div className={head}>
-          <h2 className="text-[13.5px] font-semibold">Client</h2>
-        </div>
-        <div className="px-7 py-6">
-          <ClientPicker name="clientId" clients={clients} initial={client} onChange={setClient} />
-        </div>
-      </section>
+    <form
+      action={inline ? undefined : createOpeningStep1}
+      onSubmit={inline ? submitInline : undefined}
+      className={`flex flex-col ${inline ? "gap-4" : "gap-5"}`}
+    >
+      {lockedClient ? (
+        <input type="hidden" name="clientId" value={lockedClient.id} />
+      ) : (
+        <section className={card}>
+          <div className={`${head} flex items-center justify-between gap-3`}>
+            <h2 className="text-[13.5px] font-semibold">Client</h2>
+            {canAddClient && (
+            <button
+              type="button"
+              onClick={() => setAddingClient(true)}
+              className="flex items-center gap-1 rounded-full border border-brand-line px-3 py-1 text-[12px] font-medium text-brand transition-colors hover:bg-brand-soft"
+            >
+              <span className="text-[14px] leading-none">+</span> New client
+            </button>
+            )}
+          </div>
+          <div className="px-7 py-6">
+            <ClientPicker key={pickerKey} name="clientId" clients={clientList} initial={client} onChange={setClient} />
+          </div>
+        </section>
+      )}
+      {addingClient && (
+        <NewClientDialog
+          withOpening={false}
+          onClose={() => setAddingClient(false)}
+          onClientCreated={(c) => {
+            setClientList((list) => [c, ...list.filter((x) => x.id !== c.id)]);
+            setClient(c.id);
+            setPickerKey((k) => k + 1);
+          }}
+        />
+      )}
 
       <section className={card}>
         <div className={head}>
           <h2 className="text-[13.5px] font-semibold">Position</h2>
         </div>
-        <div className="px-7 py-6">
+        <div className={inline ? "px-6 py-5" : "px-7 py-6"}>
           <input
             name="title"
             required
+            autoFocus={inline}
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Head of Finance"
@@ -139,6 +202,27 @@ export function CaptureForm({
         </div>
       </section>
 
+      {!isLead && (
+        <section className={card}>
+          <div className={head}>
+            <h2 className="text-[13.5px] font-semibold">
+              Details <span className="ml-1.5 font-normal text-[12px] text-ink-faint">optional</span>
+            </h2>
+            <p className="mt-0.5 text-[12.5px] text-ink-soft">
+              Anything you know about the role. The JD draft is written from these and the lead’s brief.
+            </p>
+          </div>
+          <div className={inline ? "px-6 py-5" : "px-7 py-6"}>
+            <textarea
+              name="notes"
+              rows={5}
+              placeholder={`Package around LKR 650,000. Colombo. CA or CIMA qualified, 10+ years in manufacturing.`}
+              className={`${inputClass} leading-[1.75]`}
+            />
+          </div>
+        </section>
+      )}
+
       {isLead && (
         <>
           <section className={card}>
@@ -159,7 +243,7 @@ export function CaptureForm({
                 Brief <span className="ml-1.5 font-normal text-[12px] text-ink-faint">optional</span>
               </h2>
               <p className="mt-0.5 text-[12.5px] text-ink-soft">
-                Whatever the client said. The TA writes the JD from this.
+                Whatever the client said. The JD draft is written from this and the TA’s own notes.
               </p>
             </div>
             <div className="flex flex-col gap-5 px-7 py-6">
@@ -182,6 +266,33 @@ export function CaptureForm({
         </>
       )}
 
+      {inline ? (
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <input type="hidden" name="next" value="save" />
+          <button
+            type="submit"
+            disabled={!ready || pending}
+            className="flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35"
+          >
+            {pending && <Spinner />}
+            {pending ? "Creating opening…" : "Create opening"}
+          </button>
+          <span className="text-[12.5px] text-ink-faint">
+            {!ready
+              ? isLead
+                ? "Add a position and at least one TA"
+                : "Add a position"
+              : isLead
+                ? "The TA is notified and writes the JD"
+                : "You write the JD next"}
+          </span>
+          {error && (
+            <p role="alert" className="w-full rounded-lg border border-danger/25 bg-danger-soft px-3.5 py-2.5 text-[12.5px] text-danger">
+              {error}
+            </p>
+          )}
+        </div>
+      ) : (
       <div className="flex flex-wrap items-center gap-3 pt-1">
         <button
           name="next"
@@ -222,6 +333,7 @@ export function CaptureForm({
               : "Next: notes and the JD"}
         </span>
       </div>
+      )}
     </form>
   );
 }
