@@ -89,6 +89,18 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
   const db = state.snapshot!;
   const actor = { id: null as string | null };
 
+  // Started before the small tables rather than after them: on a fresh working
+  // set (every write resets it) the two were fetched back to back.
+  const applicationsLoad =
+    scope.allApplications && !state.all ? backend.allApplications(actor) : null;
+  if (applicationsLoad) {
+    // Claimed now, as before, so a concurrent prime does not fetch it twice.
+    state.all = true;
+    // Awaited below; this only stops a rejection counting as unhandled if the
+    // small tables fail first.
+    applicationsLoad.catch(() => undefined);
+  }
+
   // ── The small tables, once ────────────────────────────────────────────────
   if (fresh) {
     const [users, openings, clients] = await Promise.all([
@@ -107,9 +119,8 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
   // ── Applications, and the people on them ──────────────────────────────────
   const wanted = new Set<Id>(scope.candidateIds ?? []);
 
-  if (scope.allApplications && !state.all) {
-    state.all = true;
-    const { applications } = await backend.allApplications(actor);
+  if (applicationsLoad) {
+    const { applications } = await applicationsLoad;
     db.applications = merge(db.applications, applications, (a) => a.id);
     for (const o of db.openings) state.openings.add(o.id);
   } else if (scope.openingId && !state.openings.has(scope.openingId)) {

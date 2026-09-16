@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { repo } from "@/data/store";
 import { assess } from "@/lib/assessment";
 import type { Score } from "@/lib/scoring";
@@ -15,22 +16,20 @@ import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { keywordRetrieve } from "@/lib/retrieve";
+import { aiSearch, cachedAiSearch, passesStrict, quickSearch, type AiHit, type AiSearchResult } from "@/lib/aiSearch";
+import type { Result } from "@/lib/match";
+import type { SearchCriteria } from "@/data/types";
 
 const PAGE = 25;
 
-export default async function ResultsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+type Params = Record<string, string | string[] | undefined>;
+
+export default async function ResultsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const sp = await searchParams;
   await primeStore({ allApplications: true });
   await pageUser("database.read");
   const q = typeof sp.q === "string" ? sp.q : "";
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
-  const forOpening = typeof sp.for === "string" ? sp.for : null;
-  const page = Math.max(1, Number(sp.page ?? 1) || 1);
-  const candidateId = typeof sp.candidate === "string" ? sp.candidate : null;
   const vocab = repo.vocabulary();
 
   // The sentence is parsed once; after that the URL's criteria win, so removing
@@ -43,6 +42,71 @@ export default async function ResultsPage({
   const parsed = mode !== "boolean" ? parseQuery(q, vocab) : null;
   const criteria = edited ? criteriaFromParams(sp) : (parsed?.criteria ?? criteriaFromParams(sp));
   const ignored = edited ? [] : (parsed?.ignored ?? []);
+  // Parsed here, once, and handed down: the vocabulary grows as candidates are
+  // primed, so parsing again after retrieval could read the sentence differently.
+  const view = { sp, criteria, ignored };
+
+  /*
+   * Plain English, backed by Convex: the hybrid AI search (lib/aiSearch).
+   *
+   * A finished search from the last ten minutes renders at once — paging,
+   * opening a candidate and coming back all land here. Otherwise the engine's
+   * heuristic ranking is shown in about a second, and the model-read ranking
+   * streams in over it when it is done (typically 8–15 s).
+   */
+  if (isConvex() && q && mode === "natural") {
+    const done = cachedAiSearch(q, criteria);
+    if (done) return <ResultsView {...view} ai={done} />;
+    try {
+      const quick = await quickSearch(q, criteria);
+      return (
+        <Suspense fallback={<ResultsView {...view} ai={quick} refining />}>
+          <RefinedResults {...view} quick={quick} />
+        </Suspense>
+      );
+    } catch (e) {
+      return <ResultsView {...view} aiFailure={`The AI search could not run (${(e as Error).message}), so these were found on the words.`} />;
+    }
+  }
+  return <ResultsView {...view} />;
+}
+
+async function RefinedResults({ quick, ...view }: { sp: Params; criteria: SearchCriteria; ignored: string[]; quick: AiSearchResult }) {
+  let full: AiSearchResult;
+  try {
+    full = await aiSearch(typeof view.sp.q === "string" ? view.sp.q : "", view.criteria);
+  } catch (e) {
+    full = { ...quick, problems: [...quick.problems, `The AI ranking did not finish (${(e as Error).message}); these are the engine's own scores.`] };
+  }
+  return <ResultsView {...view} ai={full} />;
+}
+
+async function ResultsView({
+  sp,
+  criteria,
+  ignored,
+  ai,
+  refining = false,
+  aiFailure,
+}: {
+  sp: Params;
+  criteria: SearchCriteria;
+  ignored: string[];
+  /** Set on the AI route: who was found, and in what order. */
+  ai?: AiSearchResult;
+  /** The quick ranking, shown while the model-read one is still coming. */
+  refining?: boolean;
+  aiFailure?: string;
+}) {
+  const q = typeof sp.q === "string" ? sp.q : "";
+  const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
+  const forOpening = typeof sp.for === "string" ? sp.for : null;
+  const page = Math.max(1, Number(sp.page ?? 1) || 1);
+  const candidateId = typeof sp.candidate === "string" ? sp.candidate : null;
+  const vocab = repo.vocabulary();
+  const edited =
+    (sp as Record<string, string | undefined>).edited === "1" ||
+    criteriaToParams(criteriaFromParams(sp)).toString().length > 0;
   const booleanError = mode === "boolean" ? parseBoolean(q).error : null;
 
   // Searched once, in full. The spotlight counts below were taken from a list
@@ -50,7 +114,7 @@ export default async function ResultsPage({
   // 37); they now describe every match, the same set the headline counts.
   let similarity: Map<string, number> | undefined;
   let meaningProblem: string | null = null;
-  let retrievalProblem: string | null = null;
+  let retrievalProblem: string | null = aiFailure ?? null;
 
   /*
    * Retrieval, before anything is filtered.
@@ -65,7 +129,7 @@ export default async function ResultsPage({
    * working set for the criteria to narrow. No model and no key involved;
    * this is the route that still works when the meaning half cannot run.
    */
-  if (isConvex() && q && mode !== "meaning") {
+  if (isConvex() && q && mode !== "meaning" && !ai) {
     try {
       const terms = [
         q,
@@ -83,7 +147,10 @@ export default async function ResultsPage({
   }
 
   if (mode === "meaning" && q) {
-    const vectors = await refreshCandidateVectors();
+    // Backed by Convex the vectors are Qdrant's, built by the reindexer — the
+    // same reason findDatabaseMatches skips this. Refreshing the local file
+    // here re-embedded every primed candidate: ~17 s and a paid API call.
+    const vectors = isConvex() ? { ok: true as const } : await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
     if (query.ok) {
       const hits = await nearestCandidates(query.vectors[0], 1000);
@@ -113,13 +180,27 @@ export default async function ResultsPage({
   const showBelow = (sp as Record<string, string | undefined>).below === "1";
   const bar = isMeaningBased() ? RELEVANT_SIMILARITY : Math.max(0.08, best * 0.6);
   const floor = showBelow ? bar - (isMeaningBased() ? BELOW_BAR : 0.04) : bar;
-  const { results, total, scanned, below } = repo.searchDatabase(criteria, {
-    boolean: mode === "boolean" ? q : null,
-    limit: Number.MAX_SAFE_INTEGER,
-    similarity,
-    floor,
-    belowFloor: showBelow ? undefined : bar - (isMeaningBased() ? BELOW_BAR : 0.04),
-  });
+  const aiById = new Map<string, AiHit>((ai?.hits ?? []).map((h) => [h.candidateId, h]));
+  /** On the AI route: the engine's order, narrowed by the strict filters. */
+  const aiResults = (crit: SearchCriteria): Result[] => {
+    const out: Result[] = [];
+    for (const h of ai?.hits ?? []) {
+      const c = repo.candidate(h.candidateId);
+      const r = c ? passesStrict(c, crit) : null;
+      if (r) out.push({ ...r, score: h.score });
+    }
+    return out;
+  };
+  const aiFound = ai ? aiResults(criteria) : null;
+  const { results, total, scanned, below } = aiFound
+    ? { results: aiFound, total: aiFound.length, scanned: ai!.hits.length, below: 0 }
+    : repo.searchDatabase(criteria, {
+        boolean: mode === "boolean" ? q : null,
+        limit: Number.MAX_SAFE_INTEGER,
+        similarity,
+        floor,
+        belowFloor: showBelow ? undefined : bar - (isMeaningBased() ? BELOW_BAR : 0.04),
+      });
   const shown = results.slice((page - 1) * PAGE, page * PAGE);
 
   /*
@@ -170,10 +251,34 @@ export default async function ResultsPage({
 
   // Widening — only offered where it would actually find someone.
   const suggestions: { label: string; found: number; href: string }[] = [];
-  if (criteria.locations.length) {
+  if (ai && criteria.locations.length) {
+    // Everyone the engine found who fails on place alone, counted by where they are.
+    const byPlace = new Map<string, number>();
+    for (const r of aiResults({ ...criteria, locations: [] })) {
+      if (passesStrict(r.candidate, criteria) || !r.candidate.location) continue;
+      byPlace.set(r.candidate.location, (byPlace.get(r.candidate.location) ?? 0) + 1);
+    }
+    for (const [place, found] of byPlace) {
+      suggestions.push({ label: place, found, href: `${base}${withValue(criteria, "locations", place, extra)}` });
+    }
+    suggestions.sort((a, b) => b.found - a.found);
+  } else if (criteria.locations.length) {
+    // One search with the place dropped, counted by place — rather than the
+    // whole search again per city (~350 of them, ~1.1 s). Place is an exact,
+    // one-value match per candidate, so adding a city adds exactly the people
+    // who live there and match everything else.
+    const anywhere = repo.searchDatabase(
+      { ...criteria, locations: [] },
+      { boolean: mode === "boolean" ? q : null, limit: Number.MAX_SAFE_INTEGER, similarity, floor },
+    );
+    const byPlace = new Map<string, number>();
+    for (const r of anywhere.results) {
+      const place = (r.candidate.location ?? "").toLowerCase();
+      byPlace.set(place, (byPlace.get(place) ?? 0) + 1);
+    }
+    const chosen = new Set(criteria.locations.map((l) => l.toLowerCase()));
     for (const city of vocab.cities.filter((c) => !criteria.locations.includes(c))) {
-      const widened = { ...criteria, locations: [...criteria.locations, city] };
-      const found = repo.searchDatabase(widened, { boolean: mode === "boolean" ? q : null, limit: 1, similarity, floor }).total - total;
+      const found = chosen.has(city.toLowerCase()) ? 0 : (byPlace.get(city.toLowerCase()) ?? 0);
       if (found > 0) suggestions.push({ label: city, found, href: `${base}${withValue(criteria, "locations", city, extra)}` });
     }
     suggestions.sort((a, b) => b.found - a.found);
@@ -187,7 +292,7 @@ export default async function ResultsPage({
       const relaxed = criteriaFromParams(
         Object.fromEntries(new URLSearchParams(withoutChip(criteria, chip).slice(1))),
       );
-      const found = repo.searchDatabase(relaxed, { limit: 1, similarity, floor }).total;
+      const found = ai ? aiResults(relaxed).length : repo.searchDatabase(relaxed, { limit: 1, similarity, floor }).total;
       if (found > 0) blockers.push({ label: chip.label, found, href: `${base}${withoutChip(criteria, chip, extra)}` });
     }
     blockers.sort((a, b) => b.found - a.found);
@@ -298,6 +403,31 @@ export default async function ResultsPage({
         </aside>
 
         <div className="min-w-0">
+          {ai && (refining || ai.interpretation) && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-soft px-4 py-3 text-[12.5px]">
+              {refining && (
+                <span aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+              )}
+              <p className="leading-relaxed text-ink">
+                {refining ? (
+                  <>
+                    <span className="font-medium">AI is refining these results</span>
+                    <span className="text-ink-soft"> — reading your query and re-ranking the closest candidates. The list below will update on its own.</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="font-medium">AI read this as: </span>
+                    <span className="text-ink-soft">{ai.interpretation}</span>
+                  </>
+                )}
+              </p>
+            </div>
+          )}
+          {ai?.problems.map((p) => (
+            <p key={p} className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
+              {p}
+            </p>
+          ))}
           {retrievalProblem && (
             <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
               {retrievalProblem}
@@ -348,8 +478,10 @@ export default async function ResultsPage({
                   <span className="text-[12px] text-ink-soft">Including people just below the relevance bar</span>
                 )}
                 <span className="text-[12px] text-ink-faint">
-                  from <span className="tabular">{scanned.toLocaleString()}</span> CVs ·{" "}
-                  {mode === "boolean"
+                  from <span className="tabular">{scanned.toLocaleString()}</span> {ai ? "candidates found by meaning and keywords" : "CVs"} ·{" "}
+                  {ai
+                    ? "numbers and place filter outright; the rest ranked by title, skills, experience, location and industry, then re-ranked by AI"
+                    : mode === "boolean"
                     ? "matched as words across the whole CV"
                     : mode === "meaning"
                       ? "numbers and place filter outright; the rest ranked by how close the CV is to what you wrote"
@@ -401,6 +533,7 @@ export default async function ResultsPage({
                   <ResultRow
                     candidate={r.candidate}
                     fit={fit.get(r.candidate.id) ?? null}
+                    ai={aiById.get(r.candidate.id) ?? null}
                     hits={r.hits}
                     misses={r.misses}
                     signals={r.signals}

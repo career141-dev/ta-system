@@ -355,17 +355,27 @@ export async function candidate(actor: Actor, candidateId: Id): Promise<Candidat
  * gather their ids first and ask once.
  */
 export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, Candidate>> {
-  if (ids.length === 0) return new Map();
   const out = new Map<Id, Candidate>();
-  // The backend caps a batch at 500; page rather than silently truncating.
-  for (let i = 0; i < ids.length; i += 500) {
-    const docs = await convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
-      actorId: actor.id ?? undefined,
-      candidateIds: ids.slice(i, i + 500),
-    });
-    for (const d of docs) out.set(d._id, mapCandidateDoc(d));
-  }
+  for (const d of await candidateDocsByIds(actor, ids)) out.set(d._id, mapCandidateDoc(d));
   return out;
+}
+
+/**
+ * The same rows in the backend's own shape — for the matching engine's scorer
+ * (convex/cvs/cvScoring), which reads fields the platform's type does not keep.
+ */
+export async function candidateDocsByIds(actor: Actor, ids: Id[]): Promise<LiveCandidate[]> {
+  if (ids.length === 0) return [];
+  // The backend caps a batch at 500; page rather than silently truncating.
+  // The pages are independent, so they are asked for together.
+  const pages: Id[][] = [];
+  for (let i = 0; i < ids.length; i += 500) pages.push(ids.slice(i, i + 500));
+  const results = await Promise.all(
+    pages.map((candidateIds) =>
+      convexQuery<LiveCandidate[]>("ta/candidates:getBatch", { actorId: actor.id ?? undefined, candidateIds }),
+    ),
+  );
+  return results.flat();
 }
 
 export type CvTextSource = "db" | "r2" | "none";
