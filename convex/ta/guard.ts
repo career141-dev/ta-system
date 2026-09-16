@@ -103,7 +103,11 @@ export async function assertJobAccess(
         q.or(...requiredAssignmentRoles.map((r) => q.eq(q.field("assignmentRole"), r))),
       ),
     )
-    .unique();
+    // first(), not unique(): a recruiter assigned twice to the same job (a
+    // re-assignment that left the old row active) is still assigned, and
+    // unique() threw on them — every claim on that job failed with a server
+    // error instead of going through (16 September).
+    .first();
 
   if (!assignment) {
     throw new Error("You are not assigned to this job with the required role");

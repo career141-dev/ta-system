@@ -227,7 +227,7 @@ export function DbCandidateDrawer({
                     <input type="hidden" name="candidateId" value={c.id} />
                     <h3 className="text-[13px] font-semibold">Add to an opening</h3>
                     <p className="mt-1 text-[12px] text-ink-faint">
-                      Goes in as a database match, ready to shortlist.
+                      Goes straight into Follow-up, claimed by you.
                     </p>
                     <select
                       name="openingId"
