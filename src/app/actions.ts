@@ -1198,11 +1198,24 @@ export async function deleteOpening(formData: FormData) {
   // recruiter's.
   if (!isDeskWide(user)) await back("Only a lead, director or admin can delete an opening. Close it instead.");
   const openingId = String(formData.get("openingId"));
-  const r = repo.deleteOpening(openingId);
-  if (!r.ok) await back(r.message);
-  revalidatePath("/openings", "layout");
-  revalidatePath("/clients");
-  redirect("/openings");
+  let title = repo.opening(openingId)?.title ?? "The opening";
+  if (isConvex()) {
+    // The opening and all its data are removed in the backend, in batches
+    // (convex/ta/openingDelete.ts). Its candidates stay in the database.
+    try {
+      const r = await convexMutation<{ ok: true; title: string }>("ta/openingDelete:start", { actorId: user.id, openingId });
+      title = r.title;
+    } catch (e) {
+      await back(backendMessage(e, "The opening could not be deleted."));
+    }
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  } else {
+    const r = repo.deleteOpening(openingId);
+    if (!r.ok) await back(r.message);
+  }
+  revalidatePath("/", "layout");
+  redirect(`/openings?msg=${encodeURIComponent(`"${title}" deleted. Its candidates are still in the database.`)}`);
 }
 
 /**

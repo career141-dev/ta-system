@@ -2,6 +2,9 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { CONTEXT_H, HEADER_H } from "@/lib/chrome";
 import { StatusMenu, type OpeningStatus } from "./StatusMenu";
+import { OpeningMenu } from "./OpeningMenu";
+import { getCurrentUser } from "@/lib/session";
+import { isDeskWide } from "@/lib/auth";
 
 /**
  * The persistent identity band: client, position, the TAs on it. It stays put
@@ -11,7 +14,7 @@ import { StatusMenu, type OpeningStatus } from "./StatusMenu";
  * width reads as an alert rather than a label, and this is the one thing on
  * the page nobody needs to act on.
  */
-export function ContextBar({
+export async function ContextBar({
   openingId,
   crumbs = [],
 }: {
@@ -24,6 +27,7 @@ export function ContextBar({
   // gone. Render nothing rather than throwing inside a shared shell.
   if (!o || !client) return null;
   const tas = o.assignedTaIds.map((t) => repo.user(t)).filter(Boolean);
+  const user = await getCurrentUser().catch(() => null);
 
   return (
     <div
@@ -64,6 +68,9 @@ export function ContextBar({
         <span className="text-[12px] text-ink-soft">
           {tas.map((t) => t!.name.split(" ")[0]).join(", ")}
         </span>
+        {user && isDeskWide(user) && (
+          <OpeningMenu openingId={openingId} title={o.title} candidates={repo.applications(openingId).length} />
+        )}
       </div>
     </div>
   );

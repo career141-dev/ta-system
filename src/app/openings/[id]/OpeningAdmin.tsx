@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { deleteOpening, setOpeningTeam, updateOpening } from "@/app/actions";
+import { setOpeningTeam, updateOpening } from "@/app/actions";
 import { inputClass } from "@/components/form";
 import { ASSIGNMENT_LABEL, ASSIGNMENT_NOTE, type AssignmentRole } from "@/data/types";
 import { Confirm } from "@/components/Confirm";
@@ -114,19 +114,7 @@ export function OpeningAdmin({
             Change the team
           </button>
 
-          {canDelete && (
-            <form action={deleteOpening} className="ml-auto">
-              <input type="hidden" name="openingId" value={openingId} />
-              {/* Says what goes with it. This is the one genuinely destructive
-                  action in the product. */}
-              <Confirm
-                label="Delete"
-                question={`Delete this opening and its ${counts.applications} candidate${counts.applications === 1 ? "" : "s"}, ${counts.posts} post${counts.posts === 1 ? "" : "s"} and ${counts.links} table row${counts.links === 1 ? "" : "s"}? It cannot be undone.`}
-                confirmLabel="Delete it all"
-                className="text-[12px] text-ink-faint transition-colors hover:text-danger"
-              />
-            </form>
-          )}
+          {/* Deleting the opening is in its three-dots menu (OpeningMenu). */}
         </div>
       )}
     </div>

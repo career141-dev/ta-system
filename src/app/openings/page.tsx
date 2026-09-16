@@ -3,6 +3,7 @@ import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { isDeskWide } from "@/lib/auth";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
+import { OpeningMenu } from "@/components/OpeningMenu";
 import { PRIORITY_TARGET } from "@/data/types";
 import { computeAlerts } from "@/lib/sla";
 import { relDays } from "@/lib/format";
@@ -170,7 +171,7 @@ export default async function OpeningsPage({
                     </p>
                   </div>
 
-                  <div className="flex shrink-0 gap-8 text-right">
+                  <div className="flex shrink-0 items-start gap-8 text-right">
                     {[
                       { n: c.follow_up ?? 0, l: "Follow-up" },
                       { n: c.director_review ?? 0, l: "Director" },
@@ -192,6 +193,11 @@ export default async function OpeningsPage({
                         <div className="mt-1.5 text-[11.5px] text-ink-soft">{s.l}</div>
                       </div>
                     ))}
+                    {isDeskWide(user) && (
+                      <span className="pointer-events-auto relative z-10 -mr-3 -mt-1">
+                        <OpeningMenu openingId={o.id} title={o.title} candidates={repo.applications(o.id).length} />
+                      </span>
+                    )}
                   </div>
                 </div>
 

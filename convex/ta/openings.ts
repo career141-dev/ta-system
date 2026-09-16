@@ -28,12 +28,15 @@ export const list = internalQuery({
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
 
-    const jobs = args.status
-      ? await ctx.db
-          .query("jobs")
-          .withIndex("by_status", (q) => q.eq("status", args.status as Doc<"jobs">["status"]))
-          .collect()
-      : await ctx.db.query("jobs").collect();
+    const jobs = (
+      args.status
+        ? await ctx.db
+            .query("jobs")
+            .withIndex("by_status", (q) => q.eq("status", args.status as Doc<"jobs">["status"]))
+            .collect()
+        : await ctx.db.query("jobs").collect()
+    // An opening being deleted (ta/openingDelete.ts) has already left the desk.
+    ).filter((j) => !j.deletingAt);
 
     // "Only mine" is a question about a person, so it cannot be answered
     // without one. Refusing beats returning everything, which would look like
@@ -62,7 +65,7 @@ export const get = internalQuery({
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const job = await ctx.db.get(args.openingId as Id<"jobs">);
-    if (!job) return null;
+    if (!job || job.deletingAt) return null;
 
     const posts = await ctx.db
       .query("jobPosts")
