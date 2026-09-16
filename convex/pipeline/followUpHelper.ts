@@ -141,7 +141,18 @@ export async function updateFollowUpFlags(
 export async function initiateFollowUpOutreach(
   ctx: any,
   applicationId: Id<"applications">,
-  options?: { isManual?: boolean }
+  options?: {
+    isManual?: boolean;
+    /** A TA sending one channel only (the TA System's WhatsApp / Email buttons). */
+    only?: "whatsapp" | "email";
+    /**
+     * The other channel of a round a TA already sent a moment ago: the same
+     * message kind, and the attempt count and schedule are left as they are.
+     */
+    sameRound?: boolean;
+    /** Filled in with what happened, for callers that need to say so. */
+    report?: { sent: boolean; kind?: "initial" | "reminder" };
+  }
 ): Promise<Id<"communications"> | undefined> {
   const app = await ctx.db.get(applicationId);
   if (!app) return;
@@ -188,6 +199,7 @@ export async function initiateFollowUpOutreach(
 
   const allComplete = hasCV && hasCurrentSalary && hasExpectedSalary && hasNoticePeriod && customQuestionsComplete;
   if (allComplete) return; // All data points already gathered, no outreach needed
+  const sameRound = options?.sameRound === true;
 
   const missingFields: string[] = [];
   if (!hasCV) missingFields.push("CV / Resume");
@@ -247,7 +259,11 @@ export async function initiateFollowUpOutreach(
   let isWhatsAppEnabled = job.enableWhatsAppFollowUp !== false;
   let isEmailEnabled = job.enableEmailFollowUp !== false;
 
-  if (isManual) {
+  if (isManual && options?.only) {
+    // A TA chose the channel: that one, whatever the job's own toggles say.
+    isWhatsAppEnabled = options.only === "whatsapp";
+    isEmailEnabled = options.only === "email";
+  } else if (isManual) {
     // Override: if both are disabled, manual trigger sends on both channels.
     if (!isWhatsAppEnabled && !isEmailEnabled) {
       isWhatsAppEnabled = true;
@@ -262,7 +278,13 @@ export async function initiateFollowUpOutreach(
   }
 
   const currentAttempts = app.followUpAttemptCount || 0;
-  const isNudge = currentAttempts > 0;
+  // Within a round the count already includes this round, so the round's kind
+  // is read from the count before it.
+  const isNudge = sameRound ? currentAttempts > 1 : currentAttempts > 0;
+  if (options?.report) {
+    options.report.sent = true;
+    options.report.kind = isNudge ? "reminder" : "initial";
+  }
 
   if (isNudge) {
     // === NUDGE REMINDER FLOW ===
@@ -348,6 +370,7 @@ export async function initiateFollowUpOutreach(
     }
 
     // 3. Increment attempts and reschedule nudge for 24h later
+    if (sameRound) return whatsappCommId || emailCommId;
     await ctx.db.patch(app._id, {
       nextFollowUpScheduledAt: now + NUDGE_RESCHEDULE_MS,
       nextFollowUpMessage: undefined,
@@ -432,6 +455,7 @@ export async function initiateFollowUpOutreach(
     }
 
     // 3. Persist state and schedule the next nudge 24 hours out
+    if (sameRound) return emailCommId;
     const followUpState = app.followUpState;
     await ctx.db.patch(app._id, {
       followUpEnteredAt: app.followUpEnteredAt ?? now,

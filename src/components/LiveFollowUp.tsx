@@ -1,6 +1,7 @@
 import { convexQuery } from "@/lib/convexServer";
 import { timeAt } from "@/lib/format";
-import { sendFollowUpNow, stopFollowUpNow } from "@/app/actions";
+import { stopFollowUpNow } from "@/app/actions";
+import { FollowUpActions } from "./FollowUpActions";
 
 /**
  * Follow-up, as it really happened — read from the backend, sent through it.
@@ -51,11 +52,19 @@ export async function LiveFollowUp({
   openingId,
   actorId,
   locked,
+  candidateName,
+  roleTitle,
+  hasPhone,
+  hasEmail,
 }: {
   applicationId: string;
   openingId: string;
   actorId: string;
   locked: boolean;
+  candidateName: string;
+  roleTitle: string;
+  hasPhone: boolean;
+  hasEmail: boolean;
 }) {
   const [state, messages, gate] = await Promise.all([
     convexQuery<State | null>("ta/outreach:followUpState", { actorId, applicationId }).catch(() => null),
@@ -128,13 +137,19 @@ export async function LiveFollowUp({
             ) : exhausted ? (
               <span className="text-[12.5px] text-ink-soft">All {max} follow-ups sent. Call them, or mark them as dropped out.</span>
             ) : (
-              <form action={sendFollowUpNow}>
-                <input type="hidden" name="appId" value={applicationId} />
-                <input type="hidden" name="openingId" value={openingId} />
-                <button className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white hover:opacity-90">
-                  {sent === 0 ? "Send follow-up — WhatsApp template + email" : `Send reminder (${sent + 1} of ${max})`}
-                </button>
-              </form>
+              <>
+                <span className="text-[12px] text-ink-faint">
+                  {sent === 0 ? "First follow-up:" : `Follow-up ${sent + 1} of ${max}:`}
+                </span>
+                <FollowUpActions
+                  applicationId={applicationId}
+                  openingId={openingId}
+                  candidateName={candidateName}
+                  roleTitle={roleTitle}
+                  hasPhone={hasPhone}
+                  hasEmail={hasEmail}
+                />
+              </>
             )}
             {sent > 0 && missing > 0 && (
               <form action={stopFollowUpNow}>

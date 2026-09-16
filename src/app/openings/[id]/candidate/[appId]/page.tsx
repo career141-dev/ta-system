@@ -21,7 +21,7 @@ import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
 import { LiveFollowUp } from "@/components/LiveFollowUp";
-import { WebCallPanel } from "@/components/WebCallPanel";
+import { AuraCallButton } from "@/components/AuraCallButton";
 import { WebCallResults } from "@/components/WebCallResults";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
@@ -423,7 +423,21 @@ export default async function CandidateDrawer({
           <div className="flex flex-col gap-5">
             {/* The screening call and the chase are the owner's to run. Hiding
                 them for anyone else matches what the server will allow. */}
-            {isConvex() && !locked && <WebCallPanel applicationId={app.id} openingId={id} />}
+            {isConvex() && !locked && (
+              <div className="rounded-xl border border-rule bg-paper p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-[13px] font-semibold">Screening call with Aura</h3>
+                    <p className="mt-1 text-[12px] leading-relaxed text-ink-soft">
+                      Aura calls from Career141 about the {opening.title} role and asks current salary, expected salary,
+                      notice period{opening.followUpQuestions.length > 0 ? " and this opening's own questions" : ""}. The answers
+                      are saved to the candidate when the call ends.
+                    </p>
+                  </div>
+                  <AuraCallButton applicationId={app.id} openingId={id} candidateName={c.fullName} roleTitle={opening.title} />
+                </div>
+              </div>
+            )}
             {isConvex() && <WebCallResults applicationId={app.id} actorId={user.id} />}
             {!isConvex() && !locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="call" />}
             {!isConvex() && !locked && (
@@ -454,7 +468,16 @@ export default async function CandidateDrawer({
                 the Convex store it is the real sequence, sent and read by the
                 backend; the file store keeps the drafting desk. */}
             {isConvex() ? (
-              <LiveFollowUp applicationId={app.id} openingId={id} actorId={user.id} locked={locked} />
+              <LiveFollowUp
+                applicationId={app.id}
+                openingId={id}
+                actorId={user.id}
+                locked={locked}
+                candidateName={c.fullName}
+                roleTitle={opening.title}
+                hasPhone={!!(c.phone ?? "").replace(/D/g, "")}
+                hasEmail={!!c.email}
+              />
             ) : (
               <>
                 {!locked && <FollowUpPanel applicationId={app.id} openingId={id} taName={user.name} mode="chat" />}

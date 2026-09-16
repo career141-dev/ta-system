@@ -112,6 +112,7 @@ import type * as lib_outreachSafety from "../lib/outreachSafety.js";
 import type * as lib_permissions from "../lib/permissions.js";
 import type * as lib_postRouting from "../lib/postRouting.js";
 import type * as lib_qdrant from "../lib/qdrant.js";
+import type * as lib_screeningCall from "../lib/screeningCall.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as lib_vectorPayload from "../lib/vectorPayload.js";
 import type * as lib_voiceAgentWebhook from "../lib/voiceAgentWebhook.js";
@@ -166,6 +167,7 @@ import type * as ta_tables from "../ta/tables.js";
 import type * as ta_testSweep from "../ta/testSweep.js";
 import type * as ta_users from "../ta/users.js";
 import type * as ta_voice from "../ta/voice.js";
+import type * as ta_voiceExtract from "../ta/voiceExtract.js";
 import type * as templates_messageTemplates from "../templates/messageTemplates.js";
 import type * as users_users from "../users/users.js";
 
@@ -280,6 +282,7 @@ declare const fullApi: ApiFromModules<{
   "lib/permissions": typeof lib_permissions;
   "lib/postRouting": typeof lib_postRouting;
   "lib/qdrant": typeof lib_qdrant;
+  "lib/screeningCall": typeof lib_screeningCall;
   "lib/validate": typeof lib_validate;
   "lib/vectorPayload": typeof lib_vectorPayload;
   "lib/voiceAgentWebhook": typeof lib_voiceAgentWebhook;
@@ -334,6 +337,7 @@ declare const fullApi: ApiFromModules<{
   "ta/testSweep": typeof ta_testSweep;
   "ta/users": typeof ta_users;
   "ta/voice": typeof ta_voice;
+  "ta/voiceExtract": typeof ta_voiceExtract;
   "templates/messageTemplates": typeof templates_messageTemplates;
   "users/users": typeof users_users;
 }>;

@@ -227,20 +227,29 @@ export async function sendFollowUpNow(formData: FormData) {
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
+  const raw = String(formData.get("channel") ?? "");
+  // The WhatsApp and Email buttons send one channel; the older button sends both.
+  const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
   if (!isConvex()) await back("Sending needs the Convex store.");
-  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number } | null = null;
+  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
   try {
-    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId });
+    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
   } catch (e) {
     await back(backendMessage(e, "The follow-up could not be sent."));
   }
   await afterBackendWrite(openingId);
+  const what =
+    channel === "whatsapp"
+      ? r?.kind === "initial" ? "WhatsApp follow-up sent (approved template)" : "WhatsApp reminder sent"
+      : channel === "email"
+        ? r?.kind === "initial" ? "Follow-up email sent" : "Reminder email sent"
+        : r?.kind === "initial" ? "Follow-up sent — WhatsApp template and email" : "Reminder sent";
   await back(
     !r?.sent
       ? r?.reason ?? "Nothing was sent."
-      : r.kind === "initial"
-        ? "Follow-up sent — WhatsApp template and email. Delivery shows below in a few seconds."
-        : `Reminder ${r.attempt} of ${r.maxAttempts} sent.`,
+      : r.kind === "initial" || r.sameRound
+        ? `${what}. Delivery shows in the conversation in a few seconds.`
+        : `${what} — follow-up ${r.attempt} of ${r.maxAttempts}.`,
   );
 }
 

@@ -928,6 +928,9 @@ export default defineSchema({
       replyChannel: v.optional(v.string())
     })),
     followUpAttemptCount: v.optional(v.number()),
+    /** The TA System's last manual follow-up round: when, and on which channels (lib/followUpScope.ts). */
+    followUpLastManualSendAt: v.optional(v.number()),
+    followUpLastManualChannels: v.optional(v.array(v.string())),
     nextFollowUpScheduledAt: v.optional(v.number()),
     nextFollowUpMessage: v.optional(v.string()),
     promisedEtaTimestamp: v.optional(v.number()),

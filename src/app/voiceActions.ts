@@ -2,7 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
+import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-server-sdk";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { isConvex } from "@/data/mode";
@@ -15,9 +15,14 @@ import { convexMutation } from "@/lib/convexServer";
  *
  * The backend records the call and its session (convex/ta/voice.ts); this
  * server holds the LiveKit key, so it creates the room carrying the call's
- * metadata and mints the browser's token. The voice agent joins every new room
- * on the server, reads the metadata, and reports answers back to the backend.
+ * metadata, dispatches the Aura agent (voice-agent/) into it and mints the
+ * browser's token. Aura reads the metadata, runs the call, and sends each line
+ * to the call window; the window hands the transcript back here when the call
+ * ends (`completeWebCall`) and the backend reads the answers from it.
  */
+
+/** The agent name Aura registers under (voice-agent/src/index.ts). */
+const AURA_AGENT_NAME = (process.env.AURA_AGENT_NAME ?? "").trim() || "career141-aura";
 
 export type WebCallStart =
   | { ok: true; url: string; token: string; roomName: string; aiCallId: string }
@@ -81,6 +86,10 @@ export async function startWebCall(applicationId: string, openingId: string): Pr
       emptyTimeout: 120,
       maxParticipants: 4,
     });
+    // Aura joins only rooms it is dispatched to.
+    await new AgentDispatchClient(lk.http, lk.key, lk.secret).createDispatch(roomName, AURA_AGENT_NAME, {
+      metadata: JSON.stringify(prepared.metadata),
+    });
     const token = new AccessToken(lk.key, lk.secret, { identity, name: user.name, ttl: "20m" });
     token.addGrant({ room: roomName, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true });
     return { ok: true, url: lk.browser, token: await token.toJwt(), roomName, aiCallId: prepared.aiCallId };
@@ -100,4 +109,41 @@ export async function endWebCall(aiCallId: string, openingId: string, reason?: s
   const user = await getCurrentUser();
   await convexMutation("ta/voice:abandonWebCall", { actorId: user.id, aiCallId, reason }).catch(() => undefined);
   revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+export interface CallLine {
+  who: "agent" | "candidate";
+  text: string;
+}
+
+/**
+ * The call ended with a transcript. Nothing said by the candidate means nobody
+ * answered; otherwise the answers are read from it and filled into the record.
+ */
+export async function completeWebCall(input: {
+  aiCallId: string;
+  openingId: string;
+  durationSeconds: number;
+  lines: CallLine[];
+  reason?: string;
+}): Promise<{ ok: boolean; answered: boolean }> {
+  if (!isConvex()) return { ok: false, answered: false };
+  const user = await getCurrentUser();
+  const lines = input.lines
+    .filter((l) => (l.who === "agent" || l.who === "candidate") && typeof l.text === "string" && l.text.trim())
+    .slice(0, 400)
+    .map((l) => ({ who: l.who, text: l.text.slice(0, 2000) }));
+  try {
+    const r = await convexMutation<{ ok: boolean; answered: boolean }>("ta/voice:completeWebCall", {
+      actorId: user.id,
+      aiCallId: input.aiCallId,
+      durationSeconds: Math.max(0, Math.round(input.durationSeconds)),
+      lines,
+      reason: input.reason,
+    });
+    revalidatePath(`/openings/${input.openingId}`, "layout");
+    return { ok: r.ok, answered: r.answered };
+  } catch {
+    return { ok: false, answered: false };
+  }
 }
