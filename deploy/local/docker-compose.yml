@@ -1,0 +1,81 @@
+# TA System — local backend on this laptop only.
+#
+# Same shape as deploy/staging, but everything listens on 127.0.0.1 and nothing
+# reaches the live server. Its own Postgres and instance name ("ta-local" ->
+# database "ta_local"), so it cannot touch any other Convex database.
+# Secrets are generated locally in deploy/local/.env.backend.local (git-ignored).
+#
+#   docker compose -f deploy/local/docker-compose.yml --env-file deploy/local/.env.backend.local up -d
+
+name: ta-local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ta-local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: convex
+      POSTGRES_PASSWORD: ${LOCAL_POSTGRES_PASSWORD:?set in .env.backend.local}
+      POSTGRES_DB: ta_local
+    command: ["postgres", "-c", "shared_buffers=384MB", "-c", "max_wal_size=2GB"]
+    volumes:
+      - ta-local-postgres-data:/var/lib/postgresql/data
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U convex -d ta_local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  convex:
+    image: ghcr.io/get-convex/convex-backend:latest
+    container_name: ta-local-convex
+    restart: unless-stopped
+    stop_grace_period: 20s
+    stop_signal: SIGINT
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3210:3210"
+      - "127.0.0.1:3211:3211"
+    environment:
+      INSTANCE_NAME: ta-local
+      INSTANCE_SECRET: ${LOCAL_INSTANCE_SECRET:?set in .env.backend.local}
+      POSTGRES_URL: postgresql://convex:${LOCAL_POSTGRES_PASSWORD}@postgres:5432?sslmode=disable
+      DO_NOT_REQUIRE_SSL: "true"
+      CONVEX_CLOUD_ORIGIN: http://127.0.0.1:3210
+      CONVEX_SITE_ORIGIN: http://127.0.0.1:3211
+      DISABLE_BEACON: "true"
+    volumes:
+      - ta-local-convex-files:/convex/data
+    mem_limit: 6g
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    container_name: ta-local-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6791:6791"
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: http://127.0.0.1:3210
+    depends_on: [convex]
+    mem_limit: 512m
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ta-local-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+    environment:
+      QDRANT__SERVICE__API_KEY: ${LOCAL_QDRANT_API_KEY:?set in .env.backend.local}
+    volumes:
+      - ta-local-qdrant-data:/qdrant/storage
+    mem_limit: 2g
+
+volumes:
+  ta-local-postgres-data:
+  ta-local-convex-files:
+  ta-local-qdrant-data:

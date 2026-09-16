@@ -9,6 +9,7 @@ import { ClerkProvider, Show } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
 import { NavigationProgress } from "@/components/NavigationProgress";
 import { primeStore } from "@/data/prime";
+import { uiOnly } from "@/lib/uiOnly";
 
 // Every page depends on who is signed in and reads the database, so nothing is
 // rendered at build time. Without this, `next build` pre-rendered the 404 page,
@@ -52,6 +53,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         and shipped the client library to every visitor for no reader.
       */}
       <body suppressHydrationWarning>
+        {uiOnly() ? (
+          // Laptop screen work without a sign-in service (lib/uiOnly.ts).
+          <>
+            {user ? <TopNav user={user} alertCount={alertCount} /> : null}
+            <Suspense fallback={null}>
+              <NavigationProgress />
+            </Suspense>
+            <Suspense fallback={null}>
+              <Flash />
+            </Suspense>
+            {children}
+            {user ? <DeskAssistant /> : null}
+          </>
+        ) : (
         <ClerkProvider signInUrl="/signin" signUpUrl="/signup" afterSignOutUrl="/signin">
           {/* Hidden the moment Clerk signs out, even before this layout re-renders. */}
           {user ? (
@@ -72,6 +87,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </Show>
           ) : null}
         </ClerkProvider>
+        )}
       </body>
     </html>
   );

@@ -5,11 +5,7 @@ import { CandidateList, applyFilters, type ListFilters } from "@/components/Cand
 import { FilterPanel, type FilterOptions } from "@/components/FilterPanel";
 import { StatRow } from "@/components/StatRow";
 import Link from "next/link";
-import { findMatchesNow } from "@/app/actions";
 import { allows } from "@/lib/auth";
-import { isMeaningBased } from "@/lib/embed";
-import { dateAt } from "@/lib/format";
-import { LIMITS } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
 
@@ -36,8 +32,6 @@ export default async function DatabasePage({
   // "not acted on" list and read as a failure.
   const searchSeed = repo.opening(id)?.title ?? "";
   const opening = repo.opening(id);
-  const lastRun = repo.matchRuns(id)[0] ?? null;
-  const canRun = allows(user, "opening.sourcing", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
 
   // The filter rail offers what this list actually contains, not the whole
   // database — an option that cannot match anything on screen is noise.
@@ -79,29 +73,6 @@ export default async function DatabasePage({
         ]}
       />
 
-      {/* The automatic search: nearest by meaning, hard rules, fit score, model
-          review — the best waiting here for a TA. Runs on JD approval and nightly. */}
-      <div className="mb-6 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-rule bg-surface px-5 py-3.5 text-[12.5px]">
-        <div className="min-w-0 flex-1">
-          <p className="font-medium">Automatic matches</p>
-          <p className="mt-0.5 text-ink-soft">
-            {opening?.jdStatus !== "approved"
-              ? "Start once the JD is approved, then run every night."
-              : lastRun
-                ? `Last run ${dateAt(lastRun.at)}: ${lastRun.considered} nearest ${isMeaningBased() ? "by meaning" : "by shared words"}, ${lastRun.afterRules} passed nationality, location and experience, ${lastRun.added} added.`
-                : "Not run yet. Runs every night; up to " + LIMITS.shown + " wait here at a time."}
-            {lastRun?.note && <span className="text-ink-faint"> {lastRun.note}</span>}
-          </p>
-        </div>
-        {canRun && opening?.jdStatus === "approved" && (
-          <form action={findMatchesNow}>
-            <input type="hidden" name="openingId" value={id} />
-            <button className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft">
-              Find matches now
-            </button>
-          </form>
-        )}
-      </div>
 
       <div className="flex gap-9">
         <FilterPanel

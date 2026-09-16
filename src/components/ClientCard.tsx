@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { CLIENTS_TOGGLE_ALL } from "./ClientsToolbar";
 import Link from "next/link";
 import { ClientEditor, ClientMenu, type Contact, type Pane } from "./ClientEditor";
 
@@ -90,25 +91,42 @@ export function ClientCard({
     if (typeof remembered === "boolean") setOpen(remembered);
   }, [clientId]);
 
+  const remember = (next: boolean) => {
+    try {
+      const map = readOpenMap();
+      map[clientId] = next;
+      localStorage.setItem(OPEN_KEY, JSON.stringify(map));
+    } catch {
+      // Private browsing, or storage turned off. The row still toggles.
+    }
+  };
+
   const toggle = () =>
     setOpen((was) => {
-      const next = !was;
-      try {
-        const map = readOpenMap();
-        map[clientId] = next;
-        localStorage.setItem(OPEN_KEY, JSON.stringify(map));
-      } catch {
-        // Private browsing, or storage turned off. The row still toggles.
-      }
-      return next;
+      remember(!was);
+      return !was;
     });
 
+  // "Open all" / "Close all" on the Clients page.
+  useEffect(() => {
+    const onAll = (e: Event) => {
+      const next = Boolean((e as CustomEvent<{ open: boolean }>).detail?.open);
+      setOpen(next);
+      remember(next);
+    };
+    window.addEventListener(CLIENTS_TOGGLE_ALL, onAll);
+    return () => window.removeEventListener(CLIENTS_TOGGLE_ALL, onAll);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
   return (
-    <section className="group/card overflow-hidden rounded-xl border border-rule bg-surface">
+    <section className="group/card rounded-xl border border-rule bg-surface">
       {/* The row expands, and the menu sits on top of it — a button inside a
           button is invalid, and the editing controls were a permanent strip
           across the card before this. */}
-      <div className="relative flex items-center gap-5 px-7 py-5 transition-colors hover:bg-paper/50">
+      <div
+        className={`relative flex items-center gap-5 rounded-t-xl px-7 py-5 transition-colors hover:bg-paper/50 ${open ? "" : "rounded-b-xl"}`}
+      >
         <button
           onClick={toggle}
           aria-expanded={open}

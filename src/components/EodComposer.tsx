@@ -119,6 +119,24 @@ export function EodComposer({
                 send.
               </p>
             ) : (
+              <>
+              {(() => {
+                // The email's columns never change (the Director reads this
+                // format), so an empty column is pointed out instead of hidden.
+                const empty = [
+                  ["AGE", rows.every((r) => !r.age.trim())],
+                  ["NOTICE", rows.every((r) => !r.notice.trim())],
+                  ["NOTES", rows.every((r) => r.notes.every((n) => !n.trim()))],
+                  ["CURRENT REMUNERATION", rows.every((r) => !r.currentRemuneration.trim())],
+                  ["EXPECTED REMUNERATION", rows.every((r) => !r.expectedRemuneration.trim())],
+                ].filter(([, e]) => e).map(([h]) => h as string);
+                return empty.length > 0 ? (
+                  <p className="mb-3 rounded-lg bg-warn-soft px-3.5 py-2 text-[12px] text-warn">
+                    {empty.join(", ")} {empty.length === 1 ? "is" : "are"} empty for everyone in this set. Fill them in on each
+                    candidate before sending, or the Director gets blank columns.
+                  </p>
+                ) : null;
+              })()}
               <table className="w-full border-collapse">
                 <thead>
                   <tr>
@@ -152,6 +170,7 @@ export function EodComposer({
                   ))}
                 </tbody>
               </table>
+              </>
             )}
           </div>
 

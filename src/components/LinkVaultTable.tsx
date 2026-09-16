@@ -87,6 +87,11 @@ export function LinkVaultTable({
                     entry={r}
                     openingId={openingId}
                     addedByName={userNames[r.addedBy] ?? "—"}
+                    onPipeline={
+                      r.candidateId
+                        ? (repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId) ?? null)
+                        : null
+                    }
                     userNames={userNames}
                   />
                 </div>

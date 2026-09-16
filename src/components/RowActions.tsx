@@ -57,13 +57,13 @@ export function RowActions({
         <input type="hidden" name="on" value={isAddOn ? "0" : "1"} />
         <button
           title={isAddOn ? "Remove from add-ons" : "Mark as an add-on — notifies you and the lead"}
-          className={`rounded-full border px-2.5 py-[7px] text-[12.5px] transition-colors ${
+          className={`whitespace-nowrap rounded-full border px-3.5 py-[7px] text-[12.5px] transition-colors ${
             isAddOn
-              ? "border-brand bg-brand-soft text-brand"
-              : "border-rule-strong text-ink-faint hover:border-ink-faint hover:text-ink"
+              ? "border-brand bg-brand-soft font-medium text-brand"
+              : "border-rule-strong text-ink-soft hover:border-ink-faint hover:text-ink"
           }`}
         >
-          +
+          {isAddOn ? "Add-on ✓" : "Add-on"}
         </button>
       </form>
       <button

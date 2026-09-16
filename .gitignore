@@ -17,3 +17,6 @@ tools/embed/.venv
 tools/embed/models
 *.log
 .claude/
+
+# Invented sample data for UI-only work (deploy/local/start-ui.sh)
+.data-ui

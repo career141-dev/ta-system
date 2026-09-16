@@ -1,6 +1,7 @@
 "use client";
 
 import { externalUrl } from "@/lib/url";
+import { packageLine } from "@/lib/format";
 import { useState } from "react";
 import Link from "next/link";
 import { addToOpening } from "@/app/actions";
@@ -156,7 +157,7 @@ export function ResultRow({
 
             <Line label="Package">
               <span className="text-ink-soft">
-                Now {c.currentSalary} · expects {c.expectedSalary} · {c.noticePeriodDays}-day notice
+                {packageLine(c)}
               </span>
             </Line>
 

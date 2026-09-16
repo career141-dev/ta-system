@@ -24,7 +24,8 @@ export function searchScopeFor(pathname: string): SearchScope {
   const path = (pathname.replace(/\/+$/, "") || "/").split("?")[0];
 
   if (path === "/") return same(path, "Search your dashboard");
-  if (path === "/clients") return same(path, "Search clients");
+  // Clients has its own search box on the page (ClientsToolbar), so the header
+  // keeps the desk-wide search there.
   if (path === "/people") return same(path, "Search people");
   if (path === "/openings") return same(path, "Search openings", ["bucket"]);
   if (path === "/alerts") return same(path, "Search alerts", ["all"]);

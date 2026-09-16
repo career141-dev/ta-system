@@ -5,6 +5,7 @@ import { repo } from "@/data/store";
 import { devSigninEnabled } from "@/lib/devSignin";
 import { devSignInAs } from "@/app/actions";
 import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
+import { uiOnly } from "@/lib/uiOnly";
 
 /**
  * The sign-in screen.
@@ -44,7 +45,7 @@ export default async function SignInPage() {
         </form>
       )}
 
-      {emails.length === 0 ? (
+      {uiOnly() ? null : emails.length === 0 ? (
         // The server can briefly see no session that the browser already has
         // (just after sign-in). Rendering <SignIn> then starts a second sign-in,
         // which Clerk refuses with a 400 and a blank card — so only render it
