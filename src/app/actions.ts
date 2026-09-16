@@ -929,6 +929,55 @@ export async function logOutreach(formData: FormData) {
 }
 
 
+/**
+ * "Add to pipeline" on an Excel Tables row: a headhunted person the TA has
+ * shortlisted goes to Director Review, like any other shortlisted candidate.
+ * They are claimed by this TA (which gives them their set number) and moved
+ * through the normal stage rules, so the backend still refuses the move when
+ * something Director Review needs has not been collected yet.
+ */
+export async function addLinkToPipeline(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { link: "entryId", opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  const entryId = String(formData.get("entryId"));
+
+  // From the row's edit panel the button also saves what was just typed, so
+  // picking "Shortlisted" and pressing Add to pipeline is one step.
+  if (formData.has("outcome")) {
+    await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
+    repo.updateLink(entryId, {
+      outcome: String(formData.get("outcome")) as import("@/data/types").LinkOutcome,
+      phoneNumber: String(formData.get("phoneNumber") ?? "").trim() || null,
+      phoneSource: (String(formData.get("phoneSource") ?? "") || null) as import("@/data/types").LinkVaultEntry["phoneSource"],
+      name: String(formData.get("name") ?? "").trim() || null,
+      company: String(formData.get("company") ?? "").trim() || null,
+    });
+  }
+
+  const made = repo.linkToApplication(entryId, user.id);
+  if (!made.ok) return back(made.message);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  if (made.stage !== "follow_up") return back("Already on the pipeline past Follow-up.");
+
+  if (isConvex()) {
+    let problem: string | null = null;
+    try {
+      const claimed = await backend.shortlist({ id: user.id }, made.applicationId);
+      if (!claimed.ok) problem = "Another recruiter already claimed this candidate.";
+      else await backend.moveStage({ id: user.id }, made.applicationId, "director_review");
+    } catch (e) {
+      problem = `On the pipeline at Follow-up, not yet in Director review: ${backendMessage(e, "the move could not be made.")}`;
+    }
+    await afterBackendWrite(openingId);
+    return back(problem ?? "Moved to Director review.");
+  }
+  repo.shortlist(made.applicationId, user.id);
+  const moved = repo.moveStage(made.applicationId, "director_review", user.id);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  return back(moved.ok ? "Moved to Director review." : `On the pipeline at Follow-up: ${moved.message}`);
+}
+
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
 
 export async function setOpeningStatus(formData: FormData) {
@@ -2320,6 +2369,30 @@ export async function saveFollowUpAnswers(formData: FormData) {
   });
   revalidatePath("/alerts");
   redirect(`/openings/${openingId}/candidate/${appId}?tab=chat&msg=${encodeURIComponent("Saved.")}`);
+}
+
+/**
+ * Current salary, expected salary and notice period typed in by the TA, from
+ * the candidate page's "Details for Director review" box. Blank fields leave
+ * what is already on file.
+ */
+export async function saveReviewDetails(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
+  const app = repo.application(String(formData.get("applicationId")));
+  if (!app) return back("That application no longer exists.");
+  const currentSalary = String(formData.get("currentSalary") ?? "").trim();
+  const expectedSalary = String(formData.get("expectedSalary") ?? "").trim();
+  const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
+  const notice = noticeRaw === "" ? null : Number(noticeRaw);
+  if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return back("Notice period is a number of days, 0 or more.");
+  repo.updateCandidate(app.candidateId, {
+    ...(currentSalary ? { currentSalary } : {}),
+    ...(expectedSalary ? { expectedSalary } : {}),
+    ...(notice !== null ? { noticePeriodDays: Math.round(notice) } : {}),
+  });
+  revalidatePath(`/openings/${app.openingId}`, "layout");
+  return back("Details saved.");
 }
 
 /**

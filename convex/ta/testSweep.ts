@@ -69,6 +69,34 @@ export const sweep = internalMutation({
   },
 });
 
+/**
+ * Remove named test records that did not come from the e2e scripts — the test
+ * openings and candidates the desk created on the old system, which arrived
+ * with the snapshot ("df", "Follow-up Test", "Test Recruiter"…). Each id is
+ * named by a person who checked it; nothing is found by pattern here.
+ *
+ * Test deployments only, like `sweep`. CV files are never touched: the R2
+ * bucket is shared with production.
+ */
+export const removeNamedTestRecords = internalMutation({
+  args: {
+    openingIds: v.array(v.id("jobs")),
+    candidateIds: v.array(v.id("candidates")),
+    confirm: v.literal("delete named test records"),
+  },
+  handler: async (ctx, args) => {
+    if (!outboundLocked()) throw new Error("removeNamedTestRecords runs only on a test deployment (C141_OUTBOUND_LOCK=true).");
+    const removed: Record<string, number> = {};
+    const del = async (table: string, id: string) => {
+      await ctx.db.delete(id as never);
+      removed[table] = (removed[table] ?? 0) + 1;
+    };
+    for (const id of args.openingIds) if (await ctx.db.get(id)) await removeOpening(ctx, id, del);
+    for (const id of args.candidateIds) if (await ctx.db.get(id)) await removeCandidate(ctx, id, del);
+    return { removed };
+  },
+});
+
 async function removeCandidate(ctx: Ctx, id: Id<"candidates">, del: (t: string, id: string) => Promise<void>) {
   for (const a of await ctx.db.query("applications").withIndex("by_candidateId", (q) => q.eq("candidateId", id)).collect()) {
     await removeApplication(ctx, a._id, del);

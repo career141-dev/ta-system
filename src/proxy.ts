@@ -1,4 +1,6 @@
 import { clerkMiddleware } from "@clerk/nextjs/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
+import { uiOnly } from "@/lib/uiOnly";
 
 /**
  * Puts the Clerk session on every request so `auth()` can read it.
@@ -8,7 +10,13 @@ import { clerkMiddleware } from "@clerk/nextjs/server";
  * and cron routes under /api, which authenticate with their own secrets, keep
  * working without a Clerk session.
  */
-export default clerkMiddleware();
+const clerk = clerkMiddleware();
+
+// UI-only laptop mode has no sign-in service to hand the request to (lib/uiOnly.ts).
+export default function proxy(req: NextRequest, event: NextFetchEvent) {
+  if (uiOnly()) return NextResponse.next();
+  return clerk(req, event);
+}
 
 export const config = {
   matcher: [

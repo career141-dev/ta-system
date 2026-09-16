@@ -13,7 +13,7 @@
 // "no text" and "text lives in R2" need different handling upstream.
 
 import { v } from "convex/values";
-import { internalQuery, type QueryCtx } from "../_generated/server";
+import { internalMutation, internalQuery, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
 import { candidateIdToPointId, candidateVectorPayload } from "../lib/vectorPayload";
@@ -208,10 +208,72 @@ export const stats = internalQuery({
   args: { actorId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
+    // The backend's counter, kept by ingestion (stats/statsHelper) and set
+    // exactly by scripts/recount-candidates.mjs after an import, which bypasses
+    // it. One read. Trusted only once a recount has stamped it.
+    const counter = await ctx.db
+      .query("systemStats")
+      .withIndex("by_singletonKey", (q) => q.eq("singletonKey", "global_stats"))
+      .first();
+    const stamped = await ctx.db
+      .query("taSettings")
+      .withIndex("by_key", (q) => q.eq("key", "ta.candidateCountVerifiedAt"))
+      .first();
+    if (counter && counter.totalCandidates > 0 && stamped) {
+      return { total: counter.totalCandidates, sampled: false };
+    }
     // A bounded walk: enough to be useful, capped so it cannot become a scan.
     const CAP = 4000;
     const page = await ctx.db.query("candidates").take(CAP + 1);
     return { total: Math.min(page.length, CAP), sampled: page.length > CAP };
+  },
+});
+
+/**
+ * One page of an exact count of the candidates table.
+ *
+ * Convex keeps no row count and a query has a one-second budget, so the whole
+ * table is counted a page at a time by the app (data/convex/backend
+ * `candidateTotal`), which keeps the answer for a few minutes. The table's own
+ * counter (`systemStats.totalCandidates`) is not used: it had drifted to
+ * 47,488 against 77,216 real rows.
+ */
+export const countPage = internalQuery({
+  args: { cursor: v.optional(v.union(v.string(), v.null())), numItems: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const page = await ctx.db
+      .query("candidates")
+      .paginate({ cursor: args.cursor ?? null, numItems: Math.min(args.numItems ?? 4000, 8000) });
+    return { n: page.page.length, isDone: page.isDone, continueCursor: page.continueCursor };
+  },
+});
+
+/** Sets the candidate counter to an exact count taken with `countPage`, and stamps it as verified. */
+export const setCandidateTotal = internalMutation({
+  args: { total: v.number() },
+  handler: async (ctx, args) => {
+    const counter = await ctx.db
+      .query("systemStats")
+      .withIndex("by_singletonKey", (q) => q.eq("singletonKey", "global_stats"))
+      .first();
+    if (counter) await ctx.db.patch(counter._id, { totalCandidates: args.total });
+    else {
+      await ctx.db.insert("systemStats", {
+        singletonKey: "global_stats",
+        totalCandidates: args.total,
+        totalCvUploads: 0,
+        totalApplications: 0,
+        activeJobsCount: 0,
+      });
+    }
+    const stamp = await ctx.db
+      .query("taSettings")
+      .withIndex("by_key", (q) => q.eq("key", "ta.candidateCountVerifiedAt"))
+      .first();
+    const value = new Date().toISOString();
+    if (stamp) await ctx.db.patch(stamp._id, { value, updatedAt: Date.now() });
+    else await ctx.db.insert("taSettings", { key: "ta.candidateCountVerifiedAt", value, updatedAt: Date.now() });
+    return { total: args.total };
   },
 });
 

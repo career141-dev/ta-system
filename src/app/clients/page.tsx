@@ -4,6 +4,8 @@ import { PRIORITY_TARGET } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { AddClient } from "@/components/AddClient";
 import { ClientCard } from "@/components/ClientCard";
+import { ClientsToolbar } from "@/components/ClientsToolbar";
+import { Suspense } from "react";
 import { pageUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { can } from "@/lib/auth";
@@ -24,7 +26,7 @@ export default async function ClientsPage({
   const user = await pageUser("database.read");
   const openings = repo.openings();
   const users = repo.users();
-  // The header search, on this page, searches clients: the name, the industry,
+  // The page's own search (ClientsToolbar) searches clients: the name, the industry,
   // a contact, or an opening filed under the client.
   const matching = repo.clients().filter((c) =>
     matchesQuery(
@@ -57,6 +59,10 @@ export default async function ClientsPage({
           )}
         </div>
       </div>
+
+      <Suspense fallback={<div className="mb-6 h-[38px]" />}>
+        <ClientsToolbar initialQuery={q} />
+      </Suspense>
 
       {/* A refused delete says why rather than looking like a dead button. */}
       {held && (

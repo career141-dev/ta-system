@@ -481,7 +481,7 @@ Reject where the evidence shows they do not fit. Be decisive: a longlist a TA ha
 REJECT:
 - a different discipline entirely — a cement plant manager for a retail branch role, a hospital operator for a manufacturing role, a cosmetics formulator for food R&D
 - a different SECTOR where the specification names one — this is the commonest mistake, and the one a TA notices first
-- a level far above or far below the band and title
+- a level FAR above or far below the band and title — two or more rungs away. One rung below or above is NOT a reason to reject (a senior analyst for a manager role, a manager for a senior manager role): those are the people who move into this job, and the ranking weighs level separately
 - anything contradicting an absolute requirement above
 - a career evidently based in another country when the role is a local hire
 - a match that rests only on a coinciding acronym or company name
@@ -489,13 +489,22 @@ REJECT:
 Do NOT reject for missing information. "Years not stated" is a question for the call.
 If you would reject nobody, return the single word NONE.`;
 
-function parseExclusions(text: string, max: number): Map<number, string> {
+/**
+ * The rejected rows. The prompt asks for "INDEX | REASON", but the model does not
+ * always keep to it — DeepSeek answered "[3] Reject - reason" on one run and the
+ * pipe form on the next (16 September), so one run rejected everybody and the
+ * next nobody. Any line that starts with an index is read; a line that says the
+ * person is kept is not a rejection.
+ */
+export function parseExclusions(text: string, max: number): Map<number, string> {
   const out = new Map<number, string>();
-  for (const line of text.split("\n")) {
-    if (!line.includes("|")) continue;
-    const [a, ...rest] = line.split("|");
-    const idx = Number(a.replace(/[[\]]/g, "").trim());
-    if (Number.isInteger(idx) && idx >= 0 && idx < max) out.set(idx, rest.join("|").trim());
+  for (const line of text.split(/\r?\n/)) {
+    const m = line.match(/^\s*[-*]?\s*\[?(\d{1,3})\]?\s*(?:\||:|-|–|—|\.|\))?\s*(.*)$/);
+    if (!m || m[0].trim() === m[1]) continue;
+    const idx = Number(m[1]);
+    const reason = m[2].replace(/^(reject(ed)?|exclude(d)?)\s*[-–—:|]?\s*/i, "").trim();
+    if (/^(keep|kept|include|pass|none)\b/i.test(m[2].trim())) continue;
+    if (Number.isInteger(idx) && idx >= 0 && idx < max) out.set(idx, reason || "rejected");
   }
   return out;
 }
@@ -546,9 +555,29 @@ ${spec.jdText.slice(0, 5000)}
 CANDIDATES — a LinkedIn search snippet, plus what other searches found about the same person:
 ${rows.join("\n")}
 
-Return ONLY pipe-delimited lines, one per candidate, all six fields present:
+Return ONLY pipe-delimited lines, one per candidate you would put in front of the client's recruiter, all seven fields present:
 
-INDEX | TIER | NAME | CURRENT_TITLE_AND_EMPLOYER | WHY | CONCERN
+INDEX | SCORE | TIER | NAME | CURRENT_TITLE_AND_EMPLOYER | WHY | CONCERN
+
+CHECK EVERY CANDIDATE AGAINST EACH REQUIREMENT IN THE SPECIFICATION, one by one:
+  1. LOCATION — are they in (or clearly working in) the role's location?
+  2. EXPERIENCE — do the evidenced years fall in the stated range?
+  3. INDUSTRY — is their current or recent employer in the sector the role needs?
+  4. LEVEL — is their title at the role's level?
+  5. SKILLS / QUALIFICATIONS — are the required ones evidenced?
+A requirement the evidence CONTRADICTS is disqualifying. A requirement the evidence is silent on lowers the score and goes in CONCERN.
+
+SCORE — 0 to 100, how well the EVIDENCE matches this specification:
+- 85-100: right work, right level, and at least two further hard matches evidenced
+- 70-84: right work at roughly the right level, one further match evidenced
+- 55-69: plausible, worth a call, but a material fact is unclear
+- below 55: do not list them at all
+
+DO NOT LIST (leave the line out entirely):
+- fewer years than a stated minimum, where the years ARE evidenced
+- students, undergraduates, interns or trainees for anything above an entry-level role
+- two or more levels below or above the role (a junior for a mid-level role, a head of department for an executive role)
+- anyone where the snippet gives no real evidence of the discipline — "insufficient evidence" is a reason to leave them out, not to list them
 
 TIER — apply strictly, they must carry information:
 - "priority" = the evidence shows BOTH (a) the right kind of work at roughly the right level, AND
@@ -560,16 +589,74 @@ TIER — apply strictly, they must carry information:
 CALIBRATION: the two tiers should come out roughly balanced. If more than 60% land in one tier you
 are not discriminating — move the weaker ones to "screen".
 
+- Plain text only in WHY and CONCERN: no markdown, no asterisks.
 - WHY: cite the SPECIFIC evidence — employer, qualification, system, years or duties actually named.
   Where the ALSO FOUND line adds something the snippet lacked, use it.
 - CONCERN: what the TA must confirm on the call, or what is contradictory between sources. Be
   concrete. Only write NONE if every stated requirement is genuinely evidenced.
 - Use the salary band to judge seniority: someone already above this band is a "screen" at best.
 - Exclude only people clearly in the wrong discipline, or clearly far above or below the band.
-- Aim for 12-16 rows, but NEVER pad. If only four people genuinely fit this specification, return four. A short honest list is worth more than a long one a TA has to re-screen.`;
+- Aim for the 10-20 best, best first, but NEVER pad. If only four people genuinely fit this specification, return four. A short honest list is worth more than a long one a TA has to re-screen.`;
 };
 
 // ─── The run ─────────────────────────────────────────────────────────────────
+
+/** Below this the ranker has said the person is not worth a call. */
+const MIN_SCORE = 55;
+/** "priority" needs the evidence to back it, not only the word. */
+const PRIORITY_SCORE = 75;
+/** A curated list, not a dump: what a TA will genuinely call in a round. */
+const MAX_SUGGESTIONS = 20;
+/** Profiles enriched and screened together. */
+const BATCH = 30;
+/** Survivors that make a second batch unnecessary. */
+const ENOUGH = 8;
+
+/** Run `work` over `items`, `limit` at a time, keeping the input order in the result. */
+async function inParallel<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (next < items.length) {
+        const i = next++;
+        out[i] = await work(items[i]);
+      }
+    }),
+  );
+  return out;
+}
+
+/**
+ * One ranked line. Seven fields with a score; the older six-field form (no
+ * score) is still read, so a model that drops the column does not lose the run.
+ */
+export function rankFields(line: string): { index: string; score: number | null; tier: string; name: string; headline: string; why: string; concern: string } | null {
+  const f = line.split("|").map((x) => x.trim());
+  if (f.length >= 7 && /^\d{1,3}$/.test(f[1])) {
+    return { index: f[0], score: Number(f[1]), tier: f[2], name: f[3], headline: f[4], why: f[5], concern: f.slice(6).join(" | ") };
+  }
+  if (f.length >= 6) return { index: f[0], score: null, tier: f[1], name: f[2], headline: f[3], why: f[4], concern: f.slice(5).join(" | ") };
+  return null;
+}
+
+/** Model prose without markdown: the list shows plain text. */
+export function plain(text: string | undefined): string {
+  return (text ?? "").replace(/\*\*|__|`/g, "").replace(/^\s*[-*]\s+/gm, "").trim();
+}
+
+/**
+ * Company and location as LinkedIn's own search result states them — "Name -
+ * Title - Company | LinkedIn" and "Location: Colombo" — never from the model.
+ */
+export function profileFacts(c: { title: string; snippets: string[] }): { company: string | null; location: string | null } {
+  const parts = c.title.replace(/\s*\|\s*LinkedIn.*$/i, "").split(/\s+[-–—]\s+/);
+  // "Name - Title - Company", or "Name - Title at Company".
+  const company =
+    (parts.length >= 3 ? parts[parts.length - 1].trim() : parts[1]?.match(/\s(?:at|@)\s+(.+)$/i)?.[1]?.trim()) || null;
+  const loc = c.snippets.join(" ").match(/Location:\s*([^·|.\n]{2,60})/i)?.[1]?.trim() ?? null;
+  return { company, location: loc };
+}
 
 export async function runSourcing(spec: SourcingSpec, round: number): Promise<SourcingRun> {
   const empty: SourcingRun = { suggestions: [], plan: null, queries: [], credits: 0, scanned: 0, cost: 0 };
@@ -589,20 +676,23 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
 
   // The first ten results of the best queries are not the only ten. Page two
   // costs one credit and is the cheapest coverage available.
+  //
+  // Run six at a time: one after another, a run took four and a half minutes
+  // (16 September), nearly all of it waiting on searches that do not depend on
+  // each other. Results are merged in query order, so the outcome is the same.
   const deep = new Set(queries.slice(0, 4));
-  for (const q of queries) {
-    const pages = deep.has(q) ? [1, 2] : [1];
-    const hits = [] as { url: string; title: string; snippet: string }[];
-    for (const page of pages) {
-      const r = await search(q, 10, page);
-      credits += r.credits;
-      hits.push(...r.hits);
-    }
-    const r = { hits };
+  const pages = await inParallel(queries.flatMap((q) => (deep.has(q) ? [[q, 1], [q, 2]] : [[q, 1]])) as [string, number][], 6, ([q, page]) =>
+    search(q, 10, page),
+  );
+  for (const r of pages) {
+    credits += r.credits;
     for (const h of r.hits) {
       const key = canonicalProfile(h.url);
       if (!key || known.has(key)) continue;
-      const c = byKey.get(key) ?? { key, url: displayUrl(key), title: h.title, snippets: [], hits: 0, enriched: [] };
+      // "Name - Title at Company | LinkedIn": the suffix is not part of the person,
+      // and a pipe in it split the ranker's pipe-delimited line one field early.
+      const title = h.title.replace(/\s*\|\s*LinkedIn.*$/i, "").replace(/\|/g, "/").trim();
+      const c = byKey.get(key) ?? { key, url: displayUrl(key), title, snippets: [], hits: 0, enriched: [] };
       c.hits += 1;
       if (h.snippet && !c.snippets.includes(h.snippet)) c.snippets.push(h.snippet);
       byKey.set(key, c);
@@ -610,9 +700,10 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
   }
   const scanned = byKey.size;
 
-  // Stage 3 — free filter.
-  const keep = relevanceFilter([...byKey.values()], plan, spec, 30);
-  if (keep.length === 0) {
+  // Stage 3 — free filter. Two batches' worth, best first: the second is
+  // screened only when the first leaves too few (below).
+  const pool = relevanceFilter([...byKey.values()], plan, spec, BATCH * 2);
+  if (pool.length === 0) {
     return { ...empty, plan, queries, credits, scanned, cost, note: "nothing_survived_filter" };
   }
 
@@ -626,7 +717,7 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
   const where = countryOf(spec.locations.join(" ")) ?? "Sri Lanka";
   const discipline = spec.title.split(/[\s/]+/)[0];
   const credential = plan.qualifications[0] ?? plan.systems[0] ?? "";
-  for (const c of keep) {
+  const enrich = (batch: Candidate[]) => inParallel(batch, 6, async (c) => {
     const name = c.title.split(/ - | \| /)[0].trim();
     const angles = [
       `"${name}" ${where} ${discipline}`,
@@ -635,8 +726,7 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
     ].filter(Boolean);
 
     const pages: string[] = [];
-    for (const a of angles) {
-      const r = await search(a, 6);
+    for (const r of await Promise.all(angles.map((a) => search(a, 6)))) {
       credits += r.credits;
       for (const h of r.hits.slice(0, 5)) {
         if (h.snippet && !c.snippets.includes(h.snippet) && !c.enriched.includes(h.snippet)) {
@@ -645,12 +735,11 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
         if (pages.length < 2 && !/linkedin\.com/i.test(h.url)) pages.push(h.url);
       }
     }
-    for (const url of pages) {
-      const body = await readPage(url);
-      if (body) c.enriched.push(`[${new URL(url).hostname}] ${body}`);
+    for (const [i, body] of (await Promise.all(pages.map((url) => readPage(url)))).entries()) {
+      if (body) c.enriched.push(`[${new URL(pages[i]).hostname}] ${body}`);
     }
     c.enriched = c.enriched.slice(0, 7);
-  }
+  });
 
   // Stage 5a — reject, against the must-haves and nothing else.
   const rowsOf = (xs: Candidate[]) =>
@@ -659,21 +748,33 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
         `[${i}] ${c.title}\n  PROFILE: ${c.snippets.join(" ").slice(0, 380)}\n  ALSO FOUND: ${c.enriched.join(" | ").slice(0, 480)}`,
     );
   const hardReqs = hardRequirements(spec);
-  const cut = await gemini("plan", EXCLUDE_PROMPT(spec, rowsOf(keep), hardReqs), { maxTokens: 2500 });
-  let survivors = keep;
+  let survivors: Candidate[] = [];
   let rejected = 0;
+  let screened = 0;
   let screenNote: string | undefined;
-  if (cut.ok) {
+  // Batches of thirty, best first. A niche role's first thirty can all be the
+  // wrong people — operations staff for a pricing role (16 September: 30 of 30
+  // rejected, 0 suggested) — while the right ones sit further down the pool.
+  // So a second batch is screened when the first leaves too few, and the
+  // screen's decisions still stand: nobody rejected is put back.
+  for (let from = 0; from < pool.length && survivors.length < ENOUGH; from += BATCH) {
+    const batch = pool.slice(from, from + BATCH);
+    await enrich(batch);
+    const cut = await gemini("plan", EXCLUDE_PROMPT(spec, rowsOf(batch), hardReqs), { maxTokens: 2500 });
+    screened += batch.length;
+    if (!cut.ok) {
+      survivors.push(...batch);
+      continue;
+    }
     cost += usageCost(cut.usage);
-    const drop = parseExclusions(cut.text, keep.length);
-    // The screen's decisions stand. When it removes most of the pool, that is
-    // reported — a bad search and a bad screen look the same from here, and
-    // quietly restoring rejected people to keep the list full hid both
-    // (13 September review).
-    survivors = keep.filter((_, i) => !drop.has(i));
-    rejected = drop.size;
-    if (drop.size >= keep.length * 0.75) screenNote = `screen_removed_${drop.size}_of_${keep.length}`;
+    const drop = parseExclusions(cut.text, batch.length);
+    if (process.env.C141_DEBUG_SOURCING === "1") console.log("[sourcing] exclusion reply:", cut.text.slice(0, 4000));
+    survivors.push(...batch.filter((_, i) => !drop.has(i)));
+    rejected += drop.size;
   }
+  // When the screen removes most of what it saw, that is reported — a bad
+  // search and a bad screen look the same from here (13 September review).
+  if (screened > 0 && rejected >= screened * 0.75) screenNote = `screen_removed_${rejected}_of_${screened}`;
   if (survivors.length === 0) {
     return { ...empty, plan, queries, credits, scanned, rejected, cost, note: screenNote ?? "all_excluded" };
   }
@@ -685,33 +786,42 @@ export async function runSourcing(spec: SourcingSpec, round: number): Promise<So
   cost += usageCost(rank.usage);
 
   const now = Date.now();
-  const suggestions: Omit<ProfileSuggestion, "id">[] = [];
+  const scored: { score: number; s: Omit<ProfileSuggestion, "id"> }[] = [];
+  const seen = new Set<number>();
   for (const line of rank.text.split("\n")) {
-    if ((line.match(/\|/g) ?? []).length < 4) continue;
-    const f = line.split("|").map((x) => x.trim());
-    const idx = Number(f[0].replace(/[[\]]/g, ""));
-    if (!Number.isInteger(idx) || idx < 0 || idx >= survivors.length) continue;
+    const f = rankFields(line);
+    if (!f) continue;
+    const idx = Number(f.index.replace(/[[\]]/g, ""));
+    if (!Number.isInteger(idx) || idx < 0 || idx >= survivors.length || seen.has(idx)) continue;
+    seen.add(idx);
+    // The bar the prompt states, enforced here too: a model that lists someone
+    // at 40 has told us not to show them.
+    if (f.score !== null && f.score < MIN_SCORE) continue;
     const c = survivors[idx];
-    const tier = f[1]?.toLowerCase().startsWith("prior") ? "priority" : "screen";
-    const concern = f[5] ?? "";
-    suggestions.push({
+    // Priority is earned by the evidence, not by the label alone.
+    const tier = f.tier.toLowerCase().startsWith("prior") && (f.score === null || f.score >= PRIORITY_SCORE) ? "priority" : "screen";
+    const concern = plain(f.concern);
+    const found = profileFacts(c);
+    scored.push({ score: f.score ?? (tier === "priority" ? PRIORITY_SCORE : MIN_SCORE), s: {
       openingId: "",
-      name: f[2] || c.title.split(/ - | \| /)[0],
-      headline: f[3] || c.title,
-      company: null,
-      location: null,
+      name: plain(f.name) || c.title.split(/ - | \| /)[0],
+      headline: plain(f.headline) || c.title,
+      company: found.company,
+      location: found.location,
       // Never from the model — always the URL the search returned.
       linkedinUrl: c.url,
       tier,
-      why: f[4] ?? "",
-      concern: concern && !/^none$/i.test(concern) ? concern : null,
+      why: plain(f.why),
+      concern: concern && !/^none\.?$/i.test(concern) ? concern : null,
       sourceUrl: c.url,
       status: "new",
       feedback: null,
       round,
       generatedAt: now,
-    });
+    } });
   }
+  // Best first, and no more than a TA will genuinely work through.
+  const suggestions = scored.sort((a, b) => b.score - a.score).slice(0, MAX_SUGGESTIONS).map((x) => x.s);
   // A thin list is a finding, not a failure — senior and confidential roles
   // simply have less public surface. Saying so points the TA at Benchmarking
   // instead of leaving them to assume the search broke.

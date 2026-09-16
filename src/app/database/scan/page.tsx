@@ -47,6 +47,11 @@ export default async function ScanPage({ searchParams }: { searchParams: Promise
         </p>
       </header>
 
+      <p className="mt-6 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
+        <b>Not ready yet.</b> You can't start a new scan from here: uploading CVs isn't built
+        into this screen. The list below only shows scans already in the system.
+      </p>
+
       {!isConvex() && (
         <p className="mt-6 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
           The scanner reads from the live database, and this build is running on the
@@ -98,10 +103,7 @@ export default async function ScanPage({ searchParams }: { searchParams: Promise
         <Pager page={page} pageSize={PAGE_SIZE} total={matching.length} href={pageLink("/database/scan", sp)} className="mt-4" />
       </section>
 
-      <p className="mt-6 text-[11.5px] leading-relaxed text-ink-faint">
-        Starting a scan means uploading files, which is not wired into this screen yet —
-        the list above reads scans already in the system. Signed in as {user.name}.
-      </p>
+      <p className="mt-6 text-[11.5px] leading-relaxed text-ink-faint">Signed in as {user.name}.</p>
     </main>
   );
 }

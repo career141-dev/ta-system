@@ -6,7 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { ROLE_LABEL } from "@/data/types";
 import type { User } from "@/data/types";
-import { SignOutButton } from "@clerk/nextjs";
+import { SignOut } from "./SignOut";
 import { HEADER_H } from "@/lib/chrome";
 import { SearchIcon } from "./icons";
 import { searchScopeFor } from "@/lib/searchScope";
@@ -127,11 +127,6 @@ export function TopNav({
           />
         </form>
 
-        <span className="hidden items-center gap-1.5 text-[11.5px] text-ink-faint lg:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-ink-faint/60" />
-          Test data
-        </span>
-
         <div className="relative">
           <button
             onClick={() => setOpen((v) => !v)}
@@ -164,11 +159,7 @@ export function TopNav({
                 </Link>
               )}
               <div className="border-t border-rule">
-                <SignOutButton redirectUrl="/signin">
-                  <button className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper">
-                    Sign out
-                  </button>
-                </SignOutButton>
+                <SignOut className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper" />
               </div>
             </div>
           )}
