@@ -88,7 +88,7 @@ function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "bool
   const vocab = repo.vocabulary();
   return (
     <div className="grid items-start gap-6 xl:grid-cols-[400px_1fr]">
-      <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px]">
+      <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
         <div className="rounded-xl border border-rule bg-surface p-4">
           <SearchBox
             vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
@@ -539,7 +539,7 @@ async function ResultsView({
   return (
     <>
       <div className="grid items-start gap-6 xl:grid-cols-[400px_1fr]">
-        <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px]">
+        <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
           <AiPanel
             criteria={criteria}
             ignored={ignored}
