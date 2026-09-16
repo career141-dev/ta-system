@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { approveJd, generateJdWithModel, saveBriefNotes } from "@/app/actions";
 import { inputClass } from "./form";
+import { BriefRecorder } from "./BriefRecorder";
 
 /**
  * Screen two, and the TA's whole job in one place: notes in, JD out, approved.
@@ -59,6 +60,14 @@ export function JdScreen({
           </div>
         ))}
         <form action={saveBriefNotes} className="px-7 py-6">
+          <div className="mb-4">
+            <BriefRecorder
+              label="Record your notes"
+              onTranscript={(text) =>
+                setNotes((prev) => `${prev.trim() ? `${prev.trimEnd()}\n\n` : ""}From the recording:\n${text.trim()}`)
+              }
+            />
+          </div>
           {fromLead && <p className="mb-2 text-[12px] font-medium text-ink-soft">Your notes</p>}
           <input type="hidden" name="openingId" value={openingId} />
           <textarea
