@@ -24,6 +24,7 @@ import { LiveFollowUp } from "@/components/LiveFollowUp";
 import { WebCallPanel } from "@/components/WebCallPanel";
 import { WebCallResults } from "@/components/WebCallResults";
 import { isConvex } from "@/data/mode";
+import * as backend from "@/data/convex/backend";
 import { removeApplication } from "@/app/actions";
 import { primeStore } from "@/data/prime";
 
@@ -105,6 +106,19 @@ export default async function CandidateDrawer({
     chat: repo.outreach(app.id).filter((m) => m.channel !== "ai_call").length,
     reference: referees.length,
   };
+
+  // The candidate's own CV file, looked up only when the tab shows it.
+  const cvFile =
+    tab === "cv" && isConvex()
+      ? await backend.cvFile(c.id).catch((e) => ({
+          ok: false as const,
+          reason: "storage_unavailable" as const,
+          detail: `The CV could not be looked up (${(e as Error).message}).`,
+          fileName: null,
+        }))
+      : null;
+  const cvHref = `/api/cv/${encodeURIComponent(c.id)}?app=${encodeURIComponent(app.id)}`;
+  const cvIsPdf = !!cvFile?.ok && (/pdf/i.test(cvFile.fileType ?? "") || /\.pdf$/i.test(cvFile.fileName ?? ""));
 
   const base = `/openings/${id}/candidate/${appId}`;
   const tabHref = (t: string) => (t === "cv" ? `${base}` : `${base}?tab=${t}`);
@@ -319,37 +333,64 @@ export default async function CandidateDrawer({
         {tab === "cv" && (
           <>
             {/* The CV is a document. A TA reads it, they do not read a summary of
-                it — so the document is the tab, and the parsed fields sit under
-                it for filtering and for the end-of-day email. */}
+                it — so the candidate's own file is the tab, and the parsed fields
+                sit under it for filtering and for the end-of-day email.
+
+                This showed the prepared CV, a page generated from the parsed
+                fields, in place of the file — so every candidate's CV looked
+                like the same template. The prepared version (with the green
+                Career141 block, for the Director and the client) is still one
+                click away. */}
             <div className="mb-5 overflow-hidden rounded-xl border border-rule">
               <div className="flex flex-wrap items-center gap-3 border-b border-rule bg-paper px-4 py-2.5">
-                <span className="text-[12.5px] font-medium">{c.cvFileName ?? "Prepared CV"}</span>
-                <span className="text-[11.5px] text-ink-faint">
-                  opens with the green block on page one
+                <span className="text-[12.5px] font-medium">
+                  {(cvFile?.ok ? cvFile.fileName : null) ?? c.cvFileName ?? "CV"}
                 </span>
-                <a
-                  href={`/api/prepared-cv/${app.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-auto rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                >
-                  Open in a new tab
-                </a>
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  {cvFile?.ok && (
+                    <>
+                      <a
+                        href={cvHref}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                      >
+                        Open in a new tab
+                      </a>
+                      <a
+                        href={`${cvHref}&download=1`}
+                        className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                      >
+                        Download
+                      </a>
+                    </>
+                  )}
+                  <a
+                    href={`/api/prepared-cv/${app.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="The Career141 version, with the green block on page one"
+                    className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                  >
+                    Prepared CV
+                  </a>
+                </div>
               </div>
-              <object
-                data={`/api/prepared-cv/${app.id}#view=FitH`}
-                type="application/pdf"
-                className="h-[660px] w-full bg-paper"
-                aria-label={`CV for ${c.fullName}`}
-              >
+              {cvFile?.ok && cvIsPdf ? (
+                <iframe src={cvHref} title={`CV — ${c.fullName}`} className="h-[720px] w-full bg-paper" />
+              ) : cvFile?.ok ? (
                 <p className="px-4 py-10 text-center text-[12.5px] text-ink-soft">
-                  Your browser will not display the PDF inline.{" "}
-                  <a href={`/api/prepared-cv/${app.id}`} className="text-brand hover:underline">
-                    Open it in a new tab
+                  This CV is not a PDF, so the browser cannot show it here.{" "}
+                  <a href={`${cvHref}&download=1`} className="text-brand hover:underline">
+                    Download it
                   </a>
                   .
                 </p>
-              </object>
+              ) : (
+                <p className="px-4 py-10 text-center text-[12.5px] text-ink-soft">
+                  {cvFile?.detail ?? "No CV file is on record for this candidate."}
+                </p>
+              )}
             </div>
 
             <h3 className="mb-2.5 text-[13px] font-semibold">What we hold on file</h3>

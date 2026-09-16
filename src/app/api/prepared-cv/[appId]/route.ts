@@ -43,7 +43,19 @@ export async function GET(
 
   // The CV's own structure, as extraction read it; without it the page has
   // only the headline fields.
-  const profile = storeMode() === "convex" ? await backend.candidateProfile({ id: user.id }, c.id).catch(() => null) : null;
+  //
+  // Read without an actor, as the profile page and /api/cv do: access was
+  // decided above, against this opening. Passing the user made the backend
+  // apply its whole-database rule (admin, ta_manager, senior_ta, test_ta), so a
+  // Director, Ops or a recruiter got the headline fields only — and the refusal
+  // was swallowed by the catch, so it looked like a CV with nothing in it.
+  const profile =
+    storeMode() === "convex"
+      ? await backend.candidateProfile({ id: null }, c.id).catch((e) => {
+          console.error(`[prepared-cv ${appId}] profile could not be read:`, (e as Error).message);
+          return null;
+        })
+      : null;
 
   const { pdf, placement } = buildPreparedCv(
     {
