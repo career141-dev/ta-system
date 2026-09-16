@@ -148,9 +148,14 @@ export function TokenInput({
   const [tokens, setTokens] = useState<string[]>(initial);
   const [draft, setDraft] = useState("");
 
+  // "SAP, IFRS; Excel" typed or pasted is three entries, not one.
   const add = (v: string) => {
-    const t = v.trim();
-    if (t && !tokens.includes(t)) setTokens([...tokens, t]);
+    const next = [...tokens];
+    for (const part of v.split(/[,;\n]+/)) {
+      const t = part.trim();
+      if (t && !next.some((x) => x.toLowerCase() === t.toLowerCase())) next.push(t);
+    }
+    setTokens(next);
     setDraft("");
   };
 
@@ -178,9 +183,13 @@ export function TokenInput({
         ))}
         <input
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            // A paste with commas in it is split at once, rather than waiting for Enter.
+            if (/[,;\n]/.test(e.target.value)) add(e.target.value);
+            else setDraft(e.target.value);
+          }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === ",") {
+            if (e.key === "Enter" || e.key === "," || e.key === ";") {
               e.preventDefault();
               add(draft);
             }

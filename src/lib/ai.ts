@@ -70,7 +70,10 @@ export type Task = "jd" | "research" | "rank" | "extract" | "plan" | "parse" | "
  * and the only thing that differs is who bills the search.
  */
 const OPENROUTER_MODEL: Record<Task, string> = {
-  jd: "anthropic/claude-opus-5",
+  // DeepSeek V4 Flash, the model the matching engine already uses (16 September,
+  // at the desk's request). Checked the same day to serve through the
+  // zero-retention providers this route insists on.
+  jd: "deepseek/deepseek-v4-flash",
   extract: "anthropic/claude-sonnet-5",
   research: "google/gemini-3.1-pro-preview",
   rank: "google/gemini-3.6-flash",

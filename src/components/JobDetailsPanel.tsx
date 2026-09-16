@@ -63,16 +63,16 @@ export function JobDetailsPanel({
 
   const statusLine =
     r.status === "extracting"
-      ? "Reading the approved JD…"
+      ? "Reading the details…"
       : r.status === "failed"
         ? `Could not read the JD: ${r.error ?? "unknown error"}`
         : r.editedAt
           ? `Edited${editedByName ? ` by ${editedByName}` : ""} ${new Date(r.editedAt).toLocaleString()}`
           : r.status === "extracted" && r.extractedAt
-            ? `Extracted from the approved JD ${new Date(r.extractedAt).toLocaleString()} — check it`
+            ? `Extracted ${jdApproved ? "from the approved JD" : "from the brief and notes"} ${new Date(r.extractedAt).toLocaleString()} — check it`
             : jdApproved
               ? "Not extracted yet"
-              : "Filled in when the JD is approved";
+              : "Filled in from the brief and notes when the JD is drafted";
 
   const fieldset = !canEdit || r.status === "extracting";
 
