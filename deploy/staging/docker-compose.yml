@@ -1,0 +1,142 @@
+# TA System — staging, on the live VPS, isolated from production.
+#
+# Nothing here touches the production project in ~/career141: its own network,
+# its own Postgres, its own volumes, and a Convex instance name that cannot
+# resolve to production's database (Convex names the database after
+# INSTANCE_NAME: "ta-staging" -> database "ta_staging").
+#
+# Memory is capped on every container, so a runaway import is killed inside
+# staging instead of pushing the kernel into killing production processes.
+#
+# Only the app is published on the public address. Convex, its dashboard,
+# Qdrant and Postgres listen on 127.0.0.1; reach them with an SSH tunnel
+# (see docs/STAGING.md). Secrets come from .env.staging (chmod 600).
+
+name: ta-staging
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: ta-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: convex
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD:?set in .env.staging}
+      POSTGRES_DB: ta_staging
+    command: ["postgres", "-c", "shared_buffers=384MB", "-c", "max_connections=100", "-c", "max_wal_size=2GB"]
+    volumes:
+      - ta-staging-postgres-data:/var/lib/postgresql/data
+    mem_limit: 1536m
+    mem_reservation: 512m
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U convex -d ta_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [ta-staging-net]
+    logging: &logs
+      driver: json-file
+      options: { max-size: "20m", max-file: "3" }
+
+  convex:
+    image: ghcr.io/get-convex/convex-backend:latest
+    container_name: ta-staging-convex
+    restart: unless-stopped
+    stop_grace_period: 20s
+    stop_signal: SIGINT
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:3220:3210"
+      - "127.0.0.1:3221:3211"
+    environment:
+      INSTANCE_NAME: ta-staging
+      INSTANCE_SECRET: ${STAGING_INSTANCE_SECRET:?set in .env.staging}
+      POSTGRES_URL: postgresql://convex:${STAGING_POSTGRES_PASSWORD}@postgres:5432?sslmode=disable
+      DO_NOT_REQUIRE_SSL: "true"
+      CONVEX_CLOUD_ORIGIN: http://127.0.0.1:3220
+      CONVEX_SITE_ORIGIN: http://127.0.0.1:3221
+      DISABLE_BEACON: "true"
+      APPLICATION_MAX_CONCURRENT_MUTATIONS: "8"
+      APPLICATION_MAX_CONCURRENT_NODE_ACTIONS: "4"
+      APPLICATION_MAX_CONCURRENT_V8_ACTIONS: "4"
+    volumes:
+      - ta-staging-convex-files:/convex/data
+    mem_limit: 5g
+    memswap_limit: 5g
+    mem_reservation: 1g
+    networks: [ta-staging-net]
+    logging: *logs
+
+  convex-dashboard:
+    image: convex-dashboard:working
+    container_name: ta-staging-convex-dashboard
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6792:6791"
+    environment:
+      NEXT_PUBLIC_DEPLOYMENT_URL: http://127.0.0.1:3220
+      PORT: "6791"
+      HOSTNAME: 0.0.0.0
+    depends_on: [convex]
+    mem_limit: 512m
+    networks: [ta-staging-net]
+    logging: *logs
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ta-staging-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6336:6333"
+      - "127.0.0.1:6337:6334"
+    volumes:
+      - ta-staging-qdrant-data:/qdrant/storage
+    mem_limit: 1536m
+    networks: [ta-staging-net]
+    logging: *logs
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:?set in .env.staging}
+    image: career141-ta:staging
+    container_name: ta-staging-app
+    restart: unless-stopped
+    depends_on: [convex, qdrant]
+    ports:
+      - "3110:3100"
+    env_file: [.env.staging]
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=768"
+      # Staging names its backend explicitly and keeps the safety check: the app
+      # refuses to start unless Convex has crons off and the outbound lock on.
+      C141_DEPLOYMENT: staging
+      C141_CONVEX_HOST: convex
+      CONVEX_SELF_HOSTED_URL: http://convex:3210
+      QDRANT_URL: http://qdrant:6333
+    mem_limit: 1g
+    mem_reservation: 256m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/signin').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks: [ta-staging-net]
+    logging: *logs
+
+volumes:
+  ta-staging-postgres-data:
+    name: ta-staging-postgres-data
+  ta-staging-convex-files:
+    name: ta-staging-convex-files
+  ta-staging-qdrant-data:
+    name: ta-staging-qdrant-data
+    external: true
+
+networks:
+  ta-staging-net:
+    name: ta-staging-net
