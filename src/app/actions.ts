@@ -10,6 +10,7 @@ import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from 
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
+import { assignableTas } from "@/lib/assignable";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -435,8 +436,11 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   const gender = String(formData.get("targetGender") ?? "").trim() || null;
 
   const isLead = user.role === "ta_lead" || user.role === "admin";
+  // A lead assigns from the active TAs only (lib/assignable); anyone else sent
+  // is dropped rather than trusted from the form.
+  const tas = new Set(assignableTas(repo.users()).map((u) => u.id));
   const assigned = isLead
-    ? formData.getAll("assignedTaIds").map(String).filter(Boolean)
+    ? formData.getAll("assignedTaIds").map(String).filter((id) => tas.has(id))
     : [user.id];
 
   if (!clientId || !title || assigned.length === 0) return null;
