@@ -5,6 +5,7 @@ import { adjustJobStageStat } from "./jobs/stats";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
 import { v } from "convex/values";
 import { awaitingFirstSend, sweepCovers } from "./lib/followUpScope";
+import { assignedTaEmail } from "./pipeline/followUpHelper";
 
 const crons = cronJobs();
 
@@ -370,6 +371,8 @@ export const evaluateFollowUpStage = internalMutation({
               subject: emailSubject,
               body: emailBody,
               bodyHtml: emailBodyHtml,
+              // From the assigned TA's own mailbox.
+              fromEmail: await assignedTaEmail(ctx, app, job),
             });
           }
 

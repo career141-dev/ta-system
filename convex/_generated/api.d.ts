@@ -146,6 +146,7 @@ import type * as ta_clients from "../ta/clients.js";
 import type * as ta_commit from "../ta/commit.js";
 import type * as ta_dispatch from "../ta/dispatch.js";
 import type * as ta_dispatchRecord from "../ta/dispatchRecord.js";
+import type * as ta_eodMail from "../ta/eodMail.js";
 import type * as ta_followUp from "../ta/followUp.js";
 import type * as ta_guard from "../ta/guard.js";
 import type * as ta_inboxTest from "../ta/inboxTest.js";
@@ -316,6 +317,7 @@ declare const fullApi: ApiFromModules<{
   "ta/commit": typeof ta_commit;
   "ta/dispatch": typeof ta_dispatch;
   "ta/dispatchRecord": typeof ta_dispatchRecord;
+  "ta/eodMail": typeof ta_eodMail;
   "ta/followUp": typeof ta_followUp;
   "ta/guard": typeof ta_guard;
   "ta/inboxTest": typeof ta_inboxTest;

@@ -1,4 +1,5 @@
-import { followUpCancelledReason, GRAPH_BASE, sendFollowUpMail, sendMailPayload } from "../convex/lib/graphMail";
+import { addressList, followUpCancelledReason, GRAPH_BASE, sendFollowUpMail, sendMailPayload } from "../convex/lib/graphMail";
+import { eodEmailHtml, DEFAULT_EOD_CC } from "../src/lib/eod-format";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -14,12 +15,13 @@ const env = (vars: Record<string, string | undefined>) => {
   for (const [k, v] of Object.entries(vars)) if (v !== undefined) process.env[k] = v;
 };
 
-/** A fake Microsoft Graph: records each call and answers with `status`. */
-function fakeGraph(status = 202, body = "") {
+/** A fake Microsoft Graph: records each call and answers with `status` (or per sender). */
+function fakeGraph(status: number | ((url: string) => number) = 202, body = "") {
   const calls: { url: string; auth: string; payload: any }[] = [];
   const fetchImpl = async (url: string, init: { headers: Record<string, string>; body: string }) => {
     calls.push({ url, auth: init.headers.Authorization, payload: JSON.parse(init.body) });
-    return { ok: status >= 200 && status < 300, status, text: async () => body };
+    const s = typeof status === "function" ? status(url) : status;
+    return { ok: s >= 200 && s < 300, status: s, text: async () => body };
   };
   return { calls, fetchImpl };
 }
@@ -86,9 +88,59 @@ async function main() {
   r = await sendFollowUpMail(mail, async () => { throw new Error("AADSTS7000215 invalid secret"); }, fakeGraph().fetchImpl);
   eq("sign-in failure → reason", !r.ok && r.error.includes("AADSTS7000215"), true);
   r = await sendFollowUpMail(mail, token, fakeGraph(403, "ErrorAccessDenied").fetchImpl);
-  eq("Graph 403 → status and body", !r.ok && r.error, "Microsoft Graph sendMail returned 403: ErrorAccessDenied");
+  eq("Graph 403 → status and body", !r.ok && r.error, "Microsoft Graph sendMail from job@career141.com returned 403: ErrorAccessDenied");
   r = await sendFollowUpMail(mail, token, async () => { throw new Error("ECONNRESET"); });
   eq("network failure → reason", !r.ok && r.error.includes("ECONNRESET"), true);
+
+  // ── From the assigned TA's mailbox, falling back to the system inbox ─────
+  env({ OUTREACH_LIVE: "true" });
+  g = fakeGraph();
+  r = await sendFollowUpMail({ ...mail, from: "Nimali@Career141.com", fallbackFrom: "job@career141.com", replyTo: ["nimali@career141.com", "job@career141.com"] }, token, g.fetchImpl);
+  eq("sent from the TA's mailbox", r.ok && r.from, "nimali@career141.com");
+  eq("posted to the TA's sendMail", g.calls[0].url, `${GRAPH_BASE}/users/nimali%40career141.com/sendMail`);
+  eq("replies go to the TA and job@", g.calls[0].payload.message.replyTo.map((x: any) => x.emailAddress.address), ["nimali@career141.com", "job@career141.com"]);
+  g = fakeGraph((url) => (url.includes("nimali") ? 403 : 202), "ErrorAccessDenied");
+  r = await sendFollowUpMail({ ...mail, from: "nimali@career141.com", fallbackFrom: "job@career141.com" }, token, g.fetchImpl);
+  eq("TA mailbox refused → sent from job@", r.ok && r.from, "job@career141.com");
+  eq("and says so", r.ok && r.note.includes("could not send"), true);
+  eq("two attempts", g.calls.length, 2);
+  g = fakeGraph((url) => (url.includes("nimali") ? 500 : 202), "boom");
+  r = await sendFollowUpMail({ ...mail, from: "nimali@career141.com", fallbackFrom: "job@career141.com" }, token, g.fetchImpl);
+  eq("a Graph outage is not retried from another mailbox", [r.ok, g.calls.length], [false, 1]);
+
+  // ── End of day: copies and attachments ───────────────────────────────────
+  const eod = {
+    from: "nimali@career141.com",
+    to: "director@career141.com",
+    cc: ["lead@career141.com", DEFAULT_EOD_CC, "shortlists@career141.com", "Director@career141.com", "not an address"],
+    subject: "HAYLEYS - CFO - 16 SEPTEMBER 2026",
+    html: "<p>x</p>",
+    attachments: [{ name: "Nimal Perera - Career141.pdf", contentType: "application/pdf", base64: "JVBERi0=" }],
+  };
+  g = fakeGraph();
+  r = await sendFollowUpMail(eod, token, g.fetchImpl);
+  eq("azim@career141.com is the default end-of-day copy", DEFAULT_EOD_CC, "azim@career141.com");
+  eq("live: copies kept, the recipient and junk removed", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["lead@career141.com", "azim@career141.com", "shortlists@career141.com"]);
+  eq("CV attached as a file", g.calls[0].payload.message.attachments[0], { "@odata.type": "#microsoft.graph.fileAttachment", name: "Nimal Perera - Career141.pdf", contentType: "application/pdf", contentBytes: "JVBERi0=" });
+  env({ OUTREACH_TEST_EMAIL: "qa@career141.com" });
+  g = fakeGraph();
+  r = await sendFollowUpMail(eod, token, g.fetchImpl);
+  eq("test mode: no copies go out", g.calls[0].payload.message.ccRecipients, undefined);
+  env({ OUTREACH_LIVE: "true", C141_OUTBOUND_LOCK: "true", C141_OUTBOUND_ALLOW_EMAILS: "director@career141.com,azim@career141.com" });
+  g = fakeGraph();
+  r = await sendFollowUpMail(eod, token, g.fetchImpl);
+  eq("lock: only allow-listed copies", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["azim@career141.com"]);
+  eq("address list de-duplicates", addressList(["A@b.co", "a@b.co", "", "x"]), ["a@b.co"]);
+
+  const body = eodEmailHtml({
+    rows: [{ no: 1, name: "Nimal <Perera>", location: "Colombo", age: "34", notice: "30 days", notes: [">Currently at Hayleys"], currentCompany: "Hayleys", currentDesignation: "CFO", currentRemuneration: "LKR 450,000", expectedRemuneration: "LKR 600,000", applicationId: "a1" }],
+    effort: { date: "16 Sept", assignee: "Nimali", hundredOrFollowUp: "", lEffort: 12, sets: 2, da: 1, scoop: 0, l: 3, post: null, addOns: null, backUp: null },
+    senderName: "Nimali",
+  });
+  eq("email body escapes names", body.includes("Nimal &lt;Perera&gt;"), true);
+  eq("email body carries the shortlist", body.includes("LKR 600,000") && body.includes("CURRENT REMUNERATION"), true);
+  eq("email body carries today's progress", body.includes("NO.OF L EFFORT") && body.includes(">12<"), true);
+  eq("email body signs off as the TA", body.includes("Best Regards,<br><br>Nimali"), true);
 
   // ── A queued message that should no longer go ─────────────────────────────
   eq("pending, in Follow-up → send", followUpCancelledReason({ deliveryStatus: "pending" }, { currentStage: "follow_up" }), null);

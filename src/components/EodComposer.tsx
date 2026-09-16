@@ -19,7 +19,9 @@ import { sendEod } from "@/app/actions";
  * the real emails, so what arrives in the Director's inbox looks like what he
  * already reads.
  *
- * It is never auto-sent — spec §10.3.
+ * Never sent on its own — spec §10.3. The Director's copy is sent through
+ * Microsoft Graph when the TA presses Send, from their own mailbox, copying the
+ * TA Lead, the desk's end-of-day copy and the shortlist inbox.
  */
 export function EodComposer({
   openingId,
@@ -30,6 +32,7 @@ export function EodComposer({
   ccName,
   ccEmail,
   trackedAt,
+  eodCc,
   rows,
   effort,
   senderName,
@@ -45,6 +48,8 @@ export function EodComposer({
   ccEmail: string;
   /** The TA's shortlist-replies inbox. Copied in, and on the reply-to. */
   trackedAt: string | null;
+  /** Copied on every end-of-day email (People page). */
+  eodCc: string | null;
   rows: ShortlistRow[];
   effort: EffortRow;
   senderName: string;
@@ -76,6 +81,12 @@ export function EodComposer({
               <span>
                 <span className="text-ink-faint">Cc </span>
                 {ccName} <span className="text-ink-faint">{ccEmail}</span>
+              </span>
+            )}
+            {eodCc && (
+              <span>
+                <span className="text-ink-faint">Cc </span>
+                {eodCc}
               </span>
             )}
             {trackedAt && (
@@ -248,13 +259,13 @@ export function EodComposer({
           disabled={rows.length === 0}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35"
         >
-          {kind === "director" ? "Record as sent" : "Record that it went to the client"}
+          {kind === "director" ? "Send email" : "Record that it went to the client"}
         </button>
         <span className="max-w-[62ch] text-[12.5px] text-ink-faint">
           {rows.length === 0
             ? "Nobody new to send — everyone at this stage has already gone out."
             : kind === "director"
-              ? `Nothing is emailed from here: send it from your mailbox as usual, then record it so the ${rows.length}-person list is held for the reply. ${openSetNote ?? ""}`
+              ? `Sends this email now from your mailbox through Microsoft Graph, with the ${rows.length} CV${rows.length === 1 ? "" : "s"} attached, and holds the list for the Director's reply. ${openSetNote ?? ""}`
               : `The client email is sent by operations, not from here. Record it once it has gone, so the reply to the shortlist inbox can be read back onto these ${rows.length}.`}
           {alreadyOut && " An earlier set is still waiting on a reply — that is fine; replies are matched by the date in their subject."}
         </span>

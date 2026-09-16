@@ -135,6 +135,22 @@ export async function updateFollowUpFlags(
 }
 
 /**
+ * The mailbox a candidate's follow-up emails are sent from: the TA assigned to
+ * them — whoever shortlisted them — or, before anybody has, the opening's
+ * primary recruiter. Undefined when neither has an email address, and the
+ * sender falls back to the system inbox.
+ */
+export async function assignedTaEmail(ctx: any, app: any, job: any): Promise<string | undefined> {
+  for (const userId of [app?.ownerTaId, job?.primaryRecruiterId]) {
+    if (!userId) continue;
+    const user = await ctx.db.get(userId);
+    const email = (user?.email ?? "").trim();
+    if (email) return email;
+  }
+  return undefined;
+}
+
+/**
  * Initiates the follow-up outreach flow when a candidate first arrives at the follow_up stage.
  * Immediately builds and schedules the Day 0 WhatsApp notification outlining missing fields.
  */
@@ -366,6 +382,7 @@ export async function initiateFollowUpOutreach(
         subject: emailSubject,
         body: emailBody,
         bodyHtml: emailBodyHtml,
+        fromEmail: await assignedTaEmail(ctx, app, job),
       });
     }
 
@@ -423,8 +440,7 @@ export async function initiateFollowUpOutreach(
       });
 
       // Schedule the actual Email delivery via Microsoft Graph
-      const recruiter = await ctx.db.get(job.primaryRecruiterId);
-      const taEmail = recruiter?.email;
+      const taEmail = await assignedTaEmail(ctx, app, job);
       const candidateEmail = candidate.email;
 
       // Sent from the system inbox through Microsoft Graph (lib/graphMail.ts);

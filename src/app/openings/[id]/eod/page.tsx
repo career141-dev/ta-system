@@ -90,7 +90,7 @@ export default async function EodPage({
         <h1 className="text-[26px] font-semibold tracking-tight">End of day</h1>
         <p className="mt-2 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
           Sent from your own mailbox to {director?.name ?? "the Director"}, copying{" "}
-          {lead?.name ?? "the TA Lead"}. When the reply comes back, paste it below — whoever he
+          {lead?.name ?? "the TA Lead"} and {repo.eodCopyTo()}. When the reply comes back, paste it below — whoever he
           picks moves to the Director shortlist on its own.
         </p>
       </header>
@@ -216,6 +216,7 @@ export default async function EodPage({
         /* Copied in and named on the reply-to, so the reply is caught whether
            they press Reply or Reply All. */
         trackedAt={repo.shortlistInbox()}
+        eodCc={kind === "director" ? repo.eodCopyTo() : null}
         rows={rows}
         effort={effort}
         senderName={user.name}
