@@ -11,32 +11,24 @@
  * carries the URL it came off and the person who pressed the button.
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import crypto from "node:crypto";
 import type { ProfileCapture } from "@/data/types";
-import { dataDir } from "@/data/dataDir";
-
-const DATA_DIR = dataDir();
-const TOKEN_FILE = path.join(DATA_DIR, "extension-token.txt");
+import { repo } from "@/data/store";
 
 /**
- * A shared secret so a stray page cannot post into the vault. It lives beside
- * the JSON store and is created on first read; at connection this is replaced
- * by the signed-in user's Clerk session.
+ * A shared secret so a stray page cannot post into the vault. Kept in the
+ * database's settings (key `extension.token`) and created on first read, so
+ * every server — and a restart — hands out the same one.
  */
 export function extensionToken(): string {
-  try {
-    const existing = fs.readFileSync(TOKEN_FILE, "utf8").trim();
-    if (existing) return existing;
-  } catch {
-    // Not written yet.
-  }
+  const existing = repo.setting(TOKEN_KEY, "").trim();
+  if (existing) return existing;
   const token = crypto.randomBytes(24).toString("base64url");
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-  fs.writeFileSync(TOKEN_FILE, token);
+  repo.setSetting(TOKEN_KEY, token);
   return token;
 }
+
+const TOKEN_KEY = "extension.token";
 
 /** The extension runs on a chrome-extension:// origin, so every reply needs
  *  these and every route needs an OPTIONS handler. */

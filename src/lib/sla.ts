@@ -1,7 +1,7 @@
 import { repo, setsForOpening } from "@/data/store";
 import { colomboDayStart } from "@/lib/calendar";
 import { PRIORITY_TARGET, URGENT_ALERTS, type AlertKind, type Id } from "@/data/types";
-import { isWorkingDay, workingHoursBetween } from "./calendar";
+import { hasWorkingHours, isWorkingDay, workingHoursBetween } from "./calendar";
 
 export { isWorkingDay, workingHoursBetween, nextWorkingDay, TIMEZONE, DAILY_CUTOFF_HOUR } from "./calendar";
 
@@ -31,7 +31,29 @@ export interface LiveAlert {
 
 const DAY = 86_400_000;
 
-export function computeAlerts(now = Date.now()): LiveAlert[] {
+/*
+ * One computation per state of the desk, not one per call.
+ *
+ * The layout counts alerts for the badge on every page, and the dashboard, the
+ * openings list and the alerts page each compute them again in the same
+ * request. The answer only changes when the data does — or when the clock
+ * crosses a threshold, which is why the memo also expires after half a minute.
+ * A caller that passes its own `now` (tests, "as of" views) always computes.
+ */
+const ALERT_MEMO_MS = 30_000;
+let alertMemo: { key: string; at: number; alerts: LiveAlert[] } | null = null;
+
+export function computeAlerts(now?: number): LiveAlert[] {
+  if (now !== undefined) return computeAlertsAt(now);
+  const at = Date.now();
+  const key = repo.version();
+  if (alertMemo && alertMemo.key === key && at - alertMemo.at < ALERT_MEMO_MS) return alertMemo.alerts;
+  const alerts = computeAlertsAt(at);
+  alertMemo = { key, at, alerts };
+  return alerts;
+}
+
+function computeAlertsAt(now: number): LiveAlert[] {
   const out: LiveAlert[] = [];
   const openings = repo.openings().filter((o) => o.status === "open");
 
@@ -122,9 +144,7 @@ export function computeAlerts(now = Date.now()): LiveAlert[] {
     // buries everything else on the page and the TA opens the same list either
     // way.
     const unscreened = apps.filter(
-      (a) =>
-        (a.stage === "new_cv" || a.stage === "matched") &&
-        workingHoursBetween(a.createdAt, now) >= 24,
+      (a) => (a.stage === "new_cv" || a.stage === "matched") && hasWorkingHours(a.createdAt, now, 24),
     );
     if (unscreened.length) {
       const longest = Math.max(...unscreened.map((a) => workingHoursBetween(a.createdAt, now)));
@@ -403,7 +423,7 @@ export function computeAlerts(now = Date.now()): LiveAlert[] {
   return out.sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.dueAt - b.dueAt);
 }
 
-export function alertsFor(userId: Id, now = Date.now()): LiveAlert[] {
+export function alertsFor(userId: Id, now?: number): LiveAlert[] {
   return computeAlerts(now).filter((a) => a.assignedTo.includes(userId));
 }
 

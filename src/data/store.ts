@@ -74,7 +74,8 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
-import { hasCandidate, missingCandidateMessage, primed, resetStore, state } from "./primeState";
+import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
+import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -93,6 +94,7 @@ let dataVersion = 0;
 interface Indexes {
   db: Database;
   version: number;
+  primedVersion: number;
   candidateById: Map<Id, Candidate>;
   applicationById: Map<Id, Application>;
   appsByOpening: Map<Id, Application[]>;
@@ -104,8 +106,14 @@ let indexCache: Indexes | null = null;
 
 function indexes(): Indexes {
   const db = load();
-  const currentVersion = isConvex() ? state.version : dataVersion;
-  if (indexCache && indexCache.db === db && indexCache.version === currentVersion) return indexCache;
+  if (
+    indexCache &&
+    indexCache.db === db &&
+    indexCache.version === dataVersion &&
+    indexCache.primedVersion === primedVersion()
+  ) {
+    return indexCache;
+  }
   const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
     const list = m.get(k);
     if (list) list.push(v);
@@ -128,7 +136,8 @@ function indexes(): Indexes {
   }
   indexCache = {
     db,
-    version: currentVersion,
+    version: dataVersion,
+    primedVersion: primedVersion(),
     candidateById: new Map(db.candidates.map((c) => [c.id, c])),
     applicationById: new Map(db.applications.map((a) => [a.id, a])),
     appsByOpening,
@@ -368,6 +377,7 @@ function mutate(fn: (db: Database) => void) {
     dataVersion++;
     return;
   }
+  if (isConvex()) return commitToConvex(fn);
   return withLock(() => {
     // `load` compares the file's modified time with the copy in memory, so a
     // write by another process is still picked up — without re-reading the
@@ -375,14 +385,55 @@ function mutate(fn: (db: Database) => void) {
     const db = load();
     fn(db);
     dataVersion++;
-    if (isConvex()) {
-      // The rows live on the server; the copy here is now behind. Dropping it
-      // is what makes the next read see the write.
-      resetStore();
-      return;
-    }
     writeOut(db);
   });
+}
+
+/**
+ * A write, saved to Convex as one transaction.
+ *
+ * The rules run exactly as they do over the file: against the in-memory
+ * tables. The tables are copied first; afterwards the difference is sent as a
+ * single commit (convex/ta/commit.ts) that writes all of it or none of it, and
+ * refuses the lot if anything the write changed was changed by someone else
+ * since it was loaded. On success the new rows take the ids the database gave
+ * them and the in-memory copy stays current, so the rest of the request reads
+ * its own write. On refusal the copy is put back and the action gets an error
+ * it can show.
+ *
+ * Until this, a write here changed the copy and then threw it away: the page
+ * said "saved" and the next page showed the old data.
+ */
+function commitToConvex(fn: (db: Database) => void) {
+  const commit = getCommitter();
+  if (!commit) {
+    throw new Error("Saving is not available: the store was not loaded from Convex. Call primeStore() first.");
+  }
+  const db = load();
+  const before = snapshotTables(db);
+  lockDepth++;
+  try {
+    fn(db);
+  } catch (e) {
+    restoreTables(db, before);
+    throw e;
+  } finally {
+    lockDepth--;
+  }
+  const ops = diffTables(before, db);
+  if (ops.length === 0) return;
+  try {
+    const { ids } = commit(ops);
+    renameIds(db, ids);
+    recordAliases(ids);
+  } catch (e) {
+    restoreTables(db, before);
+    dataVersion++;
+    bumpPrimed();
+    throw new Error(describeCommitError((e as Error).message));
+  }
+  dataVersion++;
+  bumpPrimed();
 }
 
 /** "Bangladesh" → "Bangladeshi", so an unstated brief still routes correctly. */
@@ -458,7 +509,7 @@ function channelForIntake(source: IntakeSource, jobPostId: Id | null): Applicati
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
 
-export const repo = {
+const rawRepo = {
   reset() {
     cache = backfill(buildSeed());
     persist();
@@ -603,7 +654,7 @@ export const repo = {
     lockDepth > 0 ? load().applications.find((a) => a.id === id) ?? null : indexes().applicationById.get(id) ?? null,
 
   /** Changes whenever the data does — for caches outside the store. */
-  version: () => `${cacheStamp}:${dataVersion}`,
+  version: () => `${cacheStamp}:${dataVersion}:${primedVersion()}`,
 
   /**
    * The opening a record really belongs to, read from the record.
@@ -770,6 +821,12 @@ export const repo = {
     if (!app) return { ok: false, message: "That application no longer exists." };
 
     const from = app.stage;
+    // A person rejecting or dropping someone says why — whichever screen, or
+    // the assistant, asked. Only the form enforced it, so the assistant could
+    // reject with no reason on record.
+    if (!opts.force && actorId && (opts.actorType ?? "user") === "user" && (stage === "rejected" || stage === "dropped_out") && from !== stage && !reason?.trim()) {
+      return { ok: false, message: stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out." };
+    }
     if (!opts.force) {
       const db0 = load();
       const check = canMove(from, stage, {
@@ -1438,17 +1495,19 @@ export const repo = {
   },
 
   /** Top-nav search — openings and candidates by name. */
-  search(q: string) {
+  search(q: string, rankedIds: Id[] = []) {
     const db = load();
     const n = q.trim().toLowerCase();
     if (!n) return { openings: [], candidates: [] };
+    // People the database search ranked, in its order, then any loaded row that matches.
+    const ranked = rankedIds.map((id) => db.candidates.find((c) => c.id === id)).filter((c): c is Candidate => !!c);
     const clientName = (id: Id) => db.clients.find((c) => c.id === id)?.name ?? "";
     return {
       openings: db.openings
         .filter((o) => `${o.title} ${clientName(o.clientId)}`.toLowerCase().includes(n))
         .slice(0, 8),
-      candidates: db.candidates
-        .filter((c) => `${c.fullName} ${c.currentEmployer ?? ""} ${c.currentTitle ?? ""}`.toLowerCase().includes(n))
+      candidates: [...new Set([...ranked, ...db.candidates
+        .filter((c) => `${c.fullName} ${c.currentEmployer ?? ""} ${c.currentTitle ?? ""}`.toLowerCase().includes(n))])]
         .slice(0, 12)
         .map((c) => ({
           candidate: c,
@@ -1986,6 +2045,19 @@ export const repo = {
    * parser starts recognising every title the database actually contains.
    */
   vocabulary(): Vocabulary {
+    /*
+     * Backed by Convex the words come from the database, not from the rows
+     * this page happens to hold.
+     *
+     * Over the JSON file those are the same thing — the file IS the database.
+     * Over Convex they are not, and the difference is not visible in the
+     * result: a vocabulary built from an empty working set recognises no
+     * words, so the parser quietly ignores every one of them and the search
+     * answers a wider question than the one that was asked. `primeStore` reads
+     * the real one; this prefers it wherever it has.
+     */
+    const live = isConvex() ? primedVocabulary() : null;
+    if (live) return live;
     if (lockDepth > 0) return buildVocabulary(load());
     const ix = indexes();
     if (ix.vocabulary) return ix.vocabulary;
@@ -2468,6 +2540,11 @@ export const repo = {
     const app = db.applications.find((a) => a.id === input.applicationId);
     if (!app) return { ok: false, message: "No such application." };
     if (input.salary <= 0) return { ok: false, message: "An offer needs a salary." };
+    // An offer goes to someone the client shortlisted or interviewed. The move
+    // below is forced (the offer is what allows it), so without this a New CV
+    // could be made an offer, skipping the Director and the client.
+    const route = canMove(app.stage, "offer", { hasOffer: true });
+    if (!route.ok) return { ok: false, message: `An offer can be made once the client has shortlisted them. ${route.message}` };
     if (db.offers.some((o) => o.applicationId === app.id && o.status === "pending"))
       return { ok: false, message: "There is already an open offer on this candidate." };
 
@@ -3531,6 +3608,35 @@ export const repo = {
     return { ok: true };
   },
 };
+
+/**
+ * Every repo method resolves temporary ids in what it is given — a new row's
+ * first name, still held by the code that created it, after the database has
+ * renamed it on save (primeState.recordAliases). Strings, arrays of strings,
+ * and the string fields of an input object are checked; nothing else is touched.
+ */
+function withIdAliases<T extends Record<string, unknown>>(target: T): T {
+  const resolve = (arg: unknown): unknown => {
+    if (typeof arg === "string") return realId(arg);
+    if (Array.isArray(arg)) return arg.some((x) => typeof x === "string") ? arg.map((x) => realId(x)) : arg;
+    if (arg && typeof arg === "object" && Object.getPrototypeOf(arg) === Object.prototype) {
+      let copy: Record<string, unknown> | null = null;
+      for (const [k, v] of Object.entries(arg)) {
+        const r = typeof v === "string" ? realId(v) : Array.isArray(v) ? resolve(v) : v;
+        if (r !== v) (copy ??= { ...(arg as Record<string, unknown>) })[k] = r;
+      }
+      return copy ?? arg;
+    }
+    return arg;
+  };
+  for (const [name, fn] of Object.entries(target)) {
+    if (typeof fn !== "function") continue;
+    (target as Record<string, unknown>)[name] = (...args: unknown[]) => (fn as (...a: unknown[]) => unknown).apply(target, args.map(resolve));
+  }
+  return target;
+}
+
+export const repo = withIdAliases(rawRepo);
 
 function buildVocabulary(db: Database): Vocabulary {
   const uniq = (xs: (string | null)[]) => [...new Set(xs.filter(Boolean) as string[])];

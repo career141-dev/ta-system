@@ -15,7 +15,7 @@ import { primeStore } from "@/data/prime";
  * is the Director's view, not a recruiter's.
  */
 export default async function Dashboard() {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
   const openings = repo.openingsForUser(user).filter((o) => o.status === "open");
   const alerts = alertsFor(user.id);

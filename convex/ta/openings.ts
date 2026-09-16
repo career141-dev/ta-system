@@ -8,63 +8,14 @@
 // and must keep working until the backfill (plan step 5) has run.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
+import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
 import { scheduleExtraction } from "./requirements";
 
-/** An opening as the TA platform reads it. Legacy fields are carried through
- *  unchanged so nothing is lost in translation. */
-function projectOpening(job: Doc<"jobs">) {
-  return {
-    id: job._id as string,
-    title: job.title,
-    clientId: (job.clientId ?? null) as string | null,
-    clientName: job.clientName,
-    clientIndustry: job.clientIndustry,
-    jdMarkdown: job.jobDescription,
-    jdStatus: job.jdStatus ?? null,
-    jdApprovedAt: job.jdApprovedAt ?? null,
-    keyword: job.keyword,
-    locations: job.location ? [job.location] : [],
-    targetNationalities: job.targetNationalities ?? [],
-    targetGender: job.targetGender ?? null,
-    headcount: job.headcount ?? 1,
-    priorityTier: job.priorityTier ?? null,
-    positionStatus: job.positionStatus ?? null,
-    status: job.status,
-    seniorityLevel: job.seniorityLevel,
-    requiredSkills: job.requiredSkills ?? [],
-    niceToHaveSkills: job.niceToHaveSkills ?? [],
-    experienceMinYears: job.experienceMinYears ?? null,
-    experienceMaxYears: job.experienceMaxYears ?? null,
-    recruitmentType: job.recruitmentType ?? "both",
-    isConfidential: job.isConfidential ?? false,
-    educationLevel: job.educationLevel ?? null,
-    languagesRequired: job.languagesRequired ?? [],
-    salaryMin: job.salaryMin ?? null,
-    salaryMax: job.salaryMax ?? null,
-    salaryCurrency: job.salaryCurrency ?? null,
-    requirementsStatus: job.requirementsStatus ?? null,
-    requirementsExtractedAt: job.requirementsExtractedAt ?? null,
-    requirementsError: job.requirementsError ?? null,
-    requirementsLockedFields: job.requirementsLockedFields ?? [],
-    requirementsEditedBy: (job.requirementsEditedBy ?? null) as string | null,
-    requirementsEditedAt: job.requirementsEditedAt ?? null,
-    followUpQuestions: job.followUpQuestions ?? [],
-    taLeadId: (job.taLeadId ?? null) as string | null,
-    assignedTaIds: (job.assignedTaIds ?? []) as string[],
-    primaryRecruiterId: job.primaryRecruiterId as string,
-    stageCounts: job.stageCounts ?? {},
-    totalApplications: job.totalApplications ?? 0,
-    valueOnProgressing: job.valueOnProgressing ?? null,
-    valueOfPlacement: job.valueOfPlacement ?? null,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-  };
-}
 
-export const list = query({
+export const list = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     /** Omit for every status. */
@@ -105,7 +56,7 @@ export const list = query({
   },
 });
 
-export const get = query({
+export const get = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -150,7 +101,7 @@ export const get = query({
  * existing `jobs` mutations and are not duplicated here, so there is one
  * writer per field rather than two that can disagree.
  */
-export const updateTaFields = mutation({
+export const updateTaFields = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),
@@ -190,7 +141,7 @@ export const updateTaFields = mutation({
  * no agreed requirements to score against, so nothing is scored at all. It is
  * therefore a real state change, not a label.
  */
-export const approveJd = mutation({
+export const approveJd = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),
@@ -219,7 +170,7 @@ export const approveJd = mutation({
 });
 
 /** The notes captured with an opening — what the JD is written from. Newest first, joined. */
-export const briefNotes = query({
+export const briefNotes = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -235,7 +186,7 @@ export const briefNotes = query({
  * Save the JD text — a generated draft, or an edit after approval. An approved
  * JD that changes is read again for requirements, in fill mode.
  */
-export const saveJd = mutation({
+export const saveJd = internalMutation({
   args: { actorId: v.string(), openingId: v.string(), jdMarkdown: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -262,7 +213,7 @@ function makeKeyword(title: string): string {
 /**
  * Create a new Opening (jobs row) along with its assignments.
  */
-export const create = mutation({
+export const create = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     clientId: v.string(),

@@ -1,3 +1,4 @@
+import { primeStore } from "@/data/prime";
 import { reportCsv, DEFAULT_SPEC, sanitizeSpec, type ReportSpec } from "@/lib/reporting";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/auth";
@@ -10,6 +11,8 @@ export const dynamic = "force-dynamic";
  * cannot drift apart.
  */
 export async function GET(req: Request) {
+  // Load the store before reading it — this route has no page to do it first.
+  await primeStore({ allApplications: true });
   const user = await currentUser();
   if (!user) return new Response("Sign in first.", { status: 401 });
   if (!can(user, "report.read").ok) return new Response("Not allowed.", { status: 403 });

@@ -5,6 +5,8 @@ import { currentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { seatFor } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
+import { storeMode } from "@/data/mode";
+import * as backend from "@/data/convex/backend";
 
 export async function GET(
   req: Request,
@@ -24,6 +26,8 @@ export async function GET(
       (seat.stages !== null && !seat.stages.includes(app.stage))) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
+  // Applications are loaded for the whole desk; the person on this one is not.
+  await primeStore({ candidateIds: [app.candidateId] });
   const c = repo.candidate(app.candidateId);
   if (!c) return NextResponse.json({ error: "not found" }, { status: 404 });
 
@@ -37,6 +41,10 @@ export async function GET(
     .map((n) => n.replace(/^[->•*]\s*/, "").trim())
     .filter(Boolean);
 
+  // The CV's own structure, as extraction read it; without it the page has
+  // only the headline fields.
+  const profile = storeMode() === "convex" ? await backend.candidateProfile({ id: user.id }, c.id).catch(() => null) : null;
+
   const { pdf, placement } = buildPreparedCv(
     {
       fullName: c.fullName,
@@ -46,6 +54,12 @@ export async function GET(
       totalExperienceYears: c.totalExperienceYears,
       educationDegree: c.educationDegree,
       educationInstitution: c.educationInstitution,
+      summary: profile?.summary ?? null,
+      career: profile?.career ?? [],
+      education: profile?.education ?? [],
+      skills: c.skills ?? [],
+      languages: profile?.languages ?? [],
+      certifications: profile?.certifications ?? [],
     },
     {
       currentSalary: url.searchParams.get("current") ?? c.currentSalary ?? "",

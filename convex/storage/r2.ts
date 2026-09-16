@@ -2,6 +2,19 @@ import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { action, internalAction } from "../_generated/server";
 import { v } from "convex/values";
+import { outboundLocked } from "../lib/outboundGuard";
+
+/*
+ * Test deployments keep their files at home.
+ *
+ * A deployment with the outbound lock on (every one that is not production)
+ * READS the production bucket — that is where the 77k candidates' CVs are —
+ * but never WRITES to it: a CV read from the inbox during a test is stored in
+ * this deployment's own file storage, under a "convex:<storageId>" key that
+ * the download and read functions below resolve. Production is unchanged.
+ */
+const LOCAL_PREFIX = "convex:";
+const localId = (key: string) => (key.startsWith(LOCAL_PREFIX) ? key.slice(LOCAL_PREFIX.length) : null);
 
 // Helper to initialize S3 client for Cloudflare R2
 export function getS3Client() {
@@ -52,6 +65,8 @@ export const generateDownloadUrl = action({
     downloadFilename: v.optional(v.string())
   },
   handler: async (ctx, args) => {
+    const local = localId(args.key);
+    if (local) return (await ctx.storage.getUrl(local as never)) ?? "";
     const s3 = getS3Client();
     
     // Support setting Content-Disposition for proper filename download
@@ -90,6 +105,10 @@ export const uploadBufferToR2 = internalAction({
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
       bytes[i] = binaryString.charCodeAt(i);
+    }
+    if (outboundLocked()) {
+      const storageId = await ctx.storage.store(new Blob([bytes], { type: args.contentType }));
+      return `${LOCAL_PREFIX}${storageId}`;
     }
 
     const command = new PutObjectCommand({
@@ -157,6 +176,10 @@ export const uploadCvRawTextToR2 = internalAction({
     const key = `cv-rawtext/${args.candidateId}/${args.cvUploadId}.txt`;
     const encoder = new TextEncoder();
     const bytes = encoder.encode(args.rawText);
+    if (outboundLocked()) {
+      const storageId = await ctx.storage.store(new Blob([bytes], { type: "text/plain; charset=utf-8" }));
+      return `${LOCAL_PREFIX}${storageId}`;
+    }
 
     const command = new PutObjectCommand({
       Bucket: process.env.R2_BUCKET_NAME!,
@@ -190,6 +213,11 @@ export const getResumeRawText = action({
   },
   handler: async (ctx, args): Promise<string | null> => {
     try {
+      const local = localId(args.rawTextKey);
+      if (local) {
+        const blob = await ctx.storage.get(local as never);
+        return blob ? await blob.text() : null;
+      }
       const s3 = getS3Client();
       const command = new GetObjectCommand({
         Bucket: process.env.R2_BUCKET_NAME!,

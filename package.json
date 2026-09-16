@@ -16,7 +16,8 @@
     "db:restore": "node scripts/restore-local.mjs",
     "convex:dev": "node scripts/convex-local-only.mjs dev --once",
     "convex:codegen": "node scripts/convex-local-only.mjs codegen",
-    "convex:import": "node scripts/convex-local-only.mjs import"
+    "convex:import": "node scripts/convex-local-only.mjs import",
+    "e2e": "node scripts/e2e/run-all.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1091.0",

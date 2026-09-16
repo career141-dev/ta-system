@@ -1,0 +1,151 @@
+{
+  "at": "2026-09-15T17:21:22.495Z",
+  "passed": 24,
+  "failed": 0,
+  "results": [
+    {
+      "id": "P7-00",
+      "name": "a test opening with an approved JD and two test candidates",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P7-03a",
+      "name": "suggestions are saved, and the same profile offered again is not added twice",
+      "ok": true,
+      "detail": "2 suggestions"
+    },
+    {
+      "id": "P7-03",
+      "name": "keeping one claims it for the TA; dismissing the other records the feedback",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P7-03s",
+      "name": "the suggestions screen shows the kept profile",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P7-05",
+      "name": "a LinkedIn profile captured by the extension lands in the opening's link vault for that TA",
+      "ok": true,
+      "detail": "HTTP 200 {\"status\":\"added\",\"id\":\"lv_k5sft6b2\",\"name\":\"QA Captured 17-19-50\",\"openingTitle\":\"QA Payroll Specia; 1 links"
+    },
+    {
+      "id": "P7-05b",
+      "name": "a capture with the wrong extension token is refused",
+      "ok": true,
+      "detail": "HTTP 401"
+    },
+    {
+      "id": "P7-01",
+      "name": "the hh screen loads",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-01",
+      "name": "the hh/research screen loads",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-01",
+      "name": "the hh/links screen loads",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-01",
+      "name": "the snippets screen loads",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-11",
+      "name": "the snippet card carries the opening's real title",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P7-06a",
+      "name": "the reports screen loads for the lead",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-06b",
+      "name": "a report is saved and listed for its owner, not for another TA",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P7-06",
+      "name": "the CSV export has the same rows as the report computed straight from the database",
+      "ok": true,
+      "detail": "CSV 96 rows, database 96"
+    },
+    {
+      "id": "P7-07",
+      "name": "the home dashboard loads for the ta_lead",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-07",
+      "name": "the home dashboard loads for the ta",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-07",
+      "name": "the home dashboard loads for the director",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-07",
+      "name": "the home dashboard loads for the ops",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P7-08",
+      "name": "the assistant answers a desk question",
+      "ok": true,
+      "detail": "HTTP 200 You are working on one opening: [QA Payroll Specialist 17-19-50](/openings/m179xn1w9z7dtbkk6paktv9f8s8eenv2)."
+    },
+    {
+      "id": "P7-09a",
+      "name": "an instruction to shortlist becomes a proposal to confirm",
+      "ok": true,
+      "detail": "Shortlist Qadesk Person1 1950 for QA Payroll Specialist 17-19-50"
+    },
+    {
+      "id": "P7-10",
+      "name": "someone else cannot confirm a proposal made for the TA",
+      "ok": true,
+      "detail": "HTTP 409"
+    },
+    {
+      "id": "P7-09",
+      "name": "confirming shortlists them exactly as the button does: owned by the TA, in follow-up, with a set",
+      "ok": true,
+      "detail": "They is shortlisted in set 1 and in Follow-up."
+    },
+    {
+      "id": "P7-09b",
+      "name": "the same confirmation cannot be used twice",
+      "ok": true,
+      "detail": "HTTP 409"
+    },
+    {
+      "id": "P7-10b",
+      "name": "a ta who is not on the opening is not offered the change",
+      "ok": true,
+      "detail": "refusal: I can't find “Qadesk Person2 1950” on QA Payroll Specialist 17-19-50 among the candidates on your jo"
+    }
+  ]
+}

@@ -31,7 +31,13 @@ for (const file of files) {
     // Node 22 only loads .ts files with the flag (23.6+ does it by default and
     // still accepts it), so without it every suite failed before running.
     ["--experimental-strip-types", "--no-warnings", "--import", rel(path.join(here, "alias.mjs")), rel(path.join(here, file))],
-    { stdio: "inherit", cwd: path.resolve(here, "..") },
+    {
+      stdio: "inherit",
+      cwd: path.resolve(here, ".."),
+      // The desk's rules are tested against the in-memory JSON store; the running
+      // app refuses it (src/data/mode.ts) unless both of these are set.
+      env: { ...process.env, C141_STORE: "json", C141_TEST_RUN: "1" },
+    },
   );
   if (r.status !== 0) { failed++; bad.push(label); }
 }

@@ -1,0 +1,97 @@
+{
+  "at": "2026-09-15T19:19:42.858Z",
+  "passed": 15,
+  "failed": 0,
+  "results": [
+    {
+      "id": "P4-01",
+      "name": "a real candidate with career, education, skills and a PDF CV is found in the database",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P4-02",
+      "name": "the profile screen shows the name, the career and the education",
+      "ok": true,
+      "detail": "3 roles, 3 education"
+    },
+    {
+      "id": "P4-03",
+      "name": "the CV file opens from the production bucket through the app (read-only link)",
+      "ok": true,
+      "detail": "HTTP 302 → 200 %PDF-"
+    },
+    {
+      "id": "P4-04",
+      "name": "the text read from the CV is available on the profile",
+      "ok": true,
+      "detail": "0 chars (in storage)"
+    },
+    {
+      "id": "P4-05",
+      "name": "the top-bar search finds a person by name across the whole database",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P4-06",
+      "name": "the AI search returns candidates for a plain-language query",
+      "ok": true,
+      "detail": "40 results"
+    },
+    {
+      "id": "P4-06b",
+      "name": "the keyword search (the fallback) returns candidates",
+      "ok": true,
+      "detail": "20 results"
+    },
+    {
+      "id": "P4-06s",
+      "name": "the Database results screen lists people for that search",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P4-07",
+      "name": "a saved search is stored and listed on the Database screen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P4-08",
+      "name": "the profile lists openings the person may fit, with a score",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P4-09",
+      "name": "reverse matching adds database candidates to the opening as matches (at most 30)",
+      "ok": true,
+      "detail": "30 added of 426 considered, 191 passed rules"
+    },
+    {
+      "id": "P4-10",
+      "name": "the run is recorded with its counts",
+      "ok": true,
+      "detail": "30 added, 426 considered"
+    },
+    {
+      "id": "P4-09s",
+      "name": "the matches are on the opening's Database CVs screen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P4-11",
+      "name": "a match somebody removed is not added again by the next run",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P4-12",
+      "name": "the prepared CV is built from the extracted CV: career and education, with the Career141 block, no stand-in page",
+      "ok": true,
+      "detail": "add refused (Already on this opening); HTTP 200, 1917 bytes"
+    }
+  ]
+}

@@ -26,7 +26,7 @@ export default async function AlertsPage({
   searchParams: Promise<{ all?: string }>;
 }) {
   const { all } = await searchParams;
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
   const everyones = all === "1";
   const alerts = everyones ? computeAlerts() : alertsFor(user.id);

@@ -16,11 +16,11 @@
 // person made themselves.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 
-export const messagesFor = query({
+export const messagesFor = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     candidateId: v.optional(v.string()),
@@ -77,7 +77,7 @@ export const messagesFor = query({
 
 /** Where the follow-up sequence has got to, read off the application itself —
  *  which is where the live state actually lives, not `followUpSequences`. */
-export const followUpState = query({
+export const followUpState = internalQuery({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -120,7 +120,7 @@ export const followUpState = query({
  * working through the same script and typing what they heard. This writes that
  * down; it places no call.
  */
-export const recordCall = mutation({
+export const recordCall = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     applicationId: v.string(),
@@ -156,7 +156,7 @@ export const recordCall = mutation({
   },
 });
 
-export const callsFor = query({
+export const callsFor = internalQuery({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);

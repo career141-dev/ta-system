@@ -7,11 +7,13 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { internalAction, internalQuery, action } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { batchUpsertCandidateVectors, ensureCandidateCollection, getQdrantClient, QDRANT_CANDIDATE_COLLECTION } from "../lib/qdrant";
+import { batchUpsertCandidateVectors, candidateVectorPayload, ensureCandidateCollection, getQdrantClient, QDRANT_CANDIDATE_COLLECTION } from "../lib/qdrant";
 import type { CandidateVectorPoint } from "../lib/qdrant";
 
-const BATCH_SIZE = 100;
-const BATCHES_PER_WORKER = 5; // 500 candidates per action execution
+// 100 per execution. At 500 the worker hit the isolate memory ceiling
+// (TooMuchMemoryCarryOver) and the scheduled chain ended with no error logged.
+const BATCH_SIZE = 50;
+const BATCHES_PER_WORKER = 2;
 
 function buildCandidateEmbedText(candidate: any): string {
   const parts: string[] = [];
@@ -150,19 +152,7 @@ export const reindexWorker = internalAction({
         points.push({
           candidateId: candidate._id as string,
           vector: emb,
-          payload: {
-            candidateId: candidate._id as string,
-            fullName: candidate.fullName ?? "",
-            currentJobTitle: candidate.currentJobTitle ?? "",
-            skills: Array.isArray(candidate.skills) ? candidate.skills : [],
-            totalExperienceYears: candidate.totalExperienceYears ?? 0,
-            seniorityLevel: candidate.seniorityLevel ?? "",
-            locationCity: candidate.locationCity ?? "",
-            locationCountry: candidate.locationCountry ?? "",
-            sourceChannel: candidate.sourceChannel ?? "",
-            overallStatus: candidate.overallStatus ?? "",
-            updatedAt: Date.now(),
-          },
+          payload: candidateVectorPayload(candidate),
         });
       }
 

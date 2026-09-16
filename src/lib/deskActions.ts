@@ -202,6 +202,23 @@ function words(s: string) {
 }
 
 /** Applications on this person's jobs whose candidate matches the name typed. */
+/**
+ * The people a name could refer to: everyone on the openings this person
+ * can act on (narrowed to the named job when there is one). The desk loads
+ * applications for everyone but candidate records only on request, so without
+ * this the assistant could find nobody by name. The caller loads them.
+ */
+export function candidateIdsForIntent(user: User, job: string | null): string[] {
+  const jobWords = job ? words(job) : [];
+  const ids = new Set<string>();
+  for (const o of repo.openingsForUser(user)) {
+    if (jobWords.length && !jobWords.some((w) => words(`${o.title} ${repo.client(o.clientId)?.name ?? ""}`).includes(w))) continue;
+    for (const a of repo.applications(o.id)) ids.add(a.candidateId);
+    if (ids.size >= 3000) break;
+  }
+  return [...ids];
+}
+
 export function resolvePerson(user: User, name: string, job: string | null): Hit[] {
   const want = words(name);
   if (want.length === 0) return [];

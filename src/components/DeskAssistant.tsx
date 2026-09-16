@@ -15,34 +15,98 @@ type Turn = {
   choices?: string[];
 };
 
-const STARTERS = [
-  "How many CVs came in today?",
-  "Who's in my follow-up, with numbers?",
-  "Where are my sets?",
-  "Any interviews coming up?",
+const WORKFLOW_STARTERS = [
+  "How does Semantic vector search work?",
+  "How do sets and shortlists work?",
+  "How do I add a client & create a job?",
+  "Explain the candidate pipeline stages",
 ];
 
-/** Internal links render as links; anything else stays text. Mirrors lib/deskAssistant `safeLinks`. */
+const DESK_STARTERS = [
+  "How many CVs came in today?",
+  "Who's in my follow-up, with numbers?",
+  "Any interviews coming up?",
+  "Where are my sets?",
+];
+
+/** Rich markdown renderer for assistant responses: handles links, bolding, and linebreaks */
 function Rich({ text }: { text: string }) {
-  const out: React.ReactNode[] = [];
-  const re = /\[([^\]]{1,120})\]\(([^)\s]{1,300})\)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = re.exec(text))) {
-    if (m.index > last) out.push(text.slice(last, m.index));
-    const href = m[2];
-    out.push(
-      href.startsWith("/") && !href.startsWith("//") ? (
-        <Link key={k++} href={href} className="font-medium text-brand hover:underline">{m[1]}</Link>
-      ) : (
-        m[1]
-      ),
-    );
-    last = m.index + m[0].length;
-  }
-  if (last < text.length) out.push(text.slice(last));
-  return <p className="whitespace-pre-wrap">{out.map((n, i) => (typeof n === "string" ? n.replace(/\*\*(.+?)\*\*/g, "$1") : n)).map((n, i) => <span key={i}>{n}</span>)}</p>;
+  // Split into lines for list formatting
+  const lines = text.split("\n");
+
+  return (
+    <div className="flex flex-col gap-1.5 leading-relaxed">
+      {lines.map((line, lineIdx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={lineIdx} className="h-1" />;
+
+        const isBullet = trimmed.startsWith("- ") || trimmed.startsWith("* ");
+        const content = isBullet ? trimmed.slice(2) : trimmed;
+
+        // Parse markdown links [text](url) and bold **bold**
+        const elements: React.ReactNode[] = [];
+        const tokenRegex = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*/g;
+        let lastIdx = 0;
+        let match: RegExpExecArray | null;
+        let key = 0;
+
+        while ((match = tokenRegex.exec(content)) !== null) {
+          if (match.index > lastIdx) {
+            elements.push(content.slice(lastIdx, match.index));
+          }
+
+          if (match[1] && match[2]) {
+            // Markdown link [text](url)
+            const href = match[2];
+            const isInternal = href.startsWith("/") && !href.startsWith("//");
+            if (isInternal) {
+              elements.push(
+                <Link
+                  key={key++}
+                  href={href}
+                  className="font-medium text-brand underline decoration-brand/30 underline-offset-2 hover:decoration-brand"
+                >
+                  {match[1]}
+                </Link>,
+              );
+            } else {
+              elements.push(
+                <a
+                  key={key++}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-medium text-brand underline hover:underline"
+                >
+                  {match[1]}
+                </a>,
+              );
+            }
+          } else if (match[3]) {
+            // Bold **text**
+            elements.push(
+              <strong key={key++} className="font-semibold text-ink">
+                {match[3]}
+              </strong>,
+            );
+          }
+
+          lastIdx = match.index + match[0].length;
+        }
+
+        if (lastIdx < content.length) {
+          elements.push(content.slice(lastIdx));
+        }
+
+        return (
+          <p key={lineIdx} className={isBullet ? "flex items-start gap-1.5 pl-2" : ""}>
+            {isBullet && <span className="text-ink-faint select-none">•</span>}
+            <span className="min-w-0 flex-1">{elements}</span>
+          </p>
+        );
+      })}
+    </div>
+  );
 }
 
 /**
@@ -153,8 +217,8 @@ export function DeskAssistant() {
     >
       <header className="flex items-center justify-between border-b border-rule px-4 py-2.5">
         <div>
-          <p className="text-[13px] font-semibold">Ask</p>
-          <p className="text-[11px] text-ink-faint">Answers from the jobs you can see</p>
+          <p className="text-[13px] font-semibold">Desk Copilot</p>
+          <p className="text-[11px] text-ink-faint">Platform guide & live desk assistant</p>
         </div>
         <button onClick={() => setOpen(false)} className="grid h-7 w-7 place-items-center rounded text-ink-faint hover:bg-tag hover:text-ink" aria-label="Close">
           <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
@@ -163,13 +227,32 @@ export function DeskAssistant() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3 text-[13px] leading-relaxed">
         {turns.length === 0 && (
-          <div className="flex flex-col gap-2">
-            <p className="text-ink-soft">Ask about your jobs, CVs, sets, follow-ups or interviews — or tell it what to do, like “shortlist Thisara” or “Kavindi expected salary 250k”. Nothing changes until you confirm.</p>
-            {STARTERS.map((s) => (
-              <button key={s} onClick={() => ask(s)} className="w-fit rounded-full border border-rule px-3 py-1 text-left text-[12px] text-ink-soft hover:border-brand-line hover:text-brand">
-                {s}
-              </button>
-            ))}
+          <div className="flex flex-col gap-3">
+            <p className="text-[12.5px] text-ink-soft">
+              Ask how any part of the platform works, check live desk numbers, or propose recruiter actions:
+            </p>
+
+            <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">Platform & Workflows</span>
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                {WORKFLOW_STARTERS.map((s) => (
+                  <button key={s} onClick={() => ask(s)} className="w-fit rounded-full border border-rule bg-paper/60 px-3 py-1 text-left text-[12px] text-ink transition-colors hover:border-brand-line hover:text-brand">
+                    💡 {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">Your Desk Today</span>
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                {DESK_STARTERS.map((s) => (
+                  <button key={s} onClick={() => ask(s)} className="w-fit rounded-full border border-rule bg-paper/60 px-3 py-1 text-left text-[12px] text-ink transition-colors hover:border-brand-line hover:text-brand">
+                    📊 {s}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
         <div className="flex flex-col gap-2.5">

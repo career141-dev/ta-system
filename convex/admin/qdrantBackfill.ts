@@ -3,7 +3,7 @@
 import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
-import { batchUpsertCandidateVectors, ensureCandidateCollection, QDRANT_VECTOR_DIM, type CandidateVectorPoint } from "../lib/qdrant";
+import { batchUpsertCandidateVectors, candidateVectorPayload, ensureCandidateCollection, QDRANT_VECTOR_DIM, type CandidateVectorPoint } from "../lib/qdrant";
 
 export const syncAllCandidateVectorsToQdrant = action({
   args: {
@@ -71,19 +71,7 @@ export const syncAllCandidateVectorsToQdrant = action({
         points.push({
           candidateId: candidate._id,
           vector: resume.embedding,
-          payload: {
-            candidateId: candidate._id,
-            fullName: candidate.fullName || "Candidate",
-            currentJobTitle: candidate.currentJobTitle,
-            skills: candidate.skills || [],
-            totalExperienceYears: candidate.totalExperienceYears,
-            seniorityLevel: candidate.seniorityLevel,
-            locationCity: candidate.locationCity,
-            locationCountry: candidate.locationCountry,
-            sourceChannel: candidate.firstSourceChannel || candidate.sourceChannel,
-            overallStatus: candidate.overallStatus,
-            updatedAt: candidate._creationTime || Date.now(),
-          },
+          payload: { ...candidateVectorPayload(candidate), updatedAt: candidate._creationTime || Date.now() },
         });
       }
 

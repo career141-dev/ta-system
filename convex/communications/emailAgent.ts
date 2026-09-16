@@ -2,6 +2,7 @@ import { action, internalAction, internalMutation, query, internalQuery } from "
 import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
 
 
@@ -168,6 +169,12 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
 }
 
 async function markEmailAsRead(inboxEmail: string, messageId: string) {
+  // A test deployment reads the live mailboxes; it must not change them. A
+  // message it marks read is one the production poller then never picks up.
+  if (outboundLocked()) {
+    console.log(`[EmailAgent] Outbound lock on: left ${messageId} unread in ${inboxEmail}`);
+    return;
+  }
   const token = await getGraphToken();
   if (!token) return;
 
@@ -938,7 +945,7 @@ Respond ONLY with a valid JSON object in this exact format:
        * and a decision, not a misclick.
        */
       if ((process.env.C141_TA_INTAKE ?? "").trim().toLowerCase() === "true") {
-        await ctx.runAction(api.ta.intakeReceive.receiveCv, {
+        await ctx.runAction(internal.ta.intakeReceive.receiveCv, {
           source: "email",
           receivedFrom: args.rawSender ?? null,
           // The address it arrived AT is what says whose adverts it can be
@@ -1103,6 +1110,11 @@ export const sendFollowUpEmail = internalAction({
       return { success: false, error: decision.reason };
     }
     const toAddress = decision.to;
+    // Second gate: with the outbound lock on (a test deployment) only
+    // allow-listed addresses receive anything, whatever the redirect decided.
+    if (!emailAllowed(toAddress)) {
+      throw new Error(suppressed("follow-up email", toAddress));
+    }
     console.log(`[EmailAgent] Sending outbound follow-up email to ${toAddress}${decision.note} from ${senderEmail}`);
 
     const token = await getGraphToken();
@@ -1243,7 +1255,7 @@ export const processSingleEmailAttachment = internalAction({
       // C141_TA_INTAKE on, an arriving CV joins the queue and becomes a
       // candidate only when a person admits it.
       if ((process.env.C141_TA_INTAKE ?? "").trim().toLowerCase() === "true") {
-        await ctx.runAction(api.ta.intakeReceive.receiveCv, {
+        await ctx.runAction(internal.ta.intakeReceive.receiveCv, {
           source: "email",
           receivedFrom: args.rawSender ?? null,
           toAddress: args.targetInboxEmail,

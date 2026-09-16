@@ -30,6 +30,102 @@ export interface CvSubject {
   totalExperienceYears: number | null;
   educationDegree: string | null;
   educationInstitution: string | null;
+  /** The CV's structure as extracted — when present the page is built from it. */
+  summary?: string | null;
+  career?: { title: string; employer: string | null; from: string | null; to: string | null; current: boolean }[];
+  education?: { degree: string | null; field: string | null; institution: string | null; year: string | null }[];
+  skills?: string[];
+  languages?: string[];
+  certifications?: string[];
+}
+
+/** Latin-1 only: the page's font cannot draw anything else. */
+const latin1 = (t: string) =>
+  t.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—•]/g, "-").replace(/[^\x20-\xff]/g, "");
+
+/**
+ * The CV page, built from the structure extraction read out of the candidate's
+ * CV: summary, dated career, education, skills. Returns the drawing and the
+ * boxes it covers, so the annotation is placed off the candidate's details.
+ */
+export function structuredCv(s: CvSubject): { content: string; occupancy: Box[] } {
+  const black = { r: 0.1, g: 0.1, b: 0.1 };
+  const grey = { r: 0.45, g: 0.45, b: 0.45 };
+  const left = 56;
+  const width = PAGE.w - 112;
+  const parts: string[] = [];
+  const occupancy: Box[] = [];
+  let y = PAGE.h - 80;
+  const floor = 60;
+  const put = (lines: string[], size: number, colour = black, lead = size * 1.4) => {
+    const room = Math.max(0, Math.floor((y - floor) / lead));
+    const shown = lines.map(latin1).filter(Boolean).slice(0, room);
+    if (shown.length === 0) return;
+    parts.push(textBlock(shown, left, y, size, lead, colour));
+    const longest = Math.max(...shown.map((l) => l.length));
+    occupancy.push({ x: left, y: PAGE.h - y - size, w: Math.min(width, longest * size * 0.5 + 4), h: shown.length * lead + 2 });
+    y -= shown.length * lead;
+  };
+  const heading = (t: string) => {
+    y -= 8;
+    put([t], 9.5, grey, 14);
+  };
+
+  put([s.fullName.toUpperCase()], 17, black, 22);
+  put(
+    [
+      [s.currentTitle, s.currentEmployer].filter(Boolean).join(" - "),
+      [s.location, s.totalExperienceYears ? `${s.totalExperienceYears} years' experience` : null].filter(Boolean).join(" - "),
+    ],
+    10,
+    grey,
+    14,
+  );
+  parts.push(`0.85 0.85 0.85 RG 0.7 w ${left} ${y - 2} m ${PAGE.w - 56} ${y - 2} l S`);
+  occupancy.push({ x: left, y: PAGE.h - y, w: width, h: 6 });
+  y -= 12;
+
+  if (s.summary) {
+    heading("PROFILE");
+    put(wrap(s.summary, Math.floor(width / 4.75)).slice(0, 6), 9.5);
+  }
+  const career = s.career ?? [];
+  if (career.length || s.currentTitle || s.currentEmployer) {
+    heading("EXPERIENCE");
+    const rows = career.length
+      ? career.slice(0, 8).map((r) => {
+          const dates = [r.from, r.current ? "Present" : r.to].filter(Boolean).join(" - ");
+          return `${r.title}${r.employer ? ` - ${r.employer}` : ""}${dates ? `   (${dates})` : ""}`;
+        })
+      : [[s.currentTitle, s.currentEmployer].filter(Boolean).join(" - ")];
+    put(rows, 9.5, black, 13.5);
+  }
+  const education = (s.education ?? [])
+    .map((e) => [[e.degree, e.field].filter(Boolean).join(", "), e.institution, e.year].filter(Boolean).join(" - "))
+    .filter(Boolean);
+  if (!education.length && (s.educationDegree || s.educationInstitution)) {
+    education.push([s.educationDegree, s.educationInstitution].filter(Boolean).join(", "));
+  }
+  if (education.length) {
+    heading("EDUCATION");
+    put(education.slice(0, 4), 9.5, black, 13.5);
+  }
+  if (s.skills?.length) {
+    heading("SKILLS");
+    put(wrap(s.skills.slice(0, 40).join(", "), Math.floor(width / 4.75)).slice(0, 4), 9.5);
+  }
+  const extra = [
+    s.languages?.length ? `Languages: ${s.languages.join(", ")}` : "",
+    s.certifications?.length ? `Certifications: ${s.certifications.slice(0, 6).join(", ")}` : "",
+  ].filter(Boolean);
+  if (extra.length) {
+    heading("OTHER");
+    put(extra.flatMap((t) => wrap(t, Math.floor(width / 4.75))).slice(0, 4), 9.5);
+  }
+  heading("REFERENCES");
+  put(["Available on request"], 9.5);
+
+  return { content: parts.join("\n"), occupancy };
 }
 
 /** PDF strings escape these three characters and nothing else. */
@@ -104,76 +200,6 @@ function textBlock(
   return out.join("\n");
 }
 
-/**
- * The stand-in CV page. Deliberately plain and labelled, so nobody mistakes it
- * for a real parsed CV — the point of this build is the annotation, not the
- * document under it.
- */
-/**
- * What the stand-in page occupies, in PDF coordinates (origin bottom-left).
- * At connection this list comes from pdfjs reading the candidate's real CV
- * instead; nothing downstream changes.
- */
-export function placeholderOccupancy(): Box[] {
-  return [
-    { x: 56, y: PAGE.h - 92, w: 300, h: 26 }, // name
-    { x: 56, y: PAGE.h - 116, w: 300, h: 30 }, // title and location
-    { x: 56, y: PAGE.h - 122, w: PAGE.w - 112, h: 6 }, // rule
-    { x: 56, y: PAGE.h - 460, w: 320, h: 150 }, // body
-    { x: 56, y: 34, w: 330, h: 14 }, // footer mark
-  ];
-}
-
-function placeholderCv(s: CvSubject): string {
-  const black = { r: 0.1, g: 0.1, b: 0.1 };
-  const grey = { r: 0.45, g: 0.45, b: 0.45 };
-
-  const header = textBlock([s.fullName.toUpperCase()], 56, PAGE.h - 80, 17, 20, black);
-  const sub = textBlock(
-    [
-      [s.currentTitle, s.currentEmployer].filter(Boolean).join(" · "),
-      [s.location, s.totalExperienceYears ? `${s.totalExperienceYears} years` : null]
-        .filter(Boolean)
-        .join(" · "),
-    ].filter(Boolean),
-    56,
-    PAGE.h - 102,
-    10,
-    14,
-    grey,
-  );
-  const body = textBlock(
-    [
-      "PROFILE",
-      "",
-      "EXPERIENCE",
-      `${s.currentTitle ?? "Current role"} — ${s.currentEmployer ?? "Current employer"}`,
-      "",
-      "EDUCATION",
-      [s.educationDegree, s.educationInstitution].filter(Boolean).join(", ") || "—",
-      "",
-      "REFERENCES",
-      "Available on request",
-    ],
-    56,
-    PAGE.h - 330,
-    10,
-    16,
-    black,
-  );
-  const mark = textBlock(
-    ["[ Stand-in CV page — the candidate's real CV replaces this at connection ]"],
-    56,
-    40,
-    7.5,
-    10,
-    { r: 0.62, g: 0.62, b: 0.62 },
-  );
-  const rule = `0.85 0.85 0.85 RG 0.7 w 56 ${PAGE.h - 118} m ${PAGE.w - 56} ${PAGE.h - 118} l S`;
-
-  return [header, sub, rule, body, mark].join("\n");
-}
-
 export function buildPreparedCv(
   subject: CvSubject,
   annotation: CvAnnotation,
@@ -185,14 +211,15 @@ export function buildPreparedCv(
   // Spec §8 — placed where it does not cover the candidate's information.
   // Decided against what the page actually occupies, not by convention.
   const block = blockSize(lines);
-  const placement = findPlacement({ x: 0, y: 0, w: PAGE.w, h: PAGE.h }, block, placeholderOccupancy());
+  const page = structuredCv(subject);
+  const placement = findPlacement({ x: 0, y: 0, w: PAGE.w, h: PAGE.h }, block, page.occupancy);
 
   const x = override?.x ?? placement.box.x;
   // PDF text draws from the baseline of the first line, downward.
   const yTop = override?.y ?? placement.box.y;
   const y = PAGE.h - yTop - 12;
 
-  const content = [placeholderCv(subject), textBlock(lines, x, y, 10, 11.2, GREEN)].join("\n");
+  const content = [page.content, textBlock(lines, x, y, 10, 11.2, GREEN)].join("\n");
 
   const objects: string[] = [
     "<< /Type /Catalog /Pages 2 0 R >>",

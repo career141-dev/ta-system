@@ -5,6 +5,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { getGraphToken } from "../lib/graphClient";
 import { buildStructuredEmailHtml } from "./emailHtml";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { mayReplyTo, resolveRecipient } from "../lib/outreachSafety";
 
 export { buildStructuredEmailHtml };
@@ -100,6 +101,10 @@ export const sendGraphEmail = internalAction({
       console.log(
         `[Graph Email] Sending email from ${senderEmail} to ${targetAddress}${logNote}`
       );
+
+      if (!emailAllowed(targetAddress)) {
+        throw new Error(suppressed("email", targetAddress));
+      }
 
       const res = await fetch(
         `${GRAPH_BASE}/users/${encodeURIComponent(senderEmail)}/sendMail`,
@@ -198,8 +203,15 @@ export const replyToMessage = internalAction({
     originalSender: v.optional(v.string()),
   },
   handler: async (_ctx, args) => {
-    // A thread reply cannot be redirected, so in test mode it is only allowed
-    // to the test recipient; a caller that cannot say who it replies to is refused.
+    // Two gates, both must allow it. A reply goes to whoever wrote the original,
+    // which this cannot see without fetching it, so while the outbound lock is on
+    // (a test deployment) replies are not sent at all. Otherwise the fail-closed
+    // outreach rule applies: in test mode only to the test recipient, and a
+    // caller that cannot say who it replies to is refused.
+    if (outboundLocked()) {
+      suppressed("email reply", `message ${args.messageId}`);
+      return;
+    }
     const decision = mayReplyTo("email", args.originalSender);
     if (!decision.ok) {
       console.warn(`[Graph Email] ${decision.reason}`);

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
-import { SignOutButton } from "@clerk/nextjs";
 import { addJobPost } from "@/app/actions";
+import { SignOutButton } from "@clerk/nextjs";
 import { RAIL_TOP } from "@/lib/chrome";
 
 export interface SidebarPost {

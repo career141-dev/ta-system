@@ -58,6 +58,15 @@ export default async function SnippetsPage({ params }: { params: Promise<{ id: s
     <>
       <h1 className="text-[21px] font-semibold tracking-tight">Snippets</h1>
       <ProjectHeader openingId={id} />
+      {/* The card's typefaces, for this page only. `precedence` has React place
+          the stylesheet in the head and hold the render until it has loaded, as
+          it did when the layout carried it for every page. */}
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+      <link
+        rel="stylesheet"
+        precedence="default"
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Poppins:wght@300;400;500;600;700&family=Jost:wght@300;400;500;600;700&family=Quicksand:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600;700&family=Figtree:wght@300;400;500;600;700&display=swap"
+      />
       <SnippetStudio initial={fields} />
     </>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { externalUrl } from "@/lib/url";
 import { useState } from "react";
 import Link from "next/link";
 import { addToOpening } from "@/app/actions";
@@ -7,7 +8,6 @@ import { FitChip } from "@/components/FitBadge";
 import type { Score } from "@/lib/scoring";
 import type { CandidateSignal } from "@/lib/match";
 import type { Candidate } from "@/data/types";
-import type { AiHit } from "@/lib/aiSearch";
 
 export interface RowApp {
   id: string;
@@ -57,7 +57,6 @@ export function ResultRow({
   defaultOpeningId,
   backHref,
   candidateHref,
-  ai = null,
 }: {
   candidate: Candidate;
   /** The same fit score the lists use. Only present when the search is tied
@@ -73,8 +72,6 @@ export function ResultRow({
   /** The search results URL to return to from the candidate profile. */
   backHref?: string;
   candidateHref?: string;
-  /** The AI search's score and reason for this person against the query. */
-  ai?: AiHit | null;
 }) {
   const [allRoles, setAllRoles] = useState(false);
   const [allSkills, setAllSkills] = useState(false);
@@ -106,16 +103,6 @@ export function ResultRow({
               {c.fullName}
             </Link>
             {fit && <FitChip score={fit} />}
-            {ai && (
-              <span
-                title={ai.reranked ? "Scored by AI against your search" : "Scored by the matching engine against your search"}
-                className={`tabular rounded-full px-2 py-0.5 text-[11.5px] font-semibold ${
-                  ai.score >= 75 ? "bg-brand-soft text-brand" : ai.score >= 50 ? "bg-accent-soft text-accent" : "bg-tag text-ink-soft"
-                }`}
-              >
-                {ai.score}% search match
-              </span>
-            )}
           </div>
           <p className="mt-0.5 text-[13px]">
             {c.currentTitle} at {c.currentEmployer}
@@ -125,22 +112,6 @@ export function ResultRow({
                 one, including Dubai. */}
             {[c.location, c.industries.join(", ")].filter(Boolean).join(" · ")}
           </p>
-
-          {ai && (
-            <div className="mt-2.5 rounded-lg bg-paper/70 px-3 py-2">
-              <p className="text-[12.5px] leading-relaxed">
-                {ai.reranked && <span className="font-medium text-accent">AI: </span>}
-                {ai.reason}
-              </p>
-              <p className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-ink-faint">
-                <span>Title: {ai.breakdown.title}</span>
-                <span>Skills: {ai.breakdown.skills}</span>
-                <span>Experience: {ai.breakdown.experience}</span>
-                <span>Location: {ai.breakdown.location}</span>
-                <span>Industry: {ai.breakdown.industry}</span>
-              </p>
-            </div>
-          )}
 
           <dl className="mt-3.5 grid grid-cols-[96px_1fr] gap-x-4 gap-y-2.5">
             <Line label="Experience">
@@ -252,7 +223,7 @@ export function ResultRow({
             )}
             {c.linkedinUrl && (
               <a
-                href={c.linkedinUrl}
+                href={externalUrl(c.linkedinUrl) ?? undefined}
                 target="_blank"
                 rel="noreferrer"
                 className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"

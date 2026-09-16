@@ -21,6 +21,8 @@ export function AiPanel({
   extra,
   mode,
   total,
+  read: engineRead = null,
+  engineTerms = null,
 }: {
   criteria: SearchCriteria;
   ignored: string[];
@@ -29,15 +31,32 @@ export function AiPanel({
   extra: Record<string, string>;
   mode: "natural" | "boolean" | "meaning";
   total: number;
+  /** How the matching engine read the sentence, in its own words. Absent when
+   *  it did not run — the panel then says only what the parser understood, as
+   *  it always has. */
+  read?: string | null;
+  /** The terms the engine searched on. Absent when it did not run. */
+  engineTerms?: string[] | null;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const chips: Chip[] = describe(criteria);
   const boolean = toBooleanString(criteria);
   const bool = mode === "boolean" ? parseBoolean(query) : null;
   const read = bool?.node ? describeBoolean(bool.node) : null;
+  /*
+   * What the search actually went looking for.
+   *
+   * Where the engine ran, its own terms — it read the sentence, so these are
+   * the words it searched on. The parser's are a worse reading of the same
+   * sentence and printing them here would describe a search that did not
+   * happen: "Campaign Management and Brand Strategy" comes back from the
+   * vocabulary as the single word "Management".
+   */
   const terms = read
     ? [...read.must, ...read.any.flat()]
-    : [...criteria.titles, ...criteria.skills, ...criteria.industries, ...criteria.qualifications];
+    : engineTerms && engineTerms.length > 0
+      ? engineTerms
+      : [...criteria.titles, ...criteria.skills, ...criteria.industries, ...criteria.qualifications];
 
   return (
     <div className="flex flex-col gap-3">
@@ -115,6 +134,14 @@ export function AiPanel({
           <h2 className="text-[13.5px] font-semibold">
             {mode === "boolean" ? "Boolean search" : mode === "meaning" ? "Search by meaning" : "Plain-English search"}
           </h2>
+          {/* What it took the sentence to mean, before the results. A reading
+              the TA disagrees with is the fastest explanation of a result list
+              that looks wrong. */}
+          {engineRead && (
+            <p className="rounded-lg bg-paper px-3 py-2.5 text-[12.5px] leading-relaxed text-ink">
+              {engineRead}
+            </p>
+          )}
           <p className="text-[12.5px] leading-relaxed text-ink-soft">
             {mode === "boolean"
               ? "Words matched across the whole CV. Use this chat to:"
@@ -144,8 +171,9 @@ export function AiPanel({
             )}
           </ul>
           <p className="text-[11.5px] leading-relaxed text-ink-faint">
-            This reads your sentence with fixed rules, not a model. It can miss things — the filters
-            it applied are always shown, and anything it could not use is listed below.
+            {engineRead
+              ? "This reads your sentence with a model and searches every CV in the database — the reading it took is above, and the filters it applied are always shown."
+              : "This reads your sentence with fixed rules, not a model. It can miss things — the filters it applied are always shown, and anything it could not use is listed below."}
           </p>
         </div>
 
@@ -167,7 +195,10 @@ export function AiPanel({
           </p>
         )}
 
-        {ignored.length > 0 && (
+        {/* Only where the fixed rules did the reading. The list is what THOSE
+            rules could not place, and saying a word was ignored when the engine
+            in fact searched on it would be false. */}
+        {ignored.length > 0 && !engineRead && (
           <p className="mt-2.5 text-[11.5px] leading-relaxed text-ink-faint">
             Not acted on: {ignored.join(", ")}. Nothing was filtered by those words — if one matters,
             say it as a title, a skill or a place.

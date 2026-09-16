@@ -12,7 +12,8 @@
 // plain mutation; they cannot live in the same module.
 
 import { v } from "convex/values";
-import { internalMutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
+import { assertJobAccess, requireActor, WORKS_THE_DESK } from "./guard";
 import { Id } from "../_generated/dataModel";
 
 export const createOutbound = internalMutation({
@@ -47,12 +48,41 @@ export const createOutbound = internalMutation({
 });
 
 /** Who the recruiter is, for the "from" mailbox an email needs. */
-export const senderMailbox = query({
+export const senderMailbox = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) return null;
     const user = await ctx.db.get(job.primaryRecruiterId);
     return user ? { email: user.email, name: user.fullName } : null;
+  },
+});
+
+/**
+ * May this person send on, or call about, this application?
+ *
+ * The dispatch actions run in Node and cannot read the database themselves, so
+ * they ask here first. Same rule as every other TA write: an active desk user,
+ * assigned to the opening as a recruiter or director — or an admin or TA
+ * manager, who work every opening. Returns a reason instead of throwing so the
+ * screen can show it.
+ */
+export const mayDispatch = internalQuery({
+  args: { actorId: v.string(), applicationId: v.id("applications") },
+  handler: async (ctx, args): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    let user;
+    try {
+      user = await requireActor(ctx, args.actorId);
+    } catch {
+      return { ok: false, reason: "Sign in again — the person sending could not be identified." };
+    }
+    const app = await ctx.db.get(args.applicationId);
+    if (!app) return { ok: false, reason: "That application no longer exists." };
+    try {
+      await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    } catch {
+      return { ok: false, reason: "You are not on this opening, so you cannot contact its candidates." };
+    }
+    return { ok: true };
   },
 });

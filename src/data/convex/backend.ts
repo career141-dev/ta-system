@@ -20,7 +20,8 @@ import "server-only";
  *   replaced by Qdrant retrieval, not by a slower version of themselves.
  */
 
-import { convexMutation, convexQuery } from "@/lib/convexServer";
+import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
+import { mapProfile, type CandidateProfile, type RawProfile } from "@/lib/candidateProfile";
 import type { Application, Candidate, Client, Id, JobPost, Opening, User } from "@/data/types";
 import {
   mapApplication,
@@ -259,7 +260,7 @@ export async function runReverseMatch(
   try {
     await convexMutation("jobs/jobs:triggerReverseMatch", {
       jobId: openingId,
-      ...(opts.taPreferences !== undefined ? { taPreferences: opts.taPreferences } : {}),
+      ...(opts.taPreferences !== undefined ? { customPreferences: opts.taPreferences } : {}),
     });
   } catch (e) {
     return { ok: false, reason: `could not start: ${(e as Error).message}` };
@@ -334,8 +335,21 @@ export async function vocabulary(actor: Actor): Promise<{
   industries: string[];
   sampled: number;
 }> {
-  return convexQuery("ta/candidates:vocabulary", { actorId: actor.id ?? undefined });
+  // One read every ten minutes, shared by the search parser and the Database
+  // home — it samples 1,500 candidate rows and takes over a second, for words
+  // that barely move. The actor does not change the answer.
+  void actor;
+  const now = Date.now();
+  if (vocabularyCache && now - vocabularyCache.at < 10 * 60_000) return vocabularyCache.value;
+  const value = convexQuery<Awaited<ReturnType<typeof vocabulary>>>("ta/candidates:vocabulary", {});
+  vocabularyCache = { at: now, value };
+  value.catch(() => {
+    if (vocabularyCache?.value === value) vocabularyCache = null;
+  });
+  return value;
 }
+
+let vocabularyCache: { at: number; value: ReturnType<typeof vocabulary> } | null = null;
 
 // ─── Candidates ──────────────────────────────────────────────────────────────
 
@@ -366,16 +380,28 @@ export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, 
  */
 export async function candidateDocsByIds(actor: Actor, ids: Id[]): Promise<LiveCandidate[]> {
   if (ids.length === 0) return [];
-  // The backend caps a batch at 500; page rather than silently truncating.
-  // The pages are independent, so they are asked for together.
+  const out: LiveCandidate[] = [];
+  // The backend caps a batch at 500; page rather than silently truncating, and
+  // send the pages together — they do not depend on each other, so waiting for
+  // one before asking for the next only adds up the latencies.
+  //
+  // Pages of 200, four at a time: a page of 500 reads 1,000 documents (each
+  // candidate and their résumé) and can run past the backend's one-second
+  // limit, and several such pages at once make each other slower.
   const pages: Id[][] = [];
-  for (let i = 0; i < ids.length; i += 500) pages.push(ids.slice(i, i + 500));
-  const results = await Promise.all(
-    pages.map((candidateIds) =>
-      convexQuery<LiveCandidate[]>("ta/candidates:getBatch", { actorId: actor.id ?? undefined, candidateIds }),
-    ),
-  );
-  return results.flat();
+  for (let i = 0; i < ids.length; i += 200) pages.push(ids.slice(i, i + 200));
+  for (let i = 0; i < pages.length; i += 4) {
+    const results = await Promise.all(
+      pages.slice(i, i + 4).map((page) =>
+        convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
+          actorId: actor.id ?? undefined,
+          candidateIds: page,
+        }),
+      ),
+    );
+    for (const docs of results) out.push(...docs);
+  }
+  return out;
 }
 
 export type CvTextSource = "db" | "r2" | "none";
@@ -467,3 +493,88 @@ function requireActorId(actor: Actor): string {
   }
   return actor.id;
 }
+
+// ─── A candidate's full profile, and their CV ────────────────────────────────
+
+/** Everything the database holds for one person — see `ta/candidates:profile`. */
+export async function candidateProfile(actor: Actor, candidateId: Id): Promise<CandidateProfile | null> {
+  const raw = await convexQuery<RawProfile | null>("ta/candidates:profile", {
+    actorId: actor.id ?? undefined,
+    candidateId,
+  });
+  return raw ? mapProfile(raw) : null;
+}
+
+export type CvLink =
+  | { ok: true; url: string; fileName: string | null; fileType: string | null }
+  | { ok: false; reason: "no_cv" | "file_missing" | "storage_unavailable"; detail: string; fileName: string | null };
+
+/**
+ * Where to open a candidate's CV, resolved the way the old system resolves it.
+ *
+ * `candidates/candidates:getCvUploadUrl` does the finding — upload by id, then
+ * the candidate's upload, then an application's, then the file hash — and
+ * answers with either a Convex storage URL or its own `/api/r2-file?key=…`
+ * proxy path. That proxy path is the old app's route and does not exist here,
+ * so the R2 key is taken out of it and signed directly with
+ * `storage/r2:generateDownloadUrl`, which is what that route did.
+ *
+ * The key never reaches the browser and is never accepted FROM it: the old
+ * route signed whatever key it was given, which let anyone signed in open any
+ * object in the bucket. Here the only input is a candidate id, checked by the
+ * caller against the person's access first.
+ */
+export async function cvLink(actor: Actor, candidateId: Id, download = false): Promise<CvLink> {
+  const found = await convexQuery<{
+    url: string | null;
+    fileName?: string;
+    fileType?: string;
+    isMissingMigrationFile?: boolean;
+    message?: string;
+  } | null>("candidates/candidates:getCvUploadUrl", { cvUploadId: candidateId });
+
+  if (!found) return { ok: false, reason: "no_cv", detail: "No CV file is on record for this candidate.", fileName: null };
+  const fileName = found.fileName ?? null;
+  if (!found.url) {
+    return { ok: false, reason: "file_missing", detail: found.message ?? "The CV is recorded but its file could not be found.", fileName };
+  }
+
+  const proxied = found.url.match(/^\/api\/r2-file\?key=(.+)$/);
+  if (!proxied) return { ok: true, url: found.url, fileName, fileType: found.fileType ?? null };
+
+  // Asked, not tried: signing a link on a deployment without R2 fails inside
+  // the backend and is logged there as an uncaught error on every profile
+  // view. The answer is kept for five minutes either way.
+  if (Date.now() - r2Checked.at > 5 * 60_000) {
+    r2Checked = { at: Date.now(), configured: await convexQuery<boolean>("ta/storage:r2Configured", {}).catch(() => true) };
+  }
+  if (!r2Checked.configured) {
+    return { ok: false, reason: "storage_unavailable", detail: unconfiguredDetail(fileName), fileName };
+  }
+
+  try {
+    const url = await convexAction<string>("storage/r2:generateDownloadUrl", {
+      key: decodeURIComponent(proxied[1]),
+      ...(download && fileName ? { downloadFilename: fileName.replace(/["\r\n]/g, "") } : {}),
+    });
+    return { ok: true, url, fileName, fileType: found.fileType ?? null };
+  } catch (e) {
+    const message = (e as Error).message;
+    // The SDK's words for "nothing is configured" are about HTTP labels and
+    // buckets; the person reading the profile needs to know it is a setting.
+    const unconfigured = /Bucket|credential|access key|R2_/i.test(message);
+    if (unconfigured) r2Checked = { at: Date.now(), configured: false };
+    return {
+      ok: false,
+      reason: "storage_unavailable",
+      detail: unconfigured
+        ? unconfiguredDetail(fileName)
+        : `${fileName ?? "The CV"} is stored in R2 and a link to it could not be made (${message}).`,
+      fileName,
+    };
+  }
+}
+
+let r2Checked = { at: 0, configured: true };
+const unconfiguredDetail = (fileName: string | null) =>
+  `${fileName ?? "The CV"} is stored in R2 file storage, which is not configured on this deployment (R2_BUCKET_NAME and its access keys are not set), so it cannot be opened here.`;

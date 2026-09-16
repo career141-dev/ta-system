@@ -8,7 +8,22 @@ import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
-import { redirect } from "next/navigation";
+import { redirect as nextRedirect } from "next/navigation";
+import { markTablesStale, withRealIds } from "@/data/primeState";
+
+/** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
+function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
+  return async (...args: A): Promise<R> => {
+    const result = await write(...args);
+    markTablesStale();
+    return result;
+  };
+}
+
+/** Redirect, with any id created in this action swapped for the one the database gave it. */
+function redirect(url: string): never {
+  return nextRedirect(withRealIds(url));
+}
 import { after } from "next/server";
 import {
   generateJdText,
@@ -38,6 +53,12 @@ import * as backend from "@/data/convex/backend";
  * message, looks like a dead button. Returning to the referring page keeps the
  * person where they were and tells them why.
  */
+/** The candidate a form acts on, so the action loads their record before reading it. */
+function candidateIdsIn(formData: FormData): string[] {
+  const id = String(formData.get("candidateId") ?? "").trim();
+  return id ? [id] : [];
+}
+
 async function back(message: string): Promise<never> {
   const ref = (await headers()).get("referer");
   let to = "/";
@@ -715,7 +736,9 @@ export async function updatePost(formData: FormData) {
     .filter(Boolean);
   const country = String(formData.get("country") ?? "").trim() || null;
   const assignedTaId = String(formData.get("assignedTaId") ?? "") || null;
-  repo.updatePost(postId, { aliasKeywords: aliases, country, assignedTaId });
+  const r = repo.updatePost(postId, { aliasKeywords: aliases, country, assignedTaId });
+  // A refusal is shown, not swallowed.
+  if (!r.ok) await back(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -725,7 +748,9 @@ export async function setPostStatus(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const postId = String(formData.get("postId"));
   const status = String(formData.get("status")) as "draft" | "live" | "paused" | "closed";
-  repo.updatePost(postId, { status, postedAt: status === "live" ? Date.now() : undefined });
+  const r = repo.updatePost(postId, { status, postedAt: status === "live" ? Date.now() : undefined });
+  // "Set live" before the JD is approved used to fail with no message at all.
+  if (!r.ok) await back(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -874,7 +899,7 @@ export async function addClient(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    newId = (await convexMutation<string>("ta/clients:add", {
+    newId = (await freshAfter(convexMutation<string>)("ta/clients:add", {
       actorId: actor?._id,
       name,
       industry,
@@ -909,7 +934,7 @@ export async function updateClient(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    await convexMutation("ta/clients:update", {
+    await freshAfter(convexMutation)("ta/clients:update", {
       actorId: actor?._id,
       clientId,
       name,
@@ -939,7 +964,7 @@ export async function deleteClient(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    res = await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", {
+    res = await freshAfter(convexMutation<{ ok: boolean; openings?: number }>)("ta/clients:remove", {
       actorId: actor?._id,
       clientId,
     });
@@ -974,7 +999,7 @@ export async function saveContacts(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    await convexMutation("ta/clients:saveContacts", {
+    await freshAfter(convexMutation)("ta/clients:saveContacts", {
       actorId: actor?._id,
       clientId,
       contacts,
@@ -1071,7 +1096,7 @@ export async function removeApplication(formData: FormData) {
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
   const openingId = String(formData.get("openingId"));
   const field = String(formData.get("field")) as "email" | "phone";
@@ -1324,7 +1349,7 @@ export async function inviteUser(formData: FormData) {
   const existing = repo.users().find((u) => u.email.trim().toLowerCase() === p.email);
   if (existing?.id === actor.id && p.role !== "admin") await back("You can't change your own role here.");
   try {
-    await convexMutation("ta/users:adminSaveUser", {
+    await freshAfter(convexMutation)("ta/users:adminSaveUser", {
       actorId: actor.id,
       userId: existing?.id,
       fullName: existing && !p.name ? existing.name : name,
@@ -1334,7 +1359,7 @@ export async function inviteUser(formData: FormData) {
       taRole: p.role,
     });
     if (existing && !existing.isActive) {
-      await convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
+      await freshAfter(convexMutation)("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
     }
   } catch (e) {
     const raw = (e as Error).message ?? "";
@@ -1410,7 +1435,7 @@ export async function saveSearch(formData: FormData) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
     if (actor) {
-      await convexMutation("ta/search:saveSearch", {
+      await freshAfter(convexMutation)("ta/search:saveSearch", {
         actorId: actor._id,
         name,
         query,
@@ -1436,7 +1461,7 @@ export async function deleteSearch(formData: FormData) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
     if (actor) {
-      await convexMutation("ta/search:deleteSearch", { actorId: actor._id, searchId });
+      await freshAfter(convexMutation)("ta/search:deleteSearch", { actorId: actor._id, searchId });
     }
   } else {
     repo.deleteSearch(searchId);
@@ -1446,7 +1471,7 @@ export async function deleteSearch(formData: FormData) {
 
 /** Put a database candidate onto an opening — lands at Matched, unclaimed. */
 export async function addToOpening(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
@@ -1855,7 +1880,7 @@ export async function admitIntake(formData: FormData) {
 }
 
 export async function mergeIntake(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.mergeIntake(id, String(formData.get("candidateId")), user.id);
@@ -2527,4 +2552,31 @@ export async function probeConvexAsCurrentUser(): Promise<
     if (e instanceof ConvexCallError) return { ok: false, reason: e.message };
     throw e;
   }
+}
+
+// ─── Development sign-in (lib/devSignin.ts) ──────────────────────────────────
+
+/** Sign in as a desk account without Clerk. Refused unless dev sign-in is on and the build is not production. */
+export async function devSignInAs(formData: FormData) {
+  const { devSigninEnabled, devSessionValue, DEV_SESSION_COOKIE } = await import("@/lib/devSignin");
+  if (!devSigninEnabled()) redirect("/signin");
+  await primeStore();
+  const id = String(formData.get("userId") ?? "");
+  const user = repo.users().find((u) => u.id === id);
+  if (!user || !user.isActive) redirect("/signin");
+  const { cookies } = await import("next/headers");
+  (await cookies()).set(DEV_SESSION_COOKIE, devSessionValue(user.id), {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 60 * 60 * 12,
+  });
+  redirect("/");
+}
+
+export async function devSignOut() {
+  const { DEV_SESSION_COOKIE } = await import("@/lib/devSignin");
+  const { cookies } = await import("next/headers");
+  (await cookies()).delete(DEV_SESSION_COOKIE);
+  redirect("/signin");
 }
