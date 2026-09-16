@@ -17,9 +17,9 @@ import "server-only";
  * thing — is decided before we get here, by `src/lib/auth.ts`.
  */
 
-const TIMING = !!process.env.C141_TIMING;
+import { backendHostAllowed } from "./convexHost";
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
+const TIMING = !!process.env.C141_TIMING;
 
 export class ConvexCallError extends Error {
   readonly status?: number;
@@ -42,19 +42,13 @@ function config(): { url: string; adminKey: string } {
 
   // The same refusal the CLI wrapper makes, for the same reason: production
   // and the local backend differ only by this string, and an admin key aimed
-  // at the wrong one writes to the wrong database. Lift this deliberately when
-  // there is a reason to, not by editing an env file.
-  let host: string;
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    throw new ConvexCallError(`The Convex URL is not a URL: ${url}`);
-  }
-  if (!LOOPBACK.has(host)) {
-    throw new ConvexCallError(
-      `Refusing to call ${host}: this build may only talk to a Convex backend on this machine.`,
-    );
-  }
+  // at the wrong one writes to the wrong database. See ./convexHost.ts for the
+  // one deliberate exception: a production deployment naming its own backend.
+  const verdict = backendHostAllowed(url, {
+    deployment: process.env.C141_DEPLOYMENT,
+    allowedHost: process.env.C141_CONVEX_HOST,
+  });
+  if (!verdict.ok) throw new ConvexCallError(verdict.message);
 
   return { url, adminKey };
 }

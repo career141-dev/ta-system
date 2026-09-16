@@ -1,0 +1,193 @@
+{
+  "at": "2026-09-16T03:26:44.734Z",
+  "passed": 31,
+  "failed": 0,
+  "results": [
+    {
+      "id": "P2-01",
+      "name": "lead manages clients",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01",
+      "name": "TA cannot manage clients",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01",
+      "name": "ops cannot manage clients",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01",
+      "name": "lead creates openings",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01",
+      "name": "TA creates openings",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01",
+      "name": "TA reads the database",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01",
+      "name": "only admin manages people",
+      "ok": true,
+      "detail": "no such account on this desk — skipped"
+    },
+    {
+      "id": "P2-01",
+      "name": "director does not manage people",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-01s",
+      "name": "ta_lead opens /clients",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P2-01s",
+      "name": "ta_lead opens /people",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P2-01s",
+      "name": "ta opens /reports",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P2-01s",
+      "name": "ta opens /openings/new",
+      "ok": true,
+      "detail": "HTTP 200"
+    },
+    {
+      "id": "P2-03a",
+      "name": "the same client name twice does not create a second client",
+      "ok": true,
+      "detail": "gx7ps2j6nbzf3c3gf4eafwhatx8egcg1"
+    },
+    {
+      "id": "P2-03",
+      "name": "client saved with edits, ESA date and two contacts",
+      "ok": true,
+      "detail": "Quality Assurance, 2 contacts"
+    },
+    {
+      "id": "P2-03s",
+      "name": "the client is on the Clients screen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-05",
+      "name": "opening saved from the brief: title, client, lead, pending JD, open",
+      "ok": true,
+      "detail": "pending_ta_approval, open"
+    },
+    {
+      "id": "P2-05b",
+      "name": "the brief points at the opening",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-05s",
+      "name": "the assigned TA sees it in their openings list",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-06",
+      "name": "JD saved and approved with who and when",
+      "ok": true,
+      "detail": "approved by the TA"
+    },
+    {
+      "id": "P2-07",
+      "name": "an amendment is saved and the JD stays approved",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-07s",
+      "name": "the amended JD is on the JD screen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-08",
+      "name": "details saved: salary range, headcount, tier, two locations",
+      "ok": true,
+      "detail": "300000-450000, 2, P2, Colombo/Kandy"
+    },
+    {
+      "id": "P2-09a",
+      "name": "a team with no recruiter is refused",
+      "ok": true,
+      "detail": "n1734z5k5fpmtn0c09mjbtk6218ecgh7:primary_recruiter,n177c4qb53hpt305kvs5yq3tc18eckb8:director"
+    },
+    {
+      "id": "P2-09",
+      "name": "team saved with each role",
+      "ok": true,
+      "detail": "primary_recruiter, supporting_recruiter, director"
+    },
+    {
+      "id": "P2-10",
+      "name": "a job post is saved as a draft",
+      "ok": true,
+      "detail": "{\"ok\":true}"
+    },
+    {
+      "id": "P2-10b",
+      "name": "setting it live after approval is saved with a posted time",
+      "ok": true,
+      "detail": "live"
+    },
+    {
+      "id": "P2-10s",
+      "name": "the post is on the LinkedIn Job screen",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P2-10c",
+      "name": "a post cannot go live before the JD is approved",
+      "ok": true,
+      "detail": "This job cannot go live until its JD is approved. Approve the JD first, then set the advert live."
+    },
+    {
+      "id": "P2-04",
+      "name": "deleting a client with openings is refused with the count",
+      "ok": true,
+      "detail": "{\"ok\":false,\"openings\":2}"
+    },
+    {
+      "id": "P2-11",
+      "name": "hold, close and reopen are saved with position status and closed time",
+      "ok": true,
+      "detail": "on_hold/hold → closed/closedAt → open/active"
+    },
+    {
+      "id": "P2-12",
+      "name": "an opening with no offers is deleted",
+      "ok": true,
+      "detail": "{\"ok\":true,\"applications\":0,\"posts\":0,\"links\":0,\"suggestions\":0}"
+    }
+  ]
+}

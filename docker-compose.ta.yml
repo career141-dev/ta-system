@@ -1,0 +1,48 @@
+# The TA System, next to the Convex backend it reads.
+#
+# Run it from the folder that holds the CV system's docker-compose.yml, so it
+# joins that project's network and can reach the backend as `backend:3210`:
+#
+#   docker compose -f docker-compose.yml -f /srv/ta-system/docker-compose.ta.yml up -d --build ta
+#
+# Secrets live in /srv/ta-system/.env.production on the server, never here.
+# See docs/HOSTING.md.
+
+services:
+  ta:
+    build:
+      context: /srv/ta-system
+      args:
+        # Public: it is in the browser bundle either way.
+        - NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+    image: career141-ta:latest
+    container_name: career141-ta
+    restart: unless-stopped
+    # Only the reverse proxy reaches it; never the server's public address.
+    ports:
+      - "127.0.0.1:3100:3100"
+    env_file:
+      - /srv/ta-system/.env.production
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=768"
+      # The backend is a service on this network, so it is named explicitly —
+      # allowed only because C141_DEPLOYMENT=production says this is the real
+      # deployment (src/lib/convexHost.ts).
+      CONVEX_SELF_HOSTED_URL: http://backend:3210
+      C141_CONVEX_HOST: backend
+      C141_DEPLOYMENT: production
+    depends_on:
+      - backend
+    mem_limit: 1g
+    mem_reservation: 256m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/signin').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"

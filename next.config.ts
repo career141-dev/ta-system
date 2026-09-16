@@ -2,6 +2,10 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // A server that runs from .next/standalone, with only the files it traced —
+  // what the production image copies (see Dockerfile). `next start` is
+  // unaffected, and so is `next dev`.
+  output: "standalone",
   // The JSON store writes to .data/ at runtime; keep it out of the bundle.
   outputFileTracingIncludes: {},
   // This project's own folder is the root. With a second lockfile in a parent
