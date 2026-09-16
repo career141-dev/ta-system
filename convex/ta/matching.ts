@@ -13,11 +13,11 @@
 // "why is this person NOT here" are both questions about the run, not the row.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 
-export const runsForOpening = query({
+export const runsForOpening = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -40,7 +40,7 @@ export const runsForOpening = query({
   },
 });
 
-export const recordRun = mutation({
+export const recordRun = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),
@@ -71,7 +71,7 @@ export const recordRun = mutation({
 
 /** Everyone taken off this opening's matches, so a rerun does not offer them
  *  again. Returned as a plain list for the caller to turn into a Set. */
-export const exclusionsForOpening = query({
+export const exclusionsForOpening = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -92,7 +92,7 @@ export const exclusionsForOpening = query({
  * through rather than summarised, because they are the explanation of the
  * score and dropping them would leave a number with nothing behind it.
  */
-export const reverseMatchResults = query({
+export const reverseMatchResults = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string(), minScore: v.optional(v.number()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -125,7 +125,7 @@ export const reverseMatchResults = query({
  * counts rather than silently doing nothing — "added 0" and "0 were new" are
  * different answers.
  */
-export const admitMatches = mutation({
+export const admitMatches = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),

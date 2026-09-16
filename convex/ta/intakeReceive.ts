@@ -17,7 +17,7 @@
 // thing is where the result goes.
 
 import { v } from "convex/values";
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { extractText } from "../cvs/cvExtraction";
 
@@ -27,7 +27,7 @@ import { extractText } from "../cvs/cvExtraction";
  * Idempotent on the file's hash: the same bytes arriving twice is the same
  * file, and a retrying webhook must not produce two rows.
  */
-export const receiveCv = action({
+export const receiveCv = internalAction({
   args: {
     actorId: v.optional(v.string()),
     source: v.string(),
@@ -46,7 +46,7 @@ export const receiveCv = action({
   handler: async (ctx, args): Promise<{ id: string; duplicate: boolean; routed: boolean; note: string }> => {
     // 1 ─ Which advert, from the mailbox and the headline.
     const route = args.toAddress
-      ? await ctx.runQuery(api.ta.intakeRouting.routeInbound, {
+      ? await ctx.runQuery(internal.ta.intakeRouting.routeInbound, {
           actorId: args.actorId,
           to: args.toAddress,
           subject: args.subject ?? "",
@@ -55,7 +55,7 @@ export const receiveCv = action({
 
     // 2 ─ The row exists before anything is read, so a file that cannot be
     //     parsed is still visible rather than silently dropped.
-    const created = await ctx.runMutation(api.ta.intake.receive, {
+    const created = await ctx.runMutation(internal.ta.intake.receive, {
       actorId: args.actorId,
       source: args.source,
       receivedFrom: args.receivedFrom ?? null,
@@ -107,7 +107,7 @@ export const receiveCv = action({
       problems.push("No readable text in the file.");
     }
 
-    await ctx.runMutation(api.ta.intake.setParsed, {
+    await ctx.runMutation(internal.ta.intake.setParsed, {
       actorId: args.actorId,
       itemId: created.id,
       parsed: parsed ?? undefined,

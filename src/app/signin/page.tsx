@@ -1,6 +1,9 @@
 import { Show, SignIn, SignOutButton } from "@clerk/nextjs";
 import { clerkEmails, currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
+import { repo } from "@/data/store";
+import { devSigninEnabled } from "@/lib/devSignin";
+import { devSignInAs } from "@/app/actions";
 import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
 
 /**
@@ -12,7 +15,8 @@ import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
  * than bounced back to the Clerk form, which would redirect straight out again.
  */
 export default async function SignInPage() {
-  await primeStore({ allApplications: true });
+  // A list of names. Nothing else on the desk is read here.
+  await primeStore();
   // Signed in already: a full load, not redirect() — see ReloadWhenSignedIn.
   if (await currentUser()) return <ReloadWhenSignedIn />;
   const emails = await clerkEmails();
@@ -25,6 +29,20 @@ export default async function SignInPage() {
         </div>
         <h1 className="mt-1 text-[22px] font-semibold tracking-tight">Talent Acquisition</h1>
       </div>
+
+      {/* Development and test runs only — never shown in a production build. */}
+      {devSigninEnabled() && (
+        <form action={devSignInAs} className="mb-6 rounded-lg border border-dashed border-warn/50 bg-warn-soft px-4 py-3">
+          <p className="text-[11.5px] font-semibold uppercase tracking-wide text-warn">Development sign-in</p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {repo.users().filter((u) => u.isActive).map((u) => (
+              <button key={u.id} name="userId" value={u.id} className="rounded-full border border-rule bg-surface px-3 py-1 text-[12px] hover:bg-paper">
+                {u.name} <span className="text-ink-faint">· {u.role.replace("_", " ")}</span>
+              </button>
+            ))}
+          </div>
+        </form>
+      )}
 
       {emails.length === 0 ? (
         // The server can briefly see no session that the browser already has

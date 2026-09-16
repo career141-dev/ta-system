@@ -1,3 +1,4 @@
+import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { authorised, preflight, reply } from "@/lib/extension";
 
@@ -8,7 +9,9 @@ export function OPTIONS() {
 }
 
 /** What the extension's picker lists: the live work, and who is on the desk. */
-export function GET(req: Request) {
+export async function GET(req: Request) {
+  // Load the store before reading it — this route has no page to do it first.
+  await primeStore();
   if (!authorised(req)) return reply({ error: "bad_token" }, 401);
 
   const openings = repo

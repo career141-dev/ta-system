@@ -17,7 +17,7 @@
 // requirements rather than a vector built from the old ones.
 
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess } from "./guard";
@@ -90,7 +90,7 @@ function cleanPatch(patch: Partial<RequirementValues>): Partial<Doc<"jobs">> {
 }
 
 /** The TA pressed "Re-extract from JD": replace everything the JD speaks to. */
-export const reextract = mutation({
+export const reextract = internalMutation({
   args: { actorId: v.string(), openingId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -108,7 +108,7 @@ export const reextract = mutation({
  * Save the Job details panel. Every field sent is written and locked, so an
  * automatic re-extraction later fills around it instead of overwriting it.
  */
-export const save = mutation({
+export const save = internalMutation({
   args: {
     actorId: v.string(),
     openingId: v.string(),

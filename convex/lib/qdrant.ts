@@ -1,23 +1,12 @@
 // @ts-ignore
 import { QdrantClient } from "@qdrant/js-client-rest";
 
+export { candidateIdToPointId, candidateVectorPayload, type CandidateVectorPayload } from "./vectorPayload";
+import { candidateIdToPointId, type CandidateVectorPayload } from "./vectorPayload";
+
 export const QDRANT_CANDIDATE_COLLECTION = "candidate_vectors";
 export const QDRANT_VECTOR_DIM = 1024;
 export const QDRANT_DISTANCE_METRIC = "Cosine";
-
-export interface CandidateVectorPayload {
-  candidateId: string;
-  fullName: string;
-  currentJobTitle?: string;
-  skills: string[];
-  totalExperienceYears?: number;
-  seniorityLevel?: string;
-  locationCity?: string;
-  locationCountry?: string;
-  sourceChannel?: string;
-  overallStatus?: string;
-  updatedAt: number;
-}
 
 export interface CandidateVectorPoint {
   candidateId: string;
@@ -39,27 +28,6 @@ export interface QdrantMatchResult {
   candidateId: string;
   score: number;
   payload: CandidateVectorPayload;
-}
-
-/**
- * Deterministically convert a Convex candidate ID to a valid RFC-4122 UUID for Qdrant point ID
- * (Pure JS implementation, zero Node.js runtime dependency)
- */
-export function candidateIdToPointId(candidateId: string): string {
-  let h1 = 0xdeadbeef, h2 = 0x41c6ce57, h3 = 0x9e3779b9, h4 = 0x85ebca6b;
-  for (let i = 0; i < candidateId.length; i++) {
-    const ch = candidateId.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 2654435761);
-    h2 = Math.imul(h2 ^ ch, 1597334677);
-    h3 = Math.imul(h3 ^ ch, 3812015801);
-    h4 = Math.imul(h4 ^ ch, 2246822519);
-  }
-  const hex1 = (h1 >>> 0).toString(16).padStart(8, "0");
-  const hex2 = (h2 >>> 0).toString(16).padStart(8, "0");
-  const hex3 = (h3 >>> 0).toString(16).padStart(8, "0");
-  const hex4 = (h4 >>> 0).toString(16).padStart(8, "0");
-  const raw = `${hex1}${hex2}${hex3}${hex4}`;
-  return `${raw.slice(0, 8)}-${raw.slice(8, 12)}-4${raw.slice(13, 16)}-a${raw.slice(17, 20)}-${raw.slice(20, 32)}`;
 }
 
 let clientInstance: QdrantClient | null = null;
@@ -146,6 +114,17 @@ export async function ensureCandidateCollection(): Promise<boolean> {
             console.warn(`[Qdrant] Payload index note for "${field.name}":`, idxErr?.message);
           }
         }
+      }
+
+      // Indexes a filter needs, created on an existing collection too —
+      // creating an index that is already there is a no-op.
+      try {
+        await client.createPayloadIndex(QDRANT_CANDIDATE_COLLECTION, {
+          field_name: "location",
+          field_schema: { type: "text", tokenizer: "word", lowercase: true, min_token_len: 2 },
+        });
+      } catch (idxErr: any) {
+        console.warn(`[Qdrant] Payload index note for "location":`, idxErr?.message);
       }
 
       clientInstance = client;
@@ -263,19 +242,24 @@ export async function queryCandidateVectors(
   const mustConditions: any[] = [];
 
   if (options.minExperience !== undefined && options.minExperience > 0) {
+    // Enough years, or not on file — the same rule the engine applies to the
+    // candidates it reads back, so the two stages agree on who is in.
     mustConditions.push({
-      key: "totalExperienceYears",
-      range: {
-        gte: options.minExperience,
-      },
+      should: [
+        { key: "totalExperienceYears", range: { gte: options.minExperience } },
+        { is_empty: { key: "totalExperienceYears" } },
+      ],
     });
   }
 
   if (options.locationCity && options.locationCity.trim().length > 0) {
+    // Words in the place text, not an exact city: "Colombo" must find
+    // "Colombo 06" and "Colombo District, Western Province", as the engine's
+    // own location filter (a substring match) does.
     mustConditions.push({
-      key: "locationCity",
+      key: "location",
       match: {
-        value: options.locationCity.trim(),
+        text: options.locationCity.trim().toLowerCase(),
       },
     });
   }

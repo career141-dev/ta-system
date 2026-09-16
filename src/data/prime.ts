@@ -36,10 +36,20 @@ import "server-only";
 
 import type { Application, Candidate, Database, Id } from "@/data/types";
 import { isConvex } from "@/data/mode";
+import { assertSafeBackend } from "@/lib/safety";
 import * as backend from "@/data/convex/backend";
-import { blank, state } from "@/data/primeState";
+import { blank, CANDIDATE_EVICT_MS, CANDIDATE_TTL_MS, primedVocabulary, realId, setCommitter, state, TABLES_TTL_MS } from "@/data/primeState";
+import { convexMutationSync } from "@/data/convex/syncCall";
+import { convexQuery } from "@/lib/convexServer";
 
-export { primed, hasCandidate, missingCandidateMessage, resetStore } from "@/data/primeState";
+/*
+ * How the store saves: one Convex transaction per write (convex/ta/commit.ts).
+ * Registered here, with the Convex client, rather than imported by the store —
+ * see primeState.setCommitter.
+ */
+setCommitter((ops) => convexMutationSync<{ ids: Record<string, string> }>("ta/commit:apply", { ops }));
+
+export { primed, primedVocabulary, hasCandidate, missingCandidateMessage, resetStore } from "@/data/primeState";
 
 /** What a page needs on top of the small tables. */
 export interface PrimeScope {
@@ -54,6 +64,21 @@ export interface PrimeScope {
    * the one read here that grows with the desk rather than with the page.
    */
   allApplications?: boolean;
+  /**
+   * The people currently being chased, and their records.
+   *
+   * Follow-up state is not derivable from the application alone: whether a
+   * step is owed depends on which answers are still missing from the
+   * CANDIDATE, and whether anything can be sent at all depends on their phone
+   * and email. So `repo.followUps()` reads the record, and without it a
+   * follow-up is silently dropped rather than reported wrong — which is why
+   * the alert badge, which counts them, needs this.
+   *
+   * Bounded by the stage, not by the desk: 742 of 8,378 applications, fetched
+   * in two parallel batches. Implies `allApplications`, since the stage cannot
+   * be known before the applications are.
+   */
+  followUps?: boolean;
 }
 
 /**
@@ -76,65 +101,152 @@ export async function refreshUsers(): Promise<void> {
  * A no-op when the store is the JSON file, which is what keeps the tests — and
  * the offline build — running unchanged.
  */
-export async function primeStore(scope: PrimeScope = {}): Promise<void> {
-  if (!isConvex()) return;
+/**
+ * One load at a time.
+ *
+ * A layout and the page inside it render CONCURRENTLY, and both prime. Without
+ * this they both find an unprimed store, both call `blank()`, and the second
+ * one's blank overwrites whatever the first had already fetched — most
+ * damagingly `db.users`, which is where the session is resolved, so the page
+ * decides nobody is signed in and redirects to the sign-in screen while the
+ * layout around it renders the signed-in desk perfectly well. It presents as
+ * "that one page logs me out", and it moves depending on which fetch happens
+ * to return first.
+ *
+ * Serialising is the whole fix and costs nothing: the work is additive and
+ * idempotent, so the second caller finds its scope already held and returns
+ * without asking the backend for anything.
+ */
+let loading: Promise<void> = Promise.resolve();
 
-  const fresh = state.snapshot === null;
-  if (fresh) {
-    state.snapshot = blank();
-    state.candidates = new Set();
-    state.openings = new Set();
-    state.all = false;
+export function primeStore(scope: PrimeScope = {}): Promise<void> {
+  if (!isConvex()) return Promise.resolve();
+  // A scope may name a row by the id it had before it was saved.
+  scope = { ...scope, openingId: realId(scope.openingId ?? null), candidateIds: scope.candidateIds?.map((id) => realId(id)) };
+  // Refuses a backend that could message real people or poll live mailboxes — see lib/safety.ts.
+  const safe = assertSafeBackend();
+  // Queue behind whatever is in flight — including a failed one, whose
+  // rejection must not cancel this caller's turn.
+  // The load in flight is captured now: read inside the callback, `loading`
+  // would already be this call's own promise, and it would wait on itself.
+  const before = loading;
+  const mine = safe.then(() => before.catch(() => {})).then(() => loadInto(scope));
+  loading = mine.catch(() => {});
+  return mine;
+}
+
+async function loadInto(scope: PrimeScope): Promise<void> {
+  try {
+    await refresh(scope);
+  } finally {
+    // Whatever changed, derived indexes must rebuild. Cheap to over-bump: an
+    // index is rebuilt on the next read, not here.
+    state.version++;
   }
-  const db = state.snapshot!;
+}
+
+async function refresh(scope: PrimeScope): Promise<void> {
+  const now = Date.now();
   const actor = { id: null as string | null };
 
-  // ── The small tables, once ────────────────────────────────────────────────
-  if (fresh) {
-    const [users, openings, clients] = await Promise.all([
-      backend.users(actor),
-      backend.openings(actor),
-      backend.clients(actor).catch(() => []),
-    ]);
-    db.users = users;
-    db.openings = openings;
-    // Real rows once the backfill has run. Before that they are derived from
-    // the openings, so the app works on a database that has only been
-    // restored — the fallback is a bridge, not a second source of truth.
-    db.clients = clients.length > 0 ? clients : clientsFrom(openings);
+  /*
+   * The vocabulary, from the database rather than from the working set.
+   *
+   * Read before anything else uses it, because the page parses its query
+   * immediately after this returns. It outlives the working set — see
+   * `primeState` — so this is a read once every ten minutes, not once a page.
+   */
+  if (!primedVocabulary()) {
+    try {
+      const v = await backend.vocabulary(actor);
+      state.vocabulary = {
+        titles: v.titles.map((t) => t.title),
+        skills: v.skills,
+        industries: v.industries,
+        cities: v.cities,
+        employers: v.employers,
+        // Not sampled by the backend: degrees and institutions are not indexed,
+        // so asking for them would mean a scan. The parser simply recognises no
+        // qualification words until they are, which is the honest result — the
+        // filter is still there for a recruiter who sets it from the chips.
+        qualifications: [],
+        languages: [],
+        nationalities: [],
+      };
+      state.vocabularyAt = Date.now();
+    } catch {
+      // A search that cannot read the vocabulary still runs; it reads the
+      // sentence less well. Better than a page that will not render.
+    }
   }
+
+  /*
+   * ── The small tables ────────────────────────────────────────────────────
+   *
+   * Loaded into locals first and installed only once they are complete, so the
+   * store is never in a "created but not loaded" state. That state is what
+   * signed the whole desk out twice: a load interrupted by a backend restart
+   * left an empty `db.users`, which is where the session is resolved, and
+   * nothing retried it.
+   *
+   * A refresh that fails keeps the rows already held. They are thirty seconds
+   * old; an empty list of users is not an improvement on that.
+   */
+  if (!state.snapshot || now - state.tablesAt > TABLES_TTL_MS) {
+    try {
+      const [users, openings, clients, whole] = await Promise.all([
+        backend.users(actor),
+        backend.openings(actor),
+        backend.clients(actor),
+        loadWholeTables(),
+      ]);
+      // A backend that is still starting can answer with nothing rather than an
+      // error. Nobody can sign in to a desk with no users, so that is a failed
+      // read, not an answer.
+      if (users.length === 0) throw new Error("The backend returned no users — it may still be starting.");
+      const db = state.snapshot ?? blank();
+      db.users = users;
+      db.openings = openings;
+      // The clients table only. Clients used to be derived from the openings'
+      // free-text names when the table was empty — ids that exist nowhere, so a
+      // change to one could never be saved.
+      db.clients = clients;
+      // Every other table the desk keeps: interviews, offers, placements,
+      // review rounds, the link vault, intake, follow-up records, settings…
+      // Before, these were never loaded, and read as empty.
+      Object.assign(db, whole);
+      state.snapshot = db;
+      state.tablesAt = now;
+    } catch (e) {
+      if (!state.snapshot) throw e;
+    }
+  }
+  const db = state.snapshot!;
 
   // ── Applications, and the people on them ──────────────────────────────────
   const wanted = new Set<Id>(scope.candidateIds ?? []);
 
-  if (scope.allApplications && !state.all) {
-    state.all = true;
-    const { applications } = await backend.allApplications(actor);
-    db.applications = merge(db.applications, applications, (a) => a.id);
-    for (const o of db.openings) state.openings.add(o.id);
-  } else if (scope.openingId && !state.openings.has(scope.openingId)) {
+  if ((scope.allApplications || scope.followUps) && now - state.allAt > TABLES_TTL_MS) {
+    try {
+      const { applications } = await backend.allApplications(actor);
+      // Replaced, not merged: an application that moved stage or was removed
+      // must not survive as its old self.
+      db.applications = applications;
+      state.allAt = now;
+      for (const o of db.openings) state.openings.set(o.id, now);
+    } catch (e) {
+      if (state.allAt === 0) throw e;
+    }
+  } else if (scope.openingId && now - (state.openings.get(scope.openingId) ?? 0) > TABLES_TTL_MS) {
     const openingId = scope.openingId;
-    state.openings.add(openingId);
     const [apps, detail] = await Promise.all([
       backend.applications(actor, openingId),
       backend.opening(actor, openingId),
     ]);
-    db.applications = merge(db.applications, apps, (a) => a.id);
-    if (detail) {
-      db.jobPosts = merge(db.jobPosts, detail.posts, (p) => p.id);
-      db.assignments = merge(
-        db.assignments,
-        detail.assignments.map((a, i) => ({
-          id: `${openingId}:${a.userId}:${i}`,
-          openingId,
-          userId: a.userId,
-          role: a.role as never,
-          assignedAt: 0,
-          assignedBy: null,
-        })),
-        (a) => a.id,
-      );
-    }
+    state.openings.set(openingId, now);
+    db.applications = [...db.applications.filter((a) => a.openingId !== openingId), ...apps];
+    // Posts and assignments come with the whole tables above, with their real ids.
+    void detail;
   }
 
   /*
@@ -152,33 +264,85 @@ export async function primeStore(scope: PrimeScope = {}): Promise<void> {
     }
   }
   /*
-   * The alerts, though, name people — and the root layout computes them on
-   * every page for the badge. They only read candidates on the late stages
-   * (follow-up chases, interviews, offers, joining), which is a few hundred
-   * rather than the whole desk, so those come along with `allApplications`.
+   * The alerts name people, and the root layout computes them on every page
+   * for the badge. They read candidates on the late stages only — follow-up
+   * chases, interviews, offers, joining — a few hundred, not the whole desk.
    */
-  if (scope.allApplications) {
+  if (scope.followUps) {
     for (const a of db.applications) {
       if (ALERT_STAGES.has(a.stage)) wanted.add(a.candidateId);
     }
   }
-  const missing = [...wanted].filter((id) => !state.candidates.has(id));
-  if (missing.length > 0) {
-    const people = await backend.candidatesByIds(actor, missing);
-    const added: Candidate[] = [];
-    for (const id of missing) {
+  const stale = [...wanted].filter((id) => now - (state.candidates.get(id) ?? 0) > CANDIDATE_TTL_MS);
+  if (stale.length > 0) {
+    const people = await backend.candidatesByIds(actor, stale);
+    const fresh: Candidate[] = [];
+    for (const id of stale) {
       // Remembered even when absent, so a deleted row is not chased forever
       // and a genuine miss can still be told from a page that never asked.
-      state.candidates.add(id);
+      state.candidates.set(id, now);
       const c = people.get(id);
-      if (c) added.push(c);
+      if (c) fresh.push(c);
     }
-    db.candidates = merge(db.candidates, added, (c) => c.id);
+    const gone = new Set(stale.filter((id) => !people.has(id)));
+    db.candidates = merge(
+      db.candidates.filter((c) => !gone.has(c.id)),
+      fresh,
+      (c) => c.id,
+    );
+    // Their referees, which the reference page and follow-up read by candidate.
+    const refs = await convexQuery<Database["referees"]>("ta/tables:refereesFor", { candidateIds: stale });
+    const refreshed = new Set(stale);
+    db.referees = [...db.referees.filter((r) => !refreshed.has(r.fromCandidateId)), ...refs];
+  }
+
+  // Let go of people nobody has asked for in ten minutes.
+  const evict = [...state.candidates].filter(([id, at]) => now - at > CANDIDATE_EVICT_MS && !wanted.has(id));
+  if (evict.length > 0) {
+    const out = new Set(evict.map(([id]) => id));
+    for (const id of out) state.candidates.delete(id);
+    db.candidates = db.candidates.filter((c) => !out.has(c.id));
   }
   state.version++;
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
+
+/** Tables loaded whole, through ta/tables:page — the TA System's own records. */
+const WHOLE_TABLES = [
+  "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
+  "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "intake",
+  "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
+  "matchExclusions", "callFeedback", "interviews",
+] as const;
+
+async function loadWholeTables(): Promise<Partial<Database>> {
+  const entries = await Promise.all(
+    WHOLE_TABLES.map(async (table) => {
+      const rows: unknown[] = [];
+      let cursor: string | null = null;
+      // A page that runs past the backend's one-second query limit is asked
+      // for again at half the size, rather than failing the whole page load.
+      let numItems = 1000;
+      for (let pages = 0; pages < 400; pages++) {
+        let page: { rows: unknown[]; isDone: boolean; continueCursor: string | null };
+        try {
+          page = await convexQuery("ta/tables:page", { table, cursor, numItems });
+        } catch (e) {
+          if (numItems <= 50 || !/timed out|Server Error/i.test((e as Error).message)) throw e;
+          numItems = Math.floor(numItems / 2);
+          pages--;
+          continue;
+        }
+        rows.push(...page.rows);
+        if (page.isDone || !page.continueCursor) break;
+        cursor = page.continueCursor;
+      }
+      return [table, rows] as const;
+    }),
+  );
+  return Object.fromEntries(entries) as Partial<Database>;
+}
 
 /** Stages whose people `computeAlerts` reads by name (src/lib/sla.ts). */
 const ALERT_STAGES = new Set<Application["stage"]>(["follow_up", "interview", "offer", "placed"]);
@@ -190,32 +354,3 @@ function merge<T>(have: T[], incoming: T[], key: (x: T) => string): T[] {
   return [...byKey.values()];
 }
 
-/**
- * Clients, derived from the openings until the backfill gives them their own
- * table (plan step 5).
- *
- * The backend keeps `clientName` as free text, so "DirectFN" and "DIRECTFN"
- * are two spellings of one company. They fold together on a normalised key
- * here rather than showing as two clients — the same rule the backfill will
- * apply when it writes the real rows.
- */
-function clientsFrom(openings: { clientId: string; clientName: string; clientIndustry: string; createdAt: number }[]): Database["clients"] {
-  const byKey = new Map<string, Database["clients"][number]>();
-  for (const o of openings) {
-    const name = (o.clientName ?? "").trim();
-    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-    if (!key) continue;
-    if (!byKey.has(key)) {
-      byKey.set(key, {
-        id: o.clientId || `client:${key}`,
-        name,
-        industry: o.clientIndustry ?? "",
-        contacts: [],
-        esaSignedAt: null,
-        status: "active",
-        createdAt: o.createdAt,
-      });
-    }
-  }
-  return [...byKey.values()];
-}

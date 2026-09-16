@@ -21,7 +21,12 @@
     "module": "ESNext",
     "isolatedModules": true,
     "noEmit": true,
-    "downlevelIteration": true
+    "downlevelIteration": true,
+
+    /* The TA model (convex/ta/model) reuses the app's pure mappers, which
+     * import the app's types through its "@/" alias. */
+    "baseUrl": ".",
+    "paths": { "@/*": ["../src/*"] }
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]

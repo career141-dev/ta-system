@@ -17,39 +17,17 @@
 // the pipeline events and the Meta events all still fire.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
+import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 
 const SET_SIZE = 5;
 
-function projectApplication(a: Doc<"applications">) {
-  return {
-    id: a._id as string,
-    openingId: a.jobId as string,
-    candidateId: a.candidateId as string,
-    jobPostId: (a.jobPostId ?? null) as string | null,
-    stage: toTaStage(a.currentStage),
-    backendStage: a.currentStage,
-    ownerTaId: (a.ownerTaId ?? null) as string | null,
-    shortlistedAt: a.shortlistedAt ?? null,
-    setNumber: a.setNumber ?? null,
-    answers: a.answers ?? {},
-    sourcingChannel: a.taSourcingChannel ?? null,
-    legacySourceChannel: a.sourceChannel,
-    isAddOn: a.isAddOn ?? false,
-    aiMatchScore: a.aiMatchScore ?? null,
-    aiMatchExplanation: a.aiMatchExplanation ?? null,
-    candidateName: a.candidateName ?? null,
-    isActive: a.isActive,
-    createdAt: typeof a.createdAt === "number" ? a.createdAt : Date.parse(String(a.createdAt)) || 0,
-    lastStageChangedAt: a.lastStageChangedAt,
-  };
-}
 
-export const listForOpening = query({
+export const listForOpening = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     openingId: v.string(),
@@ -84,7 +62,7 @@ export const listForOpening = query({
  * pages rather than truncating — a list that looks complete and is short by
  * two hundred is worse than one that takes two round trips.
  */
-export const listAll = query({
+export const listAll = internalQuery({
   args: {
     actorId: v.optional(v.string()),
     cursor: v.optional(v.union(v.string(), v.null())),
@@ -93,7 +71,7 @@ export const listAll = query({
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const page = await ctx.db.query("applications").paginate({
-      numItems: Math.min(args.limit ?? 4000, 4000),
+      numItems: Math.min(args.limit ?? 2000, 2000),
       cursor: args.cursor ?? null,
     });
     return {
@@ -104,7 +82,7 @@ export const listAll = query({
   },
 });
 
-export const get = query({
+export const get = internalQuery({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -127,7 +105,7 @@ export const get = query({
  * already owns them: two TAs reaching for the same person at the same moment
  * is ordinary desk life, not an error, and the loser needs to be told who won.
  */
-export const shortlist = mutation({
+export const shortlist = internalMutation({
   args: { actorId: v.optional(v.string()), applicationId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -199,7 +177,7 @@ async function nextSetNumber(
 }
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */
-export const moveStage = mutation({
+export const moveStage = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     applicationId: v.string(),
@@ -233,7 +211,7 @@ export const moveStage = mutation({
 });
 
 /** Take a candidate off an opening's automatic matches for good. */
-export const excludeFromMatches = mutation({
+export const excludeFromMatches = internalMutation({
   args: { actorId: v.optional(v.string()), openingId: v.string(), candidateId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);

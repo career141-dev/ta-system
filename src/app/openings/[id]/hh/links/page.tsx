@@ -1,3 +1,4 @@
+import { primeStore } from "@/data/prime";
 import { ProjectHeader } from "../../ProjectHeader";
 import { LinkVaultTable } from "@/components/LinkVaultTable";
 import { CaptureSetup } from "@/components/CaptureSetup";
@@ -5,6 +6,7 @@ import { getCurrentUser } from "@/lib/session";
 
 export default async function LinksPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
   return (
     <>

@@ -7,10 +7,10 @@
 // rows are written by the backfill, folded on a normalised name.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { optionalActor } from "./guard";
 
-export const list = query({
+export const list = internalQuery({
   args: { actorId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
@@ -33,7 +33,7 @@ function clientKey(name: string): string {
   return (name ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-export const add = mutation({
+export const add = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     name: v.string(),
@@ -73,7 +73,7 @@ export const add = mutation({
   },
 });
 
-export const update = mutation({
+export const update = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     clientId: v.string(),
@@ -99,7 +99,7 @@ export const update = mutation({
   },
 });
 
-export const remove = mutation({
+export const remove = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     clientId: v.string(),
@@ -120,7 +120,7 @@ export const remove = mutation({
   },
 });
 
-export const saveContacts = mutation({
+export const saveContacts = internalMutation({
   args: {
     actorId: v.optional(v.string()),
     clientId: v.string(),

@@ -4,13 +4,16 @@ node_modules
 *.tsbuildinfo
 next-env.d.ts
 
-# Secrets — never commit
+# Secrets — never commit. The server's file is .env.production; only the
+# example, which holds no values, belongs in git.
 .env
 .env.local
 .env*.local
+.env.production
 
 # Local embedding model runtime
 tools/embed/.venv
 .data-live-test
 tools/embed/models
 *.log
+.claude/

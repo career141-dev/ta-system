@@ -17,7 +17,9 @@ import "server-only";
  * thing — is decided before we get here, by `src/lib/auth.ts`.
  */
 
-const LOOPBACK = new Set(["127.0.0.1", "localhost", "::1", "0.0.0.0"]);
+import { backendHostAllowed } from "./convexHost";
+
+const TIMING = !!process.env.C141_TIMING;
 
 export class ConvexCallError extends Error {
   readonly status?: number;
@@ -25,6 +27,11 @@ export class ConvexCallError extends Error {
     super(message);
     this.status = status;
   }
+}
+
+/** The backend's URL and admin key, after the loopback check. Server code only. */
+export function convexConfig(): { url: string; adminKey: string } {
+  return config();
 }
 
 function config(): { url: string; adminKey: string } {
@@ -35,19 +42,13 @@ function config(): { url: string; adminKey: string } {
 
   // The same refusal the CLI wrapper makes, for the same reason: production
   // and the local backend differ only by this string, and an admin key aimed
-  // at the wrong one writes to the wrong database. Lift this deliberately when
-  // there is a reason to, not by editing an env file.
-  let host: string;
-  try {
-    host = new URL(url).hostname;
-  } catch {
-    throw new ConvexCallError(`The Convex URL is not a URL: ${url}`);
-  }
-  if (!LOOPBACK.has(host)) {
-    throw new ConvexCallError(
-      `Refusing to call ${host}: this build may only talk to a Convex backend on this machine.`,
-    );
-  }
+  // at the wrong one writes to the wrong database. See ./convexHost.ts for the
+  // one deliberate exception: a production deployment naming its own backend.
+  const verdict = backendHostAllowed(url, {
+    deployment: process.env.C141_DEPLOYMENT,
+    allowedHost: process.env.C141_CONVEX_HOST,
+  });
+  if (!verdict.ok) throw new ConvexCallError(verdict.message);
 
   return { url, adminKey };
 }
@@ -57,6 +58,9 @@ type Kind = "query" | "mutation" | "action";
 async function call<T>(kind: Kind, path: string, args: Record<string, unknown>): Promise<T> {
   const { url, adminKey } = config();
 
+  // C141_TIMING=1 logs each backend call's path, duration and response size —
+  // the first thing to read when a page feels slow. Off by default.
+  const started = TIMING ? performance.now() : 0;
   let res: Response;
   try {
     res = await fetch(`${url}/api/${kind}`, {
@@ -69,12 +73,25 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
       cache: "no-store",
     });
   } catch (e) {
+    // Next.js signals "this page must render per request" by THROWING from
+    // fetch during the build (an error carrying a `digest`). Wrapping it turned
+    // that signal into a connection error, and `next build` failed on the first
+    // page that loads data. Control-flow errors pass through untouched.
+    if (e && typeof e === "object" && "digest" in e) throw e;
     throw new ConvexCallError(`Could not reach the Convex backend (${(e as Error).message}).`);
   }
 
-  const body = (await res.json().catch(() => null)) as
-    | { status?: string; value?: T; errorMessage?: string }
-    | null;
+  const raw = await res.text().catch(() => "");
+  if (TIMING) {
+    console.log(`[convex] ${kind} ${path} ${Math.round(performance.now() - started)}ms ${Math.round(raw.length / 1024)}KB`);
+  }
+  let parsed: unknown = null;
+  try {
+    parsed = raw ? JSON.parse(raw) : null;
+  } catch {
+    parsed = null;
+  }
+  const body = parsed as { status?: string; value?: T; errorMessage?: string } | null;
 
   if (!res.ok || !body || body.status !== "success") {
     // The server's message only. The request carries the admin key and must
@@ -85,8 +102,21 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
   return body.value as T;
 }
 
-export const convexQuery = <T>(path: string, args: Record<string, unknown> = {}) =>
-  call<T>("query", path, args);
+/**
+ * Queries are read-only, so one that ran past the backend's one-second limit —
+ * which happens on a cold cache after the backend restarts — is simply asked
+ * again. Mutations and actions are never retried here.
+ */
+export async function convexQuery<T>(path: string, args: Record<string, unknown> = {}): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call<T>("query", path, args);
+    } catch (e) {
+      if (attempt >= 3 || !(e instanceof ConvexCallError) || !/timed out/i.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, 250 * attempt));
+    }
+  }
+}
 
 export const convexMutation = <T>(path: string, args: Record<string, unknown> = {}) =>
   call<T>("mutation", path, args);

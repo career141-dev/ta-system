@@ -8,6 +8,7 @@ import {
   isOutboundCallTestMode,
   resolveOutboundRecipient,
 } from "./livekitSipPolicy";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
 const MAX_CALL_DURATION_SECONDS = 5 * 60;
 const RINGING_TIMEOUT_SECONDS = 25;
@@ -272,6 +273,9 @@ export const dispatchManualVoiceCall = internalAction({
         metadata: participantMetadata,
       });
 
+      if (!phoneAllowed(recipient)) {
+        throw new Error(suppressed("SIP call", recipient));
+      }
       const sipClient = new SipClient(livekitUrl, apiKey, apiSecret);
       participant = await sipClient.createSipParticipant(
         outboundTrunkId,

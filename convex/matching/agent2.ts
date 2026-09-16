@@ -6,7 +6,7 @@ import type { Id } from "../_generated/dataModel.d.ts";
 import { mapJobSeniorityTo10LevelRank, checkSeniorityConflict, scoreCandidateAgainstRequirements, getSkillDomain } from "../cvs/cvScoring";
 import { classifyJobRoleFamily, classifyCurrentRolesBatch } from "../lib/currentRoleClassifier";
 import { synthesizeJobRequirements } from "../lib/jobSynthesizer";
-import { upsertCandidateVector, queryCandidateVectors } from "../lib/qdrant";
+import { candidateVectorPayload, upsertCandidateVector, queryCandidateVectors } from "../lib/qdrant";
 
 /**
  * Helper to get vector embeddings from NVIDIA API
@@ -157,19 +157,7 @@ export const generateAndStoreEmbedding = internalAction({
       await upsertCandidateVector({
         candidateId: args.candidateId,
         vector: embedding,
-        payload: {
-          candidateId: args.candidateId,
-          fullName: candidate.fullName || "Candidate",
-          currentJobTitle: candidate.currentJobTitle,
-          skills: candidate.skills || [],
-          totalExperienceYears: candidate.totalExperienceYears,
-          seniorityLevel: candidate.seniorityLevel,
-          locationCity: candidate.locationCity,
-          locationCountry: candidate.locationCountry,
-          sourceChannel: candidate.firstSourceChannel || candidate.sourceChannel,
-          overallStatus: candidate.overallStatus,
-          updatedAt: Date.now(),
-        },
+        payload: { ...candidateVectorPayload(candidate), candidateId: args.candidateId },
       });
 
       // 2. Mark hasEmbedding: true in Convex (lightweight flag, 0 float arrays)

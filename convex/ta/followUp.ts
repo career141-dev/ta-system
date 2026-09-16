@@ -17,7 +17,7 @@
 // recipient.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { outreachLive } from "../lib/outreachSafety";
 import { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
@@ -28,7 +28,7 @@ import { toTaStage } from "./stages";
  * Send the next follow-up for one candidate: the Day 0 outreach if nothing has
  * gone out yet, otherwise a reminder.
  */
-export const send = mutation({
+export const send = internalMutation({
   args: { actorId: v.string(), applicationId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -78,7 +78,7 @@ export const send = mutation({
  * Whether messages would reach real people, for the banner on the screen.
  * Says whether the test recipients are set — never what they are.
  */
-export const gateStatus = query({
+export const gateStatus = internalQuery({
   args: {},
   handler: async () => ({
     live: outreachLive(),
@@ -90,7 +90,7 @@ export const gateStatus = query({
 });
 
 /** Stop the sequence: cancels anything still pending and clears the schedule. */
-export const stop = mutation({
+export const stop = internalMutation({
   args: { actorId: v.string(), applicationId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);

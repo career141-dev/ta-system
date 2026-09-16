@@ -1,0 +1,158 @@
+{
+  "at": "2026-09-15T16:56:33.928Z",
+  "inbox": "sanjeev@career141.com",
+  "passed": 25,
+  "failed": 0,
+  "results": [
+    {
+      "id": "P3-01",
+      "name": "the mailbox is read with Microsoft Graph and CV attachments are listed",
+      "ok": true,
+      "detail": "29 messages with attachments"
+    },
+    {
+      "id": "P3-01b",
+      "name": "the test set has new CVs, an already-known CV and a document that is not a CV",
+      "ok": true,
+      "detail": "2 new, 1 known, 1 not a CV"
+    },
+    {
+      "id": "P3-02",
+      "name": "a test opening with an approved JD is open for CVs",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P3-03",
+      "name": "each message is accepted by the ingestion action",
+      "ok": true,
+      "detail": "4 attachments sent"
+    },
+    {
+      "id": "P3-04",
+      "name": "#1 the file is stored in this deployment's own storage, not the production bucket",
+      "ok": true,
+      "detail": "convex:kg2b6g85x24mm"
+    },
+    {
+      "id": "P3-05",
+      "name": "#1 the upload is processed",
+      "ok": true,
+      "detail": "processed"
+    },
+    {
+      "id": "P3-06",
+      "name": "#1 a candidate profile is extracted: name, contact, title, skills, history",
+      "ok": true,
+      "detail": "34 skills, 1 jobs, 2 education, ? yrs"
+    },
+    {
+      "id": "P3-07",
+      "name": "#1 the CV text is kept and readable",
+      "ok": true,
+      "detail": "convex:kg248kj9jmhb2"
+    },
+    {
+      "id": "P3-08",
+      "name": "#1 the candidate is on the opening",
+      "ok": true,
+      "detail": "ta_shortlist, source email_campaign"
+    },
+    {
+      "id": "P3-09",
+      "name": "#1 the CV is scored against the opening with an explanation",
+      "ok": true,
+      "detail": "score 64, 1 score rows"
+    },
+    {
+      "id": "P3-04",
+      "name": "#2 the file is stored in this deployment's own storage, not the production bucket",
+      "ok": true,
+      "detail": "convex:kg268w2n97k89"
+    },
+    {
+      "id": "P3-05",
+      "name": "#2 the upload is processed",
+      "ok": true,
+      "detail": "processed"
+    },
+    {
+      "id": "P3-06",
+      "name": "#2 a candidate profile is extracted: name, contact, title, skills, history",
+      "ok": true,
+      "detail": "52 skills, 1 jobs, 3 education, 1 yrs"
+    },
+    {
+      "id": "P3-07",
+      "name": "#2 the CV text is kept and readable",
+      "ok": true,
+      "detail": "convex:kg25ztsfwmhs5"
+    },
+    {
+      "id": "P3-08",
+      "name": "#2 the candidate is on the opening",
+      "ok": true,
+      "detail": "new_cvs, source email_campaign"
+    },
+    {
+      "id": "P3-09",
+      "name": "#2 the CV is scored against the opening with an explanation",
+      "ok": true,
+      "detail": "score 32, 1 score rows"
+    },
+    {
+      "id": "P3-11",
+      "name": "a CV already in the database links the existing candidate, with no second upload or profile",
+      "ok": true,
+      "detail": "1 upload rows, new_cvs"
+    },
+    {
+      "id": "P3-11b",
+      "name": "the returning candidate is scored against the new opening",
+      "ok": true,
+      "detail": "score 52"
+    },
+    {
+      "id": "P3-12",
+      "name": "a document that is not a CV is rejected, with no candidate and nobody added to the opening",
+      "ok": true,
+      "detail": "processed: Document rejected: Not recognized as a valid CV or Resume."
+    },
+    {
+      "id": "P3-13",
+      "name": "each new candidate has a search vector",
+      "ok": true,
+      "detail": "{\"j97bhczjwc2jb0c8z1e4dygrah8bgptn\":true,\"j97d2gmkn3yt2m4t6wm7kctvgx8eepqg\":true}"
+    },
+    {
+      "id": "P3-14",
+      "name": "the mailbox is unchanged (no message marked read or moved)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P3-15",
+      "name": "#1 the candidate's profile opens with their name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P3-16",
+      "name": "#1 the TA sees them in the opening's follow_up list",
+      "ok": true,
+      "detail": "ta_shortlist"
+    },
+    {
+      "id": "P3-15",
+      "name": "#2 the candidate's profile opens with their name",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "id": "P3-16",
+      "name": "#2 the TA sees them in the opening's new_cv list",
+      "ok": true,
+      "detail": "new_cvs"
+    }
+  ]
+}

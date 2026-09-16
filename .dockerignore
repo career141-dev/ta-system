@@ -1,12 +1,16 @@
-Dockerfile
-.dockerignore
-node_modules
-npm-debug.log
-README.md
-.next
+# What must not reach the build context, so it cannot reach the image.
+.env
+.env.*
+!.env.production.example
 .git
-.env.local
-.data
+.claude
 .convex
-convex
+node_modules
+.next
+.data
+.data-live-test
 docs
+tools/embed/.venv
+tools/embed/models
+*.log
+*.tsbuildinfo

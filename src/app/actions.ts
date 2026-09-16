@@ -8,7 +8,22 @@ import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
-import { redirect } from "next/navigation";
+import { redirect as nextRedirect } from "next/navigation";
+import { markTablesStale, withRealIds } from "@/data/primeState";
+
+/** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
+function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
+  return async (...args: A): Promise<R> => {
+    const result = await write(...args);
+    markTablesStale();
+    return result;
+  };
+}
+
+/** Redirect, with any id created in this action swapped for the one the database gave it. */
+function redirect(url: string): never {
+  return nextRedirect(withRealIds(url));
+}
 import { after } from "next/server";
 import {
   generateJdText,
@@ -38,6 +53,12 @@ import * as backend from "@/data/convex/backend";
  * message, looks like a dead button. Returning to the referring page keeps the
  * person where they were and tells them why.
  */
+/** The candidate a form acts on, so the action loads their record before reading it. */
+function candidateIdsIn(formData: FormData): string[] {
+  const id = String(formData.get("candidateId") ?? "").trim();
+  return id ? [id] : [];
+}
+
 async function back(message: string): Promise<never> {
   const ref = (await headers()).get("referer");
   let to = "/";
@@ -350,6 +371,55 @@ export async function createOpeningStep1(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
+  const openingId = await saveNewOpening(formData, user);
+  if (!openingId) return;
+
+  if (next === "jd") redirect(`/openings/${openingId}/jd`);
+  if (next === "again") redirect(`/openings/new?created=${openingId}`);
+  redirect(`/openings/${openingId}`);
+}
+
+export type InlineResult<T> = ({ ok: true } & T) | { ok: false; error: string };
+
+/** Why the signed-in person may not do this, or null. For saves that answer rather than redirect. */
+async function refusal(capability: Capability): Promise<string | null> {
+  const user = await getCurrentUser();
+  if (!user) return "Your session has ended. Sign in again.";
+  const decision = can(user, capability);
+  return decision.ok ? null : decision.message;
+}
+
+/**
+ * The same save, for the create-client pop-up: it answers instead of
+ * navigating, so the pop-up can say what was made and offer where to go next
+ * without the page jumping away underneath it.
+ */
+export async function createOpeningInline(
+  formData: FormData,
+): Promise<InlineResult<{ openingId: string; title: string; clientName: string }>> {
+  await primeStore({ allApplications: true });
+  const refused = await refusal("opening.create");
+  if (refused) return { ok: false, error: refused };
+  const user = await authorize(formData, "opening.create");
+  try {
+    const openingId = await saveNewOpening(formData, user);
+    if (!openingId) {
+      return { ok: false, error: "Choose a client, a position and — for a lead — at least one TA." };
+    }
+    const clientId = String(formData.get("clientId") ?? "");
+    return {
+      ok: true,
+      openingId: withRealIds(openingId),
+      title: String(formData.get("title") ?? "").trim(),
+      clientName: repo.clients().find((c) => c.id === clientId)?.name ?? "",
+    };
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The opening could not be saved. Try again.") };
+  }
+}
+
+/** Screen one's write. Returns the new opening's id, or null when something required is missing. */
+async function saveNewOpening(formData: FormData, user: User): Promise<string | null> {
   const clientId = String(formData.get("clientId") ?? "");
   const title = String(formData.get("title") ?? "").trim();
   const notes = String(formData.get("notes") ?? "");
@@ -369,7 +439,7 @@ export async function createOpeningStep1(formData: FormData) {
     ? formData.getAll("assignedTaIds").map(String).filter(Boolean)
     : [user.id];
 
-  if (!clientId || !title || assigned.length === 0) return;
+  if (!clientId || !title || assigned.length === 0) return null;
 
   const users = repo.users();
   const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
@@ -451,9 +521,7 @@ export async function createOpeningStep1(formData: FormData) {
     revalidatePath(`/openings/${openingId}`, "layout");
   });
 
-  if (next === "jd") redirect(`/openings/${openingId}/jd`);
-  if (next === "again") redirect(`/openings/new?created=${openingId}`);
-  redirect(`/openings/${openingId}`);
+  return openingId;
 }
 
 /** Screen two — the TA saves their notes before generating from them. */
@@ -715,7 +783,9 @@ export async function updatePost(formData: FormData) {
     .filter(Boolean);
   const country = String(formData.get("country") ?? "").trim() || null;
   const assignedTaId = String(formData.get("assignedTaId") ?? "") || null;
-  repo.updatePost(postId, { aliasKeywords: aliases, country, assignedTaId });
+  const r = repo.updatePost(postId, { aliasKeywords: aliases, country, assignedTaId });
+  // A refusal is shown, not swallowed.
+  if (!r.ok) await back(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -725,7 +795,9 @@ export async function setPostStatus(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const postId = String(formData.get("postId"));
   const status = String(formData.get("status")) as "draft" | "live" | "paused" | "closed";
-  repo.updatePost(postId, { status, postedAt: status === "live" ? Date.now() : undefined });
+  const r = repo.updatePost(postId, { status, postedAt: status === "live" ? Date.now() : undefined });
+  // "Set live" before the JD is approved used to fail with no message at all.
+  if (!r.ok) await back(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -851,9 +923,37 @@ export async function setOpeningTeam(formData: FormData) {
 export async function addClient(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "client.manage");
+  const saved = await saveNewClient(formData, user);
+  if (!saved) return;
+  if (String(formData.get("action") ?? "save") === "create_job") {
+    redirect(`/openings/new?client=${encodeURIComponent(saved.id)}`);
+  }
+}
+
+/**
+ * The create-client pop-up's save. It returns the client rather than
+ * redirecting, so the pop-up can carry straight on into the opening form.
+ */
+export async function createClientInline(
+  formData: FormData,
+): Promise<InlineResult<{ client: { id: string; name: string; industry: string } }>> {
+  await primeStore({ allApplications: true });
+  const refused = await refusal("client.manage");
+  if (refused) return { ok: false, error: refused };
+  const user = await authorize(formData, "client.manage");
+  try {
+    const saved = await saveNewClient(formData, user);
+    if (!saved) return { ok: false, error: "Give the company a name." };
+    return { ok: true, client: saved };
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The client could not be saved. Try again.") };
+  }
+}
+
+async function saveNewClient(formData: FormData, user: User): Promise<{ id: string; name: string; industry: string } | null> {
   const name = String(formData.get("name") ?? "").trim();
   const industry = String(formData.get("industry") ?? "").trim() || "—";
-  if (!name) return;
+  if (!name) return null;
 
   // The form has always asked for the main contact. Until the 12 Sep sweep it
   // was read off the request and thrown away.
@@ -874,7 +974,7 @@ export async function addClient(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    newId = (await convexMutation<string>("ta/clients:add", {
+    newId = (await freshAfter(convexMutation<string>)("ta/clients:add", {
       actorId: actor?._id,
       name,
       industry,
@@ -884,14 +984,9 @@ export async function addClient(formData: FormData) {
     newId = repo.addClient({ name, industry, contacts });
   }
 
-  const intent = String(formData.get("action") ?? "save");
-
   revalidatePath("/clients");
   revalidatePath("/openings/new");
-
-  if (intent === "create_job") {
-    redirect(`/openings/new?client=${encodeURIComponent(newId)}`);
-  }
+  return { id: withRealIds(newId), name, industry };
 }
 
 export async function updateClient(formData: FormData) {
@@ -909,7 +1004,7 @@ export async function updateClient(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    await convexMutation("ta/clients:update", {
+    await freshAfter(convexMutation)("ta/clients:update", {
       actorId: actor?._id,
       clientId,
       name,
@@ -939,7 +1034,7 @@ export async function deleteClient(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    res = await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", {
+    res = await freshAfter(convexMutation<{ ok: boolean; openings?: number }>)("ta/clients:remove", {
       actorId: actor?._id,
       clientId,
     });
@@ -974,7 +1069,7 @@ export async function saveContacts(formData: FormData) {
   if (isConvex()) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
-    await convexMutation("ta/clients:saveContacts", {
+    await freshAfter(convexMutation)("ta/clients:saveContacts", {
       actorId: actor?._id,
       clientId,
       contacts,
@@ -1071,7 +1166,7 @@ export async function removeApplication(formData: FormData) {
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
   const openingId = String(formData.get("openingId"));
   const field = String(formData.get("field")) as "email" | "phone";
@@ -1324,7 +1419,7 @@ export async function inviteUser(formData: FormData) {
   const existing = repo.users().find((u) => u.email.trim().toLowerCase() === p.email);
   if (existing?.id === actor.id && p.role !== "admin") await back("You can't change your own role here.");
   try {
-    await convexMutation("ta/users:adminSaveUser", {
+    await freshAfter(convexMutation)("ta/users:adminSaveUser", {
       actorId: actor.id,
       userId: existing?.id,
       fullName: existing && !p.name ? existing.name : name,
@@ -1334,7 +1429,7 @@ export async function inviteUser(formData: FormData) {
       taRole: p.role,
     });
     if (existing && !existing.isActive) {
-      await convexMutation("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
+      await freshAfter(convexMutation)("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
     }
   } catch (e) {
     const raw = (e as Error).message ?? "";
@@ -1410,7 +1505,7 @@ export async function saveSearch(formData: FormData) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
     if (actor) {
-      await convexMutation("ta/search:saveSearch", {
+      await freshAfter(convexMutation)("ta/search:saveSearch", {
         actorId: actor._id,
         name,
         query,
@@ -1436,7 +1531,7 @@ export async function deleteSearch(formData: FormData) {
     const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
     const actor = await convexActorForEmail(user.email);
     if (actor) {
-      await convexMutation("ta/search:deleteSearch", { actorId: actor._id, searchId });
+      await freshAfter(convexMutation)("ta/search:deleteSearch", { actorId: actor._id, searchId });
     }
   } else {
     repo.deleteSearch(searchId);
@@ -1446,7 +1541,7 @@ export async function deleteSearch(formData: FormData) {
 
 /** Put a database candidate onto an opening — lands at Matched, unclaimed. */
 export async function addToOpening(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
@@ -1855,7 +1950,7 @@ export async function admitIntake(formData: FormData) {
 }
 
 export async function mergeIntake(formData: FormData) {
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
   const user = await authorize(formData, "intake.handle", { intake: "itemId" });
   const id = String(formData.get("itemId"));
   const r = repo.mergeIntake(id, String(formData.get("candidateId")), user.id);
@@ -2527,4 +2622,31 @@ export async function probeConvexAsCurrentUser(): Promise<
     if (e instanceof ConvexCallError) return { ok: false, reason: e.message };
     throw e;
   }
+}
+
+// ─── Development sign-in (lib/devSignin.ts) ──────────────────────────────────
+
+/** Sign in as a desk account without Clerk. Refused unless dev sign-in is on and the build is not production. */
+export async function devSignInAs(formData: FormData) {
+  const { devSigninEnabled, devSessionValue, DEV_SESSION_COOKIE } = await import("@/lib/devSignin");
+  if (!devSigninEnabled()) redirect("/signin");
+  await primeStore();
+  const id = String(formData.get("userId") ?? "");
+  const user = repo.users().find((u) => u.id === id);
+  if (!user || !user.isActive) redirect("/signin");
+  const { cookies } = await import("next/headers");
+  (await cookies()).set(DEV_SESSION_COOKIE, devSessionValue(user.id), {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 60 * 60 * 12,
+  });
+  redirect("/");
+}
+
+export async function devSignOut() {
+  const { DEV_SESSION_COOKIE } = await import("@/lib/devSignin");
+  const { cookies } = await import("next/headers");
+  (await cookies()).delete(DEV_SESSION_COOKIE);
+  redirect("/signin");
 }

@@ -1,5 +1,6 @@
 import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
+import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
 // Helper to hash string via SHA-256 (Meta requirement)
 async function hashData(data: string): Promise<string> {
@@ -61,6 +62,12 @@ export const sendConversionEvent = internalAction({
 
     if (testEventCode) {
       payload.test_event_code = testEventCode;
+    }
+
+    // Conversion events carry hashed candidate details to Meta. Not from a test deployment.
+    if (outboundLocked()) {
+      suppressed("Meta conversion event", args.eventName);
+      return { success: false, skipped: true };
     }
 
     try {

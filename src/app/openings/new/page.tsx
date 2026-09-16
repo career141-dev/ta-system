@@ -3,6 +3,7 @@ import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { CaptureForm } from "@/components/CaptureForm";
 import { primeStore } from "@/data/prime";
+import { can } from "@/lib/auth";
 
 export default async function NewOpeningPage({
   searchParams,
@@ -57,6 +58,7 @@ export default async function NewOpeningPage({
           .sort((a, b) => a.name.localeCompare(b.name))}
         isLead={isLead}
         initialClientId={initialClientId}
+        canAddClient={can(user, "client.manage").ok}
       />
     </main>
   );

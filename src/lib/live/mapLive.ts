@@ -3,6 +3,7 @@
  * what gets copied is visible and tested.
  */
 import type { Candidate } from "@/data/types";
+import { externalUrl } from "../url";
 
 export interface LiveResume {
   _id: string;
@@ -37,7 +38,7 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     fullName: c.fullName || "Unnamed candidate",
     email: c.email ?? null,
     phone: c.phone ?? null,
-    linkedinUrl: c.linkedinUrl ?? null,
+    linkedinUrl: externalUrl(c.linkedinUrl),
     location: c.location ?? c.locationStructured?.raw_text ?? null,
     nationality: c.nationality ?? null,
     age: typeof c.age === "number" ? c.age : null,
@@ -48,14 +49,15 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     educationDegree: c.educationDegree ?? edu?.degree ?? null,
     educationInstitution: c.educationInstitution ?? edu?.institution ?? null,
     qualifications: Array.isArray(c.certifications) && c.certifications.length ? c.certifications.join(", ") : null,
-    englishLevel: null,
+    englishLevel: typeof c.englishLevel === "number" ? c.englishLevel : null,
     languages: Array.isArray(c.languages) ? c.languages.map(String) : [],
     skills: Array.isArray(c.skills) ? c.skills.map((s: unknown) => (typeof s === "object" && s && "value" in (s as object) ? String((s as { value: unknown }).value) : String(s))) : [],
     industries: Array.isArray(c.industries) ? c.industries.map(String) : c.sector ? [String(c.sector)] : [],
     noticePeriodDays: typeof c.noticePeriodDays === "number" ? c.noticePeriodDays : null,
-    currentSalary: money(c.currentSalary, c.currentSalaryCurrency),
-    expectedSalary: money(c.expectedSalary, c.expectedSalaryCurrency),
-    cvFileName: null,
+    // The words a candidate gave ("250k plus car") win over the number read from them.
+    currentSalary: (typeof c.taCurrentSalaryText === "string" && c.taCurrentSalaryText) || money(c.currentSalary, c.currentSalaryCurrency),
+    expectedSalary: (typeof c.taExpectedSalaryText === "string" && c.taExpectedSalaryText) || money(c.expectedSalary, c.expectedSalaryCurrency),
+    cvFileName: typeof c.cvFileName === "string" ? c.cvFileName : null,
     workHistory: (history ?? [])
       .filter((h) => h && h.title)
       .map((h) => ({ title: String(h.title), employer: String(h.company ?? ""), fromYear: yearOf(h.startDate) ?? 0, toYear: yearOf(h.endDate) })),

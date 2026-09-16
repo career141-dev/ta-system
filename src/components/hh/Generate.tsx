@@ -1,3 +1,4 @@
+import { externalUrl } from "@/lib/url";
 import { aiStatus, FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 import { serperConfigured } from "@/lib/serper";
 
@@ -94,7 +95,7 @@ export function Sources({ sources }: { sources: { url: string; title: string; qu
       <ol className="mt-3 flex flex-col gap-3">
         {sources.map((s, i) => (
           <li key={s.url + i} className="text-[12.5px] leading-relaxed">
-            <a href={s.url} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
+            <a href={externalUrl(s.url) ?? undefined} target="_blank" rel="noreferrer" className="font-medium text-accent hover:underline">
               {s.title}
             </a>
             {s.quote && <p className="mt-0.5 text-[11.5px] italic text-ink-faint">&ldquo;{s.quote}&rdquo;</p>}

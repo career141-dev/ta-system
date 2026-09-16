@@ -34,10 +34,10 @@ export default async function JdPage({
     e?.salaryMin
       ? `${e.currency} ${e.salaryMin.toLocaleString()}${e.salaryMax ? `–${e.salaryMax.toLocaleString()}` : ""}`
       : null,
-    e?.locations.length ? e.locations.join(", ") : null,
-    e?.nationalities.length ? `${e.nationalities.join(", ")} only` : null,
+    e?.locations?.length ? e.locations.join(", ") : null,
+    e?.nationalities?.length ? `${e.nationalities.join(", ")} only` : null,
     e?.headcount && e.headcount > 1 ? `${e.headcount} positions` : null,
-    e?.mustHaves.length ? `${e.mustHaves.length} requirements` : null,
+    e?.mustHaves?.length ? `${e.mustHaves.length} requirements` : null,
     e?.priorityTier ?? null,
   ].filter(Boolean) as string[];
 

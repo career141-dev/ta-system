@@ -29,9 +29,10 @@ export default async function EodPage({
   searchParams: Promise<{ kind?: string; msg?: string }>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
   await primeStore({ openingId: id });
   await requireSourcingSeat(id);
-  const kind = "director" as const;
+  const kind: "director" | "client" = sp.kind === "client" ? "client" : "director";
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();

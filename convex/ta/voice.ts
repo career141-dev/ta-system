@@ -19,7 +19,7 @@
 // LiveKit key; nothing here needs it.
 
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
@@ -38,7 +38,7 @@ function detailsToCollect(jobTitle: string, custom: string[]): string[] {
   ].slice(0, 15);
 }
 
-export const prepareWebCall = mutation({
+export const prepareWebCall = internalMutation({
   args: {
     actorId: v.string(),
     applicationId: v.string(),
@@ -133,7 +133,7 @@ export const prepareWebCall = mutation({
 });
 
 /** The recent AI calls for one application, with what each captured. */
-export const callsFor = query({
+export const callsFor = internalQuery({
   args: { actorId: v.string(), applicationId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -173,7 +173,7 @@ export const callsFor = query({
  * nothing; if it never connected, the records say so instead of staying "in
  * progress".
  */
-export const abandonWebCall = mutation({
+export const abandonWebCall = internalMutation({
   args: { actorId: v.string(), aiCallId: v.string(), reason: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { repo } from "@/data/store";
 import { assess } from "@/lib/assessment";
 import type { Score } from "@/lib/scoring";
@@ -15,14 +16,24 @@ import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { keywordRetrieve } from "@/lib/retrieve";
+import {
+  cachedEngineSearch,
+  deskCriteria,
+  engineSearch,
+  hitsAndMisses,
+  quickEngineSearch,
+  scoreFromEngine,
+  type EngineHit,
+  type EngineSearch,
+} from "@/lib/engineSearch";
+import type { SearchCriteria } from "@/data/types";
 
 const PAGE = 25;
+const ENGINE_LIMIT = 100;
 
-export default async function ResultsPage({
-  searchParams,
-}: {
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
-}) {
+type Params = Record<string, string | string[] | undefined>;
+
+export default async function ResultsPage({ searchParams }: { searchParams: Promise<Params> }) {
   const sp = await searchParams;
   await primeStore({ allApplications: true });
   await pageUser("database.read");
@@ -44,7 +55,91 @@ export default async function ResultsPage({
   const criteria = edited ? criteriaFromParams(sp) : (parsed?.criteria ?? criteriaFromParams(sp));
   const ignored = edited ? [] : (parsed?.ignored ?? []);
   const booleanError = mode === "boolean" ? parseBoolean(q).error : null;
+  const view: ViewProps = { sp, q, mode, forOpening, page, candidateId, vocab, edited, criteria, ignored, booleanError };
 
+  /*
+   * How the engine's answer reaches the screen.
+   *
+   * The engine runs for the ordinary case — Boolean is a literal word search
+   * and by-meaning a deliberate request for raw similarity, both the recruiter
+   * overriding the ranking on purpose.
+   *
+   * A full run reads the sentence with a model and has a second model re-rank
+   * the uncertain band: ten seconds or more, most of it waiting on those two
+   * calls. So unless the answer is already held (page 2, back from a profile),
+   * the same retrieval is ranked by the engine's deterministic score first —
+   * about a second — and the page shows that while the full run streams in
+   * behind it and replaces it.
+   */
+  if (isConvex() && q && mode === "natural") {
+    const held = cachedEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+    if (held) return <ResultsView {...view} engine={held} />;
+    const full = engineSearch(q, criteria, ENGINE_LIMIT, edited);
+    // Started above, so an unawaited failure here is not an unhandled one; the
+    // streamed half reports it.
+    full.catch(() => undefined);
+    let quick: EngineSearch | null = null;
+    try {
+      quick = await quickEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+    } catch {
+      // No quick answer: wait for the full one, as before.
+    }
+    if (!quick) return <EngineResults {...view} full={full} />;
+    return (
+      <Suspense fallback={<ResultsView {...view} engine={quick} refining />}>
+        <EngineResults {...view} full={full} />
+      </Suspense>
+    );
+  }
+  return <ResultsView {...view} />;
+}
+
+interface ViewProps {
+  sp: Params;
+  q: string;
+  mode: "natural" | "boolean" | "meaning";
+  forOpening: string | null;
+  page: number;
+  candidateId: string | null;
+  vocab: ReturnType<typeof repo.vocabulary>;
+  edited: boolean;
+  criteria: SearchCriteria;
+  ignored: string[];
+  booleanError: string | null;
+}
+
+/** The streamed half: the engine's full answer, or the words when it cannot run. */
+async function EngineResults({ full, ...view }: ViewProps & { full: Promise<EngineSearch> }) {
+  try {
+    return <ResultsView {...view} engine={await full} />;
+  } catch (e) {
+    return <ResultsView {...view} engineError={(e as Error).message} />;
+  }
+}
+
+async function ResultsView({
+  sp,
+  q,
+  mode,
+  forOpening,
+  page,
+  candidateId,
+  vocab,
+  edited,
+  criteria,
+  ignored,
+  booleanError,
+  engine,
+  engineError,
+  refining = false,
+}: ViewProps & {
+  /** The engine's answer, when it ran. */
+  engine?: EngineSearch;
+  /** Why the engine could not run, when it could not; the words stand in. */
+  engineError?: string;
+  /** `engine` is the quick deterministic pass and the full one is still coming. */
+  refining?: boolean;
+}) {
   // Searched once, in full. The spotlight counts below were taken from a list
   // cut to 25 × the page number, so they changed as you paged (audit finding
   // 37); they now describe every match, the same set the headline counts.
@@ -60,30 +155,60 @@ export default async function ResultsPage({
    * people this page primed and nobody else, so filtering it would search a
    * few hundred rows and confidently report that nothing matched.
    *
-   * So the words are put to the backend's own full-text indexes first — title,
-   * skills, summary and CV text — and whoever comes back is brought into the
-   * working set for the criteria to narrow. No model and no key involved;
-   * this is the route that still works when the meaning half cannot run.
+   * So somebody has to go and find people first, and that finding is the whole
+   * problem at this size — the hard part is not filtering a list, it is being
+   * good at turning up people whose CV never uses the words the recruiter
+   * typed. The matching engine already does it, and does it well enough that
+   * the desk corrected it into its present shape over months rather than
+   * replacing it. Its own functions run it (lib/engineSearch); the page above
+   * decides whether this render has its quick answer or its full one.
    */
-  if (isConvex() && q && mode !== "meaning") {
+  let engineHits = new Map<string, EngineHit>();
+  let engineRead: string | null = null;
+  let engineTerms: string[] | null = null;
+
+  if (engine) {
+    /*
+     * The engine does the finding and the ranking.
+     *
+     * It reads the sentence with a model rather than against a vocabulary,
+     * searches Qdrant and the full-text indexes together, and scores what
+     * comes back with the rules the desk corrected over months. Its order is
+     * the order shown.
+     *
+     * The platform's own criteria still apply on top — place, years, notice,
+     * salary, availability — because those are the desk's rules about who
+     * may be approached, and the engine has no notion of them. They narrow
+     * the engine's list; they never reorder it.
+     */
+    engineHits = new Map(engine.hits.map((h) => [h.candidateId, h]));
+    engineRead = engine.interpretation?.interpretation || null;
+    engineTerms = engine.interpretation?.keywords?.length ? engine.interpretation.keywords : null;
+    await primeStore({ candidateIds: engine.hits.map((h) => h.candidateId) });
+    // Fed in as the ranking signal the existing filter path already accepts,
+    // scaled to its 0–1 scale. The floor is 0: the engine has already
+    // decided who is worth showing and applies its own safety floor.
+    similarity = new Map(engine.hits.map((h) => [h.candidateId, h.score / 100]));
+    if (engine.hits.length === 0) retrievalProblem = "Nothing in the database matched that search.";
+  } else if (engineError !== undefined) {
+    // The engine needs a model. Where it cannot run, the words still can —
+    // the backend's full-text indexes need no key at all, so the screen
+    // degrades to a worse search rather than to an empty one.
+    retrievalProblem = `Ranked on words only — the matching engine could not run (${engineError}).`;
     try {
-      const terms = [
-        q,
-        ...criteria.titles,
-        ...criteria.skills.slice(0, 3),
-        ...criteria.employers.slice(0, 2),
-        ...criteria.qualifications.slice(0, 2),
-      ];
+      const terms = [q, ...criteria.titles, ...criteria.skills.slice(0, 3), ...criteria.employers.slice(0, 2)];
       const hits = await keywordRetrieve(terms, 150);
       await primeStore({ candidateIds: hits });
-      if (hits.length === 0) retrievalProblem = "Nothing in the database matched those words.";
-    } catch (e) {
-      retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+    } catch (inner) {
+      retrievalProblem = `The database could not be searched (${(inner as Error).message}).`;
     }
   }
 
   if (mode === "meaning" && q) {
-    const vectors = await refreshCandidateVectors();
+    // Backed by Convex the vectors are Qdrant's, built by the reindexer — the
+    // same reason findDatabaseMatches skips this. Refreshing the local file
+    // here re-embedded every primed candidate: ~17 s and a paid API call.
+    const vectors = isConvex() ? { ok: true as const } : await refreshCandidateVectors();
     const query = vectors.ok ? await embedQuery(q) : vectors;
     if (query.ok) {
       const hits = await nearestCandidates(query.vectors[0], 1000);
@@ -111,9 +236,21 @@ export default async function ResultsPage({
   // closest CV in the database: within 0.12 of the best, and never under 0.25.
   const best = similarity ? Math.max(0, ...similarity.values()) : 0;
   const showBelow = (sp as Record<string, string | undefined>).below === "1";
-  const bar = isMeaningBased() ? RELEVANT_SIMILARITY : Math.max(0.08, best * 0.6);
-  const floor = showBelow ? bar - (isMeaningBased() ? BELOW_BAR : 0.04) : bar;
-  const { results, total, scanned, below } = repo.searchDatabase(criteria, {
+  const engineRanked = engineHits.size > 0;
+  /*
+   * The bar below is a bar on cosine similarity, and the engine's number is not
+   * one — it is a fit score out of 100 with its own thresholds, already applied
+   * before it returned. Judging it against a similarity bar would cut people the
+   * engine had passed, for a reason that does not apply to them. So when the
+   * engine ranked the list the bar is zero: everyone it sent back is shown, in
+   * its order, and the criteria below still narrow them.
+   */
+  const bar = engineRanked ? 0 : isMeaningBased() ? RELEVANT_SIMILARITY : Math.max(0.08, best * 0.6);
+  const floor = engineRanked ? 0 : showBelow ? bar - (isMeaningBased() ? BELOW_BAR : 0.04) : bar;
+  // What is still ours to enforce. Where the engine ran it has already applied
+  // place and years against its own fields; see `deskCriteria`.
+  const narrowing = engineRanked ? deskCriteria(criteria) : criteria;
+  const { results, total, scanned, below } = repo.searchDatabase(narrowing, {
     boolean: mode === "boolean" ? q : null,
     limit: Number.MAX_SAFE_INTEGER,
     similarity,
@@ -140,7 +277,24 @@ export default async function ResultsPage({
   const targetClient = target ? repo.client(target.clientId) : null;
   const fit = new Map<string, Score>();
   const assessment = target ? assess(target.id, shown.map((r) => r.candidate)) : null;
-  if (assessment?.ok) for (const [id, score] of assessment.scores) fit.set(id, score);
+  if (assessment?.ok) {
+    for (const [id, score] of assessment.scores) fit.set(id, score);
+  } else if (engineRanked) {
+    /*
+     * No opening to fit against, so the engine's own score stands in — the one
+     * it ranked by, with the sentence it wrote explaining the position.
+     *
+     * This does not bring back the two-numbers problem above. That was one
+     * candidate reading 82 here and 55 on the pipeline for the same job, from
+     * two scorers. Here the job's score always wins where there is a job: the
+     * engine's number appears only when there is no opening to compare
+     * against, so the two are never on screen together.
+     */
+    for (const r of shown) {
+      const hit = engineHits.get(r.candidate.id);
+      if (hit) fit.set(r.candidate.id, scoreFromEngine(hit));
+    }
+  }
 
   const openings = repo.openings().filter((o) => o.status === "open");
   const clients = repo.clients();
@@ -168,12 +322,35 @@ export default async function ResultsPage({
   if ((page - 1) > 0) currentSearchParams.set("page", String(page));
   const backToResults = `${base}?${currentSearchParams.toString()}`;
 
-  // Widening — only offered where it would actually find someone.
+  /*
+   * Widening — only offered where it would actually find someone.
+   *
+   * Not offered at all when the engine ranked the list. The offer is computed
+   * by re-running the search with one more city added, and the engine's list
+   * was fetched for the cities that were asked for: adding a city to a filter
+   * over people who were never retrieved finds nobody, so every suggestion
+   * would read "+0" and the honest ones would be missing. Answering that needs
+   * a second trip to the engine, which is a cost this row of chips does not
+   * justify.
+   */
   const suggestions: { label: string; found: number; href: string }[] = [];
-  if (criteria.locations.length) {
+  if (criteria.locations.length && !engineRanked) {
+    // One search with the place dropped, counted by place — rather than the
+    // whole search again per city (~350 of them, ~1.1 s). Place is an exact,
+    // one-value match per candidate, so adding a city adds exactly the people
+    // who live there and match everything else.
+    const anywhere = repo.searchDatabase(
+      { ...criteria, locations: [] },
+      { boolean: mode === "boolean" ? q : null, limit: Number.MAX_SAFE_INTEGER, similarity, floor },
+    );
+    const byPlace = new Map<string, number>();
+    for (const r of anywhere.results) {
+      const place = (r.candidate.location ?? "").toLowerCase();
+      byPlace.set(place, (byPlace.get(place) ?? 0) + 1);
+    }
+    const chosen = new Set(criteria.locations.map((l) => l.toLowerCase()));
     for (const city of vocab.cities.filter((c) => !criteria.locations.includes(c))) {
-      const widened = { ...criteria, locations: [...criteria.locations, city] };
-      const found = repo.searchDatabase(widened, { boolean: mode === "boolean" ? q : null, limit: 1, similarity, floor }).total - total;
+      const found = chosen.has(city.toLowerCase()) ? 0 : (byPlace.get(city.toLowerCase()) ?? 0);
       if (found > 0) suggestions.push({ label: city, found, href: `${base}${withValue(criteria, "locations", city, extra)}` });
     }
     suggestions.sort((a, b) => b.found - a.found);
@@ -182,7 +359,7 @@ export default async function ResultsPage({
   // When nothing comes back, name the condition responsible rather than telling
   // the TA to guess at it.
   const blockers: { label: string; found: number; href: string }[] = [];
-  if (total === 0 && mode !== "boolean") {
+  if (total === 0 && mode !== "boolean" && !engineRanked) {
     for (const chip of describe(criteria)) {
       const relaxed = criteriaFromParams(
         Object.fromEntries(new URLSearchParams(withoutChip(criteria, chip).slice(1))),
@@ -200,6 +377,25 @@ export default async function ResultsPage({
     if (edited) p.set("edited", "1");
     if (showBelow) p.set("below", "1");
     return `${base}?${p.toString()}`;
+  };
+
+  /*
+   * What a row says this person met and missed.
+   *
+   * The platform derives it by checking the criteria against the record. Where
+   * the engine ran it has read the same person against the same sentence and
+   * judged title, place and experience itself, so its reading is used and the
+   * platform's is folded in behind it — neither alone names everything.
+   */
+  const rowChips = (r: { candidate: (typeof shown)[number]["candidate"]; hits: string[]; misses: string[] }) => {
+    const hit = engineHits.get(r.candidate.id);
+    if (!hit) return { hits: r.hits, misses: r.misses };
+    const e = hitsAndMisses(hit, r.candidate, criteria, edited);
+    const misses = [...new Set([...e.misses, ...r.misses])];
+    // A thing the engine counted as met is not also missing, whatever the
+    // platform's own check made of it.
+    const hits = [...new Set([...e.hits, ...r.hits])];
+    return { hits, misses: misses.filter((m) => !hits.includes(m)) };
   };
 
   const candidateHref = (id: string) => {
@@ -270,6 +466,8 @@ export default async function ResultsPage({
             extra={extra}
             mode={mode}
             total={total}
+            read={engineRead}
+            engineTerms={engineTerms}
           />
 
           <div className="rounded-xl border border-rule bg-surface p-4">
@@ -298,6 +496,15 @@ export default async function ResultsPage({
         </aside>
 
         <div className="min-w-0">
+          {refining && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-soft px-4 py-3 text-[12.5px]">
+              <span aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
+              <p className="leading-relaxed">
+                <span className="font-medium">First results — AI is still refining them.</span>
+                <span className="text-ink-soft"> It is reading your search and re-ranking the closest people; this list updates on its own.</span>
+              </p>
+            </div>
+          )}
           {retrievalProblem && (
             <p className="mb-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
               {retrievalProblem}
@@ -348,12 +555,23 @@ export default async function ResultsPage({
                   <span className="text-[12px] text-ink-soft">Including people just below the relevance bar</span>
                 )}
                 <span className="text-[12px] text-ink-faint">
-                  from <span className="tabular">{scanned.toLocaleString()}</span> CVs ·{" "}
-                  {mode === "boolean"
-                    ? "matched as words across the whole CV"
-                    : mode === "meaning"
-                      ? "numbers and place filter outright; the rest ranked by how close the CV is to what you wrote"
-                      : "numbers and place filter outright; titles and skills are scored"}
+                  {/* `scanned` counts the rows this request happens to hold,
+                      which is the whole database only when the store is the
+                      file. Where the engine searched, it searched all of it,
+                      and quoting the working set instead would understate that
+                      by about four orders of magnitude. */}
+                  {engineRanked ? (
+                    "searched across the whole database · ranked and explained by the matching engine"
+                  ) : (
+                    <>
+                      from <span className="tabular">{scanned.toLocaleString()}</span> CVs ·{" "}
+                      {mode === "boolean"
+                        ? "matched as words across the whole CV"
+                        : mode === "meaning"
+                          ? "numbers and place filter outright; the rest ranked by how close the CV is to what you wrote"
+                          : "numbers and place filter outright; titles and skills are scored"}
+                    </>
+                  )}
                 </span>
               </div>
             )}
@@ -401,8 +619,7 @@ export default async function ResultsPage({
                   <ResultRow
                     candidate={r.candidate}
                     fit={fit.get(r.candidate.id) ?? null}
-                    hits={r.hits}
-                    misses={r.misses}
+                    {...rowChips(r)}
                     signals={r.signals}
                     apps={appsFor(r.candidate.id)}
                     openings={openingOptions}

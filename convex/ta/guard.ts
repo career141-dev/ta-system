@@ -40,10 +40,12 @@ export async function requireActor(
  * Reads therefore carry an actor when the caller has one and go without when
  * they do not.
  *
- * That is not an open door. Reaching these functions at all takes the
- * deployment's admin key, which already permits calling everything here,
- * internal functions included. An absent actor removes an attribution, not a
- * barrier. Writes still demand one — see the mutations, which all use
+ * That is not an open door, because every function under convex/ta is
+ * internal: it cannot be called from outside the deployment without the admin
+ * key, which only the TA server holds (src/lib/convexServer.ts). A PUBLIC
+ * Convex function is callable by anyone who knows the deployment URL, with no
+ * key at all — which is why none of these may be public. An absent actor
+ * removes an attribution, not a barrier. Writes still demand one — see the mutations, which all use
  * `requireActor` — because a write with nobody's name on it is the thing worth
  * refusing.
  */

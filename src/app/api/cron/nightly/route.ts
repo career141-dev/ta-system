@@ -1,3 +1,4 @@
+import { primeStore } from "@/data/prime";
 import { timingSafeEqual } from "node:crypto";
 import { nightly } from "@/lib/dbMatch";
 
@@ -11,6 +12,8 @@ import { nightly } from "@/lib/dbMatch";
 export const maxDuration = 800;
 
 export async function POST(req: Request) {
+  // Load the store before reading it — this route has no page to do it first.
+  await primeStore({ allApplications: true });
   const secret = (process.env.C141_CRON_SECRET ?? "").trim();
   if (!secret) return new Response("Not configured", { status: 404 });
   const sent = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
