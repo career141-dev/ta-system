@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL, type Stage } from "@/data/types";
+import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL, type Candidate, type Stage } from "@/data/types";
 import { declineOffer, moveStage, scheduleInterview, toggleAddOn } from "@/app/actions";
-import { nextStages } from "@/lib/pipeline";
+import { directorReviewBlockers, nextStages } from "@/lib/pipeline";
 import { inputClass } from "./form";
 
 const REASONS = [
@@ -33,6 +33,7 @@ export function RowActions({
   appId,
   openingId,
   current,
+  candidate,
   isAddOn = false,
   canDecideDirector = false,
   canDecideClient = false,
@@ -40,12 +41,15 @@ export function RowActions({
   appId: string;
   openingId: string;
   current: Stage;
+  /** For the Director Review preview below — what the backend's own gate checks. */
+  candidate?: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays">;
   isAddOn?: boolean;
   /** Whether this person may record a director decision by hand. The server
    *  checks again; this only decides what the menu offers. */
   canDecideDirector?: boolean;
   canDecideClient?: boolean;
 }) {
+  const missingForDirector = candidate ? directorReviewBlockers(candidate) : [];
   const [open, setOpen] = useState<false | "stage" | "reject" | "dropout" | "decline" | "interview">(false);
   const allowed = nextStages(current);
 
@@ -133,6 +137,25 @@ export function RowActions({
                   {STAGE_LABEL[s]}
                   <span className="ml-auto text-[11px]">{elsewhere}</span>
                 </div>
+              );
+            }
+            // Director Review has its own gate: a CV, current salary, expected
+            // salary and notice period. Rather than a button that presses and
+            // does nothing (the exact confusion that sent someone hunting for a
+            // candidate who never made it), it says what is still outstanding.
+            // Still a real button — the fields may be there and this proxy just
+            // cannot see them — so it can still be pressed once it looks right.
+            if (s === "director_review" && missingForDirector.length > 0) {
+              return (
+                <form key={s} action={moveStage} title={`Still needs ${missingForDirector.join(", ")}.`}>
+                  <input type="hidden" name="appId" value={appId} />
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <input type="hidden" name="stage" value={s} />
+                  <button className="flex w-full items-center gap-2 px-3.5 py-2 text-left text-[13px] hover:bg-paper">
+                    {STAGE_LABEL[s]}
+                    <span className="ml-auto text-[11px] text-warn">needs {missingForDirector.join(", ")}</span>
+                  </button>
+                </form>
               );
             }
             return (

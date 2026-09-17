@@ -117,8 +117,16 @@ export async function executeStageTransition(
       (app.followUpNoticePeriod === undefined && candidate.noticePeriodDays !== undefined);
 
     if (!(hasCV && hasCurrentSalary && hasExpectedSalary && hasNoticePeriod)) {
+      // Name only what is actually missing for THIS candidate — not all four
+      // every time, which sends a TA hunting for a salary that was already on
+      // file because the notice period was the one thing outstanding.
+      const missing: string[] = [];
+      if (!hasCV) missing.push("CV");
+      if (!hasCurrentSalary) missing.push("current salary");
+      if (!hasExpectedSalary) missing.push("expected salary");
+      if (!hasNoticePeriod) missing.push("notice period");
       throw new Error(
-        "Cannot move to 2nd Shortlist: Missing mandatory candidate details (CV, Current Salary, Expected Salary, Notice Period)."
+        `Cannot move to Director Review: still missing ${missing.join(", ")}. Finish the follow-up first.`
       );
     }
   }
