@@ -7,7 +7,7 @@ import { getGraphToken } from "../lib/graphClient";
 import { buildStructuredEmailHtml } from "./emailHtml";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { mayReplyTo } from "../lib/outreachSafety";
-import { followUpCancelledReason, sendFollowUpMail } from "../lib/graphMail";
+import { followUpCancelledReason, isEmail, sendFollowUpMail } from "../lib/graphMail";
 
 export { buildStructuredEmailHtml };
 
@@ -20,7 +20,7 @@ export const sendGraphEmail = internalAction({
   args: {
     communicationId: v.id("communications"),
     candidateJobId: v.string(), // applicationId stringified for header
-    taEmail: v.string(),        // the recruiter; kept for callers — mail goes from the system inbox
+    taEmail: v.string(),        // the assigned TA's mailbox it is sent from (system inbox when blank)
     toAddress: v.string(),      // recipient email
     subject: v.string(),
     bodyHtml: v.string(),
@@ -45,23 +45,26 @@ export const sendGraphEmail = internalAction({
       return;
     }
 
-    // Replies MUST come back to the system inbox (job@), which is polled for
-    // follow-up replies and read into the record.
+    // Sent from the assigned TA's own mailbox, so the candidate sees their
+    // recruiter. Replies go to the TA and to the system inbox (job@), which is
+    // polled for follow-up replies and read into the record.
     const systemInbox = process.env.MS_SENDER_EMAIL || process.env.OUTBOUND_EMAIL_SENDER || "job@career141.com";
+    const taMailbox = isEmail(args.taEmail) ? args.taEmail.trim() : systemInbox;
     const result = await sendFollowUpMail(
       {
-        from: systemInbox,
+        from: taMailbox,
+        fallbackFrom: systemInbox,
         to: args.toAddress,
         subject: args.subject,
         html: args.bodyHtml,
-        replyTo: systemInbox,
+        replyTo: [taMailbox, systemInbox],
         candidateJobId: args.candidateJobId,
       },
       getGraphToken,
     );
 
     if (result.ok) {
-      console.log(`[Graph Email] Sent via Microsoft Graph from ${systemInbox} to ${result.to}${result.note}`);
+      console.log(`[Graph Email] Sent via Microsoft Graph from ${result.from} to ${result.to}${result.note}`);
     } else {
       console.error(`[Graph Email] Not sent: ${result.error}`);
     }

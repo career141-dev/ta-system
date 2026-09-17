@@ -1,45 +1,59 @@
 // convex/lib/graphMail.ts
 //
-// A follow-up email, sent through Microsoft Graph `sendMail`.
+// An email to a person, sent through Microsoft Graph `sendMail`.
 //
-// Both follow-up senders go through here — the Day 0 email
-// (communications/graphEmail.ts `sendGraphEmail`) and the 24-hour reminders
-// (communications/emailAgent.ts `sendFollowUpEmail`). They used to build the
-// request separately and fail differently: a reminder with no Graph
-// credentials was marked failed with no reason, and one whose mailbox was not
-// configured threw and stayed "pending" for ever. Here every outcome comes back
-// as a result with a reason the TA System shows.
+// Every email the desk sends goes through here: the Day 0 follow-up
+// (communications/graphEmail.ts `sendGraphEmail`), the 24-hour reminders
+// (communications/emailAgent.ts `sendFollowUpEmail`) and the end-of-day email
+// (ta/eodMail.ts). Every outcome comes back as a result with a reason the TA
+// System shows, never a row left "pending".
+//
+// Follow-ups are sent from the assigned TA's own mailbox, so the candidate sees
+// their recruiter. If Graph will not send as that mailbox (not in the tenant, or
+// not permitted) the message goes from the system inbox instead, and says so.
 //
 // The gates run first and in this order, as they do everywhere else:
 //   1. the outreach gate (lib/outreachSafety.ts) — test mode redirects to the
-//      test mailbox, or refuses when none is set;
+//      test mailbox, or refuses when none is set; copies are dropped, because a
+//      copy cannot be redirected without sending the test mailbox two of them;
 //   2. the outbound lock (lib/outboundGuard.ts) — a test deployment sends only
-//      to allow-listed addresses.
+//      to allow-listed addresses, copies included.
 //
 // No Convex imports: the token getter and fetch are handed in, so this is
 // tested with a fake Graph (tests/graphmail.test.ts).
 
 import { emailAllowed, suppressed } from "./outboundGuard";
-import { resolveRecipient } from "./outreachSafety";
+import { outreachLive, resolveRecipient } from "./outreachSafety";
 
 export const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
+
+export interface MailAttachment {
+  name: string;
+  contentType: string;
+  /** The file, base64-encoded. */
+  base64: string;
+}
 
 export interface FollowUpMail {
   /** The mailbox it is sent from — must exist in the tenant. */
   from: string | undefined;
-  /** The candidate's address. The gate decides where it actually goes. */
+  /** Sent from here instead when Graph refuses `from` (403/404). */
+  fallbackFrom?: string;
+  /** The recipient. The gate decides where it actually goes. */
   to: string;
+  cc?: string[];
   subject: string;
   html?: string;
   text?: string;
-  /** Where replies go — the system inbox that is polled for follow-up replies. */
-  replyTo?: string;
+  /** Where replies go. One address or several. */
+  replyTo?: string | string[];
   /** Written as `x-c141-candidatejobid`, so a reply can be tied to its application. */
   candidateJobId?: string;
+  attachments?: MailAttachment[];
 }
 
 export type MailResult =
-  | { ok: true; to: string; note: string }
+  | { ok: true; to: string; from: string; cc: string[]; note: string }
   | { ok: false; error: string; blocked: boolean };
 
 type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
@@ -48,16 +62,41 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
   text(): Promise<string>;
 }>;
 
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const isEmail = (s: string | null | undefined) => EMAIL.test((s ?? "").trim());
+
+/** Addresses, trimmed, lower-cased, valid and once each, leaving out any in `except`. */
+export function addressList(values: (string | null | undefined)[], except: string[] = []): string[] {
+  const skip = new Set(except.map((e) => e.trim().toLowerCase()));
+  const out: string[] = [];
+  for (const v of values) {
+    const a = (v ?? "").trim().toLowerCase();
+    if (!isEmail(a) || skip.has(a) || out.includes(a)) continue;
+    out.push(a);
+  }
+  return out;
+}
+
 /** The `sendMail` request body. */
-export function sendMailPayload(mail: FollowUpMail, to: string) {
+export function sendMailPayload(mail: FollowUpMail, to: string, cc: string[] = []) {
   const message: Record<string, unknown> = {
     subject: mail.subject,
     body: mail.html ? { contentType: "HTML", content: mail.html } : { contentType: "Text", content: mail.text ?? "" },
     toRecipients: [{ emailAddress: { address: to } }],
   };
-  if (mail.replyTo) message.replyTo = [{ emailAddress: { address: mail.replyTo } }];
+  if (cc.length) message.ccRecipients = cc.map((address) => ({ emailAddress: { address } }));
+  const replyTo = addressList(Array.isArray(mail.replyTo) ? mail.replyTo : [mail.replyTo]);
+  if (replyTo.length) message.replyTo = replyTo.map((address) => ({ emailAddress: { address } }));
   if (mail.candidateJobId) {
     message.internetMessageHeaders = [{ name: "x-c141-candidatejobid", value: mail.candidateJobId }];
+  }
+  if (mail.attachments?.length) {
+    message.attachments = mail.attachments.map((a) => ({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: a.name,
+      contentType: a.contentType,
+      contentBytes: a.base64,
+    }));
   }
   return { message, saveToSentItems: true };
 }
@@ -69,10 +108,24 @@ export async function sendFollowUpMail(
 ): Promise<MailResult> {
   const decision = resolveRecipient("email", mail.to);
   if (!decision.ok) return { ok: false, error: decision.reason, blocked: true };
-  if (!emailAllowed(decision.to)) return { ok: false, error: suppressed("follow-up email", decision.to), blocked: true };
+  if (!emailAllowed(decision.to)) return { ok: false, error: suppressed("email", decision.to), blocked: true };
 
-  const from = (mail.from ?? "").trim();
-  if (!from) {
+  let note = decision.note;
+  let cc = addressList(mail.cc ?? [], [decision.to]);
+  if (cc.length && !outreachLive()) {
+    note += ` [TEST MODE: ${cc.length} cc dropped]`;
+    cc = [];
+  }
+  const ccBlocked = cc.filter((c) => !emailAllowed(c));
+  if (ccBlocked.length) {
+    for (const c of ccBlocked) suppressed("email cc", c);
+    cc = cc.filter((c) => emailAllowed(c));
+  }
+
+  const first = (mail.from ?? "").trim();
+  const fallback = (mail.fallbackFrom ?? "").trim();
+  const senders = addressList([first, fallback]);
+  if (!senders.length) {
     return { ok: false, error: "No sending mailbox is configured (MS_SENDER_EMAIL or OUTBOUND_EMAIL_SENDER).", blocked: false };
   }
 
@@ -86,21 +139,28 @@ export async function sendFollowUpMail(
     return { ok: false, error: "Microsoft Graph credentials are not configured (MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET).", blocked: false };
   }
 
-  try {
-    const res = await fetchImpl(`${GRAPH_BASE}/users/${encodeURIComponent(from)}/sendMail`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify(sendMailPayload(mail, decision.to)),
-    });
-    // Graph answers 202 Accepted with an empty body.
-    if (!res.ok) {
-      const body = (await res.text()).slice(0, 500);
-      return { ok: false, error: `Microsoft Graph sendMail returned ${res.status}: ${body}`, blocked: false };
+  const body = JSON.stringify(sendMailPayload(mail, decision.to, cc));
+  let lastError = "";
+  for (const [i, from] of senders.entries()) {
+    try {
+      const res = await fetchImpl(`${GRAPH_BASE}/users/${encodeURIComponent(from)}/sendMail`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body,
+      });
+      // Graph answers 202 Accepted with an empty body.
+      if (res.ok) {
+        return { ok: true, to: decision.to, from, cc, note: i > 0 ? `${note} [sent from ${from}: ${senders[0]} could not send]` : note };
+      }
+      lastError = `Microsoft Graph sendMail from ${from} returned ${res.status}: ${(await res.text()).slice(0, 500)}`;
+      // Only a mailbox Graph will not send as is worth trying the fallback for.
+      if (res.status !== 403 && res.status !== 404) break;
+    } catch (e) {
+      lastError = `Microsoft Graph could not be reached: ${(e as Error).message}`;
+      break;
     }
-  } catch (e) {
-    return { ok: false, error: `Microsoft Graph could not be reached: ${(e as Error).message}`, blocked: false };
   }
-  return { ok: true, to: decision.to, note: decision.note };
+  return { ok: false, error: lastError, blocked: false };
 }
 
 /**

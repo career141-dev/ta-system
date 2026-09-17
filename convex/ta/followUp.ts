@@ -25,14 +25,19 @@ import { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "../pipeline/followUpHelper";
 import { toTaStage } from "./stages";
-import { autoFollowUpPatch, questionLabels } from "../lib/followUpScope";
+import { autoFollowUpPatch, questionLabels, sameRoundAs } from "../lib/followUpScope";
 
 /**
  * Send the next follow-up for one candidate: the Day 0 outreach if nothing has
  * gone out yet, otherwise a reminder.
  */
 export const send = internalMutation({
-  args: { actorId: v.string(), applicationId: v.string() },
+  args: {
+    actorId: v.string(),
+    applicationId: v.string(),
+    /** One channel (the WhatsApp / Email buttons), or both when omitted. */
+    channel: v.optional(v.union(v.literal("whatsapp"), v.literal("email"))),
+  },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     const appId = args.applicationId as Id<"applications">;
@@ -49,29 +54,57 @@ export const send = internalMutation({
       throw new Error("This candidate has asked not to be contacted.");
     }
     const hasPhone = !!(candidate.phone ?? "").replace(/\D/g, "");
-    if (!hasPhone && !candidate.email) {
+    const hasEmail = !!candidate.email;
+    if (args.channel === "whatsapp" && !hasPhone) throw new Error("No phone number on file for WhatsApp.");
+    if (args.channel === "email" && !hasEmail) throw new Error("No email address on file.");
+    if (!hasPhone && !hasEmail) {
       throw new Error("No phone number or email address on file.");
     }
 
     const before = app.followUpAttemptCount ?? 0;
     const job = await ctx.db.get(app.jobId);
     const max = job?.maxFollowUpAttempts ?? 3;
-    if (before >= max) {
+    const now = Date.now();
+    const channel = args.channel ?? "both";
+    const sameRound = sameRoundAs({
+      attempts: before,
+      lastManualSendAt: app.followUpLastManualSendAt,
+      lastManualChannels: app.followUpLastManualChannels,
+      channel,
+      now,
+    });
+    if (!sameRound && before >= max) {
       throw new Error(`All ${max} follow-ups have been sent. Call them, or mark them as dropped out.`);
     }
 
-    const communicationId = await initiateFollowUpOutreach(ctx, appId, { isManual: true });
-    const after = (await ctx.db.get(appId))?.followUpAttemptCount ?? before;
-    if (after === before) {
+    const report: { sent: boolean; kind?: "initial" | "reminder" } = { sent: false };
+    const communicationId = await initiateFollowUpOutreach(ctx, appId, {
+      isManual: true,
+      only: args.channel,
+      sameRound,
+      report,
+    });
+    if (!report.sent) {
       // initiateFollowUpOutreach returns early when every detail is already in.
       return { sent: false as const, reason: "Everything the follow-up asks for is already collected." };
     }
+
+    const sentOn = channel === "both" ? ["whatsapp", "email"] : [channel];
+    await ctx.db.patch(appId, {
+      followUpLastManualSendAt: sameRound ? app.followUpLastManualSendAt : now,
+      followUpLastManualChannels: sameRound ? [...(app.followUpLastManualChannels ?? []), ...sentOn] : sentOn,
+    });
+    const after = (await ctx.db.get(appId))?.followUpAttemptCount ?? before;
     return {
       sent: true as const,
-      kind: before === 0 ? ("initial" as const) : ("reminder" as const),
+      kind: report.kind ?? (before === 0 ? ("initial" as const) : ("reminder" as const)),
       attempt: after,
       maxAttempts: max,
-      channels: { whatsapp: hasPhone, email: !!candidate.email },
+      sameRound,
+      channels: {
+        whatsapp: hasPhone && channel !== "email",
+        email: hasEmail && channel !== "whatsapp",
+      },
       communicationId: (communicationId ?? null) as string | null,
     };
   },

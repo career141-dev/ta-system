@@ -47,14 +47,18 @@ export const createOutbound = internalMutation({
   },
 });
 
-/** Who the recruiter is, for the "from" mailbox an email needs. */
+/** The assigned TA — who shortlisted them, else the primary recruiter — for the "from" mailbox. */
 export const senderMailbox = internalQuery({
-  args: { jobId: v.id("jobs") },
+  args: { jobId: v.id("jobs"), applicationId: v.optional(v.id("applications")) },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) return null;
-    const user = await ctx.db.get(job.primaryRecruiterId);
-    return user ? { email: user.email, name: user.fullName } : null;
+    const app = args.applicationId ? await ctx.db.get(args.applicationId) : null;
+    for (const userId of [app?.ownerTaId, job.primaryRecruiterId]) {
+      const user = userId ? await ctx.db.get(userId) : null;
+      if (user?.email) return { email: user.email, name: user.fullName };
+    }
+    return null;
   },
 });
 

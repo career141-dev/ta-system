@@ -44,7 +44,7 @@ import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
-import { convexMutation, convexQuery } from "@/lib/convexServer";
+import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
 import * as backend from "@/data/convex/backend";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
@@ -227,20 +227,29 @@ export async function sendFollowUpNow(formData: FormData) {
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
+  const raw = String(formData.get("channel") ?? "");
+  // The WhatsApp and Email buttons send one channel; the older button sends both.
+  const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
   if (!isConvex()) await back("Sending needs the Convex store.");
-  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number } | null = null;
+  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
   try {
-    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId });
+    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
   } catch (e) {
     await back(backendMessage(e, "The follow-up could not be sent."));
   }
   await afterBackendWrite(openingId);
+  const what =
+    channel === "whatsapp"
+      ? r?.kind === "initial" ? "WhatsApp follow-up sent (approved template)" : "WhatsApp reminder sent"
+      : channel === "email"
+        ? r?.kind === "initial" ? "Follow-up email sent" : "Reminder email sent"
+        : r?.kind === "initial" ? "Follow-up sent — WhatsApp template and email" : "Reminder sent";
   await back(
     !r?.sent
       ? r?.reason ?? "Nothing was sent."
-      : r.kind === "initial"
-        ? "Follow-up sent — WhatsApp template and email. Delivery shows below in a few seconds."
-        : `Reminder ${r.attempt} of ${r.maxAttempts} sent.`,
+      : r.kind === "initial" || r.sameRound
+        ? `${what}. Delivery shows in the conversation in a few seconds.`
+        : `${what} — follow-up ${r.attempt} of ${r.maxAttempts}.`,
   );
 }
 
@@ -1189,11 +1198,24 @@ export async function deleteOpening(formData: FormData) {
   // recruiter's.
   if (!isDeskWide(user)) await back("Only a lead, director or admin can delete an opening. Close it instead.");
   const openingId = String(formData.get("openingId"));
-  const r = repo.deleteOpening(openingId);
-  if (!r.ok) await back(r.message);
-  revalidatePath("/openings", "layout");
-  revalidatePath("/clients");
-  redirect("/openings");
+  let title = repo.opening(openingId)?.title ?? "The opening";
+  if (isConvex()) {
+    // The opening and all its data are removed in the backend, in batches
+    // (convex/ta/openingDelete.ts). Its candidates stay in the database.
+    try {
+      const r = await convexMutation<{ ok: true; title: string }>("ta/openingDelete:start", { actorId: user.id, openingId });
+      title = r.title;
+    } catch (e) {
+      await back(backendMessage(e, "The opening could not be deleted."));
+    }
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  } else {
+    const r = repo.deleteOpening(openingId);
+    if (!r.ok) await back(r.message);
+  }
+  revalidatePath("/", "layout");
+  redirect(`/openings?msg=${encodeURIComponent(`"${title}" deleted. Its candidates are still in the database.`)}`);
 }
 
 /**
@@ -2678,6 +2700,25 @@ export async function sendEod(formData: FormData) {
       ids.length ? "Everyone on that list has already been sent." : "Nothing to send.",
     )}`);
   const sets = fresh.map((id) => repo.application(id)?.setNumber).filter((n): n is number => n != null);
+
+  // The Director's copy is really sent now, through Microsoft Graph from the
+  // TA's own mailbox, copying the TA Lead, the desk's end-of-day copy and the
+  // shortlist inbox. Nothing is recorded unless it went. The client's copy is
+  // still sent by operations and only recorded here.
+  let sentNote = "";
+  if (kind === "director") {
+    if (!isConvex()) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent("Sending needs the Convex store.")}`);
+    const r = await emailEod({
+      openingId,
+      user,
+      applicationIds: fresh,
+      to: String(formData.get("to") ?? ""),
+      subject: String(formData.get("subject") ?? ""),
+    });
+    if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
+    sentNote = r.note;
+  }
+
   // Anyone sent to the Director straight out of a finished follow-up moves to
   // Director Review now — the email going out is that move.
   if (kind === "director") {
@@ -2703,9 +2744,134 @@ export async function sendEod(formData: FormData) {
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(
     `/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
-      `Recorded as sent to the ${kind}. ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on a reply. Nothing was emailed from here.`,
+      kind === "director"
+        ? `${sentNote} ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on the Director's reply.`
+        : `Recorded as sent to the client. ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on a reply. Nothing was emailed from here.`,
     )}`,
   );
+}
+
+/** Graph's sendMail takes about 4 MB in one request; the CVs share what is left after the email. */
+const EOD_ATTACHMENT_BUDGET = 3 * 1024 * 1024;
+
+/**
+ * Send the Director's end-of-day email through Microsoft Graph (convex/ta/eodMail.ts).
+ *
+ * The same email the composer shows: the shortlist table for exactly these
+ * people in this order, today's L-sheet line, and each prepared CV attached.
+ */
+async function emailEod(input: {
+  openingId: string;
+  user: User;
+  applicationIds: string[];
+  to: string;
+  subject: string;
+}): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
+  const { openingId, user } = input;
+  const opening = repo.opening(openingId);
+  if (!opening) return { ok: false, error: "That opening no longer exists." };
+  const director = repo.users().find((u) => u.role === "director");
+  const to = input.to.trim() || director?.email || "";
+  if (!to) return { ok: false, error: "There is no Director email address to send to." };
+  if (!input.subject.trim()) return { ok: false, error: "The email needs a subject." };
+
+  const { shortlistRows, effortRow } = await import("@/lib/eod");
+  const { eodEmailHtml } = await import("@/lib/eod-format");
+  const { buildPreparedCv, preparedCvFileName } = await import("@/lib/pdf");
+
+  // The rows for exactly the people being sent, numbered in the order sent —
+  // the order the Director's reply numbers refer to.
+  const byId = new Map(shortlistRows(openingId, user.role === "ta" ? user.id : null, "director").map((r) => [r.applicationId, r]));
+  const rows = input.applicationIds
+    .map((id) => byId.get(id))
+    .filter((r): r is NonNullable<typeof r> => !!r)
+    .map((r, i) => ({ ...r, no: i + 1 }));
+  if (rows.length === 0) return { ok: false, error: "Nobody on that list is ready to send." };
+
+  await primeStore({ candidateIds: rows.map((r) => repo.application(r.applicationId)?.candidateId).filter((c): c is string => !!c) });
+  const attachments: { name: string; contentType: string; base64: string }[] = [];
+  const left: string[] = [];
+  let used = 0;
+  for (const r of rows) {
+    const app = repo.application(r.applicationId);
+    const c = app ? repo.candidate(app.candidateId) : null;
+    if (!app || !c) continue;
+    try {
+      const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
+      const { pdf } = buildPreparedCv(
+        {
+          fullName: c.fullName,
+          currentTitle: c.currentTitle,
+          currentEmployer: c.currentEmployer,
+          location: c.location,
+          totalExperienceYears: c.totalExperienceYears,
+          educationDegree: c.educationDegree,
+          educationInstitution: c.educationInstitution,
+          summary: profile?.summary ?? null,
+          career: profile?.career ?? [],
+          education: profile?.education ?? [],
+          skills: c.skills ?? [],
+          languages: profile?.languages ?? [],
+          certifications: profile?.certifications ?? [],
+        },
+        {
+          currentSalary: r.currentRemuneration,
+          expectedSalary: r.expectedRemuneration,
+          notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+        },
+      );
+      const base64 = Buffer.from(pdf).toString("base64");
+      if (used + base64.length > EOD_ATTACHMENT_BUDGET) {
+        left.push(c.fullName);
+        continue;
+      }
+      used += base64.length;
+      attachments.push({ name: preparedCvFileName(c.fullName), contentType: "application/pdf", base64 });
+    } catch (e) {
+      console.error(`[End of day] CV for ${c.fullName} could not be prepared:`, (e as Error).message);
+      left.push(c.fullName);
+    }
+  }
+
+  const lead = repo.user(opening.taLeadId);
+  const html = eodEmailHtml({
+    rows,
+    effort: effortRow(openingId, user),
+    senderName: user.name,
+    attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
+  });
+
+  let result: { ok: true; from: string; to: string; cc: string[]; note: string } | { ok: false; error: string };
+  try {
+    result = await convexAction("ta/eodMail:send", {
+      from: user.email,
+      to,
+      cc: [lead?.email ?? "", repo.eodCopyTo(), repo.shortlistInbox()].filter(Boolean),
+      replyTo: [user.email, repo.shortlistInbox()].filter(Boolean),
+      subject: input.subject.trim(),
+      html,
+      attachments,
+    });
+  } catch (e) {
+    return { ok: false, error: backendMessage(e, "The email could not be sent.") };
+  }
+  if (!result.ok) return { ok: false, error: result.error };
+  return {
+    ok: true,
+    note: `Sent from ${result.from} to ${result.to}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ""}, with ${attachments.length} CV${attachments.length === 1 ? "" : "s"} attached.${result.note ? ` ${result.note.trim()}` : ""}`,
+  };
+}
+
+/** Who every end-of-day email is copied to (azim@career141.com to start with). */
+export async function setEodCopy(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "user.manage");
+  const v = String(formData.get("eodCc") ?? "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(v)) await back("That is not an email address.");
+  repo.setSetting("eodCc", v);
+  revalidatePath("/people");
+  revalidatePath("/openings", "layout");
+  await back(`End-of-day emails are now copied to ${v}.`);
 }
 
 /**

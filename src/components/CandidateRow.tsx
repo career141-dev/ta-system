@@ -6,6 +6,9 @@ import { RowActions } from "./RowActions";
 import { claimCandidate } from "@/app/actions";
 import { FitMark, FitReason } from "./FitBadge";
 import type { Score } from "@/lib/scoring";
+import { FollowUpActions } from "./FollowUpActions";
+import { repo } from "@/data/store";
+import { isConvex } from "@/data/mode";
 
 export function CandidateRow({
   app,
@@ -131,6 +134,19 @@ export function CandidateRow({
             isAddOn={app.isAddOn}
             canDecideDirector={canDecideDirector}
             canDecideClient={canDecideClient}
+          />
+        )}
+
+        {/* In Follow-up, the three ways to reach them, one press each. */}
+        {!locked && app.stage === "follow_up" && isConvex() && (
+          <FollowUpActions
+            applicationId={app.id}
+            openingId={openingId}
+            candidateName={candidate.fullName}
+            roleTitle={repo.opening(openingId)?.title ?? "the role"}
+            hasPhone={!!(candidate.phone ?? "").replace(/\D/g, "")}
+            hasEmail={!!candidate.email}
+            compact
           />
         )}
 

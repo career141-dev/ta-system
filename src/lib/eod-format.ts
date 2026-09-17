@@ -69,3 +69,58 @@ export const EFFORT_COLUMNS = [
  * different messages to a Director.
  */
 export const UNDEFINED_COLUMNS = new Set(["post", "addOns", "backUp"]);
+
+/** Who is copied on every end-of-day email, until it is changed on the People page. */
+export const DEFAULT_EOD_CC = "azim@career141.com";
+
+const esc = (s: unknown) =>
+  String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+/**
+ * The end-of-day email as it is sent: the same greeting, the same two tables
+ * and the same sign-off as the composer on screen. Inline styles only, because
+ * that is all a mail client keeps.
+ */
+export function eodEmailHtml(input: {
+  rows: ShortlistRow[];
+  effort: EffortRow;
+  senderName: string;
+  senderTitle?: string;
+  /** A line under the tables when some CVs could not be attached. */
+  attachmentNote?: string | null;
+}): string {
+  const th = 'style="border:1px solid #cfd6d1;background:#eef2ef;padding:6px 8px;text-align:left;font-size:11px;font-weight:600;white-space:nowrap"';
+  const td = 'style="border:1px solid #cfd6d1;padding:6px 8px;vertical-align:top;font-size:12px"';
+  const table = (head: string, body: string) =>
+    `<table style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;margin:12px 0"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+
+  const shortlist = table(
+    SHORTLIST_COLUMNS.map((h) => `<th ${th}>${esc(h)}</th>`).join(""),
+    input.rows
+      .map(
+        (r) =>
+          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.location)}</td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(esc).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
+      )
+      .join(""),
+  );
+
+  const effort = table(
+    EFFORT_COLUMNS.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
+    `<tr>${EFFORT_COLUMNS.map((c) => {
+      const v = input.effort[c.key as keyof EffortRow];
+      return `<td ${td}>${UNDEFINED_COLUMNS.has(c.key) || v === null ? "" : esc(v)}</td>`;
+    }).join("")}</tr>`,
+  );
+
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.7;color:#171c18">
+<p>Dear Sir,<br><br>Please find the attached Shortlisted CV for the above-mentioned position</p>
+${shortlist}
+${effort}
+${input.attachmentNote ? `<p style="color:#6b736d">${esc(input.attachmentNote)}</p>` : ""}
+<p>Thank You<br>Best Regards,<br><br>${esc(input.senderName)}<br>${esc(input.senderTitle ?? "Executive - Talent Acquisition")}</p>
+</div>`;
+}

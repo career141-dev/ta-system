@@ -72,3 +72,27 @@ export function answersById(questions: Question[], byLabel: Record<string, strin
   }
   return out;
 }
+
+/** A second channel pressed within this long of the first is the same round. */
+export const ROUND_WINDOW_MS = 15 * 60_000;
+
+export type SendChannel = "whatsapp" | "email";
+
+/**
+ * Whether a TA's single-channel send belongs to the round they just sent.
+ *
+ * WhatsApp now and email two minutes later is one follow-up, not two: it is
+ * the same kind of message and uses one attempt. Pressing the same channel
+ * again, or pressing after the window, starts the next round.
+ */
+export function sameRoundAs(input: {
+  attempts: number;
+  lastManualSendAt?: number | null;
+  lastManualChannels?: string[] | null;
+  channel: SendChannel | "both";
+  now: number;
+}): boolean {
+  if (input.channel === "both" || input.attempts <= 0 || !input.lastManualSendAt) return false;
+  if (input.now - input.lastManualSendAt > ROUND_WINDOW_MS) return false;
+  return !(input.lastManualChannels ?? []).includes(input.channel);
+}

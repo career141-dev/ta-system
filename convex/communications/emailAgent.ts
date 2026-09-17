@@ -4,7 +4,7 @@ import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
-import { followUpCancelledReason, sendFollowUpMail } from "../lib/graphMail";
+import { followUpCancelledReason, isEmail, sendFollowUpMail } from "../lib/graphMail";
 
 
 // ----------------------------------------------------------------------------------
@@ -1090,6 +1090,8 @@ export const sendFollowUpEmail = internalAction({
     subject: v.string(),
     body: v.string(),
     bodyHtml: v.optional(v.string()),
+    /** The assigned TA's mailbox it is sent from; the system sender when absent. */
+    fromEmail: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     // A reminder queued before the TA stopped the sequence, or before the
@@ -1118,23 +1120,27 @@ export const sendFollowUpEmail = internalAction({
       candidateJobId = comm?.applicationId ? String(comm.applicationId) : undefined;
     }
 
-    // Sent through Microsoft Graph, gates first (lib/graphMail.ts).
-    const senderEmail = process.env.OUTBOUND_EMAIL_SENDER || process.env.MS_SENDER_EMAIL;
+    // Sent through Microsoft Graph, gates first (lib/graphMail.ts), from the
+    // assigned TA's mailbox. Replies go to the TA and to the system inbox, which
+    // is polled and read into the record.
+    const systemSender = process.env.OUTBOUND_EMAIL_SENDER || process.env.MS_SENDER_EMAIL;
+    const senderEmail = args.fromEmail && isEmail(args.fromEmail) ? args.fromEmail.trim() : systemSender;
     const result = await sendFollowUpMail(
       {
         from: senderEmail,
+        fallbackFrom: systemSender,
         to: args.candidateEmail,
         subject: args.subject,
         html: args.bodyHtml,
         text: args.body,
-        replyTo: process.env.MS_SENDER_EMAIL || senderEmail,
+        replyTo: [senderEmail ?? "", process.env.MS_SENDER_EMAIL || systemSender || ""],
         candidateJobId,
       },
       getGraphToken,
     );
 
     if (result.ok) {
-      console.log(`[EmailAgent] Follow-up email sent via Microsoft Graph from ${senderEmail} to ${result.to}${result.note}`);
+      console.log(`[EmailAgent] Follow-up email sent via Microsoft Graph from ${result.from} to ${result.to}${result.note}`);
     } else {
       console.warn(`[EmailAgent] Follow-up email not sent: ${result.error}`);
     }

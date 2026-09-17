@@ -65,6 +65,7 @@ import { matchCandidate, type Result } from "@/lib/match";
 import { employerRelated, matchAgainst, planMerge } from "@/lib/dedup";
 import { guard, parseCv, problemsWith } from "@/lib/ingest";
 import { makeCampaignCode, routeByCampaignCode, routeInbound, routeNote, DEFAULT_SHORTLIST_INBOX } from "@/lib/routing";
+import { DEFAULT_EOD_CC } from "@/lib/eod-format";
 import {
   followUpFor, missingFor, questionsInForce, readReply, STANDARD_QUESTIONS,
   type Contact, type FollowUp, type FollowUpQuestion, type FollowUpState, type ReplyReading,
@@ -2972,6 +2973,11 @@ const rawRepo = {
 
   /** The one box every shortlist reply is copied to. A director can change it
    *  here rather than waiting on a deploy — it is an address, not a code path. */
+  /** Copied on every end-of-day email. Changed on the People page. */
+  eodCopyTo(): string {
+    return repo.setting("eodCc", DEFAULT_EOD_CC);
+  },
+
   shortlistInbox(): string {
     return repo.setting("shortlistInbox", DEFAULT_SHORTLIST_INBOX);
   },

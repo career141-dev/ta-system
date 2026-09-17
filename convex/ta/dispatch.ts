@@ -85,7 +85,10 @@ export const sendFollowUp = internalAction({
     const email = (candidate as { email?: string }).email;
     if (!email) return { sent: false, via: "email", reason: "No email address on file." };
 
-    const mailbox = await ctx.runQuery(internal.ta.dispatchRecord.senderMailbox, { jobId: app.jobId });
+    const mailbox = await ctx.runQuery(internal.ta.dispatchRecord.senderMailbox, {
+      jobId: app.jobId,
+      applicationId: args.applicationId,
+    });
     if (!mailbox) return { sent: false, via: "email", reason: "This opening has no recruiter to send from." };
 
     const subject = args.subject ?? "Following up on your application";

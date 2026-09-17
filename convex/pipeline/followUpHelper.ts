@@ -135,13 +135,40 @@ export async function updateFollowUpFlags(
 }
 
 /**
+ * The mailbox a candidate's follow-up emails are sent from: the TA assigned to
+ * them — whoever shortlisted them — or, before anybody has, the opening's
+ * primary recruiter. Undefined when neither has an email address, and the
+ * sender falls back to the system inbox.
+ */
+export async function assignedTaEmail(ctx: any, app: any, job: any): Promise<string | undefined> {
+  for (const userId of [app?.ownerTaId, job?.primaryRecruiterId]) {
+    if (!userId) continue;
+    const user = await ctx.db.get(userId);
+    const email = (user?.email ?? "").trim();
+    if (email) return email;
+  }
+  return undefined;
+}
+
+/**
  * Initiates the follow-up outreach flow when a candidate first arrives at the follow_up stage.
  * Immediately builds and schedules the Day 0 WhatsApp notification outlining missing fields.
  */
 export async function initiateFollowUpOutreach(
   ctx: any,
   applicationId: Id<"applications">,
-  options?: { isManual?: boolean }
+  options?: {
+    isManual?: boolean;
+    /** A TA sending one channel only (the TA System's WhatsApp / Email buttons). */
+    only?: "whatsapp" | "email";
+    /**
+     * The other channel of a round a TA already sent a moment ago: the same
+     * message kind, and the attempt count and schedule are left as they are.
+     */
+    sameRound?: boolean;
+    /** Filled in with what happened, for callers that need to say so. */
+    report?: { sent: boolean; kind?: "initial" | "reminder" };
+  }
 ): Promise<Id<"communications"> | undefined> {
   const app = await ctx.db.get(applicationId);
   if (!app) return;
@@ -188,6 +215,7 @@ export async function initiateFollowUpOutreach(
 
   const allComplete = hasCV && hasCurrentSalary && hasExpectedSalary && hasNoticePeriod && customQuestionsComplete;
   if (allComplete) return; // All data points already gathered, no outreach needed
+  const sameRound = options?.sameRound === true;
 
   const missingFields: string[] = [];
   if (!hasCV) missingFields.push("CV / Resume");
@@ -247,7 +275,11 @@ export async function initiateFollowUpOutreach(
   let isWhatsAppEnabled = job.enableWhatsAppFollowUp !== false;
   let isEmailEnabled = job.enableEmailFollowUp !== false;
 
-  if (isManual) {
+  if (isManual && options?.only) {
+    // A TA chose the channel: that one, whatever the job's own toggles say.
+    isWhatsAppEnabled = options.only === "whatsapp";
+    isEmailEnabled = options.only === "email";
+  } else if (isManual) {
     // Override: if both are disabled, manual trigger sends on both channels.
     if (!isWhatsAppEnabled && !isEmailEnabled) {
       isWhatsAppEnabled = true;
@@ -262,7 +294,13 @@ export async function initiateFollowUpOutreach(
   }
 
   const currentAttempts = app.followUpAttemptCount || 0;
-  const isNudge = currentAttempts > 0;
+  // Within a round the count already includes this round, so the round's kind
+  // is read from the count before it.
+  const isNudge = sameRound ? currentAttempts > 1 : currentAttempts > 0;
+  if (options?.report) {
+    options.report.sent = true;
+    options.report.kind = isNudge ? "reminder" : "initial";
+  }
 
   if (isNudge) {
     // === NUDGE REMINDER FLOW ===
@@ -344,10 +382,12 @@ export async function initiateFollowUpOutreach(
         subject: emailSubject,
         body: emailBody,
         bodyHtml: emailBodyHtml,
+        fromEmail: await assignedTaEmail(ctx, app, job),
       });
     }
 
     // 3. Increment attempts and reschedule nudge for 24h later
+    if (sameRound) return whatsappCommId || emailCommId;
     await ctx.db.patch(app._id, {
       nextFollowUpScheduledAt: now + NUDGE_RESCHEDULE_MS,
       nextFollowUpMessage: undefined,
@@ -400,8 +440,7 @@ export async function initiateFollowUpOutreach(
       });
 
       // Schedule the actual Email delivery via Microsoft Graph
-      const recruiter = await ctx.db.get(job.primaryRecruiterId);
-      const taEmail = recruiter?.email;
+      const taEmail = await assignedTaEmail(ctx, app, job);
       const candidateEmail = candidate.email;
 
       // Sent from the system inbox through Microsoft Graph (lib/graphMail.ts);
@@ -432,6 +471,7 @@ export async function initiateFollowUpOutreach(
     }
 
     // 3. Persist state and schedule the next nudge 24 hours out
+    if (sameRound) return emailCommId;
     const followUpState = app.followUpState;
     await ctx.db.patch(app._id, {
       followUpEnteredAt: app.followUpEnteredAt ?? now,

@@ -1,0 +1,27 @@
+{
+  "name": "career141-ta-aura-agent",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Aura, the TA System's screening call agent (LiveKit Agents worker)",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js start",
+    "dev": "tsx src/index.ts dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@livekit/agents": "1.6.4",
+    "@livekit/agents-plugin-deepgram": "1.6.4",
+    "@livekit/agents-plugin-openai": "1.6.4",
+    "@livekit/agents-plugin-silero": "1.6.4",
+    "@livekit/rtc-node": "^0.13.33",
+    "dotenv": "17.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

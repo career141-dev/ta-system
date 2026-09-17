@@ -314,6 +314,9 @@ export default defineSchema({
     /** Switched on from the TA System: a TA sends the first message, the sweep
      *  runs the reminders after it (convex/lib/followUpScope.ts). */
     followUpStartsOnSend: v.optional(v.boolean()),
+    /** Set when a delete is under way (ta/openingDelete.ts): hidden from every list, removed in batches. */
+    deletingAt: v.optional(v.number()),
+    deletingBy: v.optional(v.id("users")),
     conversationTone: v.optional(v.string()),
 
     agent3TriggerStages: v.optional(v.array(v.string())),
@@ -928,6 +931,9 @@ export default defineSchema({
       replyChannel: v.optional(v.string())
     })),
     followUpAttemptCount: v.optional(v.number()),
+    /** The TA System's last manual follow-up round: when, and on which channels (lib/followUpScope.ts). */
+    followUpLastManualSendAt: v.optional(v.number()),
+    followUpLastManualChannels: v.optional(v.array(v.string())),
     nextFollowUpScheduledAt: v.optional(v.number()),
     nextFollowUpMessage: v.optional(v.string()),
     promisedEtaTimestamp: v.optional(v.number()),
