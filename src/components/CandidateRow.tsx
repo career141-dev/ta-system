@@ -131,6 +131,7 @@ export function CandidateRow({
             appId={app.id}
             openingId={openingId}
             current={app.stage}
+            candidate={candidate}
             isAddOn={app.isAddOn}
             canDecideDirector={canDecideDirector}
             canDecideClient={canDecideClient}

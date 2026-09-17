@@ -18,7 +18,7 @@
  *   nothing to remind anyone about, and no way to chase a no-show.
  */
 
-import type { Stage } from "@/data/types";
+import type { Candidate, Stage } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 
 export const ALLOWED_TRANSITIONS: Record<Stage, Stage[]> = {
@@ -99,6 +99,30 @@ export function canMove(from: Stage, to: Stage, ctx: MoveContext = {}): MoveChec
  *  offers moves that will work. */
 export function nextStages(from: Stage): Stage[] {
   return ALLOWED_TRANSITIONS[from] ?? [];
+}
+
+/**
+ * What is still missing before Director Review will accept this candidate —
+ * the backend's own gate (pipelineStateMachine.ts `second_shortlist`), read
+ * off the fields the row already has so the menu can say so before a TA
+ * presses a button that is only going to be refused.
+ *
+ * This is a proxy, not the backend's own answer: it has no view of the
+ * per-application follow-up flags a WhatsApp reply may have set ahead of the
+ * candidate record itself, so it can occasionally call something missing that
+ * the real gate would accept. It never claims the reverse — nothing it lists
+ * as present is actually absent — so a candidate it waves through will go
+ * through, and the rare false miss just means one extra, informative refusal.
+ */
+export function directorReviewBlockers(
+  candidate: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays">,
+): string[] {
+  const blockers: string[] = [];
+  if (!candidate.cvFileName) blockers.push("a CV");
+  if (!candidate.currentSalary) blockers.push("current salary");
+  if (!candidate.expectedSalary) blockers.push("expected salary");
+  if (candidate.noticePeriodDays === null || candidate.noticePeriodDays === undefined) blockers.push("notice period");
+  return blockers;
 }
 
 /**

@@ -217,6 +217,7 @@ export default async function CandidateDrawer({
                   appId={app.id}
                   openingId={id}
                   current={app.stage}
+                  candidate={c}
                   isAddOn={app.isAddOn}
                   canDecideDirector={canDecideDirector}
                   canDecideClient={canDecideClient}
