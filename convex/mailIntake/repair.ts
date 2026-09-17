@@ -19,7 +19,7 @@ import { syncCandidateOverallStatus } from "../candidates/candidates";
 /** The trial ran from the first sync until the corrected placement was deployed. */
 const TRIAL_FROM = Date.parse("2026-09-16T14:50:00Z");
 const TRIAL_TO = Date.parse("2026-09-17T04:10:00Z");
-const MAX_PER_CALL = 100;
+const MAX_PER_CALL = 15;
 
 function fromTrial(app: { _creationTime: number; sourceChannel?: string } | null): boolean {
   return Boolean(app && app.sourceChannel === "linkedin" && app._creationTime >= TRIAL_FROM && app._creationTime < TRIAL_TO);
@@ -60,7 +60,7 @@ export const removeMisfiled = internalMutation({
       await byApp("taAlerts", "by_subject", "subjectId");
       await adjustJobStageStat(ctx, app.jobId, app.currentStage, app.currentStage, false, true);
       await ctx.db.delete(id);
-      await syncCandidateOverallStatus(ctx, app.candidateId);
+      if (await ctx.db.get(app.candidateId)) await syncCandidateOverallStatus(ctx, app.candidateId);
     }
     return { removed: removed.length, left, dryRun: args.dryRun };
   },
@@ -90,7 +90,7 @@ export const restoreToNewCvs = internalMutation({
       if (args.dryRun) continue;
       await ctx.db.patch(id, { currentStage: "new_cvs" as any, lastStageChangedAt: Date.now() });
       await adjustJobStageStat(ctx, app.jobId, "matched_candidates", "new_cvs");
-      await syncCandidateOverallStatus(ctx, app.candidateId);
+      if (await ctx.db.get(app.candidateId)) await syncCandidateOverallStatus(ctx, app.candidateId);
     }
     return { restored, left, dryRun: args.dryRun };
   },
