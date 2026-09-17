@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { CLIENTS_TOGGLE_ALL } from "./ClientsToolbar";
 import Link from "next/link";
-import { ClientEditor, ClientMenu, type Contact, type Pane } from "./ClientEditor";
+import { ClientDeleteButton, ClientEditor, ClientMenu, type Contact, type Pane } from "./ClientEditor";
 
 export interface ClientOpening {
   id: string;
@@ -140,6 +140,12 @@ export function ClientCard({
             {contactTitle && ` · ${contactTitle}`}
           </p>
         </div>
+
+        {canDelete && (
+          <div className="pointer-events-auto relative z-10">
+            <ClientDeleteButton clientId={clientId} name={name} openingCount={openings.length} />
+          </div>
+        )}
 
         {/*
           One grid, sized to the widest LABEL rather than to the numbers.

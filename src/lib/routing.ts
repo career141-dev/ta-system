@@ -68,8 +68,37 @@ export function titleCandidates(subject: string): string[] {
   // Dash-separated: take every segment, since the house subject line is
   // "CLIENT - TITLE - DATE".
   for (const part of s.split(/\s+[-–|]\s+/)) out.add(part);
+  // "Country Head / General Manager Sales and Marketing": either side of a
+  // spaced slash is a title on its own.
+  for (const part of s.split(/\s+\/\s+/)) out.add(part);
 
   return [...out].map((x) => x.trim()).filter((x) => x.length >= 3);
+}
+
+/** The subject's job title as a whole, never a fragment of it (as convex/lib/postRouting.ts). */
+function wholeTitles(subject: string): string[] {
+  let s = subject.replace(/\s+/g, " ").trim();
+  for (const w of WRAPPERS) s = s.replace(w, "");
+  const out = new Set<string>([s]);
+  const appliedTo = s.match(/\bapplied\s+(?:to|for)\s+(.+?)(?:\s+at\s+.+)?$/i);
+  if (appliedTo?.[1]) out.add(appliedTo[1]);
+  const before = s.match(/^(.+?)\s+(?:from|by)\s+\S+/i);
+  if (before?.[1]) out.add(before[1]);
+  return [...out].map((x) => x.trim()).filter((x) => x.length >= 3);
+}
+
+/** "Pricing Manager" of "Pricing Manager – Sea & Air Freight". */
+function titleHead(title: string): string {
+  return title.split(/\s+(?:[-–|]|from)\s+/i)[0].trim();
+}
+
+/** Words that make a title a different job when they follow it. */
+const CHANGES_ROLE_AFTER = new Set(["assistant", "trainee", "intern", "internship", "apprentice", "support", "coordinator"]);
+
+/** `text` starts with the whole of `title` (both normalised), and what follows does not change the job. */
+function leadsWith(text: string, title: string): boolean {
+  if (!title || !text.startsWith(`${title} `)) return false;
+  return !CHANGES_ROLE_AFTER.has(text.slice(title.length + 1).split(" ")[0]);
 }
 
 function norm(s: string): string {
@@ -170,7 +199,7 @@ interface Scored {
   matchedOn: string;
 }
 
-function scorePost(post: JobPost, cands: string[]): Scored | null {
+function scorePost(post: JobPost, cands: string[], whole: string[] = cands): Scored | null {
   const postNorm = norm(post.title);
   const postTokens = tokens(post.title);
   let best: Scored | null = null;
@@ -179,26 +208,35 @@ function scorePost(post: JobPost, cands: string[]): Scored | null {
     if (!best || score > best.score) best = { post, score, confidence, matchedOn };
   };
 
+  // The subject's whole title is the advert's head.
+  const head = norm(titleHead(post.title));
+  if (head !== postNorm && head.split(" ").length >= 2 && whole.some((w) => norm(w) === head)) {
+    take(75, "exact", post.title);
+  }
+
   for (const c of cands) {
     const cn = norm(c);
     if (!cn) continue;
 
     // The whole title, exactly. The only thing worth acting on without doubt.
     if (cn === postNorm) take(100, "exact", post.title);
-    // The title sitting inside a longer subject.
-    else if (cn.includes(postNorm) || postNorm.includes(cn)) take(80, "exact", post.title);
+    // The title followed by a place or a client. Not a title found anywhere
+    // inside the subject, and never the subject inside a title: "General Sales
+    // Manager" is not "Sales Manager", and the fragment "Head" is not every
+    // "Head of …" (linkedin@, 16 September).
+    else if (leadsWith(cn, postNorm)) take(80, "exact", post.title);
 
     // A title the advert carried before it was edited (posting type 4).
     for (const old of post.previousTitles ?? []) {
       const on = norm(old);
-      if (on && (cn === on || cn.includes(on))) take(90, "exact", old);
+      if (on && (cn === on || leadsWith(cn, on))) take(90, "exact", old);
     }
 
     // A keyword the TA put on the post on purpose — the advert may be headed
     // "Marketing Lead" while the opening is "Brand Manager".
     for (const k of post.aliasKeywords) {
       const kn = norm(k);
-      if (kn && (cn === kn || cn.includes(kn))) take(70, "keyword", k);
+      if (kn && (cn === kn || ` ${cn} `.includes(` ${kn} `))) take(70, "keyword", k);
     }
 
     // Every significant word of the title present, in any order.
@@ -243,8 +281,9 @@ export function routeInbound(
   if (mine.length === 0) return { taId: ta.id, ...NO_MATCH };
 
   const cands = titleCandidates(input.subject);
+  const whole = wholeTitles(input.subject);
   const scored = mine
-    .map((p) => scorePost(p, cands))
+    .map((p) => scorePost(p, cands, whole))
     .filter((x): x is Scored => x !== null)
     .sort((a, b) => b.score - a.score);
 

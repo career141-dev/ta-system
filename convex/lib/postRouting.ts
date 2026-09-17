@@ -91,8 +91,35 @@ export function titleCandidates(subject: string): string[] {
   const ofClient = s.match(/^(.+?)\s+of\s+\S+/i);
   if (ofClient?.[1]) out.add(ofClient[1]);
   for (const part of s.split(/\s+[-–|]\s+/)) out.add(part);
+  // "Country Head / General Manager Sales and Marketing - Sea freight": either
+  // side of a spaced slash is a title on its own.
+  for (const part of s.split(/\s+\/\s+/)) out.add(part);
 
   return [...out].map((x) => x.trim()).filter((x) => x.length >= 3);
+}
+
+/**
+ * The subject's job title as a whole — the subject without its wrapper, the
+ * applicant's name or the client — never a fragment of it.
+ */
+export function wholeTitles(subject: string): string[] {
+  let s = (subject ?? "").replace(/\s+/g, " ").trim();
+  for (const w of WRAPPERS) s = s.replace(w, "");
+  const out = new Set<string>([s]);
+  const appliedTo = s.match(/\bapplied\s+(?:to|for)\s+(.+?)(?:\s+at\s+.+)?$/i);
+  if (appliedTo?.[1]) out.add(appliedTo[1]);
+  const before = s.match(/^(.+?)\s+(?:from|by)\s+\S+/i);
+  if (before?.[1]) out.add(before[1]);
+  return [...out].map((x) => x.trim()).filter((x) => x.length >= 3);
+}
+
+/**
+ * An advert title's own head: "Pricing Manager" of "Pricing Manager – Sea &
+ * Air Freight", "Divisional Merchandise Manager" of "… from Apparel
+ * Manufacturing Industry". The LinkedIn advert often carries only that.
+ */
+export function titleHead(title: string): string {
+  return (title ?? "").split(/\s+(?:[-–|]|from)\s+/i)[0].trim();
 }
 
 export function norm(s: string): string {
@@ -106,6 +133,20 @@ export function norm(s: string): string {
 
 const tokens = (s: string) => norm(s).split(" ").filter(Boolean);
 
+/** Words that make a title a different job when they follow it ("Sales Manager Assistant"). */
+const CHANGES_ROLE_AFTER = new Set(["assistant", "trainee", "intern", "internship", "apprentice", "support", "coordinator"]);
+
+/**
+ * `text` (normalised) starts with the whole of `title` (normalised), and what
+ * follows does not change the job. Words BEFORE a title almost always do —
+ * General, Regional, Area, Deputy, Assistant — so a title inside a subject
+ * only counts at the start.
+ */
+export function leadsWith(text: string, title: string): boolean {
+  if (!title || !text.startsWith(`${title} `)) return false;
+  return !CHANGES_ROLE_AFTER.has(text.slice(title.length + 1).split(" ")[0]);
+}
+
 // ── scoring one advert ──────────────────────────────────────────────────────
 
 export interface Scored<P extends RoutablePost = RoutablePost> {
@@ -115,7 +156,7 @@ export interface Scored<P extends RoutablePost = RoutablePost> {
   matchedOn: string;
 }
 
-export function scorePost<P extends RoutablePost>(post: P, cands: string[]): Scored<P> | null {
+export function scorePost<P extends RoutablePost>(post: P, cands: string[], whole: string[] = cands): Scored<P> | null {
   const postNorm = norm(post.title);
   const postTokens = tokens(post.title);
   let best: Scored<P> | null = null;
@@ -123,19 +164,33 @@ export function scorePost<P extends RoutablePost>(post: P, cands: string[]): Sco
     if (!best || score > best.score) best = { post, score, confidence, matchedOn };
   };
 
+  // The whole title in the subject is the advert's head. Only the whole title:
+  // "General Manager - Sales" must not match the head "General Manager" of an
+  // unrelated advert through its first segment. Below an exact title, so a
+  // subject naming the shorter title still goes to that advert if it exists.
+  const head = norm(titleHead(post.title));
+  if (head !== postNorm && head.split(" ").length >= 2 && whole.some((w) => norm(w) === head)) {
+    take(75, "exact", post.title);
+  }
+
   for (const c of cands) {
     const cn = norm(c);
     if (!cn) continue;
 
     // The whole title, exactly — the only thing worth acting on without doubt.
     if (cn === postNorm) take(100, "exact", post.title);
-    else if (cn.includes(postNorm) || postNorm.includes(cn)) take(80, "exact", post.title);
+    // The title followed by a place, a client or a product line ("Chief
+    // Operating Officer - Gloves"). Not a title found anywhere inside the
+    // subject, and never the subject found inside a title: on 16 September
+    // "General Sales Manager" filed 169 applicants to "Sales Manager", and the
+    // fragment "Head" (from "Head of Operations") matched every "Head of …".
+    else if (leadsWith(cn, postNorm)) take(80, "exact", post.title);
 
     // A title the advert carried before it was edited: applicants who clicked
     // before the edit still arrive under the old one.
     for (const old of post.previousTitles ?? []) {
       const on = norm(old);
-      if (on && (cn === on || cn.includes(on))) take(90, "exact", old);
+      if (on && (cn === on || leadsWith(cn, on))) take(90, "exact", old);
     }
 
     // A keyword the TA put on the post on purpose — the advert may be headed
@@ -144,7 +199,7 @@ export function scorePost<P extends RoutablePost>(post: P, cands: string[]): Sco
     // still lands.
     for (const k of post.aliasKeywords ?? []) {
       const kn = norm(k);
-      if (kn && (cn === kn || cn.includes(kn))) take(70, "keyword", k);
+      if (kn && (cn === kn || ` ${cn} `.includes(` ${kn} `))) take(70, "keyword", k);
     }
 
     const ct = new Set(tokens(c));
@@ -176,8 +231,9 @@ export function rankPosts<P extends RoutablePost>(
   body?: string | null,
 ): { primary: Scored<P>; alsoTo: Scored<P>[] } | null {
   const cands = titleCandidates(subject);
+  const whole = wholeTitles(subject);
   const scored = live
-    .map((p) => scorePost(p, cands))
+    .map((p) => scorePost(p, cands, whole))
     .filter((x): x is Scored<P> => x !== null)
     .sort((a, b) => b.score - a.score);
   if (scored.length === 0) return null;

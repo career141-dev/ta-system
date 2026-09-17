@@ -54,7 +54,7 @@ export function getModelForTask(taskType: TaskType | string): string {
 
 let openRouterKeyIndex = 0;
 
-export function getOpenAI(_taskType?: TaskType | string): OpenAI {
+export function getOpenAI(_taskType?: TaskType | string, timeoutMs = 30000): OpenAI {
   // Collect all available OpenRouter API keys from environment variables for round-robin rotation
   const keysFromEnv = [
     process.env.OPENROUTER_API_KEY,
@@ -80,7 +80,7 @@ export function getOpenAI(_taskType?: TaskType | string): OpenAI {
   return new OpenAI({
     baseURL: "https://openrouter.ai/api/v1",
     apiKey,
-    timeout: 30000,
+    timeout: timeoutMs,
     maxRetries: 0,
   });
 }
@@ -334,7 +334,12 @@ export async function executeLLMWithNvidiaFallback(
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
-          const client = isNvidiaModel ? getNvidiaOpenAI() : getOpenAI(taskType);
+          // Reading a whole CV into JSON takes deepseek-v4-flash 30–45 seconds
+          // (measured on real linkedin@ CVs, 17 September). At the old 30s
+          // limit both tries timed out, the fallback model answered with an
+          // empty object, and 141 real CVs were rejected as "not a CV".
+          // Two tries at 75s stay inside the extraction's 210s deadline.
+          const client = isNvidiaModel ? getNvidiaOpenAI() : getOpenAI(taskType, 75_000);
           const response = await client.chat.completions.create({
             model,
             messages: options.messages,

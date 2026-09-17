@@ -11,6 +11,7 @@ import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
 import { DbCandidateDrawer } from "@/components/db/DbCandidateDrawer";
+import { DATABASE_STEPS, LoadingProgress } from "@/components/LoadingScenes";
 import { saveSearch } from "@/app/actions";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
@@ -100,12 +101,17 @@ function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "bool
         </div>
       </aside>
       <div className="min-w-0">
-        <div className="overflow-hidden rounded-xl border border-rule bg-surface px-8 py-16 text-center" role="status" aria-live="polite">
-          <p className="text-[14px] font-medium">Searching the database…</p>
-          <p className="mx-auto mt-2 max-w-[460px] text-[12.5px] leading-relaxed text-ink-soft">
-            {q ? <>Reading &ldquo;{q}&rdquo; and ranking the people who fit. A new search can take up to half a minute; the same search again is instant.</> : "Loading the results."}
-          </p>
-        </div>
+        {q ? (
+          <LoadingProgress
+            steps={DATABASE_STEPS}
+            heading={`Searching for “${q.length > 80 ? `${q.slice(0, 80)}…` : q}”`}
+            note="a new search can take up to half a minute; the same search again is instant"
+          />
+        ) : (
+          <div className="overflow-hidden rounded-xl border border-rule bg-surface px-8 py-16 text-center" role="status" aria-live="polite">
+            <p className="text-[14px] font-medium">Loading the results…</p>
+          </div>
+        )}
       </div>
     </div>
   );

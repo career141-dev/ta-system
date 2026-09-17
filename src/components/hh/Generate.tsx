@@ -1,6 +1,7 @@
 import { externalUrl } from "@/lib/url";
 import { aiStatus, FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 import { serperConfigured } from "@/lib/serper";
+import { GenerateForm } from "./GenerateForm";
 
 /**
  * The bar above every generated page — spec §8A.
@@ -42,24 +43,10 @@ export function Generate({
   }
   const blocked = missing.length > 0;
 
-  return (
-    <div className="mb-5 rounded-xl border border-rule bg-surface px-5 py-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium">{label}</p>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-ink-soft">{sub}</p>
-        </div>
-        <form action={action}>
-          <input type="hidden" name="openingId" value={openingId} />
-          <button
-            disabled={blocked}
-            className="shrink-0 rounded-full bg-brand px-5 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:bg-rule-strong"
-          >
-            {hasResult ? "Run again" : "Generate"}
-          </button>
-        </form>
-      </div>
-
+  // The bar is a client form so it can show the run's progress while it works
+  // (GenerateForm); the checks above stay here, on the server.
+  const notes = (
+    <>
       {blocked && (
         <p className="mt-3 rounded-lg bg-warn-soft px-3.5 py-2.5 text-[12px] leading-relaxed text-warn">
           Add to <code>.env.local</code> and restart: {missing.join(" · ")}
@@ -80,7 +67,14 @@ export function Generate({
           {searches ? ` · ${searches} web ${Number(searches) === 1 ? "search" : "searches"}` : ""}
         </p>
       )}
-    </div>
+    </>
+  );
+
+  return (
+    <GenerateForm openingId={openingId} action={action} blocked={blocked} hasResult={hasResult} needs={needs} notes={notes}>
+      <p className="text-[13px] font-medium">{label}</p>
+      <p className="mt-0.5 text-[12px] leading-relaxed text-ink-soft">{sub}</p>
+    </GenerateForm>
   );
 }
 

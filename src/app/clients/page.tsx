@@ -94,7 +94,7 @@ export default async function ClientsPage({
               status={c.status}
               esaSignedAt={c.esaSignedAt}
               contacts={c.contacts}
-              canDelete={user.role !== "ta"}
+              canDelete={can(user, "client.manage").ok}
               industry={c.industry}
               contactTitle={contact?.title ?? null}
               openCount={open.length}

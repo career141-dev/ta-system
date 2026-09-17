@@ -73,6 +73,14 @@ async function placeCandidate(
   subject: string,
 ) {
   for (const d of destinations(route)) {
+    // Already on this opening — the CV pipeline filed them, or LinkedIn's
+    // second email about the same applicant. createApplication on an existing
+    // application moves it from New CVs to Matched candidates, which moved 196
+    // applicants no one had looked at (17 September); only the post is recorded.
+    const already: boolean = await ctx.runMutation(internal.mailIntake.model.setApplicationPost, {
+      candidateId, jobId: d.jobId, jobPostId: d.postId,
+    });
+    if (already) continue;
     await ctx.runMutation(api.applications.applications.createApplication, {
       candidateId,
       jobId: d.jobId,
@@ -143,9 +151,11 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
     }
     // A LinkedIn applicant with no résumé attached: they named themselves, the
     // job and their profile, which is enough to hold them and place them.
-    let candidateId = parsed.profileUrl
-      ? await ctx.runQuery(internal.mailIntake.model.candidateByLinkedin, { url: parsed.profileUrl })
-      : null;
+    // A retry of this message: the person was already created last time.
+    let candidateId: Id<"candidates"> | null = m.candidateIds[0] ?? null;
+    if (!candidateId && parsed.profileUrl) {
+      candidateId = await ctx.runQuery(internal.mailIntake.model.candidateByLinkedin, { url: parsed.profileUrl });
+    }
     if (!candidateId) {
       candidateId = await ctx.runMutation(api.candidates.candidates.createCandidate, {
         fullName: parsed.applicantName ?? undefined,
@@ -154,6 +164,7 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
         phone: parsed.phone ?? undefined,
         sourceChannel,
       });
+      if (candidateId) await ctx.runMutation(internal.mailIntake.model.noteCandidate, { id: m._id, candidateId });
     }
     if (!candidateId) throw new Error("The candidate could not be created.");
     await placeCandidate(ctx, candidateId, route, sourceChannel, subject);

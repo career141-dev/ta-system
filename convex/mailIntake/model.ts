@@ -13,8 +13,15 @@ import type { RoutablePost } from "../lib/postRouting";
 /** The desk's shared mailboxes. Created switched off; turned on in Settings → Mailboxes. */
 export const DEFAULT_MAILBOXES = ["linkedin@career141.com", "cv@career141.com", "job@career141.com"];
 
-/** How far back the first sync of a mailbox reads (the one-off backfill). */
-export const BACKFILL_DAYS = 30;
+/**
+ * A mailbox takes only mail received after it was switched on.
+ *
+ * The first version read 30 days back when a mailbox was turned on. On
+ * linkedin@ that was 11,000 messages, filed over a night at three a minute,
+ * with new applicants queued behind old ones (16–17 September). Old mail is
+ * the old system's; `backfillFrom` is now the moment reading started, and
+ * anything received before it is closed as skipped, never filed.
+ */
 
 /**
  * How long a message waits before it is processed.
@@ -41,7 +48,8 @@ export const ensureMailboxes = internalMutation({
         await ctx.db.insert("mailIntakeMailboxes", {
           mailbox,
           enabled: false,
-          backfillFrom: now - BACKFILL_DAYS * 86_400_000,
+          // Moved to the moment it is switched on (setEnabled).
+          backfillFrom: now,
           totals: { ...EMPTY_TOTALS },
           updatedAt: now,
         });
@@ -90,36 +98,30 @@ export const setEnabled = internalMutation({
   handler: async (ctx, args) => {
     const row = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", args.mailbox)).first();
     if (!row) throw new Error(`${args.mailbox} is not one of the intake mailboxes.`);
-    await ctx.db.patch(row._id, { enabled: args.enabled, updatedAt: Date.now() });
+    const now = Date.now();
+    // Switched on (again): from now. Mail that arrived while it was off is not
+    // filed later — the sync still pages past it, and claimDue closes any of
+    // it already logged.
+    const starting = args.enabled && !row.enabled;
+    await ctx.db.patch(row._id, { enabled: args.enabled, updatedAt: now, ...(starting ? { backfillFrom: now } : {}) });
     return { ok: true };
   },
 });
 
 /**
- * Narrow a mailbox's intake window to the last `days` days.
- *
- * The first sync reads BACKFILL_DAYS of old mail; on linkedin@ that was over
- * 9,000 messages, days of filing at a few a minute (16 September). This moves
- * the window forward — the sync then records nothing older — and closes the
- * waiting messages already recorded from before it as skipped, a batch at a
- * time (call again while `more` is true). Nothing is deleted.
+ * Take a mailbox's mail from this moment only, without switching it off —
+ * for a mailbox already reading with an older window (linkedin@, switched on
+ * with 30 days, then 3). Anything logged from before is closed as skipped by
+ * claimDue as it comes up; nothing is deleted.
  */
-export const setBackfillWindow = internalMutation({
-  args: { mailbox: v.string(), days: v.number() },
+export const startFromNow = internalMutation({
+  args: { mailbox: v.string() },
   handler: async (ctx, args) => {
     const row = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", args.mailbox)).first();
     if (!row) throw new Error(`${args.mailbox} is not one of the intake mailboxes.`);
-    const cutoff = Date.now() - Math.max(1, args.days) * 86_400_000;
-    if (row.backfillFrom < cutoff) await ctx.db.patch(row._id, { backfillFrom: cutoff, updatedAt: Date.now() });
-    const old = await ctx.db
-      .query("mailIntakeMessages")
-      .withIndex("by_receivedAt", (q) => q.lt("receivedAt", cutoff))
-      .filter((q) => q.and(q.eq(q.field("mailbox"), args.mailbox), q.eq(q.field("status"), "waiting")))
-      .take(400);
-    for (const m of old) {
-      await finish(ctx, m, { outcome: "skipped", note: `Older than the intake window (last ${args.days} days), not filed.` });
-    }
-    return { skipped: old.length, more: old.length === 400, from: cutoff };
+    const now = Date.now();
+    await ctx.db.patch(row._id, { backfillFrom: now, updatedAt: now });
+    return { from: now };
   },
 });
 
@@ -177,12 +179,25 @@ export const claimDue = internalMutation({
   args: { limit: v.number(), ignoreGrace: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const boxes = new Map((await ctx.db.query("mailIntakeMailboxes").collect()).map((b) => [b.mailbox, b]));
+    // Read past what will be closed unfiled, so a run of old mail does not use
+    // up the run and hold new applicants back.
     const due = await ctx.db
       .query("mailIntakeMessages")
       .withIndex("by_status_next", (q) => q.eq("status", "waiting").lte("nextAttemptAt", args.ignoreGrace ? Number.MAX_SAFE_INTEGER : now))
-      .take(args.limit);
+      .take(args.limit + 200);
     const claimed: Doc<"mailIntakeMessages">[] = [];
     for (const m of due) {
+      if (claimed.length >= args.limit) break;
+      const box = boxes.get(m.mailbox);
+      if (!box?.enabled) {
+        await finish(ctx, m, { outcome: "skipped", note: "The mailbox was switched off before this was filed." });
+        continue;
+      }
+      if (m.receivedAt < box.backfillFrom) {
+        await finish(ctx, m, { outcome: "skipped", note: "Received before this mailbox was switched on — old mail is not filed." });
+        continue;
+      }
       if (m.attempts >= MAX_ATTEMPTS) {
         await finish(ctx, m, { outcome: "failed", error: m.error ?? "Gave up after repeated attempts." });
         continue;
@@ -245,6 +260,20 @@ export const finishMessage = internalMutation({
     if (!m || m.status === "done") return;
     const { id: _id, ...fields } = args;
     await finish(ctx, m, fields);
+  },
+});
+
+/**
+ * Record a candidate on the message the moment it is created, so a retry after
+ * a failure part-way uses that person rather than creating them again.
+ */
+export const noteCandidate = internalMutation({
+  args: { id: v.id("mailIntakeMessages"), candidateId: v.id("candidates") },
+  handler: async (ctx, args) => {
+    const m = await ctx.db.get(args.id);
+    if (m && !m.candidateIds.includes(args.candidateId)) {
+      await ctx.db.patch(args.id, { candidateIds: [...m.candidateIds, args.candidateId] });
+    }
   },
 });
 
@@ -352,9 +381,12 @@ export const candidateByLinkedin = internalQuery({
 export const setApplicationPost = internalMutation({
   args: { candidateId: v.id("candidates"), jobId: v.id("jobs"), jobPostId: v.id("jobPosts") },
   handler: async (ctx, args) => {
+    // The same person under the id they were merged into, as createApplication does.
+    const person = await ctx.db.get(args.candidateId);
+    const candidateId = (person?.mergedInto as Id<"candidates"> | undefined) ?? args.candidateId;
     const app = await ctx.db
       .query("applications")
-      .withIndex("by_candidate_job", (q) => q.eq("candidateId", args.candidateId).eq("jobId", args.jobId))
+      .withIndex("by_candidate_job", (q) => q.eq("candidateId", candidateId).eq("jobId", args.jobId))
       .first();
     if (app && !app.jobPostId) await ctx.db.patch(app._id, { jobPostId: args.jobPostId });
     return Boolean(app);

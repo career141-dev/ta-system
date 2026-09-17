@@ -70,3 +70,30 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .c141-progress { animation: none; width: 100%; opacity: 0.6; }
 }
+
+/* The scenes on a long wait (components/LoadingScenes.tsx): each step's
+   picture settles in, and a few parts of it keep moving so the page does not
+   look stopped. Still for anyone who asks for less motion. */
+@keyframes c141-scene-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes c141-scene-float {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-7px, -4px); }
+}
+@keyframes c141-scene-line {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes c141-scene-pop {
+  0%, 100% { opacity: 0.45; }
+  35%, 70% { opacity: 1; }
+}
+.c141-scene { animation: c141-scene-in 0.45s ease-out both; }
+.c141-scene-float { animation: c141-scene-float 2.4s ease-in-out infinite; }
+.c141-scene-line { animation: c141-scene-line 1.6s ease-in-out infinite; }
+.c141-scene-pop { animation: c141-scene-pop 2.2s ease-in-out infinite both; }
+@media (prefers-reduced-motion: reduce) {
+  .c141-scene, .c141-scene-float, .c141-scene-line, .c141-scene-pop { animation: none; }
+}
