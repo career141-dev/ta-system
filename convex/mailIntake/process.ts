@@ -73,6 +73,14 @@ async function placeCandidate(
   subject: string,
 ) {
   for (const d of destinations(route)) {
+    // Already on this opening — the CV pipeline filed them, or LinkedIn's
+    // second email about the same applicant. createApplication on an existing
+    // application moves it from New CVs to Matched candidates, which moved 196
+    // applicants no one had looked at (17 September); only the post is recorded.
+    const already: boolean = await ctx.runMutation(internal.mailIntake.model.setApplicationPost, {
+      candidateId, jobId: d.jobId, jobPostId: d.postId,
+    });
+    if (already) continue;
     await ctx.runMutation(api.applications.applications.createApplication, {
       candidateId,
       jobId: d.jobId,

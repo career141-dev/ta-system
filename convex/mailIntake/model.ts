@@ -381,9 +381,12 @@ export const candidateByLinkedin = internalQuery({
 export const setApplicationPost = internalMutation({
   args: { candidateId: v.id("candidates"), jobId: v.id("jobs"), jobPostId: v.id("jobPosts") },
   handler: async (ctx, args) => {
+    // The same person under the id they were merged into, as createApplication does.
+    const person = await ctx.db.get(args.candidateId);
+    const candidateId = (person?.mergedInto as Id<"candidates"> | undefined) ?? args.candidateId;
     const app = await ctx.db
       .query("applications")
-      .withIndex("by_candidate_job", (q) => q.eq("candidateId", args.candidateId).eq("jobId", args.jobId))
+      .withIndex("by_candidate_job", (q) => q.eq("candidateId", candidateId).eq("jobId", args.jobId))
       .first();
     if (app && !app.jobPostId) await ctx.db.patch(app._id, { jobPostId: args.jobPostId });
     return Boolean(app);
