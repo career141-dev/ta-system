@@ -94,16 +94,41 @@ export function FitReason({ score }: { score: Score }) {
   );
 }
 
-/** One line, for tighter tables. */
+/**
+ * The score beside a name in the search results: a ring that fills to the
+ * number as the row appears, the number inside, the band beside it. It was
+ * 12px text and easy to miss (17 September).
+ */
 export function FitChip({ score }: { score: Score }) {
   const tone = BAND[score.band];
+  const r = 15;
+  const len = 2 * Math.PI * r;
+  const to = len * (1 - Math.max(0, Math.min(100, score.overall)) / 100);
   return (
     <span
-      className="tabular inline-flex items-center gap-1.5 text-[12px] font-medium"
+      className="c141-score-pop tabular inline-flex items-center gap-2 align-middle"
       title={score.reasons.join(" · ")}
     >
-      {score.overall}
-      <span className={`font-normal ${tone.text}`}>{tone.word}</span>
+      <span className={`relative inline-grid h-[38px] w-[38px] place-items-center ${tone.text}`}>
+        <svg width={38} height={38} viewBox="0 0 38 38" aria-hidden="true" className="absolute inset-0 -rotate-90">
+          <circle cx="19" cy="19" r={r} fill="none" stroke="currentColor" strokeOpacity={0.14} strokeWidth={4} />
+          <circle
+            cx="19"
+            cy="19"
+            r={r}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={4}
+            strokeLinecap="round"
+            strokeDasharray={len}
+            strokeDashoffset={to}
+            className="c141-score-ring"
+            style={{ "--c141-len": `${len}`, "--c141-to": `${to}` } as React.CSSProperties}
+          />
+        </svg>
+        <span className="relative text-[13px] font-bold text-ink">{score.overall}</span>
+      </span>
+      <span className={`text-[12px] font-semibold ${tone.text}`}>{tone.word}</span>
     </span>
   );
 }

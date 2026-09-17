@@ -29,6 +29,8 @@ const NAV = [
   // system raised was invisible.
   { href: "/alerts", label: "Alerts" },
   { href: "/reports", label: "Reports" },
+  // Practice calls with the AI screening agent (as the CV platform's Aura page).
+  { href: "/voice", label: "Voice agent" },
 ];
 
 
