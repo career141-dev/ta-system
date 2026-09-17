@@ -1,7 +1,9 @@
 export default {
   providers: [
     {
-      domain: "https://upward-squid-19.clerk.accounts.dev",
+      // The TA System's Clerk development instance since 17 September
+      // (replaces upward-squid-19, whose accounts no longer sign in).
+      domain: "https://prime-elf-9817.clerk.accounts.dev",
       applicationID: "convex",
     },
     {
