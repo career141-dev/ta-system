@@ -104,7 +104,39 @@ const posts = [
   eq("the more specific advert wins, and is not also filed to the shorter title", [r?.openingId, r?.alsoTo], ["op_gloves", []]);
   eq("the shorter title still routes on its own", routeShared({ subject: "New application: Chief Operating Officer from A B" }, coo)?.openingId, "op_coo");
 }
-eq("an old headline still routes", routeShared({ subject: "Application for Finance Head" }, posts)?.postId, "p3");
+{
+  // Real linkedin@ subjects that were filed to the wrong openings on 16 September.
+  const desk = [
+    post("s1", "op_sales", "Sales Manager"),
+    post("s2", "op_hbo", "Head of Branch Operations"),
+    post("s3", "op_school", "Head of School"),
+    post("s4", "op_hos", "Head of Sales"),
+    post("s5", "op_gmm", "General Manager – Marketing & Merchandising"),
+    post("s6", "op_ehs", "EHS Manager"),
+    post("s7", "op_price", "Pricing Manager – Sea & Air Freight"),
+    post("s8", "op_spm", "Senior Pricing Manager"),
+    post("s9", "op_dmm", "Divisional Merchandise Manager from Apparel Manufacturing Industry"),
+    post("s10", "op_gmsea", "General Manager Sales and Marketing - Sea freight"),
+    post("s11", "op_gmo", "General Manager - Operations / Sales / Marketing - Shipping / Freight forwarding"),
+  ];
+  const to = (subject: string) => {
+    const r = routeShared({ subject }, desk);
+    return r ? [r.openingId, ...r.alsoTo.map((a) => a.openingId)] : null;
+  };
+  eq("a longer title is not the shorter advert ('General Sales Manager' ≠ Sales Manager)", to("New application: General Sales Manager from Amila Tennakoon"), null);
+  eq("'Group Head of Sales' ≠ Head of Sales", to("New application: Group Head of Sales from A B"), null);
+  eq("the fragment 'Head' matches no 'Head of …'", to("You have a new applicant ready for review for Head of Operations"), null);
+  eq("the fragment 'Manager' matches no '… Manager'", to("New application: Manager – Technical Sales & Business Development (Yeast) from A B"), null);
+  eq("a word of the title is not the title ('DGM – Merchandising')", to("You have a new applicant ready for review for DGM – Merchandising"), null);
+  eq("'General Manager Operations' is not the long GM advert", to("New application: General Manager Operations from A B"), null);
+  eq("the whole title is an advert's head", to("New application: Pricing Manager from A B"), ["op_price"]);
+  eq("… including a 'from <industry>' head", to("New application: Divisional Merchandise Manager from A B"), ["op_dmm"]);
+  eq("either side of a spaced slash", to("New application: Country Head / General Manager Sales and Marketing - Sea freight from A B"), ["op_gmsea"]);
+  eq("an exact title still routes", to("New application: Head of Branch Operations from A B"), ["op_hbo"]);
+  eq("a title then a place still routes", to("New application: Sales Manager - Colombo from A B"), ["op_sales"]);
+  eq("a title then a role-changing word does not", to("New application: Sales Manager Assistant from A B"), null);
+}
+eq("an old headline still routes",routeShared({ subject: "Application for Finance Head" }, posts)?.postId, "p3");
 eq("a campaign code decides outright", [routeShared({ subject: "Re: my CV", body: "code HF-7K3" }, posts)?.postId, routeShared({ subject: "Re: my CV", body: "code HF-7K3" }, posts)?.how], ["p3", "campaign_code"]);
 eq("a keyword the TA set routes", routeShared({ subject: "CV - Marketing Officer" }, posts)?.postId, "p4");
 eq("the LinkedIn mailbox ignores non-LinkedIn adverts", routeShared({ subject: "CV - Marketing Officer", linkedinOnly: true }, posts), null);

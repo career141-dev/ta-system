@@ -873,10 +873,11 @@ JSON Target Schema:
   ];
 
   try {
-    const { content } = await executeLLMWithNvidiaFallback(ctx, "cv_structuring", {
+    const { content, provider } = await executeLLMWithNvidiaFallback(ctx, "cv_structuring", {
       messages,
       temperature: 0,
-      max_tokens: 4096,
+      // A long work history runs past 4,000 tokens of JSON; cut off, it does not parse.
+      max_tokens: 8192,
       response_format: { type: "json_object" },
       cvUploadId,
       sourceChannel,
@@ -887,6 +888,10 @@ JSON Target Schema:
     if (!parsed) return null;
 
     if (Object.keys(parsed).length === 0 || (!parsed.fullName && !parsed.email && !parsed.phone && !parsed.skills && !parsed.jobHistory)) {
+      // Only the primary model's "not a CV" is trusted. The fallback is reached
+      // when the primary failed, and it answers an empty object for real CVs;
+      // treating that as a verdict deleted real applicants (17 September).
+      if (provider === "nvidia") return null;
       throw new Error("NOT_A_CV");
     }
 

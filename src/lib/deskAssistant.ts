@@ -241,7 +241,7 @@ export async function askDesk(
   user: User,
   question: string,
   history: AssistantTurn[] = [],
-  call: ModelCall = (s, p) => write(s, p, 600, "assist"),
+  call: ModelCall = (s, p) => write(s, p, 1200, "assist"),
 ): Promise<{ ok: true; answer: string; instant: boolean } | { ok: false; reason: string }> {
   const q = question.trim().slice(0, 600);
   if (!q) return { ok: false, reason: "empty" };

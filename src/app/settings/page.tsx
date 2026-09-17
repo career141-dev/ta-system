@@ -105,7 +105,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                               ? "Reading — last sync had a problem"
                               : m.synced
                                 ? `Reading · synced ${when(m.lastSyncAt)}`
-                                : `Importing the last 30 days · ${when(m.lastSyncAt)}`
+                                : "Starting · the first sync is under way"
                             : "Not read"}
                         </p>
                       </div>
@@ -174,7 +174,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 </div>
                 {status.recent.length === 0 ? (
                   <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
-                    Nothing yet. Start reading a mailbox above; its last 30 days are imported first.
+                    Nothing yet. Start reading a mailbox above; only mail that arrives after that is filed.
                   </p>
                 ) : (
                   <table className="w-full text-left text-[12.5px]">

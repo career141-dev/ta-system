@@ -206,6 +206,12 @@ async function openRouterRequest(
           // account switches on, requests still went to first-party endpoints).
           // Someone is watching a spinner on "assist": the fastest such provider.
           provider: { zdr: true, data_collection: "deny", ...(task === "assist" ? { sort: "latency" } : {}) },
+          // The Copilot's answers are short and read from the snapshot; they
+          // need no thinking. With a whole desk in the prompt, DeepSeek spent
+          // up to 540 of its 600 tokens reasoning and sometimes returned
+          // nothing — "The model returned something unusable" (17 September).
+          // Off, it answers in 3–5 seconds instead of 13–33.
+          ...(task === "assist" ? { reasoning: { enabled: false } } : {}),
         }),
       });
     } catch (e) {
