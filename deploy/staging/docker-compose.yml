@@ -138,6 +138,96 @@ services:
     networks: [ta-staging-net]
     logging: *logs
 
+  # ── the screening call: staging's own copy of the CV platform's voice stack ──
+  #
+  # Same three parts as ~/career141 (LiveKit, its Redis, the agent), on ports
+  # of staging's own so production's server keeps 7880/7881, 3478, 5349 and
+  # 50000-50200. Nothing here reaches production, and production reaches
+  # nothing here: a call made from staging is served by staging's own agent.
+  #
+  # Only the signalling port is published to the host, on loopback, and the
+  # browser reaches it over HTTPS through the host's Caddy
+  # (ta-system-voice.career141.com). The media ports have to be public, as
+  # they are for production, because audio flows to the browser directly.
+  voice-redis:
+    image: redis:7.4-alpine
+    container_name: ta-staging-voice-redis
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${STAGING_VOICE_REDIS_PASSWORD:?set in .env.staging}", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${STAGING_VOICE_REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    mem_limit: 256m
+    networks: [ta-staging-voice]
+    logging: *logs
+
+  livekit:
+    image: livekit/livekit-server:v1.13.4
+    container_name: ta-staging-livekit
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    depends_on:
+      voice-redis:
+        condition: service_healthy
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?set in .env.staging}: ${LIVEKIT_API_SECRET:?set in .env.staging}"
+      LIVEKIT_REDIS_PASSWORD: ${STAGING_VOICE_REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:7890:7880"
+      - "7891:7881"
+      - "3479:3478/udp"
+      - "5350:5349/tcp"
+      - "50300-50400:50300-50400/udp"
+    volumes:
+      - ./deploy/staging/livekit.yaml:/etc/livekit.yaml:ro
+    healthcheck:
+      disable: true
+    stop_grace_period: 6m
+    mem_limit: 512m
+    mem_reservation: 128m
+    networks: [ta-staging-net, ta-staging-voice]
+    logging: *logs
+
+  voice-agent:
+    build:
+      context: ./voice-agent
+    image: ghcr.io/career141-dev/ta-system-voice-agent:staging
+    container_name: ta-staging-voice-agent
+    restart: unless-stopped
+    init: true
+    depends_on:
+      livekit:
+        condition: service_started
+    environment:
+      NODE_OPTIONS: "--max-old-space-size=512"
+      NODE_ENV: production
+      # Inside the compose network, so the agent never leaves the machine to
+      # reach its own server.
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set in .env.staging}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AURA_AGENT_NAME: ${AURA_AGENT_NAME:-career141-aura}
+      AURA_HEALTH_PORT: "8082"
+    command: ["node", "dist/index.js", "start"]
+    ports:
+      - "127.0.0.1:18082:8082"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8082/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    stop_grace_period: 6m
+    mem_limit: 1g
+    mem_reservation: 256m
+    networks: [ta-staging-voice]
+    logging: *logs
+
 volumes:
   ta-staging-postgres-data:
     name: ta-staging-postgres-data
@@ -150,3 +240,7 @@ volumes:
 networks:
   ta-staging-net:
     name: ta-staging-net
+  # The call's own network: Redis and the agent are never reachable from the
+  # app's network, and nothing on it is published except LiveKit's own ports.
+  ta-staging-voice:
+    name: ta-staging-voice

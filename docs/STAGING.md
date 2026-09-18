@@ -14,6 +14,7 @@ touches. Code in `/opt/ta-staging-src` (this repository's branch), secrets in
 | Convex HTTP actions | https://ta-system-actions.career141.com | — |
 | Convex dashboard | https://ta-system-dashboard.career141.com | deployment URL above + admin key |
 | Qdrant | https://ta-system-qdrant.career141.com/dashboard | `QDRANT_API_KEY` |
+| Screening call server | https://ta-system-voice.career141.com/ready | — (call tokens are minted by the app) |
 
 The five names are Cloudflare DNS records (A, DNS only) pointing at the server.
 HTTPS comes from the host's Caddy — the same one that serves the live sites —
@@ -38,6 +39,9 @@ table's row count was checked against the export after the import.
 | Container | Purpose | Listens on |
 |---|---|---|
 | `ta-staging-app` | the TA System | `127.0.0.1:3110` |
+| `ta-staging-livekit` | the screening call's server | `127.0.0.1:7890`, media on `7891/tcp`, `3479/udp`, `5350/tcp`, `50300-50400/udp` |
+| `ta-staging-voice-agent` | Aura, which talks to the candidate | `127.0.0.1:18082` (health) |
+| `ta-staging-voice-redis` | LiveKit's own store | inside `ta-staging-voice` only |
 | `ta-staging-convex` | Convex backend, instance `ta-staging`, 5 GB memory cap | `127.0.0.1:3220`, `:3221` |
 | `ta-staging-postgres` | its own Postgres 16, database `ta_staging`, 1.5 GB cap | Docker network only |
 | `ta-staging-convex-dashboard` | Convex dashboard | `127.0.0.1:6792` |
@@ -95,6 +99,40 @@ docker stats --no-stream ta-staging-convex ta-staging-postgres ta-staging-app
 # re-import from a snapshot (split, then import; logs in /opt/ta-staging-import)
 cd /opt/ta-staging-import && python3 split.py && ./run-import.sh
 python3 count.py            # compares every table's row count with the snapshot
+```
+
+## The screening call (Voice agent)
+
+Staging runs its own copy of the CV platform's voice stack — LiveKit, its Redis
+and the Aura agent — on ports of its own, so production's server keeps 7880,
+7881, 3478, 5349 and 50000-50200 and a staging call is never served by
+production's agent.
+
+Settings in `.env.staging`:
+
+| Name | Value |
+|---|---|
+| `LIVEKIT_URL` | `http://livekit:7880` — the app reaches it inside the network |
+| `LIVEKIT_BROWSER_URL` | `wss://ta-system-voice.career141.com` — what the browser dials |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | the call server's own key pair |
+| `STAGING_VOICE_REDIS_PASSWORD` | LiveKit's Redis |
+| `DEEPGRAM_API_KEY` | the agent's speech-to-text and voice |
+| `OPENAI_API_KEY` | what the agent thinks with |
+
+One-off setup: add the site in `deploy/staging/caddy-voice.conf` to
+`/etc/caddy/Caddyfile` (`caddy validate` then `systemctl reload caddy`), and
+point `ta-system-voice.career141.com` at the server in DNS.
+
+```bash
+cd /opt/ta-staging-src
+# start (or rebuild) the call server and the agent
+docker compose --env-file .env.staging up -d --build livekit voice-agent voice-redis
+
+# is the server reachable through Caddy?
+curl -s https://ta-system-voice.career141.com/ready
+
+# did the agent register? ("registered worker ... career141-aura")
+docker logs ta-staging-voice-agent --tail 20
 ```
 
 ## Updating the code

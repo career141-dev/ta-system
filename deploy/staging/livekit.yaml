@@ -1,0 +1,24 @@
+# LiveKit for staging — the CV platform's infra/livekit.yaml, on ports of its
+# own so production's server (7880/7881, 3478, 5349, 50000-50200) is untouched.
+#
+# The keys and the Redis password come from the environment (compose), never
+# from this file.
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  # Production holds 50000-50200; staging takes a separate range.
+  port_range_start: 50300
+  port_range_end: 50400
+  use_external_ip: true
+
+redis:
+  address: voice-redis:6379
+
+turn:
+  enabled: false
+
+logging:
+  level: info
