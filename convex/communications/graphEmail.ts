@@ -132,8 +132,27 @@ export const replyToMessage = internalAction({
     replyHtml: v.optional(v.string()),
     /** Who wrote the message being replied to — a thread reply goes to them. */
     originalSender: v.optional(v.string()),
+    /**
+     * The row this reply was written into, so a refusal is visible.
+     *
+     * Both gates below used to return silently: on a locked deployment the
+     * assistant's answer simply never existed, while the candidate page said
+     * it had replied (18 September). The row is now marked failed with the
+     * reason, which is what the conversation shows.
+     */
+    communicationId: v.optional(v.id("communications")),
   },
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    const refuse = async (reason: string) => {
+      console.warn(`[Graph Email] ${reason}`);
+      if (args.communicationId) {
+        await ctx.runMutation(internal.communications.graphEmailMutations.updateEmailStatus, {
+          communicationId: args.communicationId,
+          status: "failed",
+          error: reason,
+        });
+      }
+    };
     // Two gates, both must allow it. A reply goes to whoever wrote the original,
     // which this cannot see without fetching it, so while the outbound lock is on
     // (a test deployment) replies are not sent at all. Otherwise the fail-closed
@@ -141,11 +160,12 @@ export const replyToMessage = internalAction({
     // caller that cannot say who it replies to is refused.
     if (outboundLocked()) {
       suppressed("email reply", `message ${args.messageId}`);
+      await refuse(`Not sent: the outbound lock is on, and a thread reply cannot be redirected to the test recipient.`);
       return;
     }
     const decision = mayReplyTo("email", args.originalSender);
     if (!decision.ok) {
-      console.warn(`[Graph Email] ${decision.reason}`);
+      await refuse(decision.reason);
       return;
     }
     const token = await getGraphToken();

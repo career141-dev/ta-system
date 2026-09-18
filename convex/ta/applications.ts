@@ -22,6 +22,7 @@ import { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
+import { followUpOn } from "../lib/followUpScope";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 
 const SET_SIZE = 5;
@@ -145,8 +146,11 @@ export const shortlist = internalMutation({
         // sweep takes over the reminders. The TA can still press Send to push
         // the next one early, and Stop to end it.
         //
-        // Every message still passes the outreach gate, so on staging it
-        // reaches only the test recipients (convex/lib/outreachSafety.ts).
+        // Unless the opening's follow-up switch is off, in which case nothing
+        // goes by itself — a switch that says off has to mean off. Every
+        // message still passes the outreach gate, so on staging it reaches
+        // only the test recipients (convex/lib/outreachSafety.ts).
+        skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
       });
     }
 

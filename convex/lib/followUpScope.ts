@@ -38,12 +38,18 @@ export function sweepCovers(job: FollowUpJob, taOnly: boolean): boolean {
 
 /**
  * The fields the TA System's switch writes. Both channels together, as the
- * desk asked for one switch; the first message stays a TA's to send.
+ * desk asked for one switch.
+ *
+ * Off must clear the channels too. Clearing only `agent3Enabled` left both
+ * `enableWhatsAppFollowUp` and `enableEmailFollowUp` true, and
+ * `followUpHelper` reads those as `!== false` — so an opening the TA had
+ * switched off still sent the Day 0 template and email the moment a candidate
+ * was shortlisted (18 September, once shortlisting began sending by itself).
  */
 export function autoFollowUpPatch(enabled: boolean) {
   return enabled
     ? { agent3Enabled: true, enableWhatsAppFollowUp: true, enableEmailFollowUp: true, followUpStartsOnSend: true }
-    : { agent3Enabled: false };
+    : { agent3Enabled: false, enableWhatsAppFollowUp: false, enableEmailFollowUp: false };
 }
 
 type Question = { id: string; label: string };

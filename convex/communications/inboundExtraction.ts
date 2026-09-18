@@ -416,6 +416,8 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
                 replyText: replyMessage,
                 replyHtml,
                 originalSender: args.senderEmail || updatedCandidate?.email || candidate?.email || undefined,
+                // So a refusal shows in the conversation rather than nowhere.
+                communicationId: commId,
               });
             } else {
               await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {

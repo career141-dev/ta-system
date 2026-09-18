@@ -20,7 +20,12 @@ const on = autoFollowUpPatch(true);
 eq("switching on sets both channels and the manual first send", on, {
   agent3Enabled: true, enableWhatsAppFollowUp: true, enableEmailFollowUp: true, followUpStartsOnSend: true,
 });
-eq("switching off only turns the sequence off", autoFollowUpPatch(false), { agent3Enabled: false });
+// Off has to clear the channels too. Leaving them true was harmless while a TA
+// had to press Send; once shortlisting began sending by itself, an opening the
+// TA had switched off still sent the Day 0 template and email (18 September).
+eq("switching off clears the channels as well", autoFollowUpPatch(false), {
+  agent3Enabled: false, enableWhatsAppFollowUp: false, enableEmailFollowUp: false,
+});
 eq("on reads as on", followUpOn(on), true);
 eq("off reads as off", followUpOn({ ...on, ...autoFollowUpPatch(false) }), false);
 eq("enabled with no channel is off", followUpOn({ agent3Enabled: true }), false);
