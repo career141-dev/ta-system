@@ -10,6 +10,7 @@ import { SignOut } from "./SignOut";
 import { HEADER_H } from "@/lib/chrome";
 import { SearchIcon } from "./icons";
 import { searchScopeFor } from "@/lib/searchScope";
+import { NotificationBell } from "./NotificationBell";
 
 const NAV = [
   { href: "/clients", label: "Clients" },
@@ -128,6 +129,8 @@ export function TopNav({
             className="w-[300px] rounded-full border border-rule bg-paper py-2 pl-9 pr-4 text-[13px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand-line focus:bg-surface"
           />
         </form>
+
+        <NotificationBell />
 
         <div className="relative">
           <button

@@ -1801,7 +1801,8 @@ export default defineSchema({
       v.literal("sla_breached"),
       v.literal("reverse_match_ready"),
       v.literal("candidate_replied"),
-      v.literal("candidate_unresponsive")
+      v.literal("candidate_unresponsive"),
+      v.literal("opening_assigned")
     ),
     title: v.string(),
     body: v.string(),

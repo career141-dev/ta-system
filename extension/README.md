@@ -19,11 +19,19 @@ Every capture records the URL it came from and who pressed the button.
 
 1. Chrome → `chrome://extensions` → turn on **Developer mode**.
 2. **Load unpacked** → choose this `extension` folder.
-3. Open the platform → any opening → **Headhunting → Excel Tables** → copy the
-   access token from the *Capture from LinkedIn* panel.
-4. Click the extension's icon → ⚙ → paste the platform address and token →
+3. Open the platform you want to file into (`http://localhost:3100` locally,
+   or `https://ta-system.career141.com` on staging) → any opening →
+   **Headhunting → Excel Tables** → copy the access token from the *Capture
+   from LinkedIn* panel. The token is per deployment — a local token will not
+   work against staging and the other way round.
+4. Click the extension's icon → ⚙ → paste that platform's address and token →
    **Connect**.
 5. Choose who you are and which opening you are working, and you are set.
+
+Pointing it at a platform address other than `localhost` or
+`ta-system.career141.com` needs that host added to `host_permissions` in
+`manifest.json` first — Chrome will not let the extension reach an address it
+was not granted, and there is no in-extension prompt for it.
 
 ## Using it
 
