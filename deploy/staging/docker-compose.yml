@@ -181,7 +181,8 @@ services:
       - "5350:5349/tcp"
       - "50300-50400:50300-50400/udp"
     volumes:
-      - ./deploy/staging/livekit.yaml:/etc/livekit.yaml:ro
+      # Paths here are relative to this file, not to the repository root.
+      - ./livekit.yaml:/etc/livekit.yaml:ro
     healthcheck:
       disable: true
     stop_grace_period: 6m
@@ -192,7 +193,7 @@ services:
 
   voice-agent:
     build:
-      context: ./voice-agent
+      context: ../../voice-agent
     image: ghcr.io/career141-dev/ta-system-voice-agent:staging
     container_name: ta-staging-voice-agent
     restart: unless-stopped
