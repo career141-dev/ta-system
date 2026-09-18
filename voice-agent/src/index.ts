@@ -121,11 +121,12 @@ export default defineAgent<UserData>({
       endpointing: 300,
       smartFormat: true,
       interimResults: true,
+      mipOptOut: true,
     });
     // A screening question is one or two sentences. Uncapped, the model wrote
     // paragraphs and the candidate waited through all of them.
     const llm = new openai.LLM({ apiKey: OPENAI_API_KEY, model: "gpt-4o-mini", temperature: 0.2, maxCompletionTokens: 120 });
-    const tts = new deepgram.TTS({ apiKey: DEEPGRAM_API_KEY, model: "aura-2-asteria-en", sampleRate: 24_000 });
+    const tts = new deepgram.TTS({ apiKey: DEEPGRAM_API_KEY, model: "aura-2-asteria-en", sampleRate: 24_000, mipOptOut: true });
 
     const session = new voice.AgentSession({
       vad,
