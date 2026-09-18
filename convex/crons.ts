@@ -953,9 +953,38 @@ function addMailIntake(registry: ReturnType<typeof cronJobs>) {
   registry.interval("ta-mail-intake-process", { minutes: 1 }, internal.mailIntake.process.processReady, {});
 }
 
+/**
+ * Keeping the CV pipeline unstuck, where the rest of the automation is off.
+ *
+ * A CV that fails extraction — a timeout, a rate limit, a bad page — sits in
+ * `processing` for ever unless something frees it. The CV platform runs these
+ * three the whole time; without them, the TA System's own arrivals quietly
+ * pile up (17 September: 141 CVs stuck behind one timeout). None of them
+ * contacts anybody: they read files, re-read a record and move a status.
+ *
+ * `C141_TA_MAINTENANCE=on` registers them where `C141_DISABLE_CRONS=true` has
+ * switched the CV platform's own jobs off. The healer takes one record per
+ * tick and never retries the same one twice, so a poison file cannot loop and
+ * the model spend stays bounded.
+ */
+const maintenanceOn = (process.env.C141_TA_MAINTENANCE ?? "").trim().toLowerCase() === "on";
+
+function addMaintenance(registry: ReturnType<typeof cronJobs>) {
+  if (!maintenanceOn) return;
+  registry.interval("ta-cv-queue", { minutes: 2 }, internal.cvs.cvExtraction.processUnextractedQueueCron, {});
+  registry.interval("ta-cv-stuck-uploads", { minutes: 29 }, internal.cvs.cvUploads.recoverStuckUploads, {});
+  registry.interval("ta-cv-healer", { minutes: 31 }, internal.cvs.healerActions.healNextUnparsedCandidate, {});
+  // Nothing outbound: it writes a notification for the recruiter on a stage
+  // that has overrun its SLA.
+  registry.daily("ta-sla-breaches", { hourUTC: 8, minuteUTC: 0 }, internal.crons.checkSlaBreaches, {});
+}
+
 addMailIntake(crons);
 const quiet = cronJobs();
 addMailIntake(quiet);
+// Only on the quiet registry: where every cron runs, the CV platform's own
+// queue, healer and SLA jobs above already cover this.
+addMaintenance(quiet);
 
 /**
  * The follow-up reminders for TA System openings only, where the rest is off.
