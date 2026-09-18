@@ -2,6 +2,7 @@
 
 import { randomUUID } from "node:crypto";
 import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-server-sdk";
+import { primeStore } from "@/data/prime";
 import { getCurrentUser } from "@/lib/session";
 
 /**
@@ -44,6 +45,9 @@ function livekitConfig() {
 }
 
 export async function startVoiceTest(input: VoiceTestInput): Promise<VoiceTestStart> {
+  // Who is asking is read from the desk roster, so the store has to be loaded
+  // in this request too — a server action does not inherit the page's.
+  await primeStore();
   const user = await getCurrentUser();
   const companyName = input.companyName.trim().slice(0, 140);
   const jobTitle = input.jobTitle.trim().slice(0, 160);
