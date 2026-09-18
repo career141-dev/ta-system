@@ -363,6 +363,103 @@ export const uploadsState = internalQuery({
   },
 });
 
+/**
+ * A candidate replying to a follow-up, rather than a new application.
+ *
+ * The follow-up email goes from the TA's mailbox and asks for a CV, salary and
+ * notice period; the answer comes back to job@ with none of those attached, and
+ * the intake closed it as "No CV attached" (17 September) — the reply the whole
+ * sequence is waiting for, thrown away. This finds the person by the address
+ * they wrote from, and the application their reply belongs to: the one the
+ * outbound message named in its `x-c141-candidatejobid` header where we have
+ * it, otherwise the one we last wrote to.
+ */
+export const replyingCandidate = internalQuery({
+  args: { fromAddress: v.string(), applicationHint: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const email = args.fromAddress.trim().toLowerCase();
+    if (!email) return null;
+    const candidate = await ctx.db.query("candidates").withIndex("by_email", (q) => q.eq("email", email)).first();
+    if (!candidate) return null;
+
+    const apps = await ctx.db
+      .query("applications")
+      .withIndex("by_candidateId", (q) => q.eq("candidateId", candidate._id))
+      .collect();
+    const live = apps.filter((a) => a.isActive !== false && a.currentStage !== "rejected" && a.currentStage !== "placed");
+    if (live.length === 0) return null;
+
+    const hinted = args.applicationHint ? live.find((a) => (a._id as string) === args.applicationHint) : undefined;
+    let chosen = hinted ?? null;
+    if (!chosen) {
+      // The application we last wrote to — a reply answers the message it follows.
+      let newest = 0;
+      for (const a of live) {
+        const out = await ctx.db
+          .query("communications")
+          .withIndex("by_applicationId", (q) => q.eq("applicationId", a._id))
+          .filter((q) => q.eq(q.field("direction"), "outbound"))
+          .collect();
+        for (const c of out) {
+          const at = typeof c.sentAt === "number" ? c.sentAt : Number(c.sentAt);
+          if (Number.isFinite(at) && at >= newest) {
+            newest = at;
+            chosen = a;
+          }
+        }
+      }
+    }
+    chosen ??= live[0];
+    return {
+      candidateId: candidate._id,
+      candidateName: candidate.fullName ?? null,
+      applicationId: chosen._id,
+      jobId: chosen.jobId,
+      stage: chosen.currentStage,
+    };
+  },
+});
+
+/** Record the reply on the conversation, so the panel and the sweep both see it. */
+export const recordInboundEmail = internalMutation({
+  args: {
+    applicationId: v.id("applications"),
+    candidateId: v.id("candidates"),
+    body: v.string(),
+    subject: v.optional(v.string()),
+    fromAddress: v.string(),
+    messageId: v.optional(v.string()),
+    receivedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    // The intake can hand the same message over twice after a retry.
+    const already = await ctx.db
+      .query("communications")
+      .withIndex("by_applicationId", (q) => q.eq("applicationId", args.applicationId))
+      .filter((q) => q.eq(q.field("direction"), "inbound"))
+      .collect();
+    if (already.some((c) => Number(c.sentAt) === args.receivedAt)) return { recorded: false };
+
+    const app = await ctx.db.get(args.applicationId);
+    await ctx.db.insert("communications", {
+      applicationId: args.applicationId,
+      candidateId: args.candidateId,
+      jobId: app?.jobId,
+      channel: "email" as const,
+      direction: "inbound" as const,
+      subject: args.subject,
+      body: args.body.slice(0, 20_000),
+      deliveryStatus: "delivered" as const,
+      senderType: "candidate" as const,
+      senderName: args.fromAddress,
+      sentAt: args.receivedAt,
+      stoppedSequence: false,
+    });
+    await ctx.db.patch(args.applicationId, { lastCandidateReplyAt: args.receivedAt });
+    return { recorded: true };
+  },
+});
+
 export const candidateByLinkedin = internalQuery({
   args: { url: v.string() },
   handler: async (ctx, args) => {

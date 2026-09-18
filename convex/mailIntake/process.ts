@@ -55,6 +55,19 @@ async function sha256Hex(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/**
+ * The opening a reply belongs to, from the marker the outbound email carried.
+ *
+ * `convex/lib/graphMail.ts` stamps `x-c141-candidatejobid` on everything it
+ * sends; a reply quotes the message it answers, so the id often comes back in
+ * the body. Without it a reply is filed against the application we last wrote
+ * to, which is wrong when a candidate is on two openings at once.
+ */
+function applicationIdFrom(subject: string, body: string): string | null {
+  const m = `${subject}\n${body}`.match(/x-c141-candidatejobid:\s*([a-z0-9]{20,})/i);
+  return m ? m[1] : null;
+}
+
 /** Every opening a routed message goes to: the primary, then any other opening the advert serves. */
 function destinations(route: PostPick | null): { jobId: Id<"jobs">; postId: Id<"jobPosts"> }[] {
   if (!route) return [];
@@ -144,9 +157,42 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
       });
       return;
     }
-    // job@ is mostly candidates replying to us; without a CV it is not an application.
+    // job@ is mostly candidates replying to us. A reply carries no CV, and
+    // closing it as "no CV" threw away the very answer the follow-up was
+    // waiting for (17 September). If the sender is someone we are chasing, the
+    // reply is recorded on their conversation and read for salary, notice
+    // period and the rest — the same reading the CV platform does.
     if (!parsed.isLinkedIn) {
-      await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "no_cv", note: "No CV attached." });
+      const reply = await ctx.runQuery(internal.mailIntake.model.replyingCandidate, {
+        fromAddress,
+        applicationHint: applicationIdFrom(subject, parsed.text) ?? undefined,
+      });
+      if (reply) {
+        await ctx.runMutation(internal.mailIntake.model.recordInboundEmail, {
+          applicationId: reply.applicationId,
+          candidateId: reply.candidateId,
+          body: parsed.text || subject,
+          subject,
+          fromAddress,
+          receivedAt: m.receivedAt,
+        });
+        await ctx.runAction(internal.communications.inboundExtraction.extractDetailsFromText, {
+          candidateId: reply.candidateId,
+          textBody: parsed.text || subject,
+          channel: "email",
+          inboxEmail: m.mailbox,
+          senderEmail: fromAddress,
+        });
+        await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+          id: m._id,
+          outcome: "filed",
+          note: `A reply from ${reply.candidateName ?? fromAddress}, read into their record.`,
+          openingIds: [reply.jobId],
+          candidateIds: [reply.candidateId],
+        });
+        return;
+      }
+      await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "no_cv", note: "No CV attached, and not a reply from anyone we are chasing." });
       return;
     }
     // A LinkedIn applicant with no résumé attached: they named themselves, the
