@@ -24,6 +24,8 @@ export const sendGraphEmail = internalAction({
     toAddress: v.string(),      // recipient email
     subject: v.string(),
     bodyHtml: v.string(),
+    /** An answer to something the candidate sent, not a chase (see followUpCancelledReason). */
+    isReplyToCandidate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     // Not sent if the sequence was stopped or the candidate left Follow-up —
@@ -32,7 +34,7 @@ export const sendGraphEmail = internalAction({
     const appRecord = commRecord?.applicationId
       ? await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: commRecord.applicationId })
       : null;
-    const cancelled = followUpCancelledReason(commRecord, appRecord);
+    const cancelled = followUpCancelledReason(commRecord, appRecord, args.isReplyToCandidate === true);
     if (cancelled) {
       console.log(`[Graph Email] ${cancelled} (communication ${args.communicationId})`);
       if (commRecord?.deliveryStatus !== "failed") {

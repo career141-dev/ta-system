@@ -425,6 +425,10 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
                 toAddress: updatedCandidate?.email || candidate?.email || "",
                 subject: `Re: Application for ${job.title}`,
                 bodyHtml: replyHtml,
+                // Answering the candidate. Completing the checklist advances
+                // them out of Follow-up in the same run, and the stage guard
+                // then cancelled this very message.
+                isReplyToCandidate: true,
               });
             }
             console.log(`[Inbound Extraction] Dispatched immediate post-update EMAIL response to candidate ${args.candidateId}`);

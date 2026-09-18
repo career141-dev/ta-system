@@ -170,8 +170,21 @@ export async function sendFollowUpMail(
 export function followUpCancelledReason(
   comm: { stoppedSequence?: boolean; deliveryStatus?: string } | null,
   app: { currentStage?: string } | null,
+  /**
+   * The message answers the candidate rather than chasing them.
+   *
+   * The point of this guard is that a chase must not reach somebody who has
+   * moved on. An answer is the opposite: the assistant collects the last
+   * detail, the candidate is advanced to Second Shortlist in the same breath,
+   * and the "thank you, your profile is complete" note was then cancelled for
+   * being sent to a candidate no longer in Follow-up (18 September). The
+   * candidate heard nothing back at exactly the moment they had done what was
+   * asked.
+   */
+  isReplyToCandidate = false,
 ): string | null {
   if (comm?.stoppedSequence || comm?.deliveryStatus === "failed") return "Follow-up was stopped before this message went.";
+  if (isReplyToCandidate) return null;
   const stage = app?.currentStage;
   if (stage && stage !== "follow_up" && stage !== "ta_shortlist" && stage !== "matched_candidates") {
     return `Cancelled: the candidate is no longer in Follow-up (${stage}).`;

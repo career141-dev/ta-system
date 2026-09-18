@@ -147,6 +147,10 @@ async function main() {
   eq("no application → send", followUpCancelledReason({ deliveryStatus: "pending" }, null), null);
   eq("stopped → not sent", followUpCancelledReason({ stoppedSequence: true }, { currentStage: "follow_up" }) !== null, true);
   eq("moved on → not sent", followUpCancelledReason({}, { currentStage: "second_shortlist" }), "Cancelled: the candidate is no longer in Follow-up (second_shortlist).");
+  // Completing the checklist advances the candidate in the same run, so the
+  // assistant's own "we have everything" note must not be cancelled by it.
+  eq("an answer to the candidate still goes after they advance", followUpCancelledReason({}, { currentStage: "second_shortlist" }, true), null);
+  eq("a stopped sequence still wins over that", followUpCancelledReason({ stoppedSequence: true }, { currentStage: "second_shortlist" }, true) !== null, true);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   if (fail) process.exit(1);
