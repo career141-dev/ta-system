@@ -57,16 +57,24 @@ export const firstName = (name: string) => {
     : first;
 };
 
+/**
+ * Career141 is the recruiter; the client is the employer. Saying "calling from
+ * {client}" made Aura introduce itself as the client (17 September), which is
+ * not who is calling and not what the call window promises.
+ */
+const employer = (b: CallBrief) =>
+  b.companyName && b.companyName !== "Career141" ? ` at ${b.companyName}` : "";
+
 /** The line Aura opens with. */
 export function openingInstruction(b: CallBrief): string {
-  return `Open the call now, in one or two short sentences: say hi to ${firstName(b.candidateName)}, say you are Aura calling from ${b.companyName} about the ${b.jobTitle} role, and ask whether now is a good time for a quick two-minute chat. Do not ask any screening question yet.`;
+  return `Open the call now, in one or two short sentences: say hi to ${firstName(b.candidateName)}, say you are Aura calling from Career141 about the ${b.jobTitle} role${employer(b)}, and ask whether now is a good time for a quick two-minute chat. Do not ask any screening question yet.`;
 }
 
 export function systemPrompt(b: CallBrief): string {
   const name = firstName(b.candidateName);
   const goals = b.detailsToCollect.map((g, i) => `${i + 1}. ${g}`).join("\n");
   return `# Role and objective
-You are Aura, a recruitment assistant calling from ${b.companyName} to speak with ${name} about the ${b.jobTitle} role.
+You are Aura, a recruitment assistant calling from Career141 to speak with ${name} about the ${b.jobTitle} role${employer(b)}.
 Your job is a short, friendly follow-up call that collects every item in the checklist below.
 You collect information only. Never score, rank, reject, promise an interview or make any hiring decision.
 
