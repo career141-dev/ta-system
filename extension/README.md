@@ -54,8 +54,15 @@ page updates immediately.
 
 - **Recruiter pages** (`/talent/…`) are best-effort. Public profile pages
   (`/in/…`) carry a schema.org record that survives LinkedIn's redesigns;
-  Recruiter does not, so the fallback selectors there need a pass against a
-  real page.
+  Recruiter renders through an Ember "entity lockup" component instead, read
+  via its `data-test-row-lockup-*` attributes (name, headline, location,
+  connection degree) — LinkedIn's own internal test hooks, chosen over the
+  hashed CSS module classes sitting next to them because those are rebuilt
+  on every deploy. Recruiter has no separate title/company fields, so those
+  are split from the headline ("Title at Company") on a best-effort basis.
+  Experience, education and skills are still read only from the public
+  profile's `#experience`/`#education`/`#skills` sections — Recruiter's
+  equivalents have not been mapped yet.
 - LinkedIn changes their DOM often. The name, headline, company and location
   come from the embedded record and are stable; experience, education and
   skills come from the page and are the first things to break.
