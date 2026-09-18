@@ -7,6 +7,7 @@ import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
+import { ASSIGNMENT_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
@@ -521,6 +522,21 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
 
   revalidatePath("/openings", "layout");
 
+  const notifyTaIds = assigned.filter((id) => id !== user.id);
+  if (notifyTaIds.length) {
+    await Promise.all(
+      notifyTaIds.map((taId) =>
+        convexMutation("ta/notifications:create", {
+          userId: taId,
+          type: "opening_assigned",
+          title: "You were assigned to an opening",
+          body: `${user.name} assigned you to ${title}.`,
+          jobId: openingId,
+        }).catch((e) => console.error("[notifications] opening_assigned failed:", e)),
+      ),
+    );
+  }
+
   // The groundwork starts the moment the job exists, not when somebody finds
   // the button (13 September): the JD draft for the TA to approve, the market
   // research, and the first sourcing round, so there are people waiting when
@@ -1025,8 +1041,30 @@ export async function setOpeningTeam(formData: FormData) {
     );
   }
 
+  // Whoever is newly on the recruiting seats — not the reviewers alongside
+  // them — gets a bell notification. Captured before the write, since after
+  // it the old team is gone.
+  const previousTeam = new Set(repo.assignments(openingId).map((a) => a.userId));
+  const newlyAssigned = recruiters.filter((r) => r.userId !== user.id && !previousTeam.has(r.userId));
+
   repo.setAssignments(openingId, unique, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+
+  if (newlyAssigned.length) {
+    const opening = repo.opening(openingId);
+    const title = opening?.title ?? "an opening";
+    await Promise.all(
+      newlyAssigned.map((r) =>
+        convexMutation("ta/notifications:create", {
+          userId: r.userId,
+          type: "opening_assigned",
+          title: "You were assigned to an opening",
+          body: `${user.name} added you to ${title} as ${ASSIGNMENT_LABEL[r.role]}.`,
+          jobId: openingId,
+        }).catch((e) => console.error("[notifications] opening_assigned failed:", e)),
+      ),
+    );
+  }
 }
 
 export async function addClient(formData: FormData) {
@@ -1413,7 +1451,14 @@ export async function saveReport(formData: FormData) {
  * allowed to return the answer itself.
  */
 export async function askReport(formData: FormData) {
-  await primeStore({ allApplications: true });
+  // Only the small tables (users) are needed to say who is asking — not the
+  // whole desk's applications, which this step never reads. It used to prime
+  // those anyway and wait for the full, multi-thousand-row load before even
+  // starting the model, on every question — including one the model goes on
+  // to refuse. The page this redirects to primes the applications itself,
+  // because that is where they are actually read; asking for them again here
+  // first only delayed the model call for no reason (17 September).
+  await primeStore();
   await authorize(formData, "report.read");
   const question = String(formData.get("question") ?? "").trim();
   if (!question) return;

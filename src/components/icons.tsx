@@ -31,6 +31,15 @@ export function CloseIcon({ size = 15 }: { size?: number }) {
   );
 }
 
+export function BellIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4 6.2a4 4 0 0 1 8 0c0 3.1 1 4 1 4H3s1-.9 1-4Z" strokeWidth="1.4" {...base} />
+      <path d="M6.6 12.2a1.5 1.5 0 0 0 2.8 0" strokeWidth="1.4" {...base} />
+    </svg>
+  );
+}
+
 export function ChevronIcon({
   size = 14,
   dir = "down",
