@@ -16,3 +16,10 @@ R2_SECRET_ACCESS_KEY
 R2_ENDPOINT
 R2_BUCKET_NAME
 !OUTREACH_LIVE
+# Outreach: without these a deploy succeeds and every follow-up fails silently
+# at send time (convex/communications/metaTemplateSender.ts, lib/graphMail.ts).
+META_ACCESS_TOKEN
+META_PHONE_NUMBER_ID
+MS_GRAPH_CLIENT_ID|MS_CLIENT_ID
+MS_GRAPH_CLIENT_SECRET|MS_CLIENT_SECRET
+MS_GRAPH_TENANT_ID|MS_TENANT_ID
