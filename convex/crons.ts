@@ -4,6 +4,7 @@ import { internal, api } from "./_generated/api";
 import { adjustJobStageStat } from "./jobs/stats";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { awaitingFirstSend, sweepCovers } from "./lib/followUpScope";
 import { assignedTaEmail } from "./pipeline/followUpHelper";
 
@@ -97,6 +98,13 @@ export const evaluateFollowUpStage = internalMutation({
       // 1. Skip if application is flagged for TA review (automated nudging paused)
       if (app.flaggedForTaReview === true) {
         console.log(`[Follow-Up Cron] Application ${app._id} is flagged for TA review (${app.taReviewReason}). Skipping automated nudge.`);
+        continue;
+      }
+
+      // 1b. The candidate answered: the chase is paused until a TA reads the
+      // reply and resumes it (ta/followUp:resume). Chasing somebody who has
+      // already replied is the fastest way to lose them.
+      if (app.followUpState?.pausedByReplyAt) {
         continue;
       }
 
@@ -249,6 +257,60 @@ export const evaluateFollowUpStage = internalMutation({
         });
         await adjustJobStageStat(ctx, app.jobId, app.currentStage, "unresponsive");
         await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+        continue;
+      }
+
+      /*
+       * 1c. An answer stops the chase.
+       *
+       * Both flows below used to nudge regardless: the reply was noted, the
+       * channel recorded, and the reminders carried on every 24 hours until the
+       * details happened to be complete ("Do NOT halt sequence forever", the
+       * old comment further down). The desk asked for the opposite (18
+       * September) — a candidate who writes back is waiting on a person, not on
+       * another reminder. The pause is lifted by a TA (`ta/followUp:resume`) or
+       * by the details completing, which advances the stage anyway.
+       *
+       * `src/lib/sla.ts` turns this into a `reply_waiting` alert so it is not a
+       * silent stop.
+       */
+      const repliedSinceEntering = (
+        await ctx.db
+          .query("communications")
+          .withIndex("by_applicationId", (q: any) => q.eq("applicationId", app._id))
+          .filter((q: any) => q.eq(q.field("direction"), "inbound"))
+          .collect()
+      ).some((c: any) => {
+        const at = typeof c.sentAt === "number" ? c.sentAt : Number(c.sentAt);
+        return Number.isFinite(at) && at >= enteredAt;
+      });
+
+      if (repliedSinceEntering) {
+        await ctx.db.patch(app._id, {
+          nextFollowUpScheduledAt: undefined,
+          nextFollowUpMessage: undefined,
+          followUpState: {
+            lastContactDay: app.followUpState?.lastContactDay ?? 0,
+            firstChannelUsed: app.followUpState?.firstChannelUsed,
+            replyChannel: app.followUpState?.replyChannel,
+            pausedByReplyAt: Date.now(),
+          },
+        });
+        // Tell somebody. A silent stop would read as "the chase just died".
+        const tellTa = (app.ownerTaId ?? job.primaryRecruiterId) as Id<"users"> | undefined;
+        if (tellTa) {
+          await ctx.db.insert("notifications", {
+            userId: tellTa,
+            type: "candidate_replied" as const,
+            title: `${candidate.fullName ?? "A candidate"} replied`,
+            body: `They answered about ${job.title ?? "an opening"}, so the reminders have stopped. Read the reply and take what you need, or resume the follow-up.`,
+            candidateId: app.candidateId,
+            jobId: app.jobId,
+            read: false,
+            createdAt: new Date().toISOString(),
+          });
+        }
+        console.log(`[Follow-up] ${app._id} paused: the candidate replied, so a TA reads it next.`);
         continue;
       }
 
@@ -491,7 +553,8 @@ export const evaluateFollowUpStage = internalMutation({
             }
           });
         }
-        // Do NOT halt sequence forever, just let the scheduling below handle the next nudge if fields are still missing.
+
+        // The pause itself is handled once for both flows, above (1c).
       }
 
       // Day-tier outreach scheduling

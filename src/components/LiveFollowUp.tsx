@@ -1,6 +1,6 @@
 import { convexQuery } from "@/lib/convexServer";
 import { timeAt } from "@/lib/format";
-import { stopFollowUpNow } from "@/app/actions";
+import { resumeFollowUpNow, stopFollowUpNow } from "@/app/actions";
 import { FollowUpActions } from "./FollowUpActions";
 
 /**
@@ -19,6 +19,8 @@ interface State {
   nextScheduledAt: number | null;
   maxAttempts: number | null;
   lastCandidateReplyAt: number | null;
+  /** The reminders stopped because they answered; a TA resumes or takes over. */
+  pausedByReplyAt: number | null;
   flaggedForTaReview: boolean;
   taReviewReason: string | null;
   collected: { cv: boolean | null; currentSalary: boolean | null; expectedSalary: boolean | null; noticePeriod: boolean | null };
@@ -130,6 +132,13 @@ export async function LiveFollowUp({
           <p className="mt-3 text-[12px] text-warn">Needs you: {state.taReviewReason ?? "flagged for review"}</p>
         )}
 
+        {state.pausedByReplyAt && (
+          <p className="mt-3 rounded-lg bg-warn-soft px-3 py-2 text-[12px] leading-relaxed text-warn">
+            They replied {timeAt(state.pausedByReplyAt)}, so the reminders stopped. Read the conversation below — then
+            either take what you need, or resume the chase.
+          </p>
+        )}
+
         {!locked && (
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {missing === 0 ? (
@@ -150,6 +159,15 @@ export async function LiveFollowUp({
                   hasEmail={hasEmail}
                 />
               </>
+            )}
+            {state.pausedByReplyAt && missing > 0 && (
+              <form action={resumeFollowUpNow}>
+                <input type="hidden" name="appId" value={applicationId} />
+                <input type="hidden" name="openingId" value={openingId} />
+                <button className="rounded-full border border-rule px-3 py-1 text-[12.5px] text-ink-soft hover:text-ink">
+                  Resume follow-up
+                </button>
+              </form>
             )}
             {sent > 0 && missing > 0 && (
               <form action={stopFollowUpNow}>

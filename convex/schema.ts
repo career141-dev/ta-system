@@ -928,7 +928,9 @@ export default defineSchema({
     followUpState: v.optional(v.object({
       lastContactDay: v.number(),
       firstChannelUsed: v.optional(v.string()),
-      replyChannel: v.optional(v.string())
+      replyChannel: v.optional(v.string()),
+      /** The candidate answered, so the chase stopped and a TA was told (crons.ts). */
+      pausedByReplyAt: v.optional(v.number()),
     })),
     followUpAttemptCount: v.optional(v.number()),
     /** The TA System's last manual follow-up round: when, and on which channels (lib/followUpScope.ts). */
