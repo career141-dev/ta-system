@@ -185,7 +185,10 @@ export const sendMetaTemplate = internalAction({
     }
 
     // 4. Send request to Meta Cloud API with fallback for language locale (en_US / en)
-    const languagesToTry = ["en_US", "en"];
+    // `en` first: both approved templates on this account are in `en`, and
+    // asking for `en_US` costs a failed call and a 132001 in the log before the
+    // fallback succeeds (checked against Meta, 18 September).
+    const languagesToTry = ["en", "en_US"];
     let sentSuccess = false;
     let errorMessage = "";
 
