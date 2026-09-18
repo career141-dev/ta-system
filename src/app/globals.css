@@ -97,3 +97,20 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .c141-scene, .c141-scene-float, .c141-scene-line, .c141-scene-pop { animation: none; }
 }
+
+/* The score ring on a search result (components/FitBadge.tsx FitChip): it pops
+   in and fills to the score. At rest it shows the score, with or without motion. */
+@keyframes c141-score-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  70% { opacity: 1; transform: scale(1.08); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes c141-score-fill {
+  from { stroke-dashoffset: var(--c141-len); }
+  to { stroke-dashoffset: var(--c141-to); }
+}
+.c141-score-pop { animation: c141-score-pop 0.45s ease-out both; }
+.c141-score-ring { animation: c141-score-fill 0.9s 0.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .c141-score-pop, .c141-score-ring { animation: none; }
+}

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
-import { Room, RoomEvent, Track, type RemoteParticipant, type RemoteTrack } from "livekit-client";
+import { Room, RoomEvent, Track, type Participant, type RemoteParticipant, type RemoteTrack, type TranscriptionSegment } from "livekit-client";
 import { completeWebCall, startWebCall, type CallLine } from "@/app/voiceActions";
 
 /**
@@ -139,6 +139,20 @@ function AuraCallDialog({
       } catch {
         /* not a transcript line */
       }
+    });
+    // The CV platform's agent sends no lines on TOPIC; LiveKit's own
+    // transcription carries both sides instead. Used only until a TOPIC line
+    // arrives, so the TA System's worker is not heard twice.
+    const segments = new Map<string, CallLine>();
+    lk.on(RoomEvent.TranscriptionReceived, (parts: TranscriptionSegment[], who?: Participant) => {
+      if (heard.current.length > segments.size) return;
+      const mine = !who || who.identity === lk.localParticipant.identity;
+      for (const s of parts) {
+        if (!s.final || !s.text.trim()) continue;
+        segments.set(s.id, { who: mine ? "candidate" : "agent", text: s.text });
+      }
+      heard.current = [...segments.values()];
+      setLines(heard.current.slice(-60));
     });
     lk.on(RoomEvent.Disconnected, () => void finish("Call ended"));
 

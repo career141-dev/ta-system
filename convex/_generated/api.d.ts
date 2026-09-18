@@ -119,6 +119,7 @@ import type * as lib_voiceAgentWebhook from "../lib/voiceAgentWebhook.js";
 import type * as lib_webhookSecurity from "../lib/webhookSecurity.js";
 import type * as mailIntake_model from "../mailIntake/model.js";
 import type * as mailIntake_process from "../mailIntake/process.js";
+import type * as mailIntake_repair from "../mailIntake/repair.js";
 import type * as mailIntake_sync from "../mailIntake/sync.js";
 import type * as matching_agent2 from "../matching/agent2.js";
 import type * as matching_queries from "../matching/queries.js";
@@ -291,6 +292,7 @@ declare const fullApi: ApiFromModules<{
   "lib/webhookSecurity": typeof lib_webhookSecurity;
   "mailIntake/model": typeof mailIntake_model;
   "mailIntake/process": typeof mailIntake_process;
+  "mailIntake/repair": typeof mailIntake_repair;
   "mailIntake/sync": typeof mailIntake_sync;
   "matching/agent2": typeof matching_agent2;
   "matching/queries": typeof matching_queries;

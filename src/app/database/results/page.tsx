@@ -12,6 +12,7 @@ import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
 import { DbCandidateDrawer } from "@/components/db/DbCandidateDrawer";
 import { DATABASE_STEPS, LoadingProgress } from "@/components/LoadingScenes";
+import { booleanScore, booleanTerms } from "@/lib/booleanScore";
 import { saveSearch } from "@/app/actions";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
@@ -375,6 +376,13 @@ async function ResultsView({
     for (const r of shown) {
       const hit = engineHits.get(r.candidate.id);
       if (hit) fit.set(r.candidate.id, scoreFromEngine(hit));
+    }
+  } else if (mode === "boolean") {
+    // No opening and no engine: score how well each CV carries the terms asked for.
+    const terms = booleanTerms(q);
+    for (const r of shown) {
+      const s = booleanScore(terms, r.candidate);
+      if (s) fit.set(r.candidate.id, s);
     }
   }
 
