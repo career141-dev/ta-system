@@ -109,16 +109,54 @@
     return document.querySelector("main section") || document.querySelector("main");
   }
 
+  /**
+   * Recruiter (`/talent/…`) renders candidates through an Ember "entity
+   * lockup" component instead of the public profile's schema.org record —
+   * jsonLdPerson() and the `main h1`/`.text-body-*` fallbacks below find
+   * nothing there. These `data-test-*` attributes are LinkedIn's own
+   * internal test hooks; unlike the hashed CSS module classes sitting right
+   * next to them in the DOM, LinkedIn has kept these stable across
+   * redesigns, so they are read in preference to a class name.
+   */
+  function recruiterField(selector) {
+    return txt(document.querySelector(selector));
+  }
+
+  function recruiterLockup() {
+    const nameEl = document.querySelector(
+      '[data-test-row-lockup-full-name] a[data-test-lockup-name-button], a[data-test-lockup-name-button]',
+    );
+    if (!nameEl) return null;
+    const degreeText = recruiterField("[data-test-lockup-degree] .artdeco-entity-lockup__degree");
+    const degreeMatch = degreeText && degreeText.match(/\b(1st|2nd|3rd)\b/);
+    return {
+      fullName: txt(nameEl),
+      headline: recruiterField("[data-test-row-lockup-headline]"),
+      location: recruiterField("[data-test-row-lockup-location]"),
+      connectionDegree: degreeMatch ? degreeMatch[1] : null,
+    };
+  }
+
+  /** Recruiter's headline is one string, "Title at Company" — the public
+   *  profile gives title and company as separate fields, so this is only
+   *  needed as a fallback when those are missing. */
+  function splitHeadline(headline) {
+    const m = headline && headline.match(/^(.*?)\s+at\s+(.+)$/i);
+    return m ? { title: clean(m[1]), company: clean(m[2]) } : { title: clean(headline), company: null };
+  }
+
   function extractProfile() {
     const ld = jsonLdPerson();
+    const recruiter = recruiterLockup();
     const card = topCard();
     const cardText = card ? card.innerText || "" : "";
 
     const fullName =
-      (ld && clean(ld.name)) || txt(document.querySelector("main h1")) || null;
+      (ld && clean(ld.name)) || recruiter?.fullName || txt(document.querySelector("main h1")) || null;
 
     const headline =
       (ld && clean(ld.description)) ||
+      recruiter?.headline ||
       txt(document.querySelector("main .text-body-medium")) ||
       null;
 
@@ -129,6 +167,7 @@
             .filter(Boolean)
             .join(", "),
         )) ||
+      recruiter?.location ||
       txt(document.querySelector("main .text-body-small.inline")) ||
       null;
 
@@ -136,6 +175,8 @@
 
     const worksFor = ld?.worksFor?.[0]?.name ? clean(ld.worksFor[0].name) : null;
     const jobTitle = Array.isArray(ld?.jobTitle) ? clean(ld.jobTitle[0]) : clean(ld?.jobTitle);
+    const recruiterTitleCompany =
+      !worksFor && !jobTitle && recruiter?.headline ? splitHeadline(recruiter.headline) : null;
 
     const about =
       txt(sectionFor("about")?.querySelector('span[aria-hidden="true"]')) || null;
@@ -146,11 +187,11 @@
     return {
       fullName,
       headline,
-      currentTitle: jobTitle || experience[0]?.title || null,
-      currentCompany: worksFor || experience[0]?.company || null,
+      currentTitle: jobTitle || recruiterTitleCompany?.title || experience[0]?.title || null,
+      currentCompany: worksFor || recruiterTitleCompany?.company || experience[0]?.company || null,
       location,
       about,
-      connectionDegree: degreeMatch ? degreeMatch[1] : null,
+      connectionDegree: (degreeMatch ? degreeMatch[1] : null) || recruiter?.connectionDegree || null,
       openToWork: /#?open\s*to\s*work/i.test(cardText),
       experience,
       education: readEducation(),
