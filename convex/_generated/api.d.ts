@@ -158,6 +158,7 @@ import type * as ta_intakeRouting from "../ta/intakeRouting.js";
 import type * as ta_matching from "../ta/matching.js";
 import type * as ta_model_projections from "../ta/model/projections.js";
 import type * as ta_model_tables from "../ta/model/tables.js";
+import type * as ta_notifications from "../ta/notifications.js";
 import type * as ta_openingDelete from "../ta/openingDelete.js";
 import type * as ta_openings from "../ta/openings.js";
 import type * as ta_outreach from "../ta/outreach.js";
@@ -331,6 +332,7 @@ declare const fullApi: ApiFromModules<{
   "ta/matching": typeof ta_matching;
   "ta/model/projections": typeof ta_model_projections;
   "ta/model/tables": typeof ta_model_tables;
+  "ta/notifications": typeof ta_notifications;
   "ta/openingDelete": typeof ta_openingDelete;
   "ta/openings": typeof ta_openings;
   "ta/outreach": typeof ta_outreach;

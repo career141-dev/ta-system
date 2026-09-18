@@ -139,8 +139,14 @@ export const shortlist = internalMutation({
         // state machine's own check would look for a Clerk identity and find
         // none — see convex/ta/guard.ts.
         bypassRoleCheck: true,
-        // Nothing is sent by moving a card; the TA presses Send (ta/followUp).
-        skipAutoOutreach: true,
+        // Shortlisting starts the outreach by itself, as the CV platform does
+        // (18 September, the owner's decision): the approved WhatsApp template
+        // and the email go the moment a candidate reaches Follow-up, and the
+        // sweep takes over the reminders. The TA can still press Send to push
+        // the next one early, and Stop to end it.
+        //
+        // Every message still passes the outreach gate, so on staging it
+        // reaches only the test recipients (convex/lib/outreachSafety.ts).
       });
     }
 
@@ -204,7 +210,8 @@ export const moveStage = internalMutation({
       actorId: user._id,
       reason: args.reason,
       bypassRoleCheck: true,
-      skipAutoOutreach: true,
+      // Moving a card by hand into Follow-up starts the outreach too, so a
+      // candidate reaches the sequence the same way however they got there.
     });
     return { ...result, stage: toTaStage(target) };
   },

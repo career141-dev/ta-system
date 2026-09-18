@@ -269,24 +269,6 @@ export async function stopFollowUpNow(formData: FormData) {
 }
 
 /**
- * Chase them again after a reply paused it. The next reminder is a day away,
- * so this never fires a message at the candidate the moment it is pressed.
- */
-export async function resumeFollowUpNow(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
-  const appId = String(formData.get("appId"));
-  const openingId = String(formData.get("openingId"));
-  try {
-    await convexMutation("ta/followUp:resume", { actorId: user.id, applicationId: appId });
-  } catch (e) {
-    await back(backendMessage(e, "Could not resume the follow-up."));
-  }
-  await afterBackendWrite(openingId);
-  await back("Follow-up resumed. The next reminder goes in 24 hours.");
-}
-
-/**
  * Confirm the pre-shortlisted high scorers, several at once. Each one is
  * checked on its own — a candidate another TA claimed a moment ago is skipped,
  * not taken.

@@ -94,8 +94,6 @@ export const followUpState = internalQuery({
       nextScheduledAt: app.nextFollowUpScheduledAt ?? null,
       enteredAt: app.followUpEnteredAt ?? null,
       lastCandidateReplyAt: app.lastCandidateReplyAt ?? null,
-      /** Set when a reply stopped the chase; the panel offers Resume (crons.ts). */
-      pausedByReplyAt: app.followUpState?.pausedByReplyAt ?? null,
       waitingForEta: app.waitingForCandidateEta ?? false,
       etaMs: app.candidateEtaMs ?? null,
       flaggedForTaReview: app.flaggedForTaReview ?? false,

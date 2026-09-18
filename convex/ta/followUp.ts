@@ -153,37 +153,6 @@ export const setAuto = internalMutation({
   },
 });
 
-/**
- * Start the reminders again after a reply paused them.
- *
- * The sweep stops chasing the moment a candidate answers (convex/crons.ts) and
- * raises a `reply_waiting` alert. Once the TA has read the reply and decided
- * the person still owes us something, this hands them back to the sweep: the
- * next reminder goes 24 hours from now, not immediately, so pressing Resume
- * never fires a message at the candidate on the spot.
- */
-export const resume = internalMutation({
-  args: { actorId: v.string(), applicationId: v.string() },
-  handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    const appId = args.applicationId as Id<"applications">;
-    const app = await ctx.db.get(appId);
-    if (!app) throw new Error("That application no longer exists.");
-    await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
-    if (!app.followUpState?.pausedByReplyAt) return { ok: true, wasPaused: false };
-    await ctx.db.patch(appId, {
-      nextFollowUpScheduledAt: Date.now() + 24 * 60 * 60 * 1000,
-      followUpState: {
-        lastContactDay: app.followUpState.lastContactDay ?? 0,
-        firstChannelUsed: app.followUpState.firstChannelUsed,
-        replyChannel: app.followUpState.replyChannel,
-        pausedByReplyAt: undefined,
-      },
-    });
-    return { ok: true, wasPaused: true };
-  },
-});
-
 /** Stop the sequence: cancels anything still pending and clears the schedule. */
 export const stop = internalMutation({
   args: { actorId: v.string(), applicationId: v.string() },

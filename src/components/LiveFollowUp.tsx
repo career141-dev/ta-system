@@ -1,16 +1,16 @@
 import { convexQuery } from "@/lib/convexServer";
 import { timeAt } from "@/lib/format";
-import { resumeFollowUpNow, stopFollowUpNow } from "@/app/actions";
+import { stopFollowUpNow } from "@/app/actions";
 import { FollowUpActions } from "./FollowUpActions";
 
 /**
  * Follow-up, as it really happened — read from the backend, sent through it.
  *
- * The sequence is the older app's proven one: the first Send is the approved
- * WhatsApp template plus an email; each later Send is a reminder. Replies are
- * read by the backend and fill the checklist in. Nothing goes out by moving a
- * card — only this button starts it. With the opening's automatic follow-up
- * on, the reminders after the first Send go out by themselves, every 24 hours.
+ * The sequence is the older app's proven one, and it runs itself: shortlisting
+ * sends the approved WhatsApp template plus an email, the sweep sends a
+ * reminder every 24 hours, and a reply is read by the assistant, which records
+ * what it can and answers asking for the rest. These buttons are for a person
+ * who wants to push the next one early, or stop it.
  */
 
 interface State {
@@ -19,8 +19,6 @@ interface State {
   nextScheduledAt: number | null;
   maxAttempts: number | null;
   lastCandidateReplyAt: number | null;
-  /** The reminders stopped because they answered; a TA resumes or takes over. */
-  pausedByReplyAt: number | null;
   flaggedForTaReview: boolean;
   taReviewReason: string | null;
   collected: { cv: boolean | null; currentSalary: boolean | null; expectedSalary: boolean | null; noticePeriod: boolean | null };
@@ -121,7 +119,7 @@ export async function LiveFollowUp({
         {state.autoFollowUp && missing > 0 && !exhausted && (
           <p className="mt-3 text-[12px] text-ink-soft">
             {sent === 0
-              ? "Automatic follow-up is on: after you send the first message, reminders go out every 24 hours by themselves."
+              ? "Automatic follow-up is on: the first message goes when the candidate is shortlisted, then a reminder every 24 hours."
               : state.nextScheduledAt
                 ? `Automatic follow-up is on — next reminder ${timeAt(state.nextScheduledAt)}.`
                 : "Automatic follow-up is on, but no reminder is scheduled (it was stopped)."}
@@ -132,10 +130,10 @@ export async function LiveFollowUp({
           <p className="mt-3 text-[12px] text-warn">Needs you: {state.taReviewReason ?? "flagged for review"}</p>
         )}
 
-        {state.pausedByReplyAt && (
-          <p className="mt-3 rounded-lg bg-warn-soft px-3 py-2 text-[12px] leading-relaxed text-warn">
-            They replied {timeAt(state.pausedByReplyAt)}, so the reminders stopped. Read the conversation below — then
-            either take what you need, or resume the chase.
+        {state.lastCandidateReplyAt && missing > 0 && (
+          <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
+            They replied {timeAt(state.lastCandidateReplyAt)}. The assistant answered with what is still missing and
+            will carry on — step in below if it needs you.
           </p>
         )}
 
@@ -159,15 +157,6 @@ export async function LiveFollowUp({
                   hasEmail={hasEmail}
                 />
               </>
-            )}
-            {state.pausedByReplyAt && missing > 0 && (
-              <form action={resumeFollowUpNow}>
-                <input type="hidden" name="appId" value={applicationId} />
-                <input type="hidden" name="openingId" value={openingId} />
-                <button className="rounded-full border border-rule px-3 py-1 text-[12.5px] text-ink-soft hover:text-ink">
-                  Resume follow-up
-                </button>
-              </form>
             )}
             {sent > 0 && missing > 0 && (
               <form action={stopFollowUpNow}>

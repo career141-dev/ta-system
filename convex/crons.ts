@@ -5,7 +5,7 @@ import { adjustJobStageStat } from "./jobs/stats";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
-import { awaitingFirstSend, sweepCovers } from "./lib/followUpScope";
+import { sweepCovers } from "./lib/followUpScope";
 import { assignedTaEmail } from "./pipeline/followUpHelper";
 
 const crons = cronJobs();
@@ -42,21 +42,21 @@ export const evaluateFollowUpStage = internalMutation({
     // 2. Fetch applications per follow-up job (capped to prevent cron lock).
     // Read per job rather than the first ten in the stage overall: those ten
     // could all belong to jobs with follow-up off, and the jobs that have it on
-    // would never be reached. A TA System opening's candidates are read only
-    // once a TA has sent the first message — the sweep does not start them.
+    // would never be reached. Candidates with nothing sent yet are included:
+    // shortlisting sends the first message, and the sweep covers the ones where
+    // that did not happen.
     const PER_JOB_STAGE = 10;
     const MAX_APPS_PER_RUN = 60;
     const appsToEvaluate: any[] = [];
     for (const job of followUpJobs) {
       for (const stage of ["follow_up", "ta_shortlist"] as const) {
         if (appsToEvaluate.length >= MAX_APPS_PER_RUN) break;
-        let q = ctx.db
-          .query("applications")
-          .withIndex("by_job_stage", (i) => i.eq("jobId", job._id).eq("currentStage", stage));
-        if (job.followUpStartsOnSend === true) {
-          q = q.filter((f) => f.gt(f.field("followUpAttemptCount"), 0));
-        }
-        appsToEvaluate.push(...(await q.take(PER_JOB_STAGE)));
+        appsToEvaluate.push(
+          ...(await ctx.db
+            .query("applications")
+            .withIndex("by_job_stage", (i) => i.eq("jobId", job._id).eq("currentStage", stage))
+            .take(PER_JOB_STAGE)),
+        );
       }
     }
 
@@ -101,13 +101,6 @@ export const evaluateFollowUpStage = internalMutation({
         continue;
       }
 
-      // 1b. The candidate answered: the chase is paused until a TA reads the
-      // reply and resumes it (ta/followUp:resume). Chasing somebody who has
-      // already replied is the fastest way to lose them.
-      if (app.followUpState?.pausedByReplyAt) {
-        continue;
-      }
-
       const candidate = candidateMap.get(app.candidateId);
       if (!candidate) continue;
 
@@ -124,8 +117,9 @@ export const evaluateFollowUpStage = internalMutation({
       
       if (!job) continue;
       if (job.status !== "active") continue;
-      // A TA System opening: nothing happens until a TA has sent the first message.
-      if (awaitingFirstSend(job, app)) continue;
+      // The first message now goes when the candidate is shortlisted
+      // (ta/applications.ts). If it never went — no phone, no email, a provider
+      // error — the sweep sends it rather than leaving the candidate waiting.
 
       // 3. Enforce Max Attempt Ceiling (Terminal Stop Condition)
       const maxAttempts = job.maxFollowUpAttempts ?? 3;
@@ -261,59 +255,16 @@ export const evaluateFollowUpStage = internalMutation({
       }
 
       /*
-       * 1c. An answer stops the chase.
+       * A reply does NOT stop the sequence, by design (18 September).
        *
-       * Both flows below used to nudge regardless: the reply was noted, the
-       * channel recorded, and the reminders carried on every 24 hours until the
-       * details happened to be complete ("Do NOT halt sequence forever", the
-       * old comment further down). The desk asked for the opposite (18
-       * September) — a candidate who writes back is waiting on a person, not on
-       * another reminder. The pause is lifted by a TA (`ta/followUp:resume`) or
-       * by the details completing, which advances the stage anyway.
-       *
-       * `src/lib/sla.ts` turns this into a `reply_waiting` alert so it is not a
-       * silent stop.
+       * `communications/inboundExtraction.ts` answers it instead: DeepSeek
+       * reads what the candidate wrote, records the salary, notice period and
+       * the opening's own questions, writes back naming what is still missing,
+       * and schedules the next nudge — honouring any date the candidate
+       * promises. The sweep's job is only to carry on where that conversation
+       * goes quiet. A person is pulled in when the AI cannot help
+       * (`flaggedForTaReview`), not on every reply.
        */
-      const repliedSinceEntering = (
-        await ctx.db
-          .query("communications")
-          .withIndex("by_applicationId", (q: any) => q.eq("applicationId", app._id))
-          .filter((q: any) => q.eq(q.field("direction"), "inbound"))
-          .collect()
-      ).some((c: any) => {
-        const at = typeof c.sentAt === "number" ? c.sentAt : Number(c.sentAt);
-        return Number.isFinite(at) && at >= enteredAt;
-      });
-
-      if (repliedSinceEntering) {
-        await ctx.db.patch(app._id, {
-          nextFollowUpScheduledAt: undefined,
-          nextFollowUpMessage: undefined,
-          followUpState: {
-            lastContactDay: app.followUpState?.lastContactDay ?? 0,
-            firstChannelUsed: app.followUpState?.firstChannelUsed,
-            replyChannel: app.followUpState?.replyChannel,
-            pausedByReplyAt: Date.now(),
-          },
-        });
-        // Tell somebody. A silent stop would read as "the chase just died".
-        const tellTa = (app.ownerTaId ?? job.primaryRecruiterId) as Id<"users"> | undefined;
-        if (tellTa) {
-          await ctx.db.insert("notifications", {
-            userId: tellTa,
-            type: "candidate_replied" as const,
-            title: `${candidate.fullName ?? "A candidate"} replied`,
-            body: `They answered about ${job.title ?? "an opening"}, so the reminders have stopped. Read the reply and take what you need, or resume the follow-up.`,
-            candidateId: app.candidateId,
-            jobId: app.jobId,
-            read: false,
-            createdAt: new Date().toISOString(),
-          });
-        }
-        console.log(`[Follow-up] ${app._id} paused: the candidate replied, so a TA reads it next.`);
-        continue;
-      }
-
       // 2. Check if a dynamic message is scheduled and it's time to send
       if (app.nextFollowUpScheduledAt && now >= app.nextFollowUpScheduledAt) {
         // ANTI-DUPLICATE LOCK: Clear nextFollowUpScheduledAt immediately so that
