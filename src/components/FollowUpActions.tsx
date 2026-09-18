@@ -1,10 +1,15 @@
-import { sendFollowUpNow } from "@/app/actions";
 import { AuraCallButton } from "./AuraCallButton";
+import { FollowUpDialog } from "./FollowUpDialog";
 
 /**
  * A candidate in Follow-up, contacted by hand: an Aura call, a WhatsApp
- * follow-up, or a follow-up email. Each button does one thing. WhatsApp and
- * email sent within a few minutes of each other count as one follow-up.
+ * follow-up, or a follow-up email.
+ *
+ * WhatsApp and Email open the conversation first — everything already said to
+ * this person on this opening, and what is still missing — and send from
+ * there, so nobody sends a "first" message to someone who answered yesterday.
+ * WhatsApp and email sent within a few minutes of each other count as one
+ * follow-up.
  */
 export function FollowUpActions({
   applicationId,
@@ -35,22 +40,26 @@ export function FollowUpActions({
         roleTitle={roleTitle}
         compact={compact}
       />
-      <form action={sendFollowUpNow}>
-        <input type="hidden" name="appId" value={applicationId} />
-        <input type="hidden" name="openingId" value={openingId} />
-        <input type="hidden" name="channel" value="whatsapp" />
-        <button className={button} disabled={!hasPhone} title={hasPhone ? "Send a WhatsApp follow-up" : "No phone number on file"}>
-          WhatsApp
-        </button>
-      </form>
-      <form action={sendFollowUpNow}>
-        <input type="hidden" name="appId" value={applicationId} />
-        <input type="hidden" name="openingId" value={openingId} />
-        <input type="hidden" name="channel" value="email" />
-        <button className={button} disabled={!hasEmail} title={hasEmail ? "Send a follow-up email" : "No email address on file"}>
-          Email
-        </button>
-      </form>
+      <FollowUpDialog
+        applicationId={applicationId}
+        openingId={openingId}
+        candidateName={candidateName}
+        channel="whatsapp"
+        label="WhatsApp"
+        disabled={!hasPhone}
+        title={hasPhone ? "See the conversation and send a WhatsApp follow-up" : "No phone number on file"}
+        className={button}
+      />
+      <FollowUpDialog
+        applicationId={applicationId}
+        openingId={openingId}
+        candidateName={candidateName}
+        channel="email"
+        label="Email"
+        disabled={!hasEmail}
+        title={hasEmail ? "See the conversation and send a follow-up email" : "No email address on file"}
+        className={button}
+      />
     </div>
   );
 }
