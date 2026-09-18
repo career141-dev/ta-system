@@ -122,13 +122,26 @@ export function missingCandidateMessage(id: Id): string {
 }
 
 /**
- * Forget the working set.
+ * Mark the working set stale, so the next prime refetches it.
  *
  * Called after every write, because the next read must see it. The cache in
  * front of the backend goes too — a stale row there would just repopulate this.
+ *
+ * It used to drop the rows outright (`state.snapshot = null`). This state is a
+ * module-level global shared by every request the server is handling, so a save
+ * pulled the floor out from under whatever else was mid-render: the page that
+ * had primed a moment earlier hit `load()` with nothing there and died with
+ * "The store has not been primed". That is the 500 after saving a JD or notes,
+ * the create-opening screen that never moved on to the new opening (the write
+ * succeeded, the redirect never ran), and the /api/notifications poll failing
+ * at the same instant — 18 September.
+ *
+ * Keeping the rows and expiring their timestamps gives the same freshness —
+ * `refresh()` refetches on a zero `tablesAt`, and installs the new rows only
+ * once they are all in — without a window where the store reads as unprimed.
+ * Anything reading in that window sees rows a moment old rather than an error.
  */
 export function resetStore(): void {
-  state.snapshot = null;
   state.tablesAt = 0;
   state.candidates = new Map();
   state.openings = new Map();
