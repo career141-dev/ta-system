@@ -69,7 +69,11 @@ function textOf(item: any): string {
 
 export default defineAgent<UserData>({
   prewarm: async (proc: JobProcess<UserData>) => {
-    proc.userData.vad = await silero.VAD.load({ minSilenceDuration: 350, minSpeechDuration: 100 });
+    proc.userData.vad = await silero.VAD.load({
+      minSilenceDuration: 300,
+      minSpeechDuration: 100,
+      prefixPaddingDuration: 300,
+    });
   },
 
   entry: async (ctx: JobContext<UserData>) => {
@@ -87,18 +91,45 @@ export default defineAgent<UserData>({
       endpointing: 300,
       smartFormat: true,
       interimResults: true,
+      mipOptOut: true,
     });
     const llm = OPENAI_API_KEY
-      ? new openai.LLM({ apiKey: OPENAI_API_KEY, model: "gpt-4o-mini", temperature: 0.3 })
+      ? new openai.LLM({ apiKey: OPENAI_API_KEY, model: "gpt-4o-mini", temperature: 0.3, maxCompletionTokens: 120 })
       : new openai.LLM({
           apiKey: OPENROUTER_API_KEY,
           baseURL: "https://openrouter.ai/api/v1",
           model: "openai/gpt-4o-mini",
           temperature: 0.3,
+          maxCompletionTokens: 120,
         });
-    const tts = new deepgram.TTS({ apiKey: DEEPGRAM_API_KEY, model: "aura-2-asteria-en", sampleRate: 24_000 });
+    const tts = new deepgram.TTS({
+      apiKey: DEEPGRAM_API_KEY,
+      model: "aura-2-asteria-en",
+      sampleRate: 24_000,
+      mipOptOut: true,
+    });
 
-    const session = new voice.AgentSession({ vad, stt, llm, tts });
+    // Overlap end-of-turn detection with LLM/TTS generation instead of running
+    // them fully in series after silence is detected — this is what makes the
+    // reply feel real-time instead of "captured, then a pause, then speech".
+    // Mirrors cv-processing-recruitment-pipeline-system/agent/src/index.ts.
+    const turnHandling = {
+      turnDetection: "stt" as const,
+      endpointing: { minDelay: 300, maxDelay: 1500 },
+      interruption: { enabled: true, mode: "adaptive" as const, minWords: 2, falseInterruptionTimeout: 500 },
+      preemptiveGeneration: { enabled: true, preemptiveTts: true },
+    };
+
+    const session = new voice.AgentSession({
+      vad,
+      stt,
+      llm,
+      tts,
+      aecWarmupDuration: 0,
+      ttsReadIdleTimeout: 10_000,
+      forwardAudioIdleTimeout: 10_000,
+      turnHandling,
+    });
 
     // Each finished line goes to the call window, which keeps the transcript.
     const encoder = new TextEncoder();
@@ -113,8 +144,17 @@ export default defineAgent<UserData>({
     });
     session.on(voice.AgentSessionEventTypes.Error, (event: any) => console.error("[Aura] Session error", event?.error));
 
+    const agent = new voice.Agent({
+      instructions: systemPrompt(brief),
+      turnHandling,
+      llm,
+      stt,
+      tts,
+      vad,
+    });
+
     await ctx.waitForParticipant();
-    await session.start({ agent: new voice.Agent({ instructions: systemPrompt(brief) }), room: ctx.room });
+    await session.start({ agent, room: ctx.room });
 
     const cap = setTimeout(() => {
       console.warn(`[Aura] Call cap reached [room=${ctx.room.name}]`);
