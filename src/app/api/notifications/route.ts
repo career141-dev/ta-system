@@ -20,7 +20,12 @@ interface NotificationsPayload {
 export async function GET() {
   await primeStore({});
   const user = await currentUser();
-  if (!user) return NextResponse.json({ error: "signed_out" }, { status: 401 });
+  // The bell polls in the background. A poll that lands while Clerk is renewing
+  // its one-minute session token arrives without one — that is "try again next
+  // poll", not an error, and answering 401 printed a red line in the console
+  // every time it happened (21 September). A signed-out caller still gets
+  // nothing: an empty feed, flagged.
+  if (!user) return NextResponse.json({ signedOut: true, unreadCount: 0, notifications: [] });
 
   const payload = await convexQuery<NotificationsPayload>("ta/notifications:listForUser", {
     userId: user.id,

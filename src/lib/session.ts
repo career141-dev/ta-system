@@ -36,12 +36,28 @@ export async function clerkEmails(): Promise<string[]> {
     throw e;
   }
   if (!userId) return [];
+  const held = emailCache.get(userId);
+  if (held && Date.now() - held.at < EMAIL_TTL_MS) return held.emails;
   const account = await clerkUser();
   if (!account) return [];
-  return account.emailAddresses
+  const emails = account.emailAddresses
     .filter((e) => e.verification?.status === "verified")
     .map((e) => e.emailAddress.trim().toLowerCase());
+  emailCache.set(userId, { emails, at: Date.now() });
+  return emails;
 }
+
+/*
+ * A Clerk account's emails, held for a few minutes per signed-in account.
+ *
+ * `currentUser()` is a call to Clerk's servers, and it ran on every page and on
+ * every notification poll — each open tab, every few seconds. A development
+ * Clerk instance has strict usage limits, and an email address does not change
+ * between two clicks (21 September). The session itself is still verified on
+ * every request by `auth()` above; only the email lookup is reused.
+ */
+const EMAIL_TTL_MS = 5 * 60 * 1000;
+const emailCache = new Map<string, { emails: string[]; at: number }>();
 
 /** The signed-in user, or null. Never picks somebody for you. */
 export async function currentUser(): Promise<User | null> {

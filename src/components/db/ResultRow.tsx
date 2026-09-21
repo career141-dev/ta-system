@@ -6,6 +6,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { AddToOpening } from "@/components/AddToOpening";
 import { FitChip } from "@/components/FitBadge";
+import { DoneBadge } from "@/components/SubmitButton";
+import { BUTTON } from "@/components/buttonStyles";
 import type { Score } from "@/lib/scoring";
 import type { CandidateSignal } from "@/lib/match";
 import type { Candidate } from "@/data/types";
@@ -81,6 +83,7 @@ export function ResultRow({
   const live = apps.filter((a) => a.isLive);
   const already = new Set(apps.map((a) => a.openingId));
   const addable = openings.filter((o) => !already.has(o.id));
+  const addedTo = openings.filter((o) => already.has(o.id));
 
   const roles = allRoles ? c.workHistory : c.workHistory.slice(0, 3);
   const matchedSkills = c.skills.filter((s) => hits.some((h) => h.toLowerCase() === s.toLowerCase()));
@@ -135,8 +138,16 @@ export function ResultRow({
             </Line>
 
             <Line label="Education">
-              <span>{c.educationDegree} — {c.educationInstitution}</span>
-              <span className="block text-ink-faint">English {c.englishLevel}/10 · {c.languages.join(", ")}</span>
+              <span>{[c.educationDegree, c.educationInstitution].filter(Boolean).join(" — ") || "Not on file"}</span>
+              {/* "English /10 ·" printed on every row whose level was never
+                  assessed — only what is known is shown (21 September). */}
+              {(c.englishLevel != null || c.languages.length > 0) && (
+                <span className="block text-ink-faint">
+                  {[c.englishLevel != null ? `English ${c.englishLevel}/10` : null, c.languages.join(", ") || null]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              )}
             </Line>
 
             {skills.length > 0 && (
@@ -188,6 +199,13 @@ export function ResultRow({
           </dl>
 
           <div className="mt-4 flex flex-wrap items-center gap-2.5">
+            {/* Where they already are, as a finished state rather than a
+                missing button — "Add" becomes "Added" (21 September). */}
+            {addedTo.map((o) => (
+              <DoneBadge key={o.id} title={`Already on ${o.label}`}>
+                Added · {o.label}
+              </DoneBadge>
+            ))}
             {/* Open first: after the last opening is used, its answer still shows. */}
             {adding ? (
               <AddToOpening
@@ -198,13 +216,12 @@ export function ResultRow({
                 onCancel={() => setAdding(false)}
               />
             ) : addable.length === 0 ? (
-              <span className="text-[11.5px] text-ink-faint">On every opening you could add them to</span>
+              addedTo.length === 0 && (
+                <span className="text-[11.5px] text-ink-faint">On every opening you could add them to</span>
+              )
             ) : (
-              <button
-                onClick={() => setAdding(true)}
-                className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
-              >
-                Add to an opening
+              <button type="button" onClick={() => setAdding(true)} className={BUTTON.secondary}>
+                {addedTo.length ? "Add to another opening" : "Add to an opening"}
               </button>
             )}
             {c.linkedinUrl && (

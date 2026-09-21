@@ -30,6 +30,19 @@ const money = (amount: unknown, currency: unknown) =>
 
 export const liveId = (convexId: string) => `lv_${convexId}`;
 
+/** A language as its name, whether stored as text or as `{ language | name, … }`. */
+export function languageName(x: unknown): string {
+  // Some imported records hold the literal text "[object Object]" — the
+  // object was stringified on the way in. There is no language left in it.
+  if (typeof x === "string") return x.trim() === "[object Object]" ? "" : x.trim();
+  if (x && typeof x === "object") {
+    const o = x as Record<string, unknown>;
+    const name = o.language ?? o.name ?? o.lang;
+    return typeof name === "string" ? name.trim() : "";
+  }
+  return "";
+}
+
 export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candidate {
   const history = (c.jobHistory?.length ? c.jobHistory : resume?.jobHistory ?? []) as LiveResume["jobHistory"];
   const edu = Array.isArray(c.education) && c.education.length ? c.education[0] : null;
@@ -50,7 +63,9 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     educationInstitution: c.educationInstitution ?? edu?.institution ?? null,
     qualifications: Array.isArray(c.certifications) && c.certifications.length ? c.certifications.join(", ") : null,
     englishLevel: typeof c.englishLevel === "number" ? c.englishLevel : null,
-    languages: Array.isArray(c.languages) ? c.languages.map(String) : [],
+    // CV extraction stores each language as `{ language, proficiency }`;
+    // `String()` of that printed "[object Object]" on every result (21 September).
+    languages: Array.isArray(c.languages) ? c.languages.map(languageName).filter(Boolean) : [],
     skills: Array.isArray(c.skills) ? c.skills.map((s: unknown) => (typeof s === "object" && s && "value" in (s as object) ? String((s as { value: unknown }).value) : String(s))) : [],
     industries: Array.isArray(c.industries) ? c.industries.map(String) : c.sector ? [String(c.sector)] : [],
     noticePeriodDays: typeof c.noticePeriodDays === "number" ? c.noticePeriodDays : null,

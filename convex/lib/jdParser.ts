@@ -116,16 +116,23 @@ For occupationSynonyms, include alternative job titles that represent the same o
           { role: "system", content: prompt },
           { role: "user", content: text.slice(0, 7000) },
         ],
+        // DeepSeek can spend its whole budget "reasoning" and return nothing
+        // (the Desk Copilot's empty replies, 17 September); a structured read
+        // needs no reasoning. OpenRouter-only field, ignored elsewhere.
+        ...({ reasoning: { enabled: false } } as object),
       });
 
       const inputTokens = response.usage?.prompt_tokens || 0;
       const outputTokens = response.usage?.completion_tokens || 0;
-      let content = response.choices[0]?.message?.content ?? "{}";
+      const content = response.choices[0]?.message?.content ?? "{}";
 
-      // Clean any markdown formatting if present
-      content = content.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-
-      const parsed = JSON.parse(content) as Partial<SearchRequirements>;
+      // The object, wherever it sits in the reply. Stripping a fence only
+      // worked when the fence was the whole reply; a sentence before or after
+      // it made JSON.parse throw, and the search silently fell back to raw
+      // words ("accountant, with, years…") (21 September).
+      const from = content.indexOf("{");
+      const to = content.lastIndexOf("}");
+      const parsed = JSON.parse(from >= 0 && to > from ? content.slice(from, to + 1) : content) as Partial<SearchRequirements>;
       if (parsed && (parsed.title || (parsed.requiredSkills && parsed.requiredSkills.length > 0))) {
         return {
           requirements: normalizeRequirements({

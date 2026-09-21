@@ -287,6 +287,26 @@ async function ResultsView({
     }
   }
 
+  /*
+   * Boolean reads the words of every CV, but it can only read the CVs in the
+   * working set — and on the live desk that is the ~740 people loaded for
+   * follow-ups, not the 78,000 in the database. So "java AND …" answered from
+   * 740 CVs (21 September). Fetch everyone whose title, skills, summary or CV
+   * text holds one of the positive terms first; the expression is then
+   * checked on each of them as before.
+   */
+  if (mode === "boolean" && q && isConvex() && !booleanError) {
+    const terms = booleanTerms(q);
+    if (terms.length > 0) {
+      try {
+        const hits = await keywordRetrieve(terms, 1200);
+        await primeStore({ candidateIds: hits });
+      } catch (e) {
+        retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+      }
+    }
+  }
+
   if (mode === "meaning" && q) {
     // Backed by Convex the vectors are Qdrant's, built by the reindexer — the
     // same reason findDatabaseMatches skips this. Refreshing the local file

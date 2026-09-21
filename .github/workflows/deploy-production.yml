@@ -13,7 +13,8 @@ name: Deploy Production
 #   3. The "production" GitHub Environment requires a reviewer to approve the
 #      deploy job, and allows only the production branch.
 #
-# A database backup is taken on the server before Convex is deployed.
+# A database backup is taken first when the release changes the schema or runs a
+# function (a migration); code-only releases skip the 15-minute dump.
 # Production settings (where it lives on the server) are repository variables,
 # so they can be set when the target exists without changing this file.
 
@@ -38,6 +39,11 @@ on:
         description: JSON arguments for that function
         type: string
         default: "{}"
+      backup:
+        description: Database backup first (auto = only when the schema changes or a function runs)
+        type: choice
+        options: [auto, always]
+        default: auto
 
 permissions:
   contents: read
@@ -53,6 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.check.outputs.sha }}
+      backup: ${{ steps.backup.outputs.need }}
     steps:
       - name: Production enabled
         if: ${{ vars.PRODUCTION_ENABLED != 'true' }}
@@ -79,6 +86,27 @@ jobs:
             exit 1
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # A full dump of the 15 GB database takes about 15 minutes, and it only
+      # protects stored data. A release that changes code alone cannot harm
+      # stored data, so it skips the dump; one that changes the schema, or runs
+      # a one-off function (a migration), takes it first. `backup: always` on a
+      # manual run forces it. (Owner's decision, 21 September.)
+      - name: Does this release need a database backup?
+        id: backup
+        env:
+          BEFORE: ${{ github.event.before }}
+          FORCE: ${{ inputs.backup }}
+          RUN_FUNCTION: ${{ inputs.run_function }}
+        run: |
+          need=false
+          if [ "$FORCE" = "always" ] || [ -n "$RUN_FUNCTION" ]; then
+            need=true
+          elif [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -qE '^0+$' && git cat-file -e "$BEFORE" 2>/dev/null; then
+            git diff --quiet "$BEFORE" HEAD -- convex/schema.ts || need=true
+          fi
+          echo "need=$need" >> "$GITHUB_OUTPUT"
+          echo "Database backup before this release: $need"
 
   ci:
     name: CI
@@ -109,6 +137,6 @@ jobs:
       app_container: ${{ vars.PRODUCTION_APP_CONTAINER || 'ta-prod-app' }}
       health_url: ${{ vars.PRODUCTION_HEALTH_URL || 'http://127.0.0.1:3110/signin' }}
       convex_port: ${{ vars.PRODUCTION_CONVEX_PORT || '3210' }}
-      backup_postgres_container: ${{ vars.PRODUCTION_POSTGRES_CONTAINER || 'career141-postgres-1' }}
+      backup_postgres_container: ${{ needs.gate.outputs.backup == 'true' && (vars.PRODUCTION_POSTGRES_CONTAINER || 'career141-postgres-1') || '' }}
       backup_postgres_db: ${{ vars.PRODUCTION_POSTGRES_DB || 'convex_self_hosted' }}
       backup_postgres_user: ${{ vars.PRODUCTION_POSTGRES_USER || 'convex' }}

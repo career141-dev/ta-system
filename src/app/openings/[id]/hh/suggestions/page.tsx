@@ -13,6 +13,8 @@ import { ChevronIcon } from "@/components/icons";
 import { scopeSuggestions } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
+import { DoneBadge, SubmitButton } from "@/components/SubmitButton";
+import { BUTTON } from "@/components/buttonStyles";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 
 const PAGE_SIZE = 20;
@@ -224,13 +226,15 @@ export default async function Page({
                       <form action={keepSuggestion}>
                         <input type="hidden" name="openingId" value={id} />
                         <input type="hidden" name="suggestionId" value={s.id} />
-                        <button
-                          disabled={!s.linkedinUrl}
-                          title={s.linkedinUrl ? "Adds them to Excel Tables" : "No profile URL to add"}
-                          className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:bg-rule-strong"
-                        >
-                          Add to list
-                        </button>
+                        {s.linkedinUrl ? (
+                          <SubmitButton pendingLabel="Adding…" title="Adds them to Excel Tables as Shortlisted">
+                            Add to list
+                          </SubmitButton>
+                        ) : (
+                          <button type="button" disabled title="No profile URL to add" className={BUTTON.primary}>
+                            Add to list
+                          </button>
+                        )}
                       </form>
                       <form action={dismissSuggestion}>
                         <input type="hidden" name="openingId" value={id} />
@@ -241,9 +245,13 @@ export default async function Page({
                       </form>
                     </div>
                   ) : (
-                    <span className="shrink-0 text-[11.5px] text-ink-faint">
-                      {s.status === "kept" ? "In Excel Tables" : "Rejected"} · {dateAt(s.generatedAt)}
-                    </span>
+                    s.status === "kept" ? (
+                      <span className="shrink-0">
+                        <DoneBadge title={`Kept ${dateAt(s.generatedAt)}`}>Added to Excel Tables</DoneBadge>
+                      </span>
+                    ) : (
+                      <span className="shrink-0 text-[11.5px] text-ink-faint">Rejected · {dateAt(s.generatedAt)}</span>
+                    )
                   )}
                 </div>
 

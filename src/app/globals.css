@@ -31,29 +31,6 @@
   --color-danger-soft: #fbeae8;
 }
 
-/*
- * Tailwind 4 resets buttons to the arrow cursor, so nothing on the desk looked
- * pressable — testers read Save job and Re-extract as dead (21 Sep). One rule
- * here instead of `cursor-pointer` on every button.
- */
-@layer base {
-  button:not(:disabled),
-  [role="button"]:not([aria-disabled="true"]),
-  summary,
-  select:not(:disabled),
-  input[type="checkbox"]:not(:disabled),
-  input[type="radio"]:not(:disabled) {
-    cursor: pointer;
-  }
-  button:disabled,
-  [role="button"][aria-disabled="true"] {
-    cursor: not-allowed;
-  }
-  button[aria-busy="true"] {
-    cursor: progress;
-  }
-}
-
 html,
 body {
   background: var(--color-paper);
@@ -136,4 +113,49 @@ body {
 .c141-score-ring { animation: c141-score-fill 0.9s 0.15s cubic-bezier(0.22, 1, 0.36, 1) both; }
 @media (prefers-reduced-motion: reduce) {
   .c141-score-pop, .c141-score-ring { animation: none; }
+}
+
+/* The message banner (components/Flash.tsx) drops in from the top so a save
+   that returns you to the same page visibly answers. */
+@keyframes c141-flash-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.c141-flash-in { animation: c141-flash-in 0.22s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .c141-flash-in { animation: none; }
+}
+
+/* Every button reads as one (21 September). Tailwind v4 dropped the pointer
+   cursor on buttons, no button had a keyboard focus ring or a pressed state,
+   so across ~60 hand-written styles a "Save" felt like a label. These apply to
+   all of them at once; a component's own classes still win where they set the
+   same thing. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label[for],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+  /* A button whose action is running (SubmitButton sets aria-busy). */
+  button[aria-busy="true"] {
+    cursor: progress;
+  }
+  button:focus-visible,
+  a:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid #34705a; /* brand-line; @theme inline emits no variable */
+    outline-offset: 2px;
+  }
+  button:not(:disabled):active {
+    transform: translateY(1px);
+  }
 }

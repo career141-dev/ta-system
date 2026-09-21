@@ -75,6 +75,16 @@ function num(m: RegExpMatchArray | null, i = 1): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * A vocabulary word as a pattern that matches only itself. Titles and
+ * employers come from real CVs — "C++ Developer", "ABC (Pvt" — and were
+ * turned into patterns unescaped, so one of them in a query threw and broke the
+ * results page (21 September).
+ */
+function literal(word: string): string {
+  return word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export function parseQuery(raw: string, vocab: Vocabulary): ParseResult {
   const c: SearchCriteria = structuredClone(EMPTY_CRITERIA);
   const text = ` ${raw.toLowerCase().replace(/\s+/g, " ").trim()} `;
@@ -180,21 +190,21 @@ export function parseQuery(raw: string, vocab: Vocabulary): ParseResult {
 
   // 4. Vocabulary. Titles before skills so "Sales Manager" is not eaten by "Sales".
   c.titles = matchVocab(rest, vocab.titles);
-  for (const t of c.titles) eat(new RegExp(t, "gi"));
+  for (const t of c.titles) eat(new RegExp(literal(t), "gi"));
   c.skills = matchVocab(rest, vocab.skills);
-  for (const t of c.skills) eat(new RegExp(t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"));
+  for (const t of c.skills) eat(new RegExp(literal(t), "gi"));
   c.industries = matchVocab(rest, vocab.industries);
-  for (const t of c.industries) eat(new RegExp(t.replace(/[&]/g, "\\&"), "gi"));
+  for (const t of c.industries) eat(new RegExp(literal(t), "gi"));
   c.locations = matchVocab(rest, vocab.cities);
-  for (const t of c.locations) eat(new RegExp(t, "gi"));
+  for (const t of c.locations) eat(new RegExp(literal(t), "gi"));
   c.employers = matchVocab(rest, vocab.employers).filter((e) => !c.excludeEmployers.includes(e));
-  for (const t of c.employers) eat(new RegExp(t, "gi"));
+  for (const t of c.employers) eat(new RegExp(literal(t), "gi"));
   c.qualifications = matchVocab(rest, vocab.qualifications);
-  for (const t of c.qualifications) eat(new RegExp(t.replace(/[()]/g, "\\$&"), "gi"));
+  for (const t of c.qualifications) eat(new RegExp(literal(t), "gi"));
   c.languages = matchVocab(rest, vocab.languages);
-  for (const t of c.languages) eat(new RegExp(t, "gi"));
+  for (const t of c.languages) eat(new RegExp(literal(t), "gi"));
   c.nationalities = matchVocab(rest, vocab.nationalities);
-  for (const t of c.nationalities) eat(new RegExp(t, "gi"));
+  for (const t of c.nationalities) eat(new RegExp(literal(t), "gi"));
 
   const ignored = [
     ...new Set(

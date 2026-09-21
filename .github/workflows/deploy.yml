@@ -141,6 +141,7 @@ jobs:
           build-args: |
             NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ inputs.environment == 'production' && secrets.PRODUCTION_CLERK_PUBLISHABLE_KEY || secrets.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY }}
             NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=${{ inputs.environment == 'production' && secrets.PRODUCTION_SERVER_ACTIONS_KEY || secrets.STAGING_SERVER_ACTIONS_KEY }}
+            APP_VERSION=${{ inputs.ref }}
           cache-from: type=gha,scope=app-${{ inputs.environment }}
           cache-to: type=gha,mode=max,scope=app-${{ inputs.environment }}
 

@@ -13,6 +13,7 @@ import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
 import { setOpeningAutoFollowUp, setOpeningQuestions } from "@/app/actions";
 import { primeStore } from "@/data/prime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 /**
  * Modelled on Recruiter's project overview: a short state line, a few suggested
@@ -298,7 +299,7 @@ export default async function OverviewPage({
                     className="w-full rounded border border-rule bg-paper px-2.5 py-2 text-[12.5px]"
                   />
                   <div>
-                    <button className="rounded-full border border-rule-strong px-3.5 py-1.5 text-[12px] font-medium">Save</button>
+                    <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
                   </div>
                 </form>
               ) : (

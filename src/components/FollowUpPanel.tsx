@@ -8,6 +8,7 @@ import {
   recordFollowUpCall,
   saveFollowUpAnswers,
 } from "@/app/actions";
+import { SubmitButton } from "@/components/SubmitButton";
 
 /**
  * One candidate's follow-up day, beside everything else said to them.
@@ -116,7 +117,7 @@ export function FollowUpPanel({
             </select>
             <input type="datetime-local" name="promisedAt" className={field} aria-label="Time they gave" />
             <input name="note" placeholder="What they said" className={`${field} min-w-[180px] flex-1`} />
-            <button className="rounded bg-ink px-3 py-1.5 text-[12.5px] font-medium text-surface">Save</button>
+            <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
           </div>
           <p className="text-[11px] text-ink-faint">
             The time only matters for a call-back or a promise to send. Colombo time.
@@ -195,7 +196,7 @@ export function FollowUpPanel({
               </label>
             ))}
             <div>
-              <button className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium">Save answers</button>
+              <SubmitButton pendingLabel="Saving…">Save answers</SubmitButton>
             </div>
           </form>
         </details>
