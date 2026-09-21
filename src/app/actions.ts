@@ -25,7 +25,7 @@ function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
 
 /** Redirect, with any id created in this action swapped for the one the database gave it. */
 function redirect(url: string): never {
-  return nextRedirect(withRealIds(url));
+  return nextRedirect(withRealIds(url)) as never;
 }
 import { after } from "next/server";
 import {

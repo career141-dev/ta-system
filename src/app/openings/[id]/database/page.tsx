@@ -94,6 +94,7 @@ export default async function DatabasePage({
         <div className="min-w-0 flex-1">
           <CandidateList
             scored
+            exaggerate
             openingId={id}
             apps={apps}
             currentUser={user}
