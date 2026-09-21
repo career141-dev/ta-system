@@ -2,7 +2,14 @@
 
 import { externalUrl, profileLink } from "@/lib/url";
 import { useState } from "react";
-import { addLinkToPipeline, deleteLink, logOutreach, toggleEyeMark, updateLink } from "@/app/actions";
+import {
+  addLinkToPipelineInline,
+  deleteLinkInline,
+  logOutreachInline,
+  toggleEyeMarkInline,
+  updateLinkInline,
+} from "@/app/actions";
+import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
 import Link from "next/link";
 import { inputClass } from "./form";
 import { Confirm } from "./Confirm";
@@ -57,7 +64,20 @@ export function LinkRow({
   onPipeline?: Pick<Application, "id" | "stage"> | null;
 }) {
   const [edit, setEdit] = useState(false);
+  // Opened from "Add to pipeline" on a row that is not shortlisted yet.
+  const [forPipeline, setForPipeline] = useState(false);
   const [allLog, setAllLog] = useState(false);
+  // Every button on the row answers under the row (21 Sep: they answered at
+  // the top of the page, or not at all).
+  const eye = useInline(toggleEyeMarkInline);
+  const save = useInline(updateLinkInline);
+  const toPipeline = useInline(addLinkToPipelineInline);
+  const logIt = useInline(logOutreachInline);
+  const del = useInline(deleteLinkInline);
+  const busy = eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending;
+  const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result);
+  // The name the row can go to the pipeline under: typed, or read from the link.
+  const guessedName = profileLink(r.linkedinUrl)?.guessedName ?? "";
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-9`;
   const log = [...r.conversationLog].reverse();
   const shown = allLog ? log : log.slice(0, 2);
@@ -66,10 +86,12 @@ export function LinkRow({
   return (
     <article className="px-6 py-5">
       <div className="flex gap-3.5">
-        <form action={toggleEyeMark} className="pt-1">
+        <form onSubmit={(e) => eye.run(submitted(e).formData)} className="pt-1">
           <input type="hidden" name="openingId" value={openingId} />
           <input type="hidden" name="entryId" value={r.id} />
           <button
+            disabled={busy}
+            aria-busy={eye.pending}
             title={r.isEyeMarked ? "Eye-marked — a high-conviction profile" : "Eye-mark this profile"}
             className={`grid h-[15px] w-[15px] place-items-center rounded-[3px] border text-[10px] leading-none transition-colors ${
               r.isEyeMarked ? "border-brand bg-brand text-white" : "border-rule-strong text-transparent hover:border-brand"
@@ -114,23 +136,30 @@ export function LinkRow({
                   >
                     In {STAGE_LABEL[onPipeline.stage]} →
                   </Link>
-                ) : r.outcome === "shortlisted" ? (
-                  <form action={addLinkToPipeline}>
+                ) : r.outcome === "shortlisted" && r.name ? (
+                  <form onSubmit={(e) => toPipeline.run(submitted(e).formData)}>
                     <input type="hidden" name="openingId" value={openingId} />
                     <input type="hidden" name="entryId" value={r.id} />
-                    <button
-                      title="Send to Director review"
-                      className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                    <SubmitButton
+                      busy={toPipeline.pending}
+                      locked={busy}
+                      pendingLabel="Adding…"
+                      tone="dark"
+                      className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
                     >
                       Add to pipeline
-                    </button>
+                    </SubmitButton>
                   </form>
                 ) : (
+                  // Not greyed out: it opens the panel with Shortlisted picked and
+                  // the name filled in, one Save away (21 Sep).
                   <button
                     type="button"
-                    disabled
-                    title="Set the outcome to Shortlisted first"
-                    className="cursor-not-allowed rounded-full border border-rule px-4 py-1.5 text-[12.5px] font-medium text-ink-faint"
+                    onClick={() => {
+                      setForPipeline(true);
+                      setEdit(true);
+                    }}
+                    className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
                   >
                     Add to pipeline
                   </button>
@@ -202,15 +231,29 @@ export function LinkRow({
             </dd>
           </dl>
 
+          {!edit && <ActionNote result={answer} className="mt-3" />}
+
           {edit && (
             <div className="mt-4 grid gap-6 border-t border-rule pt-4 lg:grid-cols-2">
-              <form action={updateLink} className="flex flex-col gap-3.5">
+              <form
+                onSubmit={(e) => {
+                  const { formData, pressed } = submitted(e);
+                  (pressed === "pipeline" ? toPipeline : save).run(formData);
+                }}
+                className="flex flex-col gap-3.5"
+              >
+                {forPipeline && !onPipeline && (
+                  <p className="rounded-lg bg-brand-soft px-3 py-2 text-[12px] text-brand">
+                    To go to the pipeline they need a name and the Shortlisted outcome — both are filled in below. Check
+                    them and press Save and add to pipeline.
+                  </p>
+                )}
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="entryId" value={r.id} />
                 <div className="grid grid-cols-2 gap-3">
                   <label>
                     <span className="mb-1.5 block text-[11.5px] text-ink-soft">Name</span>
-                    <input name="name" defaultValue={r.name ?? ""} className={inputClass} />
+                    <input name="name" defaultValue={r.name ?? guessedName} className={inputClass} />
                   </label>
                   <label>
                     <span className="mb-1.5 block text-[11.5px] text-ink-soft">Company</span>
@@ -220,7 +263,7 @@ export function LinkRow({
                 <label>
                   <span className="mb-1.5 block text-[11.5px] text-ink-soft">Outcome</span>
                   <div className="relative">
-                    <select name="outcome" defaultValue={r.outcome} className={selectClass}>
+                    <select name="outcome" defaultValue={forPipeline ? "shortlisted" : r.outcome} className={selectClass}>
                       {OUTCOMES.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
@@ -246,24 +289,36 @@ export function LinkRow({
                   </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <button className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
+                  <SubmitButton
+                    name="intent"
+                    value="save"
+                    busy={save.pending}
+                    locked={busy}
+                    pendingLabel="Saving…"
+                    className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
                     Save
-                  </button>
+                  </SubmitButton>
                   {!onPipeline && (
-                    <button
-                      formAction={addLinkToPipeline}
-                      title="Saves this row; if the outcome is Shortlisted, sends them to Director review"
-                      className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                    <SubmitButton
+                      name="intent"
+                      value="pipeline"
+                      busy={toPipeline.pending}
+                      locked={busy}
+                      pendingLabel="Adding…"
+                      tone="dark"
+                      className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
                     >
                       Save and add to pipeline
-                    </button>
+                    </SubmitButton>
                   )}
                 </div>
+                <ActionNote result={latest(save.result, toPipeline.result)} />
               </form>
 
               {/* Finding 02 — a row pasted by mistake, or a person who turns out
                   to be the wrong one, had to stay in the table forever. */}
-              <form action={deleteLink} className="lg:col-span-2">
+              <form onSubmit={(e) => del.run(submitted(e).formData)} className="lg:col-span-2">
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="entryId" value={r.id} />
                 <Confirm
@@ -277,7 +332,14 @@ export function LinkRow({
                 />
               </form>
 
-              <form action={logOutreach} className="flex flex-col gap-2.5">
+              <form
+                onSubmit={(e) => {
+                  const form = e.currentTarget;
+                  logIt.run(submitted(e).formData);
+                  form.reset();
+                }}
+                className="flex flex-col gap-2.5"
+              >
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="entryId" value={r.id} />
                 <span className="text-[11.5px] text-ink-soft">Log an approach</span>
@@ -292,10 +354,17 @@ export function LinkRow({
                     </select>
                     {chev}
                   </div>
-                  <button className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-soft">
+                  <SubmitButton
+                    busy={logIt.pending}
+                    locked={busy}
+                    pendingLabel="Logging…"
+                    tone="dark"
+                    className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
+                  >
                     Log it
-                  </button>
+                  </SubmitButton>
                 </div>
+                <ActionNote result={latest(logIt.result, del.result, eye.result)} />
               </form>
             </div>
           )}

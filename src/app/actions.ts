@@ -383,8 +383,11 @@ export async function toggleEyeMark(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  repo.toggleEyeMark(String(formData.get("entryId")));
+  const entryId = String(formData.get("entryId"));
+  repo.toggleEyeMark(entryId);
   revalidatePath(`/openings/${openingId}`, "layout");
+  const now = repo.linkVault(openingId).find((l) => l.id === entryId)?.isEyeMarked;
+  await done(now ? "Eye-marked." : "Eye-mark removed.");
 }
 
 
@@ -981,7 +984,19 @@ export async function updateLink(formData: FormData) {
   const company = String(formData.get("company") ?? "").trim() || null;
   repo.updateLink(entryId, { outcome, phoneNumber, phoneSource, name, company });
   revalidatePath(`/openings/${openingId}`, "layout");
+  // It saved silently; testers could not tell it had (21 Sep).
+  await done(`Saved — ${LINK_OUTCOME_LABEL[outcome] ?? outcome}.`);
 }
+
+const LINK_OUTCOME_LABEL: Record<string, string> = {
+  no_contact: "Not contacted",
+  contacted: "Contacted",
+  responded: "Responded",
+  cv_received: "CV received",
+  shortlisted: "Shortlisted",
+  declined: "Declined",
+  unreachable: "Unreachable",
+};
 
 export async function logOutreach(formData: FormData) {
   await primeStore({ allApplications: true });
@@ -990,8 +1005,10 @@ export async function logOutreach(formData: FormData) {
   const entryId = String(formData.get("entryId"));
   const note = String(formData.get("note") ?? "").trim();
   const channel = String(formData.get("channel") ?? "linkedin");
-  if (note) repo.logOutreach(entryId, user.id, channel, note);
+  if (!note) await back("Write what happened on the approach first.");
+  repo.logOutreach(entryId, user.id, channel, note);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Logged · ${channel === "whatsapp" ? "WhatsApp" : channel === "linkedin" ? "LinkedIn" : channel[0].toUpperCase() + channel.slice(1)}.`);
 }
 
 
@@ -1008,12 +1025,14 @@ export async function addLinkToPipeline(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const entryId = String(formData.get("entryId"));
 
-  // From the row's edit panel the button also saves what was just typed, so
-  // picking "Shortlisted" and pressing Add to pipeline is one step.
+  // From the row's edit panel the button also saves what was just typed —
+  // and it means Shortlisted: pressing "Save and add to pipeline" and being
+  // told "Set the outcome to Shortlisted first" at the top of the page was
+  // the one thing it should not say (testing, 21 Sep).
   if (formData.has("outcome")) {
     await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
     repo.updateLink(entryId, {
-      outcome: String(formData.get("outcome")) as import("@/data/types").LinkOutcome,
+      outcome: "shortlisted",
       phoneNumber: String(formData.get("phoneNumber") ?? "").trim() || null,
       phoneSource: (String(formData.get("phoneSource") ?? "") || null) as import("@/data/types").LinkVaultEntry["phoneSource"],
       name: String(formData.get("name") ?? "").trim() || null,
@@ -1024,7 +1043,9 @@ export async function addLinkToPipeline(formData: FormData) {
   const made = repo.linkToApplication(entryId, user.id);
   if (!made.ok) return back(made.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  if (made.stage !== "follow_up") return back("Already on the pipeline past Follow-up.");
+  if (made.stage !== "follow_up") {
+    return back(`Already on this opening's pipeline, in ${STAGE_LABEL[made.stage] ?? made.stage}.`, "warn");
+  }
 
   if (isConvex()) {
     let problem: string | null = null;
@@ -1033,15 +1054,22 @@ export async function addLinkToPipeline(formData: FormData) {
       if (!claimed.ok) problem = "Another recruiter already claimed this candidate.";
       else await backend.moveStage({ id: user.id }, made.applicationId, "director_review");
     } catch (e) {
-      problem = `On the pipeline at Follow-up, not yet in Director review: ${backendMessage(e, "the move could not be made.")}`;
+      problem = `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${backendMessage(e, "the move could not be made.")})`;
     }
     await afterBackendWrite(openingId);
-    return back(problem ?? "Moved to Director review.");
+    if (problem) return back(problem, "warn");
+    return done("Added to the pipeline and moved to Director review.");
   }
   repo.shortlist(made.applicationId, user.id);
   const moved = repo.moveStage(made.applicationId, "director_review", user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
-  return back(moved.ok ? "Moved to Director review." : `On the pipeline at Follow-up: ${moved.message}`);
+  if (!moved.ok) {
+    return back(
+      `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${moved.message})`,
+      "warn",
+    );
+  }
+  return done("Added to the pipeline and moved to Director review.");
 }
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
@@ -1362,6 +1390,7 @@ export async function deleteLink(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   repo.deleteLink(String(formData.get("entryId")));
   revalidatePath(`/openings/${openingId}/hh`, "layout");
+  await done("Row deleted.");
 }
 
 export async function removeApplication(formData: FormData) {
@@ -3318,4 +3347,24 @@ export async function runBenchmarkInline(_: ActionResult | null, formData: FormD
 
 export async function runSuggestionsInline(_: ActionResult | null, formData: FormData) {
   return inline(() => runSuggestions(formData));
+}
+
+export async function toggleEyeMarkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => toggleEyeMark(formData));
+}
+
+export async function updateLinkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => updateLink(formData));
+}
+
+export async function logOutreachInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => logOutreach(formData));
+}
+
+export async function addLinkToPipelineInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLinkToPipeline(formData));
+}
+
+export async function deleteLinkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => deleteLink(formData));
 }
