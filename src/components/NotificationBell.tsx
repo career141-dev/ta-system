@@ -79,7 +79,9 @@ export function NotificationBell() {
     try {
       const res = await fetch("/api/notifications", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { unreadCount: number; notifications: NotificationItem[] };
+      const data = (await res.json()) as { signedOut?: boolean; unreadCount: number; notifications: NotificationItem[] };
+      // Between session tokens — keep what is shown; the next poll catches up.
+      if (data.signedOut) return;
       const unread = data.notifications.filter((n) => !n.read);
 
       if (seenIds.current && unread.some((n) => !seenIds.current!.has(n.id))) {
