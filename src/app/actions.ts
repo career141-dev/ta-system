@@ -37,7 +37,7 @@ import {
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
-import { aiStatus, gemini } from "@/lib/ai";
+import { FAILURE_MESSAGE, aiStatus, gemini } from "@/lib/ai";
 import { MAX_ROUNDS, benchmarkViaSearch, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile } from "@/lib/serper";
 import { profileLink } from "@/lib/url";
@@ -194,6 +194,12 @@ export async function moveStage(formData: FormData) {
 }
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
+
+/** A model failure code ("spend_cap") as the sentence it stands for. */
+function reasonInWords(reason: string | undefined): string {
+  const said = reason && (FAILURE_MESSAGE as Record<string, string>)[reason];
+  return said ?? (reason ? `${reason}.` : "no reason was given.");
+}
 
 /** The backend's own reason, without the transport's wrapping. */
 function backendMessage(e: unknown, fallback: string): string {
@@ -2134,7 +2140,7 @@ export async function generateJdWithModel(formData: FormData) {
   if (res!.ok) await done("Written by the AI. Read it through before approving.");
   // Said plainly and beside the button: the fallback reads like a finished JD.
   await back(
-    `The AI could not write it (${res!.reason}), so a basic version built from your notes is in place. Try again, or edit it by hand.`,
+    `The AI could not write it — ${reasonInWords(res!.reason)} A basic version built from your notes is in place: try again, or edit it by hand.`,
     "warn",
   );
 }

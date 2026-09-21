@@ -104,9 +104,7 @@ export default async function OverviewPage({
       <div className="mb-8 flex items-start justify-between gap-8">
         <div>
           <h1 className="text-[21px] font-semibold tracking-tight">Overview</h1>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-            {openingFacts(o)}
-          </p>
+          {openingFacts(o) && <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">{openingFacts(o)}</p>}
         </div>
         <div className="flex shrink-0 gap-9 text-right">
           <div>
