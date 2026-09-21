@@ -195,6 +195,24 @@ export async function moveStage(formData: FormData) {
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
 
+/**
+ * A rejected or dropped-out application back in Follow-up. The backend clears
+ * the old rejection as it moves them (pipelineStateMachine).
+ */
+async function reinstate(userId: string, appId: string, openingId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (isConvex()) {
+    try {
+      await backend.moveStage({ id: userId }, appId, "follow_up", "Brought back");
+      await afterBackendWrite(openingId);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: backendMessage(e, "the move was refused.") };
+    }
+  }
+  const r = repo.moveStage(appId, "follow_up", userId, "Brought back");
+  return r.ok ? { ok: true } : { ok: false, message: r.message };
+}
+
 /** A sourcing or benchmark failure code as a sentence. */
 function searchReasonInWords(code: string): string {
   if (code === "no_serper") return "web search is not set up on this system (no search key). An admin needs to add one.";
@@ -1044,6 +1062,14 @@ export async function addLinkToPipeline(formData: FormData) {
   const made = repo.linkToApplication(entryId, user.id);
   if (!made.ok) return back(made.message);
   revalidatePath(`/openings/${openingId}`, "layout");
+  // Someone already on the opening: from Database CVs they go on to Follow-up
+  // like anyone else; rejected or dropped out, they are brought back first.
+  if (made.stage === "rejected" || made.stage === "dropped_out") {
+    const r = await reinstate(user.id, made.applicationId, openingId);
+    if (!r.ok) return back(`They were ${STAGE_LABEL[made.stage].toLowerCase()} here and could not be brought back: ${r.message}`);
+    made.stage = "follow_up";
+  }
+  if (made.stage === "matched" || made.stage === "new_cv") made.stage = "follow_up";
   if (made.stage !== "follow_up") {
     return back(`Already on this opening's pipeline, in ${STAGE_LABEL[made.stage] ?? made.stage}.`, "warn");
   }
@@ -1397,11 +1423,25 @@ export async function deleteLink(formData: FormData) {
 export async function removeApplication(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
-  const r = repo.removeApplication(String(formData.get("appId")));
-  if (!r.ok) await back(r.message);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}`);
+  const appId = String(formData.get("appId"));
+  // Removing is a move to Dropped out with the reason "Removed", not a delete:
+  // it took the application's history, calls and interviews with it and could
+  // not be undone (plan 3.2, 21 Sep). "Bring back" reverses it.
+  if (isConvex()) {
+    try {
+      await backend.moveStage({ id: user.id }, appId, "dropped_out", "Removed from the opening");
+    } catch (e) {
+      await back(backendMessage(e, "They could not be removed."));
+    }
+    await afterBackendWrite(openingId);
+  } else {
+    const r = repo.moveStage(appId, "dropped_out", user.id, "Removed from the opening", { force: true });
+    if (!r.ok) await back(r.message);
+    revalidatePath(`/openings/${openingId}`, "layout");
+  }
+  await done("Removed from the opening — they are under Dropped out, and can be brought back from there.");
 }
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
@@ -1815,8 +1855,17 @@ export async function addToOpening(formData: FormData) {
 
   const onOpening = () => repo.applications(openingId).find((a) => a.candidateId === candidateId);
   const existing = onOpening();
+  // Rejected or dropped out is not "in the pipeline": they were refused with
+  // "Already in X's pipeline" and could never be brought back (21 Sep).
+  if (existing && (existing.stage === "rejected" || existing.stage === "dropped_out")) {
+    const was = STAGE_LABEL[existing.stage];
+    const r = await reinstate(user.id, existing.id, openingId);
+    refresh();
+    if (!r.ok) await back(`They were ${was.toLowerCase()} on ${title} and could not be brought back: ${r.message}`);
+    await done(`Back on ${title} in Follow-up — they had been ${was.toLowerCase()}.`);
+  }
   if (existing && !["matched", "new_cv"].includes(existing.stage)) {
-    await back(`Already in ${title}'s pipeline.`);
+    await back(`Already on ${title}'s pipeline, in ${STAGE_LABEL[existing.stage]}.`, "warn");
   }
   if (existing?.ownerTaId && existing.ownerTaId !== user.id) {
     const owner = repo.users().find((u) => u.id === existing.ownerTaId)?.name ?? "another recruiter";
@@ -2882,9 +2931,19 @@ export async function sendEod(formData: FormData) {
   if (kind === "director") {
     for (const id of fresh) {
       if (repo.application(id)?.stage === "follow_up") {
-        repo.moveStage(id, "director_review", user.id, "Sent to the Director in the end-of-day email");
+        // Through the backend's own move on Convex, so its stage counts, its
+        // history and the stop of the follow-up sequence happen too — the
+        // store's write skipped all three (plan 3.2, 21 Sep).
+        if (isConvex()) {
+          await backend
+            .moveStage({ id: user.id }, id, "director_review", "Sent to the Director in the end-of-day email")
+            .catch((e) => console.warn(`[eod] ${id} stays in Follow-up: ${backendMessage(e, "move refused")}`));
+        } else {
+          repo.moveStage(id, "director_review", user.id, "Sent to the Director in the end-of-day email");
+        }
       }
     }
+    if (isConvex()) await afterBackendWrite(openingId);
   }
 
   repo.openReviewRound({

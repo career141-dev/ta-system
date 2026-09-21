@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Application, Candidate, User } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 import { RowActions } from "./RowActions";
+import { directorReviewBlockers } from "@/lib/pipeline";
 import { claimCandidate } from "@/app/actions";
 import { FitMark, FitReason } from "./FitBadge";
 import type { Score } from "@/lib/scoring";
@@ -64,6 +65,13 @@ export function CandidateRow({
           </Link>
           <span className="text-[11.5px] text-ink-faint">· 2nd</span>
           <span className="rounded bg-tag px-1.5 py-[2px] text-[11px] text-ink-soft">{tag}</span>
+          {/* Held in Follow-up for want of details: said on the row, so it does
+              not look like the move to Director review simply failed (21 Sep). */}
+          {app.stage === "follow_up" && directorReviewBlockers(candidate).length > 0 && (
+            <span className="rounded bg-warn-soft px-1.5 py-[2px] text-[11px] text-warn">
+              Needs {directorReviewBlockers(candidate).join(", ")}
+            </span>
+          )}
           {app.isAddOn && (
             <span className="rounded bg-brand-soft px-1.5 py-[2px] text-[11px] font-medium text-brand">
               Add-on

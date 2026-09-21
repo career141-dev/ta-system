@@ -865,6 +865,12 @@ const rawRepo = {
         a.rejectReason = reason ?? null;
       }
       if (stage === "dropped_out") a.droppedOutReason = reason ?? null;
+      // Brought back: the old rejection no longer describes them (21 Sep).
+      if ((from === "rejected" || from === "dropped_out") && stage !== "rejected" && stage !== "dropped_out") {
+        a.rejectedBy = null;
+        a.rejectReason = null;
+        a.droppedOutReason = null;
+      }
 
       db.pipelineEvents.push({
         id: `pe_${Math.random().toString(36).slice(2, 10)}`,

@@ -34,8 +34,11 @@ export const ALLOWED_TRANSITIONS: Record<Stage, Stage[]> = {
   // A placement inside its guarantee period can still fall through.
   placed: ["dropped_out", "rejected"],
   // Re-evaluation, which is how a desk works a database it already owns.
-  rejected: ["new_cv", "follow_up"],
-  dropped_out: ["new_cv", "follow_up"],
+  // Straight back to Director review too, when nothing is missing — a
+  // rejection reversed the same day should not mean a second follow-up
+  // (testing, 21 Sep). The Director review gate still applies.
+  rejected: ["new_cv", "follow_up", "director_review"],
+  dropped_out: ["new_cv", "follow_up", "director_review"],
 };
 
 export type Requirement = "interview_scheduled" | "placement_recorded" | "offer_made";

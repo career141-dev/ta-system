@@ -150,6 +150,22 @@ export async function executeStageTransition(
     patch.followUpEnteredAt = now;
   }
 
+  // Closed and open are part of the move, not left to whoever reads the row:
+  // a rejected application stayed isActive, and one brought back kept its old
+  // rejection reason, so lists and counts disagreed about who was still in
+  // (testing, 21 Sep).
+  // The backend's closed stages: rejected, and unresponsive (the desk's "dropped out").
+  const closed = targetStage === "rejected" || targetStage === "unresponsive";
+  const wasClosed = ["rejected", "unresponsive"].includes(String(app.currentStage));
+  if (closed) patch.isActive = false;
+  else if (wasClosed) {
+    patch.isActive = true;
+    patch.rejectedBy = undefined;
+    patch.rejectedAt = undefined;
+    patch.rejectReason = undefined;
+    patch.rejectedFromStage = undefined;
+  }
+
   await ctx.db.patch(applicationId, patch);
 
   // 5. Audit Logging
