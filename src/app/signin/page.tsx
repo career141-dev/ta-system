@@ -6,6 +6,7 @@ import { devSigninEnabled } from "@/lib/devSignin";
 import { devSignInAs } from "@/app/actions";
 import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
 import { uiOnly } from "@/lib/uiOnly";
+import { AppVersion } from "@/components/AppVersion";
 
 /**
  * The sign-in screen.
@@ -74,6 +75,7 @@ export default async function SignInPage() {
           </SignOutButton>
         </div>
       )}
+      <AppVersion className="mt-6 block text-center" />
     </main>
   );
 }

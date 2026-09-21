@@ -25,6 +25,10 @@ ENV NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=$NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 # Build stage only: the image that runs reads the same value from its env file.
 ARG NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
 ENV NEXT_SERVER_ACTIONS_ENCRYPTION_KEY=$NEXT_SERVER_ACTIONS_ENCRYPTION_KEY
+# Which commit this image is — shown on the sign-in page and in the user menu,
+# so anyone can tell which release is live. The pipeline passes the commit.
+ARG APP_VERSION=dev
+ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
 RUN npm run build
 
 FROM node:22-bookworm-slim AS run

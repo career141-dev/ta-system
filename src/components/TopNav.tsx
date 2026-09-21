@@ -7,6 +7,7 @@ import { useState } from "react";
 import { ROLE_LABEL } from "@/data/types";
 import type { User } from "@/data/types";
 import { SignOut } from "./SignOut";
+import { AppVersion } from "./AppVersion";
 import { HEADER_H } from "@/lib/chrome";
 import { SearchIcon } from "./icons";
 import { searchScopeFor } from "@/lib/searchScope";
@@ -165,6 +166,7 @@ export function TopNav({
               )}
               <div className="border-t border-rule">
                 <SignOut className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper" />
+                <AppVersion className="block px-3 pb-2" />
               </div>
             </div>
           )}
