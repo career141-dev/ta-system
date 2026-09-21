@@ -9,6 +9,7 @@ import { Confirm } from "./Confirm";
 import { dateAt } from "@/lib/format";
 import { STAGE_LABEL } from "@/data/types";
 import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const OUTCOMES: { value: LinkOutcome; label: string }[] = [
   { value: "no_contact", label: "Not contacted" },
@@ -243,9 +244,7 @@ export function LinkRow({
                   </label>
                 </div>
                 <div className="flex flex-wrap items-center gap-3">
-                  <button className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
-                    Save
-                  </button>
+                  <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
                   {!onPipeline && (
                     <button
                       formAction={addLinkToPipeline}

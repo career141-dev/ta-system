@@ -279,7 +279,7 @@
       const res = await chrome.runtime.sendMessage({ type: "capture", profile });
       if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
-      setState(res.status === "updated" ? "Updated in the table" : "Added to the table", "ok");
+      setState(res.status === "updated" ? "Updated in the table" : "Shortlisted in the table", "ok");
     } catch (err) {
       setState(err.message.slice(0, 60), "bad");
     } finally {

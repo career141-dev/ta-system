@@ -8,6 +8,7 @@ import { primeStore } from "@/data/prime";
 import { pendingInvites, offDeskAccounts } from "@/lib/invites";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const PAGE_SIZE = 25;
 
@@ -71,7 +72,7 @@ export default async function PeoplePage({
             className={`${inputClass} w-[90px]`}
           />
           {canEdit && (
-            <button className="rounded-full border border-rule-strong px-5 py-2 text-[13px] font-medium">Save</button>
+            <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
           )}
         </form>
       </section>
@@ -92,7 +93,7 @@ export default async function PeoplePage({
             className={`${inputClass} w-[280px]`}
           />
           {canEdit && (
-            <button className="rounded-full border border-rule-strong px-5 py-2 text-[13px] font-medium">Save</button>
+            <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
           )}
         </form>
       </section>

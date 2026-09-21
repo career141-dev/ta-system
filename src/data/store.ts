@@ -32,6 +32,7 @@ import type {
   Database,
   Id,
   LinkVaultEntry,
+  LinkOutcome,
   BenchmarkEntry,
   ChatMessage,
   Assignment,
@@ -1811,7 +1812,13 @@ const rawRepo = {
     return { ok: true, applicationId: realId(applicationId), stage: "follow_up" };
   },
 
-  addLink(openingId: Id, url: string, addedBy: Id): Id {
+  /**
+   * A new Excel Tables row. Saved from the extension, pasted, or kept from
+   * Suggestions, the person arrives Shortlisted: someone chose them on purpose,
+   * and "Not contacted" made every saved profile look untouched (21 September).
+   * Shortlisted also marks the row as this TA's, so a colleague sees it is taken.
+   */
+  addLink(openingId: Id, url: string, addedBy: Id, outcome: LinkOutcome = "shortlisted"): Id {
     const id = `lv_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => {
       db.linkVault.push({
@@ -1826,7 +1833,7 @@ const rawRepo = {
         phoneNumber: null,
         phoneSource: null,
         sourcingChannel: "L",
-        outcome: "no_contact",
+        outcome,
         candidateId: null,
         conversationLog: [],
         createdAt: Date.now(),

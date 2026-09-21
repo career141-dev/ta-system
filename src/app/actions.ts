@@ -7,7 +7,7 @@ import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
-import { ASSIGNMENT_LABEL } from "@/data/types";
+import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
@@ -63,21 +63,44 @@ function candidateIdsIn(formData: FormData): string[] {
   return id ? [id] : [];
 }
 
-async function back(message: string): Promise<never> {
+/**
+ * Return to the page with something to say.
+ *
+ * The tone is carried beside the message so the banner can look like what
+ * happened: green for a save that worked, red for one that did not. Every
+ * message used to arrive in the same amber box, so "7 shortlisted" and "Only a
+ * lead can delete an opening" were indistinguishable at a glance (18
+ * September). `back` is the success (green), `fail` the refusal (red), `note`
+ * the in-between (amber) — done, but not the way that was asked.
+ */
+type Tone = "ok" | "error" | "note";
+
+async function back(message: string, tone: Tone = "ok"): Promise<never> {
   const ref = (await headers()).get("referer");
   let to = "/";
   if (ref) {
     try {
       const u = new URL(ref);
       u.searchParams.set("msg", message);
+      u.searchParams.set("tone", tone);
       to = u.pathname + u.search;
     } catch {
       /* an unreadable referer falls back to the dashboard */
     }
   } else {
-    to = `/?msg=${encodeURIComponent(message)}`;
+    to = `/?msg=${encodeURIComponent(message)}&tone=${tone}`;
   }
   redirect(to);
+}
+
+/** Back with a refusal: the same message, shown as an error. */
+async function fail(message: string): Promise<never> {
+  return back(message, "error");
+}
+
+/** Back with something that happened, but not as asked (amber). */
+async function note(message: string): Promise<never> {
+  return back(message, "note");
 }
 
 type RefKind = Parameters<typeof repo.openingOf>[0];
@@ -107,11 +130,11 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
   for (const [kind, field] of Object.entries(ref) as [keyof Ref, string][]) {
     if (kind === "opening" || kind === "candidate" || !field) continue;
     const id = String(formData.get(field) ?? "");
-    if (!id) await back("Something on this form was missing. Reload the page and try again.");
+    if (!id) await fail("Something on this form was missing. Reload the page and try again.");
     const hit = repo.openingOf(kind, id);
-    if (!hit.found) await back("That record no longer exists — it may have been removed.");
+    if (!hit.found) await fail("That record no longer exists — it may have been removed.");
     if (sentOpening && hit.openingId && hit.openingId !== sentOpening) {
-      await back("That record belongs to a different opening.");
+      await fail("That record belongs to a different opening.");
     }
     openingId = hit.openingId ?? openingId;
     ownerTaId = hit.ownerTaId ?? ownerTaId;
@@ -122,14 +145,14 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
     // any opening you can reach becomes a way to edit anybody in the database.
     const candidateId = String(formData.get(ref.candidate) ?? "");
     const onIt = !!openingId && repo.applications(openingId).some((a) => a.candidateId === candidateId);
-    if (!onIt) await back("That candidate is not on this opening.");
+    if (!onIt) await fail("That candidate is not on this opening.");
   }
 
-  if (openingId && !repo.opening(openingId)) await back("That opening no longer exists.");
+  if (openingId && !repo.opening(openingId)) await fail("That opening no longer exists.");
 
   const assignment = openingId ? repo.assignmentFor(openingId, user.id) ?? null : null;
   const decision = can(user, capability, { openingId, assignment, ownerTaId });
-  if (!decision.ok) await back(decision.message);
+  if (!decision.ok) await fail(decision.message);
   return user;
 }
 
@@ -155,13 +178,13 @@ export async function moveStage(formData: FormData) {
       openingId,
       assignment: repo.assignmentFor(openingId, user.id) ?? null,
     });
-    if (!verdict.ok) await back(verdict.message);
+    if (!verdict.ok) await fail(verdict.message);
   }
 
   // A rejection without a reason is a row nobody can learn from. The dedicated
   // Reject form asked for one; the generic menu let you skip it.
   if ((stage === "rejected" || stage === "dropped_out") && !reason.trim()) {
-    await back(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
+    await fail(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
   }
 
   if (isConvex()) {
@@ -171,14 +194,15 @@ export async function moveStage(formData: FormData) {
     try {
       await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
     } catch (e) {
-      await back(backendMessage(e, "That move could not be made."));
+      await fail(backendMessage(e, "That move could not be made."));
     }
     await afterBackendWrite(openingId);
-    return;
+    await back(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
   }
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
-  if (!res.ok) await back(res.message);
+  if (!res.ok) await fail(res.message);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
 }
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
@@ -206,16 +230,19 @@ export async function claimCandidate(formData: FormData) {
     try {
       r = await backend.shortlist({ id: user.id }, appId);
     } catch (e) {
-      await back(backendMessage(e, "Could not shortlist."));
+      await fail(backendMessage(e, "Could not shortlist."));
     }
     // Named before the store is dropped — reading `repo` after that would throw.
     const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
     await afterBackendWrite(openingId);
-    if (owner) await back(`${owner} already claimed this candidate.`);
-    return;
+    if (owner) await fail(`${owner} already claimed this candidate.`);
+    // It used to succeed in silence — the row simply moved away, which read
+    // as the button having done nothing (21 September).
+    await back(`Shortlisted${r?.ok && r.setNumber ? ` as set ${r.setNumber}` : ""} — moved to Follow-up.`);
   }
   repo.shortlist(appId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Shortlisted — moved to Follow-up.");
 }
 
 /**
@@ -231,12 +258,12 @@ export async function sendFollowUpNow(formData: FormData) {
   const raw = String(formData.get("channel") ?? "");
   // The WhatsApp and Email buttons send one channel; the older button sends both.
   const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
-  if (!isConvex()) await back("Sending needs the Convex store.");
+  if (!isConvex()) await fail("Sending needs the Convex store.");
   let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
   try {
     r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
   } catch (e) {
-    await back(backendMessage(e, "The follow-up could not be sent."));
+    await fail(backendMessage(e, "The follow-up could not be sent."));
   }
   await afterBackendWrite(openingId);
   const what =
@@ -251,6 +278,7 @@ export async function sendFollowUpNow(formData: FormData) {
       : r.kind === "initial" || r.sameRound
         ? `${what}. Delivery shows in the conversation in a few seconds.`
         : `${what} — follow-up ${r.attempt} of ${r.maxAttempts}.`,
+    r?.sent ? "ok" : "error",
   );
 }
 
@@ -262,7 +290,7 @@ export async function stopFollowUpNow(formData: FormData) {
   try {
     await convexMutation("ta/followUp:stop", { actorId: user.id, applicationId: appId });
   } catch (e) {
-    await back(backendMessage(e, "Could not stop the follow-up."));
+    await fail(backendMessage(e, "Could not stop the follow-up."));
   }
   await afterBackendWrite(openingId);
   await back("Follow-up stopped. Nothing further will be sent.");
@@ -278,7 +306,7 @@ export async function confirmShortlist(formData: FormData) {
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("appId").map(String);
-  if (ids.length === 0) await back("Tick at least one candidate.");
+  if (ids.length === 0) await fail("Tick at least one candidate.");
   const assignment = repo.assignmentFor(openingId, user.id) ?? null;
   let done = 0;
   let skipped = 0;
@@ -323,6 +351,7 @@ export async function logCall(formData: FormData) {
     recordedBy: user.id,
   });
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Call logged.");
 }
 
 export async function addLink(formData: FormData) {
@@ -330,8 +359,15 @@ export async function addLink(formData: FormData) {
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const url = String(formData.get("url") ?? "").trim();
-  if (url) repo.addLink(openingId, url, user.id);
+  // It used to return silently — an empty box did nothing and a saved link
+  // looked the same as an unsaved one (21 September).
+  if (!url) await fail("Paste a LinkedIn profile link first.");
+  const canonical = canonicalProfile(url);
+  const existing = canonical ? repo.findLinkByUrl(openingId, canonical) : undefined;
+  if (existing) await note(`${existing.name ?? "That profile"} is already in this table.`);
+  repo.addLink(openingId, canonical ? `https://www.${canonical}` : url, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Saved to Excel Tables as Shortlisted.");
 }
 
 export async function toggleEyeMark(formData: FormData) {
@@ -566,6 +602,7 @@ export async function saveBriefNotes(formData: FormData) {
   const user = await getCurrentUser();
   saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Notes saved.");
 }
 
 /**
@@ -637,7 +674,7 @@ export async function approveJd(formData: FormData) {
     try {
       await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined);
     } catch (e) {
-      await back(backendMessage(e, "The JD could not be approved."));
+      await fail(backendMessage(e, "The JD could not be approved."));
     }
     after(async () => {
       await rematchWhenRequirementsSettle(openingId, user.id);
@@ -700,7 +737,7 @@ export async function amendJd(formData: FormData) {
       try {
         r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
       } catch (e) {
-        await back(backendMessage(e, "The JD could not be saved."));
+        await fail(backendMessage(e, "The JD could not be saved."));
       }
       if (r?.reextracting) after(() => rematchWhenRequirementsSettle(openingId, user.id));
     }
@@ -782,14 +819,14 @@ export async function saveJobDetails(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  if (!isConvex()) await back("Job details need the Convex store.");
+  if (!isConvex()) await fail("Job details need the Convex store.");
 
   const minYears = optionalNumber(formData, "experienceMinYears");
   const maxYears = optionalNumber(formData, "experienceMaxYears");
   const salaryMin = optionalNumber(formData, "salaryMin");
   const salaryMax = optionalNumber(formData, "salaryMax");
   if ([minYears, maxYears, salaryMin, salaryMax].some((n) => Number.isNaN(n))) {
-    await back("Years and salary must be numbers.");
+    await fail("Years and salary must be numbers.");
   }
   try {
     await convexMutation("ta/requirements:save", {
@@ -813,7 +850,7 @@ export async function saveJobDetails(formData: FormData) {
       languagesRequired: listField(formData, "languagesRequired"),
     });
   } catch (e) {
-    await back(backendMessage(e, "The job details could not be saved."));
+    await fail(backendMessage(e, "The job details could not be saved."));
   }
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
@@ -828,7 +865,7 @@ export async function reextractJobDetails(formData: FormData) {
   try {
     await convexMutation("ta/requirements:reextract", { actorId: user.id, openingId });
   } catch (e) {
-    await back(backendMessage(e, "Could not start the extraction."));
+    await fail(backendMessage(e, "Could not start the extraction."));
   }
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
@@ -844,8 +881,9 @@ export async function addJobPost(formData: FormData) {
   const where = String(formData.get("channel") ?? "linkedin");
   const channel = (["linkedin", "facebook", "email_campaign"] as const).find((c) => c === where) ?? "linkedin";
   const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel);
-  if (!r.ok) await back(r.message);
+  if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back(`Job post "${title}" added.`);
 }
 
 export async function updatePost(formData: FormData) {
@@ -861,8 +899,9 @@ export async function updatePost(formData: FormData) {
   const assignedTaId = String(formData.get("assignedTaId") ?? "") || null;
   const r = repo.updatePost(postId, { aliasKeywords: aliases, country, assignedTaId });
   // A refusal is shown, not swallowed.
-  if (!r.ok) await back(r.message);
+  if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Job post saved.");
 }
 
 export async function setPostStatus(formData: FormData) {
@@ -873,7 +912,7 @@ export async function setPostStatus(formData: FormData) {
   const status = String(formData.get("status")) as "draft" | "live" | "paused" | "closed";
   const r = repo.updatePost(postId, { status, postedAt: status === "live" ? Date.now() : undefined });
   // "Set live" before the JD is approved used to fail with no message at all.
-  if (!r.ok) await back(r.message);
+  if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
@@ -931,6 +970,7 @@ export async function updateLink(formData: FormData) {
   const company = String(formData.get("company") ?? "").trim() || null;
   repo.updateLink(entryId, { outcome, phoneNumber, phoneSource, name, company });
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back(name ? `${name} saved.` : "Saved.");
 }
 
 export async function logOutreach(formData: FormData) {
@@ -940,8 +980,10 @@ export async function logOutreach(formData: FormData) {
   const entryId = String(formData.get("entryId"));
   const note = String(formData.get("note") ?? "").trim();
   const channel = String(formData.get("channel") ?? "linkedin");
-  if (note) repo.logOutreach(entryId, user.id, channel, note);
+  if (!note) await fail("Write what happened first — the note is what gets logged.");
+  repo.logOutreach(entryId, user.id, channel, note);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Logged.");
 }
 
 
@@ -972,9 +1014,9 @@ export async function addLinkToPipeline(formData: FormData) {
   }
 
   const made = repo.linkToApplication(entryId, user.id);
-  if (!made.ok) return back(made.message);
+  if (!made.ok) return fail(made.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  if (made.stage !== "follow_up") return back("Already on the pipeline past Follow-up.");
+  if (made.stage !== "follow_up") return note("Already on the pipeline past Follow-up.");
 
   if (isConvex()) {
     let problem: string | null = null;
@@ -986,12 +1028,12 @@ export async function addLinkToPipeline(formData: FormData) {
       problem = `On the pipeline at Follow-up, not yet in Director review: ${backendMessage(e, "the move could not be made.")}`;
     }
     await afterBackendWrite(openingId);
-    return back(problem ?? "Moved to Director review.");
+    return problem ? note(problem) : back("Moved to Director review.");
   }
   repo.shortlist(made.applicationId, user.id);
   const moved = repo.moveStage(made.applicationId, "director_review", user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
-  return back(moved.ok ? "Moved to Director review." : `On the pipeline at Follow-up: ${moved.message}`);
+  return moved.ok ? back("Moved to Director review.") : note(`On the pipeline at Follow-up: ${moved.message}`);
 }
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
@@ -1169,6 +1211,7 @@ export async function updateClient(formData: FormData) {
   }
   revalidatePath("/clients");
   revalidatePath("/openings/new");
+  await back("Client saved.");
 }
 
 export async function deleteClient(formData: FormData) {
@@ -1225,6 +1268,7 @@ export async function saveContacts(formData: FormData) {
     repo.setContacts(clientId, contacts);
   }
   revalidatePath("/clients");
+  await back("Contacts saved.");
 }
 
 // ─── Deletes and edits (12 Sep sweep) ────────────────────────────────────────
@@ -1234,7 +1278,7 @@ export async function deleteOpening(formData: FormData) {
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   // Deleting a whole role and everything under it is a desk decision, not one
   // recruiter's.
-  if (!isDeskWide(user)) await back("Only a lead, director or admin can delete an opening. Close it instead.");
+  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
   const openingId = String(formData.get("openingId"));
   let title = repo.opening(openingId)?.title ?? "The opening";
   if (isConvex()) {
@@ -1244,13 +1288,13 @@ export async function deleteOpening(formData: FormData) {
       const r = await convexMutation<{ ok: true; title: string }>("ta/openingDelete:start", { actorId: user.id, openingId });
       title = r.title;
     } catch (e) {
-      await back(backendMessage(e, "The opening could not be deleted."));
+      await fail(backendMessage(e, "The opening could not be deleted."));
     }
     const { resetStore } = await import("@/data/prime");
     resetStore();
   } else {
     const r = repo.deleteOpening(openingId);
-    if (!r.ok) await back(r.message);
+    if (!r.ok) await fail(r.message);
   }
   revalidatePath("/", "layout");
   redirect(`/openings?msg=${encodeURIComponent(`"${title}" deleted. Its candidates are still in the database.`)}`);
@@ -1273,16 +1317,16 @@ export async function updateOpening(formData: FormData) {
     return Number.isFinite(n) && n > 0 ? n : null;
   };
   const title = String(formData.get("title") ?? "").trim();
-  if (!title) await back("An opening needs a title.");
+  if (!title) await fail("An opening needs a title.");
   const salaryMin = num(formData.get("salaryMin"));
   const salaryMax = num(formData.get("salaryMax"));
   if (salaryMin !== null && salaryMax !== null && salaryMin > salaryMax) {
-    await back("The salary 'from' is higher than the 'to'.");
+    await fail("The salary 'from' is higher than the 'to'.");
   }
   const tier = String(formData.get("priorityTier") ?? "P3");
-  if (!["P1", "P2", "P3", "P4", "P5"].includes(tier)) await back("Pick a priority from the list.");
+  if (!["P1", "P2", "P3", "P4", "P5"].includes(tier)) await fail("Pick a priority from the list.");
   const currency = String(formData.get("salaryCurrency") ?? "LKR");
-  if (!/^[A-Z]{3}$/.test(currency)) await back("Pick a currency from the list.");
+  if (!/^[A-Z]{3}$/.test(currency)) await fail("Pick a currency from the list.");
 
   repo.updateOpening(openingId, {
     title,
@@ -1296,6 +1340,7 @@ export async function updateOpening(formData: FormData) {
     priorityTier: String(formData.get("priorityTier") ?? "P3") as PriorityTier,
   });
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back("Opening saved.");
 }
 
 export async function deleteJobPost(formData: FormData) {
@@ -1319,7 +1364,7 @@ export async function removeApplication(formData: FormData) {
   await authorize(formData, "opening.manage", { application: "appId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = repo.removeApplication(String(formData.get("appId")));
-  if (!r.ok) await back(r.message);
+  if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(`/openings/${openingId}`);
 }
@@ -1334,6 +1379,7 @@ export async function updateCandidateContact(formData: FormData) {
   const raw = String(formData.get("value") ?? "").trim();
   repo.updateCandidateContact(String(formData.get("candidateId")), { [field]: raw || null });
   revalidatePath(`/openings/${openingId}`, "layout");
+  await back(field === "email" ? "Email saved." : "Phone saved.");
 }
 
 // ─── Interviews ──────────────────────────────────────────────────────────────
@@ -1354,12 +1400,12 @@ export async function scheduleInterview(formData: FormData) {
 
   const date = String(formData.get("date") ?? "").trim();
   const time = String(formData.get("time") ?? "").trim();
-  if (!date || !time) await back("An interview needs a date and a time.");
+  if (!date || !time) await fail("An interview needs a date and a time.");
 
   // Read as Colombo time, not the server's zone — a server in another region
   // would otherwise shift every interview and every reminder (audit finding 16).
   const scheduledAt = colomboLocalToInstant(`${date}T${time}`);
-  if (scheduledAt === null) return back("That date or time could not be read.");
+  if (scheduledAt === null) return fail("That date or time could not be read.");
 
   const booked = repo.scheduleInterview({
     applicationId: appId,
@@ -1373,7 +1419,7 @@ export async function scheduleInterview(formData: FormData) {
     notes: String(formData.get("notes") ?? "").trim() || null,
     byUserId: user.id,
   });
-  if (!booked.ok) await back(booked.message);
+  if (!booked.ok) await fail(booked.message);
 
   revalidatePath(`/openings/${openingId}`, "layout");
 }
@@ -1514,7 +1560,7 @@ async function saveRoster(run: () => Promise<unknown>, done: string): Promise<ne
     // The backend's own message ("last active admin", "already has an account").
     const raw = (e as Error).message ?? "";
     const why = raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160);
-    await back(why || "That change could not be saved.");
+    await fail(why || "That change could not be saved.");
   }
   const { refreshUsers } = await import("@/data/prime");
   await refreshUsers();
@@ -1524,7 +1570,7 @@ async function saveRoster(run: () => Promise<unknown>, done: string): Promise<ne
 
 async function adminOnly(formData: FormData): Promise<User> {
   const actor = await authorize(formData, "user.manage");
-  if (actor.role !== "admin") await back("Only an admin can manage people and roles.");
+  if (actor.role !== "admin") await fail("Only an admin can manage people and roles.");
   return actor;
 }
 
@@ -1532,9 +1578,9 @@ export async function addUser(formData: FormData) {
   await primeStore({ allApplications: true });
   const actor = await adminOnly(formData);
   const p = personFrom(formData);
-  if (!p.name) await back("A name is required.");
-  if (!p.email) await back("An email is required — it is what they sign in with.");
-  if (!p.role) await back("Pick a role.");
+  if (!p.name) await fail("A name is required.");
+  if (!p.email) await fail("An email is required — it is what they sign in with.");
+  if (!p.role) await fail("Pick a role.");
   if (!isConvex()) {
     repo.addUser({ name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
     revalidatePath("/people");
@@ -1553,7 +1599,7 @@ export async function updateUser(formData: FormData) {
   const actor = await adminOnly(formData);
   const userId = String(formData.get("userId") ?? "");
   const p = personFrom(formData);
-  if (!userId || !p.name || !p.email || !p.role) await back("Name, email and role are all required.");
+  if (!userId || !p.name || !p.email || !p.role) await fail("Name, email and role are all required.");
   if (!isConvex()) {
     repo.updateUser(userId, { name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
     revalidatePath("/people");
@@ -1578,13 +1624,13 @@ export async function inviteUser(formData: FormData) {
   await primeStore({ allApplications: true });
   const actor = await adminOnly(formData);
   const p = personFrom(formData);
-  if (!p.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) await back("Enter the email address to invite.");
-  if (!p.role) await back("Pick a role.");
+  if (!p.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.email)) await fail("Enter the email address to invite.");
+  if (!p.role) await fail("Pick a role.");
   const name = p.name || p.email.split("@")[0];
-  if (!isConvex()) await back("Invites need the Convex store (C141_STORE=convex).");
+  if (!isConvex()) await fail("Invites need the Convex store (C141_STORE=convex).");
 
   const existing = repo.users().find((u) => u.email.trim().toLowerCase() === p.email);
-  if (existing?.id === actor.id && p.role !== "admin") await back("You can't change your own role here.");
+  if (existing?.id === actor.id && p.role !== "admin") await fail("You can't change your own role here.");
   try {
     await freshAfter(convexMutation)("ta/users:adminSaveUser", {
       actorId: actor.id,
@@ -1600,7 +1646,7 @@ export async function inviteUser(formData: FormData) {
     }
   } catch (e) {
     const raw = (e as Error).message ?? "";
-    await back(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
+    await fail(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
   }
   const { refreshUsers } = await import("@/data/prime");
   await refreshUsers();
@@ -1608,7 +1654,7 @@ export async function inviteUser(formData: FormData) {
 
   const { sendInvite } = await import("@/lib/invites");
   const sent = await sendInvite(p.email, p.role!);
-  await back(sent.ok ? `Invite sent to ${p.email} as ${p.role}.` : `Role saved for ${p.email}. ${sent.reason}`);
+  await back(sent.ok ? `Invite sent to ${p.email} as ${p.role}.` : `Role saved for ${p.email}. ${sent.reason}`, sent.ok ? "ok" : "note");
 }
 
 /** Withdraw an invite link. Their roster entry stays; mark them as left to remove access too. */
@@ -1616,11 +1662,11 @@ export async function revokeUserInvite(formData: FormData) {
   await primeStore({ allApplications: true });
   await adminOnly(formData);
   const id = String(formData.get("invitationId") ?? "");
-  if (!id) await back("That invite could not be found.");
+  if (!id) await fail("That invite could not be found.");
   const { revokeInvite } = await import("@/lib/invites");
   const r = await revokeInvite(id);
   revalidatePath("/people");
-  await back(r.ok ? "Invite revoked. Mark them as left too if they should not get in." : r.reason);
+  await back(r.ok ? "Invite revoked. Mark them as left too if they should not get in." : r.reason, r.ok ? "ok" : "error");
 }
 
 export async function setUserActive(formData: FormData) {
@@ -1685,6 +1731,7 @@ export async function saveSearch(formData: FormData) {
     repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count });
   }
   revalidatePath("/database", "layout");
+  await back(`Search saved as "${name}".`);
 }
 
 export async function deleteSearch(formData: FormData) {
@@ -1724,7 +1771,7 @@ export async function addToOpening(formData: FormData) {
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const candidateId = String(formData.get("candidateId"));
   const openingId = String(formData.get("openingId"));
-  if (!openingId) await back("Pick an opening.");
+  if (!openingId) await fail("Pick an opening.");
   const title = repo.opening(openingId)?.title ?? "the opening";
   const refresh = () => {
     revalidatePath("/database", "layout");
@@ -1735,23 +1782,23 @@ export async function addToOpening(formData: FormData) {
   const onOpening = () => repo.applications(openingId).find((a) => a.candidateId === candidateId);
   const existing = onOpening();
   if (existing && !["matched", "new_cv"].includes(existing.stage)) {
-    await back(`Already in ${title}'s pipeline.`);
+    await note(`Already in ${title}'s pipeline.`);
   }
   if (existing?.ownerTaId && existing.ownerTaId !== user.id) {
     const owner = repo.users().find((u) => u.id === existing.ownerTaId)?.name ?? "another recruiter";
-    await back(`${owner} has already claimed this candidate on ${title}.`);
+    await fail(`${owner} has already claimed this candidate on ${title}.`);
   }
   if (!existing) {
     const r = repo.addCandidateToOpening(candidateId, openingId, user.id);
     if (!r.ok) {
       refresh();
-      await back(r.reason ?? "Could not add them.");
+      await fail(r.reason ?? "Could not add them.");
     }
   }
   const appId = onOpening()?.id;
   if (!appId) {
     refresh();
-    await back("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.");
+    await fail("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.");
   }
 
   if (isConvex()) {
@@ -1767,14 +1814,14 @@ export async function addToOpening(formData: FormData) {
     const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
     await afterBackendWrite(openingId);
     refresh();
-    if (problem) await back(`Added to ${title} under Database CVs, but not moved to Follow-up: ${problem}`);
-    if (owner) await back(`${owner} has already claimed this candidate on ${title}.`);
+    if (problem) await note(`Added to ${title} under Database CVs, but not moved to Follow-up: ${problem}`);
+    if (owner) await fail(`${owner} has already claimed this candidate on ${title}.`);
     await back(`Added to ${title} in Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
   }
 
   const claimed = repo.shortlist(appId!, user.id);
   refresh();
-  if (!claimed.ok) await back("Somebody else claimed this candidate first.");
+  if (!claimed.ok) await fail("Somebody else claimed this candidate first.");
   await back(`Added to ${title} in Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
 }
 
@@ -1911,13 +1958,14 @@ export async function keepSuggestion(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const id = String(formData.get("suggestionId"));
   const s = repo.suggestions(openingId).find((x) => x.id === id);
-  if (!s) return;
+  if (!s) await fail("That suggestion is no longer there — the list may have been regenerated.");
   repo.setSuggestionStatus(id, "kept", "more_like_this", user.id);
-  if (s.linkedinUrl) {
-    const entryId = repo.addLink(openingId, s.linkedinUrl, user.id);
-    repo.updateLink(entryId, { name: s.name, title: s.headline, company: s.company });
+  if (s!.linkedinUrl) {
+    const entryId = repo.addLink(openingId, s!.linkedinUrl, user.id);
+    repo.updateLink(entryId, { name: s!.name, title: s!.headline, company: s!.company });
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
+  await back(`${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
 }
 
 export async function dismissSuggestion(formData: FormData) {
@@ -2119,6 +2167,7 @@ export async function editResearchField(formData: FormData) {
     isList ? value.split(/[;\n]/).map((x) => x.trim()).filter(Boolean) : value,
   );
   revalidatePath(`/openings/${openingId}/hh/research`);
+  await back("Saved.");
 }
 
 // ─── The assistant (spec §8A.3) ──────────────────────────────────────────────
@@ -2390,7 +2439,7 @@ export async function recordFollowUpCall(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const outcome = String(formData.get("outcome") ?? "") as FollowUpCallOutcome;
   if (!["no_answer", "answered", "callback", "will_send", "not_interested"].includes(outcome)) {
-    await back("Pick how the call went.");
+    await fail("Pick how the call went.");
   }
   const when = String(formData.get("promisedAt") ?? "").trim();
   const r = repo.recordCallOutcome({
@@ -2400,7 +2449,7 @@ export async function recordFollowUpCall(formData: FormData) {
     note: String(formData.get("note") ?? ""),
     byUserId: user.id,
   });
-  if (!r.ok) await back(r.message);
+  if (!r.ok) await fail(r.message);
   revalidatePath("/alerts");
   redirect(`/openings/${openingId}/candidate/${appId}?tab=call`);
 }
@@ -2438,12 +2487,12 @@ export async function saveReviewDetails(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const app = repo.application(String(formData.get("applicationId")));
-  if (!app) return back("That application no longer exists.");
+  if (!app) return fail("That application no longer exists.");
   const currentSalary = String(formData.get("currentSalary") ?? "").trim();
   const expectedSalary = String(formData.get("expectedSalary") ?? "").trim();
   const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
   const notice = noticeRaw === "" ? null : Number(noticeRaw);
-  if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return back("Notice period is a number of days, 0 or more.");
+  if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return fail("Notice period is a number of days, 0 or more.");
   repo.updateCandidate(app.candidateId, {
     ...(currentSalary ? { currentSalary } : {}),
     ...(expectedSalary ? { expectedSalary } : {}),
@@ -2466,7 +2515,7 @@ export async function setOpeningAutoFollowUp(formData: FormData) {
     try {
       await backend.setAutoFollowUp({ id: user.id }, openingId, enabled);
     } catch (e) {
-      await back(backendMessage(e, "Automatic follow-up could not be changed."));
+      await fail(backendMessage(e, "Automatic follow-up could not be changed."));
     }
     await afterBackendWrite(openingId);
   } else {
@@ -2505,7 +2554,7 @@ export async function setAutoShortlistScore(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const n = Math.round(Number(formData.get("score")));
-  if (!Number.isFinite(n) || n < 40 || n > 100) await back("Pick a score between 40 and 100.");
+  if (!Number.isFinite(n) || n < 40 || n > 100) await fail("Pick a score between 40 and 100.");
   repo.setSetting("autoShortlistScore", String(n));
   revalidatePath("/", "layout");
   await back(`Pre-shortlist score set to ${n}.`);
@@ -2520,7 +2569,7 @@ export async function findMatchesNow(formData: FormData) {
   const r = await findDatabaseMatches(openingId, "manual");
   revalidatePath(`/openings/${openingId}`, "layout");
   if (!r.ok || !r.run) {
-    await back(r.reason === "jd_not_approved" ? "Approve the JD first — matching reads it." : `Matching did not run (${r.reason}).`);
+    await fail(r.reason === "jd_not_approved" ? "Approve the JD first — matching reads it." : `Matching did not run (${r.reason}).`);
   }
   await back(`${r.run!.added} added from ${r.run!.considered} nearest; ${r.run!.afterRules} passed the rules.`);
 }
@@ -2912,7 +2961,7 @@ export async function setEodCopy(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
   const v = String(formData.get("eodCc") ?? "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(v)) await back("That is not an email address.");
+  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(v)) await fail("That is not an email address.");
   repo.setSetting("eodCc", v);
   revalidatePath("/people");
   revalidatePath("/openings", "layout");
@@ -3021,7 +3070,7 @@ export async function readInboundReply(formData: FormData) {
   const back = (m: string) =>
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(m)}`);
 
-  if (!from || !body) back("Needs at least who it came from and what they said.");
+  if (!from || !body) fail("Needs at least who it came from and what they said.");
 
   const { classifyInbound, matchReviewReply } = await import("@/lib/routing");
 
@@ -3031,8 +3080,8 @@ export async function readInboundReply(formData: FormData) {
   if (to) {
     const kindOf = classifyInbound(to, repo.users(), repo.shortlistInbox());
     if (kindOf.kind === "application")
-      back("That came to an applications inbox, not the shortlist box — it is a CV, not a decision.");
-    if (kindOf.kind === "not_ours") back(`Nothing of ours receives at ${to}.`);
+      fail("That came to an applications inbox, not the shortlist box — it is a CV, not a decision.");
+    if (kindOf.kind === "not_ours") fail(`Nothing of ours receives at ${to}.`);
   }
 
   // The sender and subject say which job and whether it is the Director or
@@ -3046,7 +3095,7 @@ export async function readInboundReply(formData: FormData) {
       users: repo.users(),
     },
   );
-  if (!target.round) back(`Could not place that reply. ${target.note}`);
+  if (!target.round) fail(`Could not place that reply. ${target.note}`);
   const round = target.round!;
   const o = repo.opening(round.openingId);
   back(`${o?.title ?? "That job"} (${round.kind}): ${await readReplyFor(round.openingId, round.kind, body, round.id)}`);
@@ -3174,7 +3223,7 @@ export async function setMailboxEnabled(formData: FormData) {
   try {
     await backend.setMailboxEnabled(mailbox, enabled);
   } catch (e) {
-    await back(backendMessage(e, "The mailbox could not be changed."));
+    await fail(backendMessage(e, "The mailbox could not be changed."));
   }
   revalidatePath("/settings");
   await back(enabled ? `${mailbox} is being read. The first sync imports the last 30 days.` : `${mailbox} is no longer read.`);
@@ -3187,7 +3236,7 @@ export async function syncMailboxNow(formData: FormData) {
   try {
     await backend.syncMailboxNow(mailbox);
   } catch (e) {
-    await back(backendMessage(e, "The sync could not be started."));
+    await fail(backendMessage(e, "The sync could not be started."));
   }
   revalidatePath("/settings");
   await back(`Syncing ${mailbox}. New messages appear below within a minute; each waits 20 minutes before it is filed.`);

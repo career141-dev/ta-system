@@ -114,3 +114,41 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .c141-score-pop, .c141-score-ring { animation: none; }
 }
+
+/* The message banner (components/Flash.tsx) drops in from the top so a save
+   that returns you to the same page visibly answers. */
+@keyframes c141-flash-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.c141-flash-in { animation: c141-flash-in 0.22s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .c141-flash-in { animation: none; }
+}
+
+/* Every button reads as one (21 September). Tailwind v4 dropped the pointer
+   cursor on buttons, no button had a keyboard focus ring or a pressed state,
+   so across ~60 hand-written styles a "Save" felt like a label. These apply to
+   all of them at once; a component's own classes still win where they set the
+   same thing. */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+  button:focus-visible,
+  a:focus-visible,
+  summary:focus-visible {
+    outline: 2px solid #34705a; /* brand-line; @theme inline emits no variable */
+    outline-offset: 2px;
+  }
+  button:not(:disabled):active {
+    transform: translateY(1px);
+  }
+}

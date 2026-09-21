@@ -3,6 +3,8 @@
 import { externalUrl } from "@/lib/url";
 import { useState } from "react";
 import { keepSuggestion, dismissSuggestion } from "@/app/actions";
+import { SubmitButton } from "@/components/SubmitButton";
+import { BUTTON } from "@/components/buttonStyles";
 import type { ProfileSuggestion } from "@/data/types";
 
 /**
@@ -87,12 +89,13 @@ export function ProfilePanel({
               <form action={keepSuggestion}>
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="suggestionId" value={s.id} />
-                <button
-                  disabled={!s.linkedinUrl}
-                  className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:bg-rule-strong"
-                >
-                  Add to the list
-                </button>
+                {s.linkedinUrl ? (
+                  <SubmitButton pendingLabel="Adding…">Add to the list</SubmitButton>
+                ) : (
+                  <button type="button" disabled title="No profile URL to add" className={BUTTON.primary}>
+                    Add to the list
+                  </button>
+                )}
               </form>
               <form action={dismissSuggestion}>
                 <input type="hidden" name="openingId" value={openingId} />

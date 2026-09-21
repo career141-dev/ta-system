@@ -4,6 +4,7 @@ import { useState } from "react";
 import { approveJd, generateJdWithModel, saveBriefNotes } from "@/app/actions";
 import { inputClass } from "./form";
 import { BriefRecorder } from "./BriefRecorder";
+import { SubmitButton } from "@/components/SubmitButton";
 
 /**
  * Screen two, and the TA's whole job in one place: notes in, JD out, approved.
@@ -83,9 +84,7 @@ export function JdScreen({
             className={`${inputClass} leading-[1.75]`}
           />
           <div className="mt-4 flex flex-wrap items-center gap-4">
-            <button className="rounded-full border border-rule-strong px-4 py-2 text-[12.5px] font-medium text-ink transition-colors hover:border-ink-faint">
-              Save notes
-            </button>
+            <SubmitButton pendingLabel="Saving…">Save notes</SubmitButton>
             {extractedSummary.length > 0 && (
               <span className="text-[12px] text-ink-faint">
                 Read from these:{" "}

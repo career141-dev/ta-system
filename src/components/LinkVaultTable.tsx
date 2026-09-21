@@ -4,6 +4,7 @@ import { LinkRow } from "./LinkRow";
 import { scopeLinks } from "@/lib/visibility";
 import type { User } from "@/data/types";
 import { Pager } from "./Pager";
+import { SubmitButton } from "./SubmitButton";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 
 const PAGE_SIZE = 25;
@@ -56,9 +57,9 @@ export function LinkVaultTable({
             className="w-full rounded-lg border border-rule bg-surface px-3.5 py-3 text-[13.5px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand"
           />
         </label>
-        <button className="rounded-lg bg-brand px-8 py-3 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+        <SubmitButton pendingLabel="Adding…" className="!rounded-lg !px-8 !py-3 !text-[13px]">
           Add to table
-        </button>
+        </SubmitButton>
       </form>
 
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">

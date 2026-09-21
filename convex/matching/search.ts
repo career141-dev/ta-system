@@ -54,15 +54,11 @@ export const searchCandidates = query({
       resumeResults = [];
     }
 
-    // If search indexes are currently bootstrapping, fallback to recent candidates to ensure zero empty state
-    if (titleResults.length === 0 && skillsResults.length === 0 && summaryResults.length === 0) {
-      try {
-        const recentCand = await ctx.db.query("candidates").order("desc").take(limit);
-        titleResults = recentCand;
-      } catch (e) {
-        // Continue
-      }
-    }
+    // No "recent candidates" stand-in when the indexes find nothing. It used to
+    // return the 20 newest CVs weighted as title matches (+100), so a search
+    // with no real hits — or one whose only hits were in CV text (+50) —
+    // showed unrelated people above the genuine ones (21 September). An empty
+    // answer is the truthful one; the search screens say "nothing matched".
 
     const resumeCandidateIds: { candidateId: Id<"candidates">; resumeId: Id<"candidateResumes"> }[] = [];
     for (const res of resumeResults) {

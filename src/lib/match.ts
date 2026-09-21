@@ -112,20 +112,34 @@ export function matchCandidate(
   }
   if (crit.maxExperience !== null && (c.totalExperienceYears ?? 0) > crit.maxExperience) return null;
 
-  if (crit.minAge !== null && (c.age ?? 0) < crit.minAge) return null;
-  if (crit.maxAge !== null && (c.age ?? 999) > crit.maxAge) return null;
-  if (crit.minAge !== null || crit.maxAge !== null) hits.push(`aged ${c.age}`);
+  /*
+   * Age, gender, notice and English are rarely on a CV record. A missing value
+   * used to count as a fail — "(noticePeriodDays ?? 999) > 30" — so asking for
+   * "immediate joiners" or "fluent English" emptied a search the engine had
+   * filled (21 September). As with salary below: a known value that fails
+   * hides the person; an unknown one keeps them and says so on the row.
+   */
+  if (crit.minAge !== null || crit.maxAge !== null) {
+    if (c.age == null) misses.push("age not on file");
+    else if ((crit.minAge !== null && c.age < crit.minAge) || (crit.maxAge !== null && c.age > crit.maxAge)) return null;
+    else hits.push(`aged ${c.age}`);
+  }
 
-  if (crit.gender && (c.gender ?? "").toLowerCase() !== crit.gender.toLowerCase()) return null;
+  if (crit.gender) {
+    if (!c.gender) misses.push("gender not on file");
+    else if (c.gender.toLowerCase() !== crit.gender.toLowerCase()) return null;
+  }
 
   if (crit.maxNoticeDays !== null) {
-    if ((c.noticePeriodDays ?? 999) > crit.maxNoticeDays) return null;
-    hits.push(`${c.noticePeriodDays}-day notice`);
+    if (c.noticePeriodDays == null) misses.push("notice not on file");
+    else if (c.noticePeriodDays > crit.maxNoticeDays) return null;
+    else hits.push(`${c.noticePeriodDays}-day notice`);
   }
 
   if (crit.minEnglish !== null) {
-    if ((c.englishLevel ?? 0) < crit.minEnglish) return null;
-    hits.push(`English ${c.englishLevel}`);
+    if (c.englishLevel == null) misses.push("English level not on file");
+    else if (c.englishLevel < crit.minEnglish) return null;
+    else hits.push(`English ${c.englishLevel}`);
   }
 
   if (crit.maxExpectedSalary !== null) {
@@ -138,7 +152,10 @@ export function matchCandidate(
   }
 
   if (crit.locations.length) {
-    const ok = crit.locations.some((l) => (c.location ?? "").toLowerCase() === l.toLowerCase());
+    // A place is held as the CV wrote it — "Colombo 3, Sri Lanka" — and asked
+    // for as a city, so it is a word inside the address, not the whole of it.
+    const where = (c.location ?? "").toLowerCase();
+    const ok = crit.locations.some((l) => where.includes(l.toLowerCase()));
     if (!ok) return null;
     hits.push(c.location!);
   }
