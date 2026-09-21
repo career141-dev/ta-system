@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { addJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
@@ -56,7 +56,10 @@ export function ProjectSidebar({
   const base = `/openings/${openingId}`;
   const jobBase = `${base}/linkedin-job`;
   const inHeadhunting = path.startsWith(`${base}/hh`);
-  const inPipeline = path.startsWith(`${base}/pipeline`);
+  // Reference lives under Follow-up (testing, 21 Sep): referees are checked
+  // for the people being followed up, so it opens the Pipeline group too.
+  const inReference = path === `${base}/reference`;
+  const inPipeline = path.startsWith(`${base}/pipeline`) || inReference;
   const inJob = path.startsWith(jobBase);
   const activePost = inJob ? search.get("post") : null;
 
@@ -83,7 +86,6 @@ export function ProjectSidebar({
     // moment it was signed off.
     { href: `${base}/jd`, label: "Job description" },
     { href: `${base}/database`, label: "Database CVs" },
-    { href: `${base}/reference`, label: "Reference" },
     { href: `${base}/snippets`, label: "Snippets" },
     // The Director and client round trips live on the end-of-day email
     // rather than a screen of their own: the set goes out on the email the
@@ -169,9 +171,16 @@ export function ProjectSidebar({
             {pipeOpen && (
               <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                 {PIPELINE_STAGES.map((s) => (
-                  <Link key={s} href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
-                    {STAGE_LABEL[s]}
-                  </Link>
+                  <Fragment key={s}>
+                    <Link href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
+                      {STAGE_LABEL[s]}
+                    </Link>
+                    {s === "follow_up" && canSeeSourcing && (
+                      <Link href={`${base}/reference`} className={`${sub(inReference)} ml-3 gap-1.5`}>
+                        <span aria-hidden="true" className="text-ink-faint">└</span> Reference
+                      </Link>
+                    )}
+                  </Fragment>
                 ))}
                 <div className="my-1.5 border-t border-rule" />
                 {CLOSED_STAGES.map((s) => (

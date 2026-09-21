@@ -72,7 +72,6 @@ export function shortlistRows(
       {
         no: i + 1,
         name: c.fullName,
-        location: c.location ?? "",
         age: c.age ? String(c.age) : "",
         // Zero days is "immediate", which is the best answer there is — it was
         // printed as a blank (audit finding 28).

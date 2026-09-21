@@ -9,7 +9,6 @@ import type { Id } from "@/data/types";
 export interface ShortlistRow {
   no: number;
   name: string;
-  location: string;
   age: string;
   notice: string;
   notes: string[];
@@ -38,7 +37,8 @@ export interface EffortRow {
 export const SHORTLIST_COLUMNS = [
   "NO",
   "NAME",
-  "LOCATION",
+  // LOCATION was the candidate's home address — clutter to a Director, and
+  // not ours to send round (testing review, 21 Sep).
   "AGE",
   "NOTICE",
   "NOTES",
@@ -103,7 +103,7 @@ export function eodEmailHtml(input: {
     input.rows
       .map(
         (r) =>
-          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.location)}</td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(esc).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
+          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(esc).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
       )
       .join(""),
   );

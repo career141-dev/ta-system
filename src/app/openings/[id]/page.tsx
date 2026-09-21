@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { openingFacts } from "./ProjectHeader";
 import Link from "next/link";
 import { HealthBar } from "@/components/HealthBar";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
@@ -104,8 +105,7 @@ export default async function OverviewPage({
         <div>
           <h1 className="text-[21px] font-semibold tracking-tight">Overview</h1>
           <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-            {o.locations.join(", ")} · {o.packageNotes}
-            {o.targetNationalities.length > 0 && ` · ${o.targetNationalities.join(", ")} only`}
+            {openingFacts(o)}
           </p>
         </div>
         <div className="flex shrink-0 gap-9 text-right">

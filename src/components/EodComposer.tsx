@@ -163,7 +163,6 @@ export function EodComposer({
                     <tr key={r.applicationId}>
                       <td className={`${td} tabular`}>{r.no}</td>
                       <td className={`${td} whitespace-nowrap font-medium`}>{r.name}</td>
-                      <td className={td}>{r.location}</td>
                       <td className={`${td} tabular`}>{r.age}</td>
                       <td className={`${td} whitespace-nowrap`}>{r.notice}</td>
                       <td className={`${td} min-w-[220px] leading-[1.6] text-ink-soft`}>
