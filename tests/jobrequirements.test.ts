@@ -43,6 +43,9 @@ eq("CIMA → professional_cert", mapEducation("CIMA passed finalist"), "professi
 
 // ── Skills: pasted lists split, trimmed, de-duplicated ──────────────────────
 eq("split pasted skills", splitSkills(["Excel, SAP ; excel", "• Power BI"]), ["Excel", "SAP", "Power BI"]);
+eq("a comma inside brackets is not a split", splitSkills("Version Control (e.g. Git, SVN), Docker"), ["Version Control (e.g. Git, SVN)", "Docker"]);
+eq("a saved list keeps its bracketed skill", splitSkills(["Containerization (e.g. Docker)", "CI/CD"]), ["Containerization (e.g. Docker)", "CI/CD"]);
+eq("tags already cut at the bracket are joined back", splitSkills(["Version Control (e.g.", "Git)", "Debugging"]), ["Version Control (e.g., Git)", "Debugging"]);
 
 // ── One extraction → field values ───────────────────────────────────────────
 const values = valuesFromExtraction({

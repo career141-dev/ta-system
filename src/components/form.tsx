@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { splitSkills } from "../../convex/lib/jobRequirements";
 
 /**
  * Form primitives.
@@ -133,30 +134,113 @@ export function Segmented({
   );
 }
 
-/** Chips instead of a comma-separated string. Typing and pressing enter adds one. */
+/**
+ * One drag between two TokenInputs of the same `group`, shared at module
+ * level because the lists are separate components. The list a tag lands in
+ * adds it and sets `landed`; the list it left removes it on dragend.
+ */
+let dragging: { group: string; from: string; token: string; landed: string | null } | null = null;
+
+/** The lists of each group, in the order they mounted, for Alt+↑/↓. */
+const lists = new Map<string, { name: string; take: (token: string) => boolean }[]>();
+
+/**
+ * Chips instead of a comma-separated string. Typing and pressing enter adds one.
+ *
+ * Tags drag to reorder — first is most important — and, with a `group`, drag
+ * between lists: Required and Nice-to-have share one, so a skill the model
+ * put in the wrong list is moved rather than deleted and retyped (testing,
+ * 21 Sep). From the keyboard, Alt+←/→ moves a focused tag along its list and
+ * Alt+↑/↓ sends it to the list above or below. Double-click edits a tag.
+ */
 export function TokenInput({
   name,
   initial,
   placeholder,
   suggestions = [],
+  group,
 }: {
   name: string;
   initial: string[];
   placeholder: string;
   suggestions?: string[];
+  /** Lists that tags can be dragged between. */
+  group?: string;
 }) {
-  const [tokens, setTokens] = useState<string[]>(initial);
+  // Tags broken at a bracket by the old splitter are joined back on load.
+  const [tokens, setTokens] = useState<string[]>(() => splitSkills(initial));
   const [draft, setDraft] = useState("");
+  const [over, setOver] = useState<number | "end" | null>(null);
+  const [editing, setEditing] = useState<number | null>(null);
+  const tokensRef = useRef(tokens);
+  tokensRef.current = tokens;
 
-  // "SAP, IFRS; Excel" typed or pasted is three entries, not one.
+  const has = (list: string[], t: string) => list.some((x) => x.toLowerCase() === t.toLowerCase());
+
+  // "SAP, IFRS; Excel" typed or pasted is three entries, not one — but a comma
+  // inside brackets is part of the skill.
   const add = (v: string) => {
     const next = [...tokens];
-    for (const part of v.split(/[,;\n]+/)) {
-      const t = part.trim();
-      if (t && !next.some((x) => x.toLowerCase() === t.toLowerCase())) next.push(t);
-    }
+    for (const t of splitSkills(v)) if (!has(next, t)) next.push(t);
     setTokens(next);
     setDraft("");
+  };
+
+  /** Put `token` at `index`, taking it out of wherever it was in this list. */
+  const place = (token: string, index: number | "end") => {
+    setTokens((list) => {
+      const from = list.findIndex((x) => x.toLowerCase() === token.toLowerCase());
+      const rest = list.filter((_, i) => i !== from);
+      let at = index === "end" ? rest.length : index;
+      if (from !== -1 && index !== "end" && from < index) at -= 1;
+      rest.splice(Math.max(0, Math.min(at, rest.length)), 0, token);
+      return rest;
+    });
+  };
+
+  // Registered so a tag sent with Alt+↑/↓ from another list can land here.
+  useEffect(() => {
+    if (!group) return;
+    const entry = {
+      name,
+      take: (token: string) => {
+        if (has(tokensRef.current, token)) return false;
+        setTokens((list) => [...list, token]);
+        return true;
+      },
+    };
+    lists.set(group, [...(lists.get(group) ?? []), entry]);
+    return () => {
+      lists.set(group, (lists.get(group) ?? []).filter((e) => e !== entry));
+    };
+  }, [group, name]);
+
+  const sendToList = (i: number, step: 1 | -1) => {
+    if (!group) return;
+    const all = lists.get(group) ?? [];
+    const here = all.findIndex((e) => e.name === name);
+    const target = all[here + step];
+    if (target && target.take(tokens[i])) setTokens((list) => list.filter((_, j) => j !== i));
+  };
+
+  const drop = (e: React.DragEvent, index: number | "end") => {
+    e.preventDefault();
+    e.stopPropagation();
+    setOver(null);
+    const d = dragging;
+    if (!d) return;
+    if (d.from === name) {
+      place(d.token, index);
+    } else if (group && d.group === group) {
+      if (!has(tokens, d.token)) {
+        setTokens((list) => {
+          const next = [...list];
+          next.splice(index === "end" ? next.length : index, 0, d.token);
+          return next;
+        });
+      }
+      d.landed = name;
+    }
   };
 
   const unused = suggestions.filter((s) => !tokens.includes(s)).slice(0, 4);
@@ -164,32 +248,103 @@ export function TokenInput({
   return (
     <>
       <input type="hidden" name={name} value={tokens.join(", ")} />
-      <div className="flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-lg border border-rule bg-surface px-2.5 py-2 transition-colors focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/12">
-        {tokens.map((t) => (
-          <span
-            key={t}
-            className="inline-flex items-center gap-1.5 rounded-md bg-tag py-1 pl-2.5 pr-1.5 text-[12.5px]"
-          >
-            {t}
-            <button
-              type="button"
-              onClick={() => setTokens(tokens.filter((x) => x !== t))}
-              className="text-ink-faint transition-colors hover:text-ink"
-              aria-label={`Remove ${t}`}
+      <div
+        onDragOver={(e) => {
+          if (!dragging || (dragging.from !== name && dragging.group !== group)) return;
+          e.preventDefault();
+          if (over === null) setOver("end");
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOver(null);
+        }}
+        onDrop={(e) => drop(e, "end")}
+        className={`flex min-h-[44px] flex-wrap items-center gap-1.5 rounded-lg border bg-surface px-2.5 py-2 transition-colors focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/12 ${
+          over !== null ? "border-brand bg-brand-soft/40" : "border-rule"
+        }`}
+      >
+        {tokens.map((t, i) =>
+          editing === i ? (
+            <input
+              key={`edit-${t}`}
+              autoFocus
+              defaultValue={t}
+              onBlur={(e) => {
+                const v = e.currentTarget.value.trim();
+                setTokens((list) => (v ? list.map((x, j) => (j === i ? v : x)) : list.filter((_, j) => j !== i)));
+                setEditing(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
+                if (e.key === "Escape") setEditing(null);
+              }}
+              className="rounded-md border border-brand bg-surface px-2 py-1 text-[12.5px] outline-none"
+            />
+          ) : (
+            <span
+              key={t}
+              draggable
+              tabIndex={0}
+              title="Drag to reorder or move · double-click to edit"
+              onDragStart={(e) => {
+                dragging = { group: group ?? name, from: name, token: t, landed: null };
+                e.dataTransfer.effectAllowed = "move";
+                e.dataTransfer.setData("text/plain", t);
+              }}
+              onDragEnd={() => {
+                // Landed in another list: it leaves this one.
+                if (dragging?.landed && dragging.landed !== name) {
+                  setTokens((list) => list.filter((x) => x !== t));
+                }
+                dragging = null;
+                setOver(null);
+              }}
+              onDragOver={(e) => {
+                if (!dragging || (dragging.from !== name && dragging.group !== group)) return;
+                e.preventDefault();
+                e.stopPropagation();
+                if (over !== i) setOver(i);
+              }}
+              onDrop={(e) => drop(e, i)}
+              onDoubleClick={() => setEditing(i)}
+              onKeyDown={(e) => {
+                if (!e.altKey) return;
+                if (e.key === "ArrowLeft" && i > 0) place(t, i - 1);
+                else if (e.key === "ArrowRight" && i < tokens.length - 1) place(t, i + 2);
+                else if (e.key === "ArrowUp") sendToList(i, -1);
+                else if (e.key === "ArrowDown") sendToList(i, 1);
+                else return;
+                e.preventDefault();
+              }}
+              className={`inline-flex cursor-grab items-center gap-1.5 rounded-md bg-tag py-1 pl-2.5 pr-1.5 text-[12.5px] outline-none transition-shadow focus-visible:ring-2 focus-visible:ring-brand/40 active:cursor-grabbing ${
+                over === i ? "shadow-[-3px_0_0_0_var(--color-brand)]" : ""
+              }`}
             >
-              ×
-            </button>
-          </span>
-        ))}
+              {t}
+              <button
+                type="button"
+                onClick={() => setTokens(tokens.filter((x) => x !== t))}
+                className="text-ink-faint transition-colors hover:text-ink"
+                aria-label={`Remove ${t}`}
+              >
+                ×
+              </button>
+            </span>
+          ),
+        )}
         <input
           value={draft}
           onChange={(e) => {
-            // A paste with commas in it is split at once, rather than waiting for Enter.
-            if (/[,;\n]/.test(e.target.value)) add(e.target.value);
-            else setDraft(e.target.value);
+            // A paste with commas in it is split at once, rather than waiting
+            // for Enter — unless a bracket is still open ("Git (e.g., ").
+            const v = e.target.value;
+            if (/[,;\n]/.test(v) && !/[([][^)\]]*$/.test(v)) add(v);
+            else setDraft(v);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === "," || e.key === ";") {
+            if ((e.key === "Enter" || e.key === ";" || (e.key === "," && !/[([][^)\]]*$/.test(draft)))) {
               e.preventDefault();
               add(draft);
             }

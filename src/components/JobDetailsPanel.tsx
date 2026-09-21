@@ -171,10 +171,10 @@ export function JobDetailsPanel({
           </div>
 
           <Field label="Required Skills *" hint={mark("requiredSkills") ?? "Enter or comma adds a skill"}>
-            <TokenInput name="requiredSkills" initial={r.requiredSkills} placeholder="Type a required skill (e.g. IFRS) and press Enter" />
+            <TokenInput name="requiredSkills" group="skills" initial={r.requiredSkills} placeholder="Type a required skill (e.g. IFRS) and press Enter" />
           </Field>
           <Field label="Nice-to-Have Skills" hint={mark("niceToHaveSkills")}>
-            <TokenInput name="niceToHaveSkills" initial={r.niceToHaveSkills} placeholder="Type a nice-to-have skill and press Enter" />
+            <TokenInput name="niceToHaveSkills" group="skills" initial={r.niceToHaveSkills} placeholder="Type a nice-to-have skill and press Enter" />
           </Field>
           <Field label="Languages Required" hint={mark("languagesRequired")}>
             <TokenInput name="languagesRequired" initial={r.languagesRequired} placeholder="e.g. English, Sinhala" />

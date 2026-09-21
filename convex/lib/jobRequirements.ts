@@ -79,10 +79,31 @@ export interface Extracted {
 
 // ─── Field rules ─────────────────────────────────────────────────────────────
 
-/** Split pasted skills on commas, semicolons, newlines and bullets; trim; de-duplicate case-insensitively. */
+/**
+ * Split pasted skills on commas, semicolons, newlines and bullets; trim;
+ * de-duplicate case-insensitively.
+ *
+ * Never inside brackets: "Version Control (e.g. Git, SVN)" is one skill. It
+ * was cut at every comma, and because a saved list went through here again on
+ * each save, "Version Control (e.g." and "Git)" became two tags (testing,
+ * 21 Sep). Pieces already broken that way are joined back while an opening
+ * bracket is still unclosed, so the next save repairs them.
+ */
 export function splitSkills(input: string | string[] | null | undefined): string[] {
-  const parts = (Array.isArray(input) ? input : [input ?? ""])
-    .flatMap((s) => String(s ?? "").split(/[,;\n•·|]+/))
+  const pieces: string[] = [];
+  let open = "";
+  for (const item of Array.isArray(input) ? input : [input ?? ""]) {
+    for (const part of splitOutsideBrackets(String(item ?? ""))) {
+      // A piece left with an unclosed "(" takes the next ones until it closes.
+      open = open ? `${open}, ${part.trim()}` : part;
+      if (bracketDepth(open) <= 0) {
+        pieces.push(open);
+        open = "";
+      }
+    }
+  }
+  if (open) pieces.push(open);
+  const parts = pieces
     .map((s) => s.replace(/^[\s\-*]+|\s+$/g, "").replace(/\s+/g, " "))
     .filter((s) => s.length > 0 && s.length <= 80);
   const seen = new Set<string>();
@@ -94,6 +115,35 @@ export function splitSkills(input: string | string[] | null | undefined): string
     out.push(p);
   }
   return out.slice(0, 40);
+}
+
+/** Brackets opened and not yet closed in a piece of text. */
+function bracketDepth(text: string): number {
+  let d = 0;
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") d++;
+    else if ((ch === ")" || ch === "]") && d > 0) d--;
+  }
+  return d;
+}
+
+/** Split on , ; newline and bullets, except inside ( ) or [ ]. */
+function splitOutsideBrackets(text: string): string[] {
+  const out: string[] = [];
+  let d = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") d++;
+    else if ((ch === ")" || ch === "]") && d > 0) d--;
+    if (d === 0 && /[,;\n•·|]/.test(ch)) {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.filter((p) => p.trim());
 }
 
 /** Any wording the model or a person uses, onto the schema's eleven levels. */

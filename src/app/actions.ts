@@ -41,6 +41,7 @@ import { aiStatus, gemini } from "@/lib/ai";
 import { MAX_ROUNDS, benchmarkViaSearch, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile } from "@/lib/serper";
 import { profileLink } from "@/lib/url";
+import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
@@ -800,11 +801,9 @@ async function rematchWhenRequirementsSettle(openingId: string, actorId: string)
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
-const listField = (formData: FormData, name: string) =>
-  String(formData.get(name) ?? "")
-    .split(/[,;\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+// Split the same way the backend does, so a comma inside brackets
+// ("Version Control (e.g., Git)") never cuts a skill in two.
+const listField = (formData: FormData, name: string) => splitSkills(String(formData.get(name) ?? ""));
 
 const optionalNumber = (formData: FormData, name: string): number | null => {
   const raw = String(formData.get(name) ?? "").replace(/,/g, "").trim();
