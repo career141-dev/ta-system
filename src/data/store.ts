@@ -11,6 +11,7 @@
  * it is what the Convex swap will inherit conceptually — read, decide, commit.
  */
 
+import { profileLink } from "@/lib/url";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -1700,10 +1701,11 @@ const rawRepo = {
 
   /** The same person pasted twice, or pasted and then captured, is one row. */
   findLinkByUrl(openingId: Id, canonical: string): LinkVaultEntry | undefined {
+    // By the profile's key, not a substring: "linkedin.com/in/nimal" is inside
+    // "linkedin.com/in/nimal-perera", and they are different people.
+    const want = canonical.toLowerCase();
     return load().linkVault.find(
-      (l) =>
-        l.openingId === openingId &&
-        l.linkedinUrl.toLowerCase().includes(canonical.toLowerCase()),
+      (l) => l.openingId === openingId && (profileLink(l.linkedinUrl)?.key ?? l.linkedinUrl.toLowerCase()) === want,
     );
   },
 
@@ -1811,7 +1813,7 @@ const rawRepo = {
     return { ok: true, applicationId: realId(applicationId), stage: "follow_up" };
   },
 
-  addLink(openingId: Id, url: string, addedBy: Id): Id {
+  addLink(openingId: Id, url: string, addedBy: Id, name: string | null = null): Id {
     const id = `lv_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => {
       db.linkVault.push({
@@ -1819,7 +1821,7 @@ const rawRepo = {
         openingId,
         addedBy,
         linkedinUrl: url,
-        name: null,
+        name,
         title: null,
         company: null,
         isEyeMarked: false,

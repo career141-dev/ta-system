@@ -1,6 +1,6 @@
 "use client";
 
-import { externalUrl } from "@/lib/url";
+import { externalUrl, profileLink } from "@/lib/url";
 import { useState } from "react";
 import { addLinkToPipeline, deleteLink, logOutreach, toggleEyeMark, updateLink } from "@/app/actions";
 import Link from "next/link";
@@ -89,8 +89,11 @@ export function LinkRow({
                   rel="noreferrer"
                   className="text-[14px] font-semibold text-accent hover:underline"
                 >
-                  {r.name ?? "Unnamed profile"}
+                  {r.name ?? profileLink(r.linkedinUrl)?.guessedName ?? "Unnamed profile"}
                 </a>
+                {!r.name && profileLink(r.linkedinUrl)?.guessedName && (
+                  <span className="text-[11px] italic text-ink-faint">name read from the link</span>
+                )}
                 <span className="text-[11px] text-ink-faint">in · 2nd</span>
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}

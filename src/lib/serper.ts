@@ -103,7 +103,9 @@ export async function readPage(url: string, maxChars = 1200): Promise<string | n
  * entirely.
  */
 export function canonicalProfile(url: string): string | null {
-  const m = url.match(/^https?:\/\/([a-z]{2,3}\.)?linkedin\.com\/in\/([^/?#]+)/i);
+  // The scheme is optional: rows pasted by hand were saved without one, and
+  // then never counted as already known (21 Sep).
+  const m = url.trim().match(/^(?:https?:\/\/)?([a-z]{2,3}\.)?linkedin\.com\/in\/([^/?#]+)/i);
   if (!m) return null;
   return `linkedin.com/in/${decodeURIComponent(m[2]).toLowerCase()}`;
 }

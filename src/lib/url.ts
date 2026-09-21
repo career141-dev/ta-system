@@ -26,3 +26,43 @@ export function externalUrl(raw: string | null | undefined): string | null {
     return null;
   }
 }
+
+/**
+ * A LinkedIn profile as a recruiter pastes it — with or without `https://`,
+ * `www.` or a country subdomain, with a trailing slash or query — as one tidy
+ * address, the key two pastes of the same person share, and a name read from
+ * the address for a row nobody has named yet.
+ *
+ * Excel Tables took the text exactly as typed, and its box refused anything
+ * without `https://` before the form was even sent; the rows it did take
+ * showed "Unnamed profile" until someone typed a name (testing, 21 Sep).
+ * Returns null for anything that is not a linkedin.com/in/ profile.
+ */
+export function profileLink(raw: string | null | undefined): { url: string; key: string; guessedName: string | null } | null {
+  const href = externalUrl(raw);
+  if (!href) return null;
+  const m = href.match(/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/in\/([^/?#]+)/i);
+  if (!m) return null;
+  let slug: string;
+  try {
+    slug = decodeURIComponent(m[1]).trim();
+  } catch {
+    slug = m[1];
+  }
+  if (!slug) return null;
+  const key = `linkedin.com/in/${slug.toLowerCase()}`;
+  return { url: `https://www.${key}`, key, guessedName: nameFromSlug(slug) };
+}
+
+/**
+ * "vishwa-fernando-85519495" → "Vishwa Fernando". LinkedIn appends a run of
+ * digits or hex to taken names; that and anything else that is not a word is
+ * dropped. Null when nothing name-like is left.
+ */
+function nameFromSlug(slug: string): string | null {
+  const words = slug
+    .split(/[-_.\s]+/)
+    .filter((w) => w && !/\d/.test(w) && /^[\p{L}']+$/u.test(w));
+  if (!words.length) return null;
+  return words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+}

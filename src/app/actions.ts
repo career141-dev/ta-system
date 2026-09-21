@@ -40,6 +40,7 @@ import {
 import { aiStatus, gemini } from "@/lib/ai";
 import { MAX_ROUNDS, benchmarkViaSearch, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile } from "@/lib/serper";
+import { profileLink } from "@/lib/url";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
@@ -338,9 +339,28 @@ export async function addLink(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const url = String(formData.get("url") ?? "").trim();
-  if (url) repo.addLink(openingId, url, user.id);
+  const typed = String(formData.get("url") ?? "").trim();
+  if (!typed) await back("Paste a LinkedIn profile link first.");
+  // Tidied before it is saved: "linkedin.com/in/x", "lk.linkedin.com/in/x/"
+  // and "https://www.linkedin.com/in/x?trk=…" are one person (21 Sep).
+  const profile = profileLink(typed);
+  if (!profile) {
+    await back("That is not a LinkedIn profile link. It should look like linkedin.com/in/their-name.");
+  }
+  const { url, key, guessedName } = profile!;
+  const already = repo.findLinkByUrl(openingId, key);
+  if (already) {
+    const who = repo.users().find((u) => u.id === already.addedBy)?.name;
+    await back(`${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`, "warn");
+  }
+  const name = String(formData.get("name") ?? "").trim() || guessedName;
+  repo.addLink(openingId, url, user.id, name);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await done(
+    name
+      ? `Added ${name} to the table${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
+      : "Added to the table. Add their name from the row, so it can go to the pipeline.",
+  );
 }
 
 export async function toggleEyeMark(formData: FormData) {
@@ -3235,4 +3255,8 @@ export async function addToOpeningInline(_: ActionResult | null, formData: FormD
 /** A successful save still navigates to the new opening; only a refusal answers here. */
 export async function createOpeningStep1Inline(_: ActionResult | null, formData: FormData) {
   return inline(() => createOpeningStep1(formData));
+}
+
+export async function addLinkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLink(formData));
 }
