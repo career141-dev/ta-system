@@ -68,7 +68,7 @@ export default async function StagePage({
           openingId={id}
           standard={repo.followUpStandard().filter((q) => q.enabled).map((q) => q.label)}
           custom={opening.followUpQuestions.map((q) => q.label)}
-          canAsk={allows(user, "opening.act", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+          canAsk={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
         />
       )}
 

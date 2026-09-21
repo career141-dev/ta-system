@@ -1,7 +1,7 @@
 "use client";
 
 import { externalUrl, profileLink } from "@/lib/url";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addLinkToPipelineInline,
   deleteLinkInline,
@@ -73,6 +73,12 @@ export function LinkRow({
   const save = useInline(updateLinkInline);
   const toPipeline = useInline(addLinkToPipelineInline);
   const logIt = useInline(logOutreachInline);
+  // Cleared once the approach is logged, not on the click: a refused note
+  // stays to be sent again (review of PR #2, 21 Sep).
+  const logForm = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (logIt.result?.tone === "ok") logForm.current?.reset();
+  }, [logIt.result]);
   const del = useInline(deleteLinkInline);
   const busy = eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending;
   const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result);
@@ -253,7 +259,9 @@ export function LinkRow({
                 <div className="grid grid-cols-2 gap-3">
                   <label>
                     <span className="mb-1.5 block text-[11.5px] text-ink-soft">Name</span>
-                    <input name="name" defaultValue={r.name ?? guessedName} className={inputClass} />
+                    {/* The name read from the link is a suggestion, not a value: pre-filled,
+                        a plain Save stored the guess as if typed (review of PR #2). */}
+                    <input name="name" defaultValue={r.name ?? ""} placeholder={guessedName || undefined} className={inputClass} />
                   </label>
                   <label>
                     <span className="mb-1.5 block text-[11.5px] text-ink-soft">Company</span>
@@ -333,11 +341,8 @@ export function LinkRow({
               </form>
 
               <form
-                onSubmit={(e) => {
-                  const form = e.currentTarget;
-                  logIt.run(submitted(e).formData);
-                  form.reset();
-                }}
+                ref={logForm}
+                onSubmit={(e) => logIt.run(submitted(e).formData)}
                 className="flex flex-col gap-2.5"
               >
                 <input type="hidden" name="openingId" value={openingId} />

@@ -215,7 +215,11 @@ export const moveStage = internalMutation({
       reason: args.reason,
       bypassRoleCheck: true,
       // Moving a card by hand into Follow-up starts the outreach too, so a
-      // candidate reaches the sequence the same way however they got there.
+      // candidate reaches the sequence the same way however they got there —
+      // and, as with shortlisting, only on an opening whose follow-up is on.
+      // A rejected person brought back came through here and was sent the
+      // Day 0 message on an opening switched off (review of PR #2, 21 Sep).
+      skipAutoOutreach: target === "follow_up" ? !followUpOn(await ctx.db.get(app.jobId)) : undefined,
     });
     return { ...result, stage: toTaStage(target) };
   },

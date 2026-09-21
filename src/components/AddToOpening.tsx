@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { addToOpeningInline } from "@/app/actions";
+import type { ActionResult } from "@/lib/inlineResult";
 import { ActionNote, SubmitButton, submitted, useInline } from "@/components/Submit";
 
 /**
@@ -33,6 +34,10 @@ export function AddToOpening({
 }) {
   const add = useInline(addToOpeningInline);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  // The answer showing when this press was made. It belongs to the previous
+  // press: counting it made a second opening read as added the moment it was
+  // picked, before the server had answered (review of PR #2, 21 Sep).
+  const [before, setBefore] = useState<ActionResult | null>(null);
   // Once added, an opening is not offered again, even before the page reloads.
   const [added, setAdded] = useState<string[]>([]);
   const offered = openings.filter((o) => !added.includes(o.id));
@@ -41,11 +46,12 @@ export function AddToOpening({
     const { formData } = submitted(e);
     const openingId = String(formData.get("openingId") ?? "");
     setSentTo(openingId);
+    setBefore(add.result);
     add.run(formData);
   };
 
   // Record the opening once the answer says they are on it.
-  const landed = add.result && add.result.tone !== "error" && sentTo;
+  const landed = !add.pending && add.result && add.result !== before && add.result.tone !== "error" && sentTo;
   useEffect(() => {
     if (landed && sentTo) setAdded((prev) => (prev.includes(sentTo) ? prev : [...prev, sentTo]));
   }, [landed, sentTo]);

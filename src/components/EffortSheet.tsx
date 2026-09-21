@@ -14,7 +14,13 @@ import { EFFORT_NUMBERS, OUTREACH_TYPES, effortColumns, type EffortKey, type Eff
  * nothing; a changed figure is marked, with the record's figure on hover.
  */
 export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; formId: string; draftKey: string }) {
-  type Draft = { kind: string; values: Partial<Record<EffortKey, string>>; targets: Partial<Record<EffortKey, string>> };
+  type Draft = {
+    kind: string;
+    values: Partial<Record<EffortKey, string>>;
+    targets: Partial<Record<EffortKey, string>>;
+    /** The records' figures when the draft was kept, to tell an edit from a figure that has since grown. */
+    base?: Partial<Record<EffortKey, string>>;
+  };
   const initial: Draft = {
     kind: effort.hundredOrFollowUp || "100%",
     values: Object.fromEntries(EFFORT_NUMBERS.map((k) => [k, effort[k] == null ? "" : String(effort[k])])),
@@ -25,7 +31,17 @@ export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; f
   useEffect(() => {
     try {
       const held = JSON.parse(localStorage.getItem(draftKey) ?? "null") as Draft | null;
-      if (held && held.values) setDraft({ ...initial, ...held, values: { ...initial.values, ...held.values } });
+      // Only what the TA changed is taken back. A kept draft replaced every
+      // figure, so counts that grew later in the day stayed hidden behind the
+      // morning's (review of PR #2, 21 Sep).
+      if (held && held.values) {
+        const values = { ...initial.values };
+        for (const k of EFFORT_NUMBERS) {
+          const v = held.values[k];
+          if (v !== undefined && held.base && v !== held.base[k]) values[k] = v;
+        }
+        setDraft({ ...initial, kind: held.kind || initial.kind, targets: held.targets ?? {}, values });
+      }
     } catch {
       /* nothing kept, or storage blocked: the records' figures */
     }
@@ -34,11 +50,26 @@ export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; f
   }, [draftKey]);
   useEffect(() => {
     try {
-      localStorage.setItem(draftKey, JSON.stringify(draft));
+      localStorage.setItem(draftKey, JSON.stringify({ ...draft, base: initial.values }));
     } catch {
       /* not kept, still sent */
     }
+    // initial.values is read, not watched: it is the records' figure this draft is measured against.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, draftKey]);
+  // Sent means done: the next visit starts from the records again.
+  useEffect(() => {
+    const form = document.getElementById(formId);
+    const clear = () => {
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        /* nothing kept */
+      }
+    };
+    form?.addEventListener("submit", clear);
+    return () => form?.removeEventListener("submit", clear);
+  }, [formId, draftKey]);
 
   const cols = effortColumns(draft.kind);
   const th =

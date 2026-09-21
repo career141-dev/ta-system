@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { addOpeningQuestionInline } from "@/app/actions";
 import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { inputClass } from "./form";
@@ -26,6 +26,12 @@ export function AskQuestion({
 }) {
   const [open, setOpen] = useState(false);
   const ask = useInline(addOpeningQuestionInline);
+  // Cleared once the question is taken, not on the click: a refused question
+  // stays in the box to be corrected (review of PR #2, 21 Sep).
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (ask.result?.tone === "ok") formRef.current?.reset();
+  }, [ask.result]);
 
   return (
     <div className="mb-5">
@@ -33,18 +39,15 @@ export function AskQuestion({
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={!canAsk}
-        title={canAsk ? undefined : "Only someone on this opening can add a question"}
+        title={canAsk ? undefined : "Only the recruiters on this opening, or a lead, can add a question"}
         className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-50"
       >
         {open ? "Close" : "Ask a question"}
       </button>
       {open && (
         <form
-          onSubmit={(e) => {
-            const form = e.currentTarget;
-            ask.run(submitted(e).formData);
-            form.reset();
-          }}
+          ref={formRef}
+          onSubmit={(e) => ask.run(submitted(e).formData)}
           className="mt-3 rounded-xl border border-rule bg-surface px-5 py-4"
         >
           <input type="hidden" name="openingId" value={openingId} />

@@ -223,7 +223,16 @@ export async function moveStage(formData: FormData) {
  * A rejected or dropped-out application back in Follow-up. The backend clears
  * the old rejection as it moves them (pipelineStateMachine).
  */
-async function reinstate(userId: string, appId: string, openingId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+async function reinstate(user: User, appId: string, openingId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  const userId = user.id;
+  // The collision lock holds for a closed application too: somebody else's
+  // rejected candidate is theirs to bring back, or a lead's — not a second
+  // TA's, who was told "Back on …" in green (review of PR #2, 21 Sep).
+  const owner = repo.application(appId)?.ownerTaId ?? null;
+  if (owner && owner !== userId && !isDeskWide(user)) {
+    const name = repo.users().find((u) => u.id === owner)?.name ?? "another recruiter";
+    return { ok: false, message: `${name} owns this candidate here. Ask them or the TA lead to bring them back.` };
+  }
   if (isConvex()) {
     try {
       await backend.moveStage({ id: userId }, appId, "follow_up", "Brought back");
@@ -1096,7 +1105,7 @@ export async function addLinkToPipeline(formData: FormData) {
   // Someone already on the opening: from Database CVs they go on to Follow-up
   // like anyone else; rejected or dropped out, they are brought back first.
   if (made.stage === "rejected" || made.stage === "dropped_out") {
-    const r = await reinstate(user.id, made.applicationId, openingId);
+    const r = await reinstate(user, made.applicationId, openingId);
     if (!r.ok) return fail(`They were ${STAGE_LABEL[made.stage].toLowerCase()} here and could not be brought back: ${r.message}`);
     made.stage = "follow_up";
   }
@@ -1895,7 +1904,7 @@ export async function addToOpening(formData: FormData) {
   // "Already in X's pipeline" and could never be brought back (21 Sep).
   if (existing && (existing.stage === "rejected" || existing.stage === "dropped_out")) {
     const was = STAGE_LABEL[existing.stage];
-    const r = await reinstate(user.id, existing.id, openingId);
+    const r = await reinstate(user, existing.id, openingId);
     refresh();
     if (!r.ok) await fail(`They were ${was.toLowerCase()} on ${title} and could not be brought back: ${r.message}`);
     await done(`Back on ${title} in Follow-up — they had been ${was.toLowerCase()}.`);
@@ -2705,7 +2714,10 @@ export async function setOpeningQuestions(formData: FormData) {
  */
 export async function addOpeningQuestion(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { opening: "openingId" });
+  // The same seats as editing the question list (setOpeningQuestions): a
+  // question goes out to everyone in Follow-up and holds their completion
+  // (review of PR #2, 21 Sep).
+  await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const label = String(formData.get("question") ?? "").trim().replace(/\s+/g, " ");
   if (!label) await fail("Type the question first.");
@@ -2995,6 +3007,7 @@ export async function sendEod(formData: FormData) {
 
   // Anyone sent to the Director straight out of a finished follow-up moves to
   // Director Review now — the email going out is that move.
+  const notMoved: string[] = [];
   if (kind === "director") {
     for (const id of fresh) {
       if (repo.application(id)?.stage === "follow_up") {
@@ -3004,7 +3017,13 @@ export async function sendEod(formData: FormData) {
         if (isConvex()) {
           await backend
             .moveStage({ id: user.id }, id, "director_review", "Sent to the Director in the end-of-day email")
-            .catch((e) => console.warn(`[eod] ${id} stays in Follow-up: ${backendMessage(e, "move refused")}`));
+            .catch((e) => {
+              console.warn(`[eod] ${id} stays in Follow-up: ${backendMessage(e, "move refused")}`);
+              // The email has gone, so they were sent; the TA is told they
+              // did not move, instead of reading them as waiting on the
+              // Director (review of PR #2, 21 Sep).
+              notMoved.push(repo.candidate(repo.application(id)?.candidateId ?? "")?.fullName ?? "one person");
+            });
         } else {
           repo.moveStage(id, "director_review", user.id, "Sent to the Director in the end-of-day email");
         }
@@ -3029,7 +3048,9 @@ export async function sendEod(formData: FormData) {
   redirect(
     `/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
       kind === "director"
-        ? `${sentNote} ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on the Director's reply.`
+        ? `${sentNote} ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on the Director's reply.${
+            notMoved.length ? ` Still in Follow-up — move by hand: ${notMoved.join(", ")}.` : ""
+          }`
         : `Recorded as sent to the client. ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on a reply. Nothing was emailed from here.`,
     )}`,
   );
@@ -3540,10 +3561,13 @@ export async function verifyReferee(formData: FormData) {
   if (!r) await fail("That referee is not on this opening's list any more. Reload the page.");
   const { search, serperConfigured } = await import("@/lib/serper");
   if (!serperConfigured()) await fail("Web search is not set up on this system, so LinkedIn cannot be checked.");
+  const first = r!.name.split(/\s+/).filter((w) => w.length > 1 && !/^(dr|mr|mrs|ms|prof)\.?$/i.test(w))[0]?.toLowerCase() ?? "";
+  // A name that is only titles or initials leaves nothing to match on, and
+  // "".includes matched the first result — a stranger (review of PR #2).
+  if (!first) await note(`${r!.name} is too short a name to match on LinkedIn. Check by hand, or call them.`);
   const query = `"${r!.name}"${r!.company ? ` "${r!.company}"` : ""} site:linkedin.com/in`;
   const res = await search(query, 5);
   if (res.error) await fail(`The search did not run (${res.error}). Try again.`);
-  const first = r!.name.split(/\s+/).filter((w) => w.length > 1 && !/^(dr|mr|mrs|ms|prof)\.?$/i.test(w))[0]?.toLowerCase() ?? "";
   const hit = res.hits.find((h) => canonicalProfile(h.url) && h.title.toLowerCase().includes(first));
   if (!hit) await note(`No LinkedIn profile found for ${r!.name}${r!.company ? ` at ${r!.company}` : ""}. Check by hand, or call them.`);
   const { profileFacts } = await import("@/lib/sourcing");

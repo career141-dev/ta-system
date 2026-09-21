@@ -124,6 +124,27 @@ export const convexMutation = <T>(path: string, args: Record<string, unknown> = 
 export const convexAction = <T>(path: string, args: Record<string, unknown> = {}) =>
   call<T>("action", path, args);
 
+/**
+ * A storage upload address, pointed at the backend this server already talks to.
+ *
+ * `generateUploadUrl` answers with the backend's public address
+ * (api.career141.com). From inside the app's container that address did not
+ * answer — a spoken brief's audio was lost with "fetch failed" (21 Sep) — while
+ * the internal one (CONVEX_SELF_HOSTED_URL) always does. Same path and token;
+ * only where it is sent changes.
+ */
+export function internalUploadUrl(url: string): string {
+  try {
+    const target = new URL(url);
+    const inside = new URL(config().url);
+    target.protocol = inside.protocol;
+    target.host = inside.host;
+    return target.toString();
+  } catch {
+    return url;
+  }
+}
+
 // ─── The actor bridge ────────────────────────────────────────────────────────
 
 export interface ConvexActor {
