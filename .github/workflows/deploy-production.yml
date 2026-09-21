@@ -13,8 +13,9 @@ name: Deploy Production
 #   3. The "production" GitHub Environment requires a reviewer to approve the
 #      deploy job, and allows only the production branch.
 #
-# A database backup is taken first when the release changes the schema or runs a
-# function (a migration); code-only releases skip the 15-minute dump.
+# A database backup is taken first only when the release runs a function (a
+# migration) or a manual run asks for one (backup: always). The owner takes a
+# backup each morning, so ordinary releases skip the 15-minute dump.
 # Production settings (where it lives on the server) are repository variables,
 # so they can be set when the target exists without changing this file.
 
@@ -40,7 +41,7 @@ on:
         type: string
         default: "{}"
       backup:
-        description: Database backup first (auto = only when the schema changes or a function runs)
+        description: Database backup first (auto = only when a function runs)
         type: choice
         options: [auto, always]
         default: auto
@@ -87,23 +88,21 @@ jobs:
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      # A full dump of the 15 GB database takes about 15 minutes, and it only
-      # protects stored data. A release that changes code alone cannot harm
-      # stored data, so it skips the dump; one that changes the schema, or runs
-      # a one-off function (a migration), takes it first. `backup: always` on a
-      # manual run forces it. (Owner's decision, 21 September.)
+      # A full dump of the 15 GB database takes about 15 minutes. The owner
+      # takes a backup each morning, so a release takes one only when it runs
+      # a one-off function (a migration, which rewrites stored rows) or a
+      # manual run asks for it (`backup: always`). A schema change alone no
+      # longer does: the schema only ever gains optional fields, which change
+      # no stored row. (Owner's decision, 21 September — twice.)
       - name: Does this release need a database backup?
         id: backup
         env:
-          BEFORE: ${{ github.event.before }}
           FORCE: ${{ inputs.backup }}
           RUN_FUNCTION: ${{ inputs.run_function }}
         run: |
           need=false
           if [ "$FORCE" = "always" ] || [ -n "$RUN_FUNCTION" ]; then
             need=true
-          elif [ -n "$BEFORE" ] && ! echo "$BEFORE" | grep -qE '^0+$' && git cat-file -e "$BEFORE" 2>/dev/null; then
-            git diff --quiet "$BEFORE" HEAD -- convex/schema.ts || need=true
           fi
           echo "need=$need" >> "$GITHUB_OUTPUT"
           echo "Database backup before this release: $need"
