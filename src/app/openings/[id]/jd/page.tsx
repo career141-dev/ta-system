@@ -6,6 +6,8 @@ import { JdRead } from "./JdRead";
 import { ProjectHeader } from "../ProjectHeader";
 import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { JobDetailsPanel } from "@/components/JobDetailsPanel";
+import { allows } from "@/lib/auth";
 
 export default async function JdPage({
   params,
@@ -40,18 +42,36 @@ export default async function JdPage({
   const lead = repo.user(o.taLeadId);
   const canWrite = o.assignedTaIds.includes(user.id) || user.role === "admin";
 
+  // Named, not bare values: "P3" on its own read as a code (testing, 21 Sep).
   const summary = [
     e?.salaryMin
-      ? `${e.currency} ${e.salaryMin.toLocaleString()}${e.salaryMax ? `–${e.salaryMax.toLocaleString()}` : ""}`
-      : null,
-    e?.locations?.length ? e.locations.join(", ") : null,
-    e?.nationalities?.length ? `${e.nationalities.join(", ")} only` : null,
+      ? `Salary ${e.currency} ${e.salaryMin.toLocaleString()}${e.salaryMax ? `–${e.salaryMax.toLocaleString()}` : ""}`
+      : e?.packageNotes?.trim()
+        ? `Package ${e.packageNotes.trim()}`
+        : null,
+    e?.locations?.length ? `Location ${e.locations.join(", ")}` : null,
+    e?.nationalities?.length ? `${e.nationalities.join(", ")} nationals only` : null,
     e?.headcount && e.headcount > 1 ? `${e.headcount} positions` : null,
-    e?.mustHaves?.length ? `${e.mustHaves.length} requirements` : null,
-    e?.priorityTier ?? null,
+    e?.mustHaves?.length ? `${e.mustHaves.length} requirement${e.mustHaves.length === 1 ? "" : "s"}` : null,
+    e?.priorityTier ? `Priority ${e.priorityTier.replace(/^P/, "")}` : null,
   ].filter(Boolean) as string[];
 
   const approved = o.jdStatus === "approved";
+
+  // Moved here from the Overview: the fields are read from this JD, so they
+  // are checked beside it (testing, 21 Sep).
+  const details = o.requirements ? (
+    <div id="job-details" className="mt-8 scroll-mt-24">
+      <JobDetailsPanel
+        openingId={id}
+        title={o.title}
+        requirements={o.requirements}
+        jdApproved={approved}
+        canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+        editedByName={repo.user(o.requirements.editedBy ?? "")?.name ?? null}
+      />
+    </div>
+  ) : null;
 
   if (approved) {
     return (
@@ -65,6 +85,7 @@ export default async function JdPage({
           approvedAt={o.jdApprovedAt ? dateAt(o.jdApprovedAt) : null}
           canAmend={canWrite}
         />
+        {details}
       </>
     );
   }
@@ -102,6 +123,7 @@ export default async function JdPage({
         </div>
       )}
 
+      {details}
     </div>
   );
 }

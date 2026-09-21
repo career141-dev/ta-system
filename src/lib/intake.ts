@@ -37,15 +37,18 @@ function parseMoney(text: string): { min: number | null; max: number | null; cur
   const currency = /\busd?\b|\$/i.test(text) ? "USD" : "LKR";
 
   const nums: number[] = [];
-  const re = /(?:lkr|usd|rs\.?|\$)?\s*([\d][\d,.]*)\s*(k|m|million)?/gi;
+  // "3L" / "3.5 lakhs" is how Sri Lankan packages are said — "package around
+  // 3L" was read as nothing and the JD printed "Around 3L" (testing, 21 Sep).
+  const re = /(?:lkr|usd|rs\.?|\$)?\s*([\d][\d,.]*)\s*(k|m|million|lakhs?|lacs?|l)?\b/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    const raw = m[1].replace(/,/g, "");
+    const raw = m[1].replace(/,/g, "").replace(/\.$/, "");
     if (!raw || Number.isNaN(Number(raw))) continue;
     let n = Number(raw);
     const unit = (m[2] ?? "").toLowerCase();
     if (unit === "k") n *= 1_000;
     if (unit === "m" || unit === "million") n *= 1_000_000;
+    if (unit === "l" || unit.startsWith("lakh") || unit.startsWith("lac")) n *= 100_000;
     if (n < 1_000 || n > 100_000_000) continue;
 
     // Look at the words either side. A figure sitting next to "turnover" or
@@ -122,6 +125,19 @@ function parseList(text: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * What the notes say in sentences — everything but the bullet list, which is
+ * the requirements. The template's Notes section printed "None recorded" over
+ * a TA's saved notes because this was never filled in (testing, 21 Sep).
+ */
+function proseOf(text: string): string {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !/^[-•*>]\s+/.test(l) && !/^from the recording:?$/i.test(l))
+    .join("\n");
+}
+
 export function extractFromText(text: string): ExtractedBrief {
   const money = parseMoney(text);
   return {
@@ -136,7 +152,7 @@ export function extractFromText(text: string): ExtractedBrief {
     nationalities: NATIONALITIES.filter((n) => new RegExp(`\\b${n}\\b`, "i").test(text)),
     headcount: parseHeadcount(text),
     mustHaves: parseList(text),
-    clientNotes: "",
+    clientNotes: proseOf(text),
     priorityTier: parseTier(text),
   };
 }
@@ -165,27 +181,23 @@ export function buildJd(e: ExtractedBrief, clientName: string): string {
     e.salaryMin && e.salaryMax
       ? `${e.currency} ${e.salaryMin.toLocaleString()} – ${e.salaryMax.toLocaleString()}`
       : e.salaryMin
-        ? `From ${e.currency} ${e.salaryMin.toLocaleString()}`
-        : "Negotiable";
+        ? // One figure is what was said ("around 3L"), not a floor.
+          `${e.currency} ${e.salaryMin.toLocaleString()}`
+        : "";
+  const pkg = [money, e.packageNotes].filter(Boolean).join(" ");
 
+  // Only what is known. Placeholders ("To be completed from the client
+  // brief", "None recorded") went out to candidates as if they were the JD.
   const lines = [
     `## ${e.title || "Untitled role"}`,
     "",
     `**Client** ${clientName}`,
-    `**Location** ${e.locations.length ? e.locations.join(", ") : "To be confirmed"}`,
-    `**Package** ${money}${e.packageNotes ? ` ${e.packageNotes}` : ""}`,
+    e.locations.length ? `**Location** ${e.locations.join(", ")}` : null,
+    pkg ? `**Package** ${pkg}` : null,
     e.nationalities.length ? `**Nationality** ${e.nationalities.join(", ")} only` : null,
     e.headcount > 1 ? `**Headcount** ${e.headcount}` : null,
-    "",
-    "### Requirements",
-    "",
-    ...(e.mustHaves.length
-      ? e.mustHaves.map((m) => `- ${m}`)
-      : ["- To be completed from the client brief"]),
-    "",
-    "### Notes",
-    "",
-    e.clientNotes || "_None recorded._",
+    ...(e.mustHaves.length ? ["", "### Requirements", "", ...e.mustHaves.map((m) => `- ${m}`)] : []),
+    ...(e.clientNotes.trim() ? ["", "### About the role", "", e.clientNotes.trim()] : []),
   ].filter((l) => l !== null) as string[];
 
   return lines.join("\n");

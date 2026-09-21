@@ -36,13 +36,20 @@ eq("null stays null", mapSeniority(null), null);
 eq("banking → Finance", mapIndustry("Banking & Financial Services"), "Finance");
 eq("software → Technology", mapIndustry("Software development"), "Technology");
 eq("garments → Apparel", mapIndustry("garment manufacturing"), "Apparel");
-eq("unknown → Other", mapIndustry("Hospitality"), "Other");
+eq("hospitality is on the list now", mapIndustry("Hospitality"), "Hospitality");
+eq("unknown → Other", mapIndustry("Space mining"), "Other");
+eq("the client editor's old value → Apparel, not Manufacturing", mapIndustry("Apparel Manufacturing"), "Apparel");
+eq("Power & Energy → Energy", mapIndustry("Power & Energy"), "Energy");
+eq("Shipping & Freight → Logistics", mapIndustry("Shipping & Freight"), "Logistics");
 eq("BSc degree → bachelor", mapEducation("BSc in Accounting or related degree"), "bachelor");
 eq("degree or MBA → bachelor_or_master", mapEducation("Bachelor's degree; MBA preferred"), "bachelor_or_master");
 eq("CIMA → professional_cert", mapEducation("CIMA passed finalist"), "professional_cert");
 
 // ── Skills: pasted lists split, trimmed, de-duplicated ──────────────────────
 eq("split pasted skills", splitSkills(["Excel, SAP ; excel", "• Power BI"]), ["Excel", "SAP", "Power BI"]);
+eq("a comma inside brackets is not a split", splitSkills("Version Control (e.g. Git, SVN), Docker"), ["Version Control (e.g. Git, SVN)", "Docker"]);
+eq("a saved list keeps its bracketed skill", splitSkills(["Containerization (e.g. Docker)", "CI/CD"]), ["Containerization (e.g. Docker)", "CI/CD"]);
+eq("tags already cut at the bracket are joined back", splitSkills(["Version Control (e.g.", "Git)", "Debugging"]), ["Version Control (e.g., Git)", "Debugging"]);
 
 // ── One extraction → field values ───────────────────────────────────────────
 const values = valuesFromExtraction({

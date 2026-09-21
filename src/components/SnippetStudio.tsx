@@ -173,9 +173,10 @@ export function SnippetStudio({
       {/* ─── rail ──────────────────────────────────────────────────────── */}
       <aside className="flex flex-col gap-5 lg:sticky" style={{ top: RAIL_TOP + 16 }}>
         <section className="rounded-xl border border-rule bg-surface p-4">
-          <h2 className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-            Level
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
+            Job level
           </h2>
+          <p className="mb-3 mt-1 text-[11.5px] text-ink-faint">Sets the card colour and the level tag.</p>
           <div className="grid grid-cols-5 gap-2">
             {LEVELS.map((l) => (
               <button
@@ -197,7 +198,7 @@ export function SnippetStudio({
 
         <section className="rounded-xl border border-rule bg-surface p-4">
           <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
-            On the card
+            Show on the card
           </h2>
           <div className="flex flex-col">
             {BLOCK_ORDER.map((k) => (
@@ -272,8 +273,9 @@ export function SnippetStudio({
 
                 {(selected === "titleLead" || selected === "titleMain") && (
                   <p className="w-full text-[11.5px] text-ink-faint">
-                    A slash splits the lines — &ldquo;Executive / Senior Executive /
-                    Acquisition&rdquo; puts the last part on the bold line.
+                    Use / to split the title over two lines — the part after the last / is shown
+                    large. Example: &ldquo;Senior / Software Engineer&rdquo;. Without a /, the last
+                    two words go on the large line.
                   </p>
                 )}
               </>
@@ -289,7 +291,7 @@ export function SnippetStudio({
                 onClick={() => setShowType((v) => !v)}
                 className="flex w-full items-center gap-2 px-5 py-2.5 text-left text-[12px] font-medium text-ink-soft hover:text-ink"
               >
-                Type and position
+                Font and position
                 <svg width={12} height={12} viewBox="0 0 16 16" aria-hidden="true" className="opacity-60">
                   <path
                     d={showType ? "M4 10L8 6L12 10" : "M4 6L8 10L12 6"}
@@ -298,7 +300,7 @@ export function SnippetStudio({
                   />
                 </svg>
                 <span className="ml-auto text-[11.5px] font-normal text-ink-faint">
-                  drag on the card, or nudge with the arrow keys
+                  Drag the text on the card, or nudge it with the arrow keys
                 </span>
               </button>
 
@@ -391,10 +393,10 @@ export function SnippetStudio({
               onClick={download}
               className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
             >
-              Download PNG
+              Download image
             </button>
             <p className="text-[11.5px] leading-relaxed text-ink-faint">
-              1080×1080, ready for WhatsApp and Facebook.
+              Square PNG, 1080 × 1080 px — sized for WhatsApp, Facebook and LinkedIn.
             </p>
           </div>
         </div>

@@ -37,11 +37,12 @@ export interface Level {
 }
 
 export const LEVELS: Level[] = [
-  { key: "JUNIOR", pill: "level - Junior", plate: "/snippet/junior.png", swatch: "#faff5c" },
-  { key: "EXECUTIVE", pill: "level - Executive", plate: "/snippet/executive.png", swatch: "#01fea3" },
-  { key: "MID LEVEL", pill: "level - Mid Level", plate: "/snippet/mid.png", swatch: "#ffd891" },
-  { key: "SENIOR", pill: "level - Senior Level", plate: "/snippet/senior.png", swatch: "#41f5e4" },
-  { key: "C LEVEL", pill: "level - C Level", plate: "/snippet/clevel.png", swatch: "#ffaa5b" },
+  // "level - Executive" read as a typo on the card and in the picker (21 Sep).
+  { key: "JUNIOR", pill: "Junior Level", plate: "/snippet/junior.png", swatch: "#faff5c" },
+  { key: "EXECUTIVE", pill: "Executive Level", plate: "/snippet/executive.png", swatch: "#01fea3" },
+  { key: "MID LEVEL", pill: "Mid Level", plate: "/snippet/mid.png", swatch: "#ffd891" },
+  { key: "SENIOR", pill: "Senior Level", plate: "/snippet/senior.png", swatch: "#41f5e4" },
+  { key: "C LEVEL", pill: "C-Level", plate: "/snippet/clevel.png", swatch: "#ffaa5b" },
 ];
 
 export const LEVEL_BY_KEY: Record<LevelKey, Level> = Object.fromEntries(
@@ -151,10 +152,10 @@ export const DEFAULT_LAYOUT: SnippetLayout = {
 };
 
 export const BLOCK_LABEL: Record<BlockKey, string> = {
-  levelPill: "Level pill",
+  levelPill: "Level tag",
   industry: "Industry",
-  titleLead: "Title — first line",
-  titleMain: "Title — bold line",
+  titleLead: "Title (top line)",
+  titleMain: "Title (main line)",
   location: "Location",
   company: "Company",
   packageLine: "Package",
@@ -223,12 +224,16 @@ export function snippetFromOpening(input: {
     return note ? `${base} ${note}` : base;
   };
 
+  // A client saved without an industry stores "—", which the card printed as
+  // a lone dash in the industry band (testing, 21 Sep).
+  const industry = /^[\s—–-]*$/.test(input.clientIndustry ?? "") ? "" : input.clientIndustry;
+
   return {
     jobTitle: input.title,
     level: levelFromTitle(input.title),
-    industry: input.clientIndustry,
+    industry,
     location: input.locations.join(" | ") || "Sri Lanka",
-    company: input.clientIndustry,
+    company: industry,
     package: money(),
     // Spec §11.1 — descriptive, and "Open" unless a client requirement says otherwise.
     gender: "Open",

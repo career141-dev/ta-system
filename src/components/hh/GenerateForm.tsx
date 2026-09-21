@@ -1,7 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useFormStatus } from "react-dom";
+import type { ActionResult } from "@/lib/inlineResult";
+import { ActionNote, submitted, useInline } from "../Submit";
 import { LoadingProgress, RESEARCH_STEPS, SOURCING_STEPS } from "../LoadingScenes";
 
 /**
@@ -11,6 +12,10 @@ import { LoadingProgress, RESEARCH_STEPS, SOURCING_STEPS } from "../LoadingScene
  * the progress has to open under the label, across the full width, not beside
  * a button. Last run's error or count is hidden while the new run works — it
  * describes a result that is about to be replaced.
+ *
+ * The run's answer — how much it found, or why it did not run — shows under
+ * the bar it came from (21 Sep: it used to be a query string, which stayed on
+ * the page after a later success and put Benchmark's errors in Research's box).
  */
 export function GenerateForm({
   openingId,
@@ -22,7 +27,7 @@ export function GenerateForm({
   notes,
 }: {
   openingId: string;
-  action: (formData: FormData) => Promise<void>;
+  action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
   blocked: boolean;
   hasResult: boolean;
   needs: "grounded" | "sourcing";
@@ -31,10 +36,22 @@ export function GenerateForm({
   /** Missing settings, last run's error or count. */
   notes: ReactNode;
 }) {
+  const run = useInline(action);
   return (
-    <form action={action} className="mb-5 rounded-xl border border-rule bg-surface px-5 py-4">
+    <form onSubmit={(e) => run.run(submitted(e).formData)} className="mb-5 rounded-xl border border-rule bg-surface px-5 py-4">
       <input type="hidden" name="openingId" value={openingId} />
-      <Body blocked={blocked} hasResult={hasResult} needs={needs} notes={notes}>
+      <Body
+        blocked={blocked}
+        hasResult={hasResult}
+        needs={needs}
+        pending={run.pending}
+        notes={
+          <>
+            {notes}
+            <ActionNote result={run.result} className="mt-3" />
+          </>
+        }
+      >
         {children}
       </Body>
     </form>
@@ -47,14 +64,15 @@ function Body({
   needs,
   notes,
   children,
+  pending,
 }: {
   blocked: boolean;
   hasResult: boolean;
   needs: "grounded" | "sourcing";
   notes: ReactNode;
   children: ReactNode;
+  pending: boolean;
 }) {
-  const { pending } = useFormStatus();
   return (
     <>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">

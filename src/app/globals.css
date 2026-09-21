@@ -135,12 +135,19 @@ body {
   button:not(:disabled),
   [role="button"]:not([aria-disabled="true"]),
   summary,
-  label[for] {
+  label[for],
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
     cursor: pointer;
   }
   button:disabled,
   [aria-disabled="true"] {
     cursor: not-allowed;
+  }
+  /* A button whose action is running (SubmitButton sets aria-busy). */
+  button[aria-busy="true"] {
+    cursor: progress;
   }
   button:focus-visible,
   a:focus-visible,

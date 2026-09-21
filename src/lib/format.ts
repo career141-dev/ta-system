@@ -50,3 +50,15 @@ export function packageLine(c: {
   const line = parts.join(" · ");
   return line.charAt(0).toUpperCase() + line.slice(1);
 }
+
+/**
+ * Where a candidate came from, as the badge beside their name. A person
+ * headhunted through Excel Tables (channel L) read "Applicant", as if they had
+ * applied (21 Sep).
+ */
+export function channelTag(channel: string | null | undefined): string {
+  if (channel === "L") return "Headhunted";
+  if (channel === "HH") return "Sourced";
+  if (channel === "SCOOP") return "Database";
+  return "Applicant";
+}

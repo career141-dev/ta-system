@@ -1,5 +1,7 @@
 import { externalUrl } from "@/lib/url";
+import { channelTag } from "@/lib/format";
 import Link from "next/link";
+import { CvFrame } from "@/components/CvFrame";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
@@ -176,7 +178,7 @@ export default async function CandidateDrawer({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] font-semibold tracking-tight">{c.fullName}</h2>
-              <span className="rounded bg-tag px-1.5 py-[3px] text-[11px] font-medium text-ink-soft">{app.sourcingChannel === "HH" ? "Sourced" : app.sourcingChannel === "SCOOP" ? "Database" : "Applicant"}</span>
+              <span className="rounded bg-tag px-1.5 py-[3px] text-[11px] font-medium text-ink-soft">{channelTag(app.sourcingChannel)}</span>
               {app.isAddOn && <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[11px] font-medium text-brand">Add-on</span>}
             </div>
             <p className="mt-1 text-[14px]">{c.currentTitle}</p>
@@ -346,7 +348,7 @@ export default async function CandidateDrawer({
                 </div>
               </div>
               {cvFile?.ok && cvIsPdf ? (
-                <iframe src={cvHref} title={`CV — ${c.fullName}`} className="h-[720px] w-full bg-paper" />
+                <CvFrame src={cvHref} title={`CV — ${c.fullName}`} />
               ) : cvFile?.ok ? (
                 <p className="px-4 py-10 text-center text-[12.5px] text-ink-soft">
                   This CV is not a PDF, so the browser cannot show it here.{" "}

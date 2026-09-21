@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { ProjectHeader } from "../../ProjectHeader";
 import { Generate, Sources } from "@/components/hh/Generate";
-import { runResearch, runBenchmark, pickBenchmark } from "@/app/actions";
+import { runResearchInline, pickBenchmark } from "@/app/actions";
+import { BenchmarkButton } from "@/components/hh/BenchmarkButton";
 import { ResearchField } from "@/components/hh/ResearchField";
 import { timeAt } from "@/lib/format";
 import { EMPTY_RESEARCH } from "@/data/types";
@@ -52,7 +53,7 @@ export default async function Page({
 
       <Generate
         openingId={id}
-        action={runResearch}
+        action={runResearchInline}
         label={`Research ${client?.name ?? "the client"}`}
         sub="Fills the fields below from the open web, each with its source. Anything it cannot verify is left empty rather than guessed — and anything you correct by hand survives a re-run."
         err={err}
@@ -106,12 +107,7 @@ export default async function Page({
               against — they become target employers in the next Suggestions round.
             </p>
           </div>
-          <form action={runBenchmark} className="shrink-0">
-            <input type="hidden" name="openingId" value={id} />
-            <button className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft">
-              {entries.length ? "Run again" : "Find them"}
-            </button>
-          </form>
+          <BenchmarkButton openingId={id} again={entries.length > 0} />
         </div>
 
         {found !== undefined && (

@@ -8,7 +8,7 @@ import { SaveReport } from "./SaveReport";
 import { Confirm } from "@/components/Confirm";
 import { Headline, Histogram, Picture, Table } from "./ReportView";
 import { sanitizeSpec,
-  CHARTS, DATASETS, DEFAULT_SPEC, PERIODS, PRESETS,
+  CHARTS, DATASETS, DEFAULT_SPEC, OPS, PERIODS, PRESETS,
   datasetFor, optionsFor, presetFor, runReport,
   type ChartKind, type ReportSpec,
 } from "@/lib/reporting";
@@ -132,8 +132,14 @@ export default async function ReportsPage({
 
       {sp.askErr && (
         <p className="mb-6 rounded-xl border border-warn/35 bg-warn-soft px-5 py-3.5 text-[12.5px] text-warn">
-          {FAILURE_MESSAGE[sp.askErr as AiFailure] ?? "That did not come back as a report."}{" "}
-          Build it instead — the controls do everything the sentence can.
+          {sp.askErr === "empty" ? (
+            "Type a question first — for example “roles open more than 30 days”."
+          ) : (
+            <>
+              {FAILURE_MESSAGE[sp.askErr as AiFailure] ?? "That did not come back as a report."}{" "}
+              Build it instead — the controls do everything the sentence can.
+            </>
+          )}
         </p>
       )}
 
@@ -219,13 +225,48 @@ export default async function ReportsPage({
       </div>
 
       {result.rows.length === 0 ? (
-        <section className="rounded-2xl border border-rule bg-surface px-8 py-20 text-center">
-          <p className="text-[14px] text-ink-soft">Nothing matches that.</p>
-          <p className="mx-auto mt-2 max-w-[46ch] text-[12.5px] leading-relaxed text-ink-faint">
-            {spec.filters.length > 0 || spec.period !== "all"
-              ? "Loosen a filter or widen the period below, and it will fill in."
-              : "There is nothing in this dataset yet."}
+        // The report ran; nobody matched. It used to say only "Nothing
+        // matches that", which read as a failure, and not which filters did
+        // it (21 Sep). Each filter is named here and can be taken off.
+        <section className="rounded-2xl border border-rule bg-surface px-8 py-14 text-center">
+          <p className="text-[14px] text-ink-soft">
+            <span className="text-brand">✓ Report built</span> — no records match.
           </p>
+          {spec.filters.length > 0 || spec.period !== "all" ? (
+            <>
+              <p className="mx-auto mt-2 max-w-[52ch] text-[12.5px] leading-relaxed text-ink-faint">
+                These are narrowing it down. Take one off and it fills in:
+              </p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {spec.period !== "all" && (
+                  <Link
+                    href={`/reports?${new URLSearchParams({ spec: JSON.stringify({ ...spec, period: "all" }), name: title })}`}
+                    className="rounded-full border border-rule px-3 py-1 text-[12px] text-ink-soft hover:border-danger/40 hover:text-danger"
+                  >
+                    Period: {PERIODS.find((p) => p.key === spec.period)?.label ?? spec.period} ×
+                  </Link>
+                )}
+                {spec.filters.map((f, i) => (
+                  <Link
+                    key={i}
+                    href={`/reports?${new URLSearchParams({ spec: JSON.stringify({ ...spec, filters: spec.filters.filter((_, j) => j !== i) }), name: title })}`}
+                    className="rounded-full border border-rule px-3 py-1 text-[12px] text-ink-soft hover:border-danger/40 hover:text-danger"
+                  >
+                    {ds.fields.find((x) => x.key === f.field)?.label ?? f.field} {OPS.find((o) => o.op === f.op)?.label ?? f.op}
+                    {f.value ? ` "${f.value}"` : ""} ×
+                  </Link>
+                ))}
+                <Link
+                  href={`/reports?${new URLSearchParams({ spec: JSON.stringify({ ...spec, filters: [], period: "all" }), name: title })}`}
+                  className="rounded-full bg-tag px-3 py-1 text-[12px] font-medium text-ink hover:bg-rule"
+                >
+                  Remove all filters
+                </Link>
+              </div>
+            </>
+          ) : (
+            <p className="mx-auto mt-2 max-w-[46ch] text-[12.5px] leading-relaxed text-ink-faint">There is nothing in this dataset yet.</p>
+          )}
         </section>
       ) : (
         <>

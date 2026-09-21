@@ -219,6 +219,8 @@ async function refresh(scope: PrimeScope): Promise<void> {
       state.tablesAt = now;
     } catch (e) {
       if (!state.snapshot) throw e;
+      // Said, not swallowed: rows that stop updating have a reason in the log.
+      console.warn("[prime] small tables refresh failed; keeping the rows held:", e instanceof Error ? e.message : e);
     }
   }
   const db = state.snapshot!;
@@ -245,8 +247,18 @@ async function refresh(scope: PrimeScope): Promise<void> {
     ]);
     state.openings.set(openingId, now);
     db.applications = [...db.applications.filter((a) => a.openingId !== openingId), ...apps];
-    // Posts and assignments come with the whole tables above, with their real ids.
-    void detail;
+    // Posts and assignments come with the whole tables above, with their real
+    // ids. But the opening itself must be here even when that list is not:
+    // a refresh of the small tables that fails keeps the older list, and a
+    // just-created opening was then missing from it — Save job went straight
+    // to a 404 for an opening that had been saved (testing, 21 Sep). The
+    // opening was fetched on its own anyway; it is now kept.
+    if (detail && !db.openings.some((o) => o.id === detail.opening.id)) {
+      db.openings = [detail.opening, ...db.openings];
+      const known = new Set(db.jobPosts.map((p) => p.id));
+      db.jobPosts = [...db.jobPosts, ...detail.posts.filter((p) => !known.has(p.id))];
+      state.version++;
+    }
   }
 
   /*

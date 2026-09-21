@@ -11,6 +11,7 @@
  * it is what the Convex swap will inherit conceptually — read, decide, commit.
  */
 
+import { profileLink } from "@/lib/url";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -637,6 +638,27 @@ const rawRepo = {
       .sort((a, b) => b.score - a.score);
   },
 
+  /**
+   * Referees of the people being followed up or shortlisted on this opening —
+   * and nobody else's (testing, 21 Sep: the list drew on whatever candidates
+   * happened to be loaded, from any stage or opening, so it changed from visit
+   * to visit). Grouped by candidate, in stage order.
+   */
+  refereesForPipeline(openingId: Id) {
+    const db = load();
+    const STAGES: Stage[] = ["follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"];
+    const apps = db.applications
+      .filter((a) => a.openingId === openingId && STAGES.includes(a.stage))
+      .sort((a, b) => STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage));
+    return apps
+      .map((app) => ({
+        app,
+        candidate: db.candidates.find((c) => c.id === app.candidateId) ?? null,
+        referees: (db.referees ?? []).filter((r) => r.fromCandidateId === app.candidateId),
+      }))
+      .filter((g) => g.candidate);
+  },
+
   /** Notebook pages 1 and 3 — who else in the database works at this company? */
   peopleAtCompany(company: string, excludeCandidateId?: Id) {
     const db = load();
@@ -865,6 +887,12 @@ const rawRepo = {
         a.rejectReason = reason ?? null;
       }
       if (stage === "dropped_out") a.droppedOutReason = reason ?? null;
+      // Brought back: the old rejection no longer describes them (21 Sep).
+      if ((from === "rejected" || from === "dropped_out") && stage !== "rejected" && stage !== "dropped_out") {
+        a.rejectedBy = null;
+        a.rejectReason = null;
+        a.droppedOutReason = null;
+      }
 
       db.pipelineEvents.push({
         id: `pe_${Math.random().toString(36).slice(2, 10)}`,
@@ -1701,10 +1729,11 @@ const rawRepo = {
 
   /** The same person pasted twice, or pasted and then captured, is one row. */
   findLinkByUrl(openingId: Id, canonical: string): LinkVaultEntry | undefined {
+    // By the profile's key, not a substring: "linkedin.com/in/nimal" is inside
+    // "linkedin.com/in/nimal-perera", and they are different people.
+    const want = canonical.toLowerCase();
     return load().linkVault.find(
-      (l) =>
-        l.openingId === openingId &&
-        l.linkedinUrl.toLowerCase().includes(canonical.toLowerCase()),
+      (l) => l.openingId === openingId && (profileLink(l.linkedinUrl)?.key ?? l.linkedinUrl.toLowerCase()) === want,
     );
   },
 
@@ -1818,7 +1847,7 @@ const rawRepo = {
    * and "Not contacted" made every saved profile look untouched (21 September).
    * Shortlisted also marks the row as this TA's, so a colleague sees it is taken.
    */
-  addLink(openingId: Id, url: string, addedBy: Id, outcome: LinkOutcome = "shortlisted"): Id {
+  addLink(openingId: Id, url: string, addedBy: Id, name: string | null = null, outcome: LinkOutcome = "shortlisted"): Id {
     const id = `lv_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => {
       db.linkVault.push({
@@ -1826,7 +1855,7 @@ const rawRepo = {
         openingId,
         addedBy,
         linkedinUrl: url,
-        name: null,
+        name,
         title: null,
         company: null,
         isEyeMarked: false,

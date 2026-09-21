@@ -109,9 +109,21 @@ export async function assertJobAccess(
     // error instead of going through (16 September).
     .first();
 
-  if (!assignment) {
-    throw new Error("You are not assigned to this job with the required role");
+  if (assignment) return;
+
+  // The web app decides who is on an opening from the job's assignedTaIds as
+  // well; an older opening, or one whose team was changed there, can have a TA
+  // in that list with no jobAssignments row. The app then let them shortlist
+  // and the backend refused it, leaving the person in Database CVs, never in
+  // the pipeline (testing, 21 Sep). A TA in the list counts as a recruiter on
+  // it here too, so the two agree.
+  if (requiredAssignmentRoles.some((r) => r === "primary_recruiter" || r === "supporting_recruiter")) {
+    const job = await ctx.db.get(jobId);
+    const listed = ((job as { assignedTaIds?: string[] } | null)?.assignedTaIds ?? []).includes(user._id as string);
+    const lead = (job as { taLeadId?: string } | null)?.taLeadId === (user._id as string);
+    if (listed || lead) return;
   }
+  throw new Error("You are not assigned to this opening. Ask the TA lead to add you to its team.");
 }
 
 /** The recruiter roles that may work an opening's pipeline. */

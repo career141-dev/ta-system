@@ -1,13 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import {
-  EFFORT_COLUMNS,
-  SHORTLIST_COLUMNS,
-  UNDEFINED_COLUMNS,
-  type EffortRow,
-  type ShortlistRow,
-} from "@/lib/eod-format";
+import { SHORTLIST_COLUMNS, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
+import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { sendEod } from "@/app/actions";
 
@@ -163,7 +158,6 @@ export function EodComposer({
                     <tr key={r.applicationId}>
                       <td className={`${td} tabular`}>{r.no}</td>
                       <td className={`${td} whitespace-nowrap font-medium`}>{r.name}</td>
-                      <td className={td}>{r.location}</td>
                       <td className={`${td} tabular`}>{r.age}</td>
                       <td className={`${td} whitespace-nowrap`}>{r.notice}</td>
                       <td className={`${td} min-w-[220px] leading-[1.6] text-ink-soft`}>
@@ -185,40 +179,9 @@ export function EodComposer({
             )}
           </div>
 
-          {/* Table two — the L-sheet */}
-          <div className="mt-7 overflow-x-auto">
-            <table className="w-full border-collapse">
-              <thead>
-                <tr>
-                  {EFFORT_COLUMNS.map((c) => (
-                    <th key={c.key} className={th}>
-                      {c.label}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  {EFFORT_COLUMNS.map((c) => {
-                    const v = effort[c.key as keyof EffortRow];
-                    const undef = UNDEFINED_COLUMNS.has(c.key);
-                    return (
-                      <td
-                        key={c.key}
-                        className={`${td} tabular ${undef ? "bg-paper/60" : ""}`}
-                        title={undef ? "Not defined yet — left blank rather than reported as zero" : undefined}
-                      >
-                        {undef || v === null ? "" : String(v)}
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-            <p className="mt-2 text-[11.5px] text-ink-faint">
-              POST, ADD-ONS and BACK-UP are blank because they are not defined yet — a blank says
-              &ldquo;not tracked&rdquo;, a zero would say &ldquo;nothing happened&rdquo;.
-            </p>
+          {/* Table two — the L-sheet, editable before it goes (plan 6.1–6.3). */}
+          <div className="mt-7">
+            <EffortSheet effort={effort} formId="eod-send" draftKey={`eod-effort:${openingId}:${effort.date}`} />
           </div>
 
           <p className="mt-7 text-[13px] leading-[1.8]">
@@ -262,7 +225,7 @@ export function EodComposer({
         </p>
       </section>
 
-      <form action={sendEod} className="flex flex-wrap items-center gap-4">
+      <form id="eod-send" action={sendEod} className="flex flex-wrap items-center gap-4">
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="kind" value={kind} />
         <input type="hidden" name="subject" value={subject} />

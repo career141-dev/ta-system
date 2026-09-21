@@ -54,6 +54,9 @@ export function SnippetStage({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<Drag | null>(null);
+  // The position readout is for the moment of dragging; left up afterwards it
+  // read as a stray number on the card (testing, 21 Sep).
+  const [dragging, setDragging] = useState(false);
   const [boxes, setBoxes] = useState<Boxes | null>(null);
   const [plate, setPlate] = useState<HTMLImageElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -114,6 +117,7 @@ export function SnippetStage({
     };
     const up = () => {
       dragRef.current = null;
+      setDragging(false);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -176,6 +180,7 @@ export function SnippetStage({
               onPointerDown={(e) => {
                 e.preventDefault();
                 onSelect(key);
+                setDragging(true);
                 dragRef.current = {
                   mode: "move",
                   key,
@@ -194,9 +199,11 @@ export function SnippetStage({
             >
               {isSel && (
                 <>
-                  <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-[#2f6df6] px-1.5 py-0.5 text-[10px] font-medium text-white">
-                    {Math.round(layout[key].x)}, {Math.round(layout[key].y)}
-                  </span>
+                  {dragging && (
+                    <span className="absolute -top-6 left-0 whitespace-nowrap rounded bg-[#2f6df6] px-1.5 py-0.5 text-[10px] font-medium text-white">
+                      {Math.round(layout[key].x)}, {Math.round(layout[key].y)}
+                    </span>
+                  )}
                   <span
                     onPointerDown={(e) => {
                       e.preventDefault();

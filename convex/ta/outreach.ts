@@ -15,6 +15,7 @@
 // TA platform's drafts at them. This module reads, and records a call that a
 // person made themselves.
 
+import { deliveryMode } from "../lib/outreachSafety";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -88,6 +89,8 @@ export const followUpState = internalQuery({
 
     return {
       applicationId: app._id as string,
+      // So the dialog can say "test system, not sent" before the click.
+      delivery: { whatsapp: deliveryMode("whatsapp"), email: deliveryMode("email") },
       attemptCount: app.followUpAttemptCount ?? 0,
       lastContactDay: app.followUpState?.lastContactDay ?? null,
       replyChannel: app.followUpState?.replyChannel ?? null,

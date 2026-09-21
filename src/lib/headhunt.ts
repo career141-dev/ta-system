@@ -92,7 +92,24 @@ Rules:
 }
 
 /** The labelled lines back into fields. Anything unsourced simply stays empty. */
-export function parseResearch(text: string): ResearchFields {
+export function parseResearch(raw: string): ResearchFields {
+  // Models dress the labels up — "**WEBSITE:**", "- WEBSITE:", "### OVERVIEW" —
+  // and a strict "^WEBSITE:" then read every field as not found although the
+  // answer was there (21 Sep). The decoration is taken off each label first.
+  const LABELS = "SIMILAR_DESIGNATION|WEBSITE|SERVICES|COUNTRY|LOCATION|COMPETITORS|SOCIAL|OVERVIEW";
+  const text = raw
+    .split("\n")
+    // "### Overview" as a heading of its own, with the text below it.
+    .map((line) => line.replace(new RegExp(`^\\s*#+\\s*\\**\\s*(${LABELS})\\s*\\**\\s*$`, "i"), (_m, l: string) => `${l.toUpperCase()}:`))
+    .map((line) =>
+      line.replace(
+        new RegExp(`^[\\s>*#\\-•\\d.)]*\\**\\s*(${LABELS})\\s*\\**\\s*[:：]\\s*\\**\\s*`, "i"),
+        (_m, label: string) => `${label.toUpperCase()}:`,
+      ),
+    )
+    .join("\n")
+    // "[site](https://x.com)" → "https://x.com"
+    .replace(/\[([^\]]*)\]\((https?:[^)\s]+)\)/g, "$2");
   const get = (label: string) => {
     const m = text.match(new RegExp(`^${label}:(.*)$`, "im"));
     return (m?.[1] ?? "").trim();

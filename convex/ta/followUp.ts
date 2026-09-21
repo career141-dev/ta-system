@@ -77,7 +77,7 @@ export const send = internalMutation({
       throw new Error(`All ${max} follow-ups have been sent. Call them, or mark them as dropped out.`);
     }
 
-    const report: { sent: boolean; kind?: "initial" | "reminder" } = { sent: false };
+    const report: { sent: boolean; kind?: "initial" | "reminder"; blocked?: boolean } = { sent: false };
     const communicationId = await initiateFollowUpOutreach(ctx, appId, {
       isManual: true,
       only: args.channel,
@@ -87,6 +87,13 @@ export const send = internalMutation({
     if (!report.sent) {
       // initiateFollowUpOutreach returns early when every detail is already in.
       return { sent: false as const, reason: "Everything the follow-up asks for is already collected." };
+    }
+    if (report.blocked) {
+      return {
+        sent: false as const,
+        blocked: true as const,
+        reason: "Not sent — messages to candidates are switched off on this system (test mode). It is recorded in the chat and not counted as a follow-up.",
+      };
     }
 
     const sentOn = channel === "both" ? ["whatsapp", "email"] : [channel];

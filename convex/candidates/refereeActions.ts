@@ -24,29 +24,8 @@ export const extractRefereesForCandidateBatch = action({
           console.warn(`[extractRefereesForCandidateBatch] LLM call warning for candidate ${cand.candidateId}:`, llmErr?.message || llmErr);
         }
 
-        // If LLM didn't find explicit referees in rawText, populate sample reference details for test verification
-        if (extractedReferees.length === 0) {
-          extractedReferees = [
-            {
-              name: `Dr. Robert Sterling`,
-              designation: `VP of Engineering`,
-              company: `Apex Global Tech`,
-              contactNo: `+1 (555) 019-2831`,
-              email: `r.sterling@apextech.com`,
-              relationship: `Former Line Manager`,
-              notes: `Direct supervisor for 3 years. Highly recommended.`,
-            },
-            {
-              name: `Sarah Lin`,
-              designation: `Senior Director`,
-              company: `Nexus Enterprise Solutions`,
-              contactNo: `+1 (555) 014-9920`,
-              email: `slin@nexus-enterprise.io`,
-              relationship: `Department Head / Mentor`,
-              notes: `Verified technical leadership.`,
-            },
-          ];
-        }
+        // No referees in the CV means none are saved. Sample referees used to be
+        // inserted here, over real data, and read as contactable (21 Sep).
 
         const savedIds: any = await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
           candidateId: cand.candidateId as any,
@@ -118,29 +97,8 @@ export const reparseSingleCandidateReferees = action({
       console.warn(`[reparseSingleCandidateReferees] LLM extraction warning:`, err?.message || err);
     }
 
-    // 3. Fallback sample references for UI verification if CV text lacks explicit reference section
-    if (extractedReferees.length === 0) {
-      extractedReferees = [
-        {
-          name: `Dr. Robert Sterling`,
-          designation: `VP of Engineering`,
-          company: `Apex Global Tech`,
-          contactNo: `+1 (555) 019-2831`,
-          email: `r.sterling@apextech.com`,
-          relationship: `Former Line Manager`,
-          notes: `Direct supervisor for 3 years. Highly recommended.`,
-        },
-        {
-          name: `Sarah Lin`,
-          designation: `Senior Director`,
-          company: `Nexus Enterprise Solutions`,
-          contactNo: `+1 (555) 014-9920`,
-          email: `slin@nexus-enterprise.io`,
-          relationship: `Department Head / Mentor`,
-          notes: `Verified technical leadership & performance.`,
-        },
-      ];
-    }
+    // No referees in the CV means none are saved. Sample referees used to be
+    // inserted here, over real data, and read as contactable (21 Sep).
 
     // 4. Persist to DB
     const savedIds: any = await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
@@ -184,28 +142,8 @@ export const reparseAllHostedReferees = action({
           console.warn(`[reparseAllHostedReferees] LLM call warning for candidate ${cand.candidateId}:`, llmErr?.message || llmErr);
         }
 
-        if (extractedReferees.length === 0) {
-          extractedReferees = [
-            {
-              name: `Dr. Robert Sterling`,
-              designation: `VP of Engineering`,
-              company: `Apex Global Tech`,
-              contactNo: `+1 (555) 019-2831`,
-              email: `r.sterling@apextech.com`,
-              relationship: `Former Line Manager`,
-              notes: `Direct supervisor for 3 years. Highly recommended.`,
-            },
-            {
-              name: `Sarah Lin`,
-              designation: `Senior Director`,
-              company: `Nexus Enterprise Solutions`,
-              contactNo: `+1 (555) 014-9920`,
-              email: `slin@nexus-enterprise.io`,
-              relationship: `Department Head / Mentor`,
-              notes: `Verified technical leadership & performance.`,
-            },
-          ];
-        }
+        // No referees in the CV means none are saved. Sample referees used to be
+        // inserted here, over real data, and read as contactable (21 Sep).
 
         const savedIds: any = await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
           candidateId: cand.candidateId as any,

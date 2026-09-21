@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { allows } from "@/lib/auth";
+import { AskQuestion } from "@/components/AskQuestion";
 import { repo, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { seatFor } from "@/lib/visibility";
@@ -60,6 +62,15 @@ export default async function StagePage({
           },
         ]}
       />
+
+      {s === "follow_up" && (
+        <AskQuestion
+          openingId={id}
+          standard={repo.followUpStandard().filter((q) => q.enabled).map((q) => q.label)}
+          custom={opening.followUpQuestions.map((q) => q.label)}
+          canAsk={allows(user, "opening.act", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+        />
+      )}
 
       <div>
         <div className="min-w-0">

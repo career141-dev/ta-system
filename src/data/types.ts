@@ -383,6 +383,9 @@ export interface Application {
    */
   isAddOn: boolean;
   addedOnAt: number | null;
+  /** A scoop: the TA who brought this CV in, when it was not the owner (plan 6.4). */
+  scoopBy?: Id | null;
+  scoopAt?: number | null;
 
   /** When this candidate was put up as cover for someone who declined. */
   backupForApplicationId: Id | null;

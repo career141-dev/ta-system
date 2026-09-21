@@ -256,6 +256,8 @@ export function mapApplication(a: BackendApplication): Application {
 
     isAddOn: a.isAddOn ?? false,
     addedOnAt: numOrNull(a.addedOnAt),
+    scoopBy: typeof a.scoopBy === "string" ? a.scoopBy : null,
+    scoopAt: numOrNull(a.scoopAt),
     backupForApplicationId: typeof a.backupForApplicationId === "string" ? a.backupForApplicationId : null,
     offerDeclinedAt: numOrNull(a.offerDeclinedAt),
     offerDeclineReason: typeof a.offerDeclineReason === "string" ? a.offerDeclineReason : null,

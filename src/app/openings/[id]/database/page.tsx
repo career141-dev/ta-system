@@ -25,7 +25,11 @@ export default async function DatabasePage({
   const user = await getCurrentUser();
   const everyone = repo
     .applications(id)
-    .filter((a) => a.stage === "matched" || a.sourcingChannel === "SCOOP");
+    // Database picks not yet shortlisted. Every database pick is saved as
+    // SCOOP, so filtering on the channel kept people here after they had moved
+    // on — each showing an "In director shortlist" box on a search screen
+    // (testing, 21 Sep). Once shortlisted they belong to the pipeline pages.
+    .filter((a) => a.stage === "matched" || (a.sourcingChannel === "SCOOP" && a.stage === "new_cv"));
   const apps = applyFilters(everyone, filters, user.id);
   const unclaimed = everyone.filter((a) => !a.ownerTaId).length;
   // A starting sentence for the database search. Only the title — an opening's

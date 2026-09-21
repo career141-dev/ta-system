@@ -36,6 +36,9 @@ export const saveExtractedReferees = mutation({
     ),
   },
   handler: async (ctx, args) => {
+    // A re-read that found nobody leaves what is on file alone. It used to
+    // delete the real referees and put nothing (or sample ones) back.
+    if (!args.referees.some((r) => r.name && r.name.trim())) return [];
     // Delete existing referees for this candidate to allow re-parsing idempotency
     const existing = await ctx.db
       .query("referees")

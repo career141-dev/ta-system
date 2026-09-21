@@ -96,6 +96,8 @@ export function projectApplication(a: Doc<"applications">) {
     legacySourceChannel: a.sourceChannel,
     isAddOn: a.isAddOn ?? false,
     addedOnAt: a.addedOnAt ?? null,
+    scoopBy: a.scoopByUserId ?? null,
+    scoopAt: a.scoopAt ?? null,
     rating: x.rating ?? null,
     notes: x.taNotes ?? [],
     statusA: a.statusA ?? null,

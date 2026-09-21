@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { amendJd } from "@/app/actions";
+import { JdDocument } from "@/components/JdDocument";
+import { JdEditor } from "@/components/JdEditor";
+import { SubmitButton } from "@/components/Submit";
 
 /**
  * The approved JD — finding 01.
@@ -26,6 +29,7 @@ export function JdRead({
 }) {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [draft, setDraft] = useState(jd);
 
   return (
     <section className="overflow-hidden rounded-2xl border border-rule bg-surface">
@@ -69,17 +73,14 @@ export function JdRead({
       {editing ? (
         <form action={amendJd} className="px-6 py-5">
           <input type="hidden" name="openingId" value={openingId} />
-          <textarea
-            name="jdMarkdown"
-            defaultValue={jd}
-            rows={24}
-            autoFocus
-            className="w-full resize-y rounded-xl border border-rule bg-surface px-4 py-3 font-mono text-[12.5px] leading-relaxed outline-none focus:border-brand"
-          />
+          <JdEditor name="jdMarkdown" value={draft} onChange={setDraft} rows={24} startInSource />
           <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+            <SubmitButton
+              pendingLabel="Saving…"
+              className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
               Save the amendment
-            </button>
+            </SubmitButton>
             <button
               type="button"
               onClick={() => setEditing(false)}
@@ -93,7 +94,7 @@ export function JdRead({
           </div>
         </form>
       ) : (
-        <div className="whitespace-pre-wrap px-6 py-5 text-[13.5px] leading-[1.75]">{jd}</div>
+        <JdDocument markdown={jd} className="px-6 py-5" />
       )}
     </section>
   );

@@ -9,7 +9,6 @@ import type { Id } from "@/data/types";
 export interface ShortlistRow {
   no: number;
   name: string;
-  location: string;
   age: string;
   notice: string;
   notes: string[];
@@ -23,7 +22,9 @@ export interface ShortlistRow {
 export interface EffortRow {
   date: string;
   assignee: string;
+  /** What the day was: a full hunt, follow-up, or add-ons (plan 6.1). */
   hundredOrFollowUp: string;
+  /** Profiles approached (100% / Add-on) or CVs (Follow-up) — see effortColumns. */
   lEffort: number | null;
   sets: number | null;
   da: number | null;
@@ -32,13 +33,23 @@ export interface EffortRow {
   post: number | null;
   addOns: number | null;
   backUp: number | null;
+  /** The day's targets, typed by the TA; shown as a TARGET row when any is set. */
+  targets?: Partial<Record<EffortKey, number | null>>;
 }
+
+/** The numeric L-sheet columns, which take a count and a target. */
+export type EffortKey = "lEffort" | "sets" | "da" | "scoop" | "l" | "post" | "addOns" | "backUp";
+export const EFFORT_NUMBERS: EffortKey[] = ["lEffort", "sets", "da", "scoop", "l", "post", "addOns", "backUp"];
+
+/** What the day was. The desk's three kinds (21 Sep). */
+export const OUTREACH_TYPES = ["100%", "Follow-up", "Add-on"] as const;
 
 /** Table one, in the order the desk sends it. */
 export const SHORTLIST_COLUMNS = [
   "NO",
   "NAME",
-  "LOCATION",
+  // LOCATION was the candidate's home address — clutter to a Director, and
+  // not ours to send round (testing review, 21 Sep).
   "AGE",
   "NOTICE",
   "NOTES",
@@ -47,6 +58,17 @@ export const SHORTLIST_COLUMNS = [
   "CURRENT REMUNERATION",
   "EXPECTED REMUNERATION",
 ] as const;
+
+/**
+ * Table two's columns for a given kind of day. The fourth counts links
+ * (profiles approached) on a full hunt or an add-on day, and CVs on a
+ * follow-up day (plan 6.2).
+ */
+export function effortColumns(kind: string): { key: string; label: string }[] {
+  return EFFORT_COLUMNS.map((c) =>
+    c.key === "lEffort" ? { key: c.key, label: kind === "Follow-up" ? "NO. OF CVs" : "NO.OF L EFFORT" } : { ...c },
+  );
+}
 
 /** Table two — the L-sheet. */
 export const EFFORT_COLUMNS = [
@@ -64,11 +86,10 @@ export const EFFORT_COLUMNS = [
 ] as const;
 
 /**
- * Q4a — still undefined, so these print empty rather than zero. A blank says
- * "not tracked yet"; a zero says "nothing happened", and those are very
- * different messages to a Director.
+ * Columns with no figure behind them. Empty since 21 Sep: POST, ADD-ONS and
+ * BACK-UP are counted from the records, and the TA can correct any of them.
  */
-export const UNDEFINED_COLUMNS = new Set(["post", "addOns", "backUp"]);
+export const UNDEFINED_COLUMNS = new Set<string>();
 
 /** Who is copied on every end-of-day email, until it is changed on the People page. */
 export const DEFAULT_EOD_CC = "azim@career141.com";
@@ -103,17 +124,26 @@ export function eodEmailHtml(input: {
     input.rows
       .map(
         (r) =>
-          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.location)}</td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(esc).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
+          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(esc).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
       )
       .join(""),
   );
 
+  const cols = effortColumns(input.effort.hundredOrFollowUp);
+  const targets = input.effort.targets ?? {};
+  const hasTargets = EFFORT_NUMBERS.some((k) => targets[k] != null);
   const effort = table(
-    EFFORT_COLUMNS.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
-    `<tr>${EFFORT_COLUMNS.map((c) => {
+    cols.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
+    `<tr>${cols.map((c) => {
       const v = input.effort[c.key as keyof EffortRow];
-      return `<td ${td}>${UNDEFINED_COLUMNS.has(c.key) || v === null ? "" : esc(v)}</td>`;
-    }).join("")}</tr>`,
+      return `<td ${td}>${v === null || v === undefined || typeof v === "object" ? "" : esc(v)}</td>`;
+    }).join("")}</tr>` +
+      (hasTargets
+        ? `<tr>${cols.map((c, i) => {
+            const t = targets[c.key as EffortKey];
+            return `<td ${td}>${i === 1 ? "<i>Target</i>" : t == null ? "" : esc(t)}</td>`;
+          }).join("")}</tr>`
+        : ""),
   );
 
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.7;color:#171c18">

@@ -13,6 +13,8 @@ import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
+import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
+import type { EffortRow } from "@/lib/eod-format";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -36,9 +38,11 @@ import {
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
-import { aiStatus, gemini } from "@/lib/ai";
+import { FAILURE_MESSAGE, aiStatus, gemini } from "@/lib/ai";
 import { MAX_ROUNDS, benchmarkViaSearch, runSourcing } from "@/lib/sourcing";
-import { canonicalProfile } from "@/lib/serper";
+import { canonicalProfile, displayUrl } from "@/lib/serper";
+import { profileLink } from "@/lib/url";
+import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
@@ -76,6 +80,9 @@ function candidateIdsIn(formData: FormData): string[] {
 type Tone = "ok" | "error" | "note";
 
 async function back(message: string, tone: Tone = "ok"): Promise<never> {
+  // Called through inline(), the message goes back to the form that asked
+  // instead of the top of the page (lib/inlineResult, 21 Sep).
+  if (isInline()) answer(message, tone === "note" ? "warn" : tone);
   const ref = (await headers()).get("referer");
   let to = "/";
   if (ref) {
@@ -91,6 +98,11 @@ async function back(message: string, tone: Tone = "ok"): Promise<never> {
     to = `/?msg=${encodeURIComponent(message)}&tone=${tone}`;
   }
   redirect(to);
+}
+
+/** back(), named for what it says: it worked. */
+async function done(message: string): Promise<never> {
+  return back(message);
 }
 
 /** Back with a refusal: the same message, shown as an error. */
@@ -197,15 +209,47 @@ export async function moveStage(formData: FormData) {
       await fail(backendMessage(e, "That move could not be made."));
     }
     await afterBackendWrite(openingId);
-    await back(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
+    await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
   }
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
   if (!res.ok) await fail(res.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
+  await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
 }
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
+
+/**
+ * A rejected or dropped-out application back in Follow-up. The backend clears
+ * the old rejection as it moves them (pipelineStateMachine).
+ */
+async function reinstate(userId: string, appId: string, openingId: string): Promise<{ ok: true } | { ok: false; message: string }> {
+  if (isConvex()) {
+    try {
+      await backend.moveStage({ id: userId }, appId, "follow_up", "Brought back");
+      await afterBackendWrite(openingId);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, message: backendMessage(e, "the move was refused.") };
+    }
+  }
+  const r = repo.moveStage(appId, "follow_up", userId, "Brought back");
+  return r.ok ? { ok: true } : { ok: false, message: r.message };
+}
+
+/** A sourcing or benchmark failure code as a sentence. */
+function searchReasonInWords(code: string): string {
+  if (code === "no_serper") return "web search is not set up on this system (no search key). An admin needs to add one.";
+  if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
+  if (code === "no_opening") return "the opening could not be found. Reload the page.";
+  return reasonInWords(code);
+}
+
+/** A model failure code ("spend_cap") as the sentence it stands for. */
+function reasonInWords(reason: string | undefined): string {
+  const said = reason && (FAILURE_MESSAGE as Record<string, string>)[reason];
+  return said ?? (reason ? `${reason}.` : "no reason was given.");
+}
 
 /** The backend's own reason, without the transport's wrapping. */
 function backendMessage(e: unknown, fallback: string): string {
@@ -259,7 +303,7 @@ export async function sendFollowUpNow(formData: FormData) {
   // The WhatsApp and Email buttons send one channel; the older button sends both.
   const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
   if (!isConvex()) await fail("Sending needs the Convex store.");
-  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
+  let r: { sent: boolean; blocked?: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
   try {
     r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
   } catch (e) {
@@ -272,13 +316,11 @@ export async function sendFollowUpNow(formData: FormData) {
       : channel === "email"
         ? r?.kind === "initial" ? "Follow-up email sent" : "Reminder email sent"
         : r?.kind === "initial" ? "Follow-up sent — WhatsApp template and email" : "Reminder sent";
-  await back(
-    !r?.sent
-      ? r?.reason ?? "Nothing was sent."
-      : r.kind === "initial" || r.sameRound
-        ? `${what}. Delivery shows in the conversation in a few seconds.`
-        : `${what} — follow-up ${r.attempt} of ${r.maxAttempts}.`,
-    r?.sent ? "ok" : "error",
+  if (!r?.sent) await (r?.blocked ? note : fail)(r?.reason ?? "Nothing was sent.");
+  await done(
+    r!.kind === "initial" || r!.sameRound
+      ? `${what}. Delivery shows in the conversation in a few seconds.`
+      : `${what} — follow-up ${r!.attempt} of ${r!.maxAttempts}.`,
   );
 }
 
@@ -293,7 +335,7 @@ export async function stopFollowUpNow(formData: FormData) {
     await fail(backendMessage(e, "Could not stop the follow-up."));
   }
   await afterBackendWrite(openingId);
-  await back("Follow-up stopped. Nothing further will be sent.");
+  await done("Follow-up stopped. Nothing further will be sent.");
 }
 
 /**
@@ -358,24 +400,39 @@ export async function addLink(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const url = String(formData.get("url") ?? "").trim();
-  // It used to return silently — an empty box did nothing and a saved link
-  // looked the same as an unsaved one (21 September).
-  if (!url) await fail("Paste a LinkedIn profile link first.");
-  const canonical = canonicalProfile(url);
-  const existing = canonical ? repo.findLinkByUrl(openingId, canonical) : undefined;
-  if (existing) await note(`${existing.name ?? "That profile"} is already in this table.`);
-  repo.addLink(openingId, canonical ? `https://www.${canonical}` : url, user.id);
+  const typed = String(formData.get("url") ?? "").trim();
+  if (!typed) await fail("Paste a LinkedIn profile link first.");
+  // Tidied before it is saved: "linkedin.com/in/x", "lk.linkedin.com/in/x/"
+  // and "https://www.linkedin.com/in/x?trk=…" are one person (21 Sep).
+  const profile = profileLink(typed);
+  if (!profile) {
+    await fail("That is not a LinkedIn profile link. It should look like linkedin.com/in/their-name.");
+  }
+  const { url, key, guessedName } = profile!;
+  const already = repo.findLinkByUrl(openingId, key);
+  if (already) {
+    const who = repo.users().find((u) => u.id === already.addedBy)?.name;
+    await note(`${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`);
+  }
+  const name = String(formData.get("name") ?? "").trim() || guessedName;
+  repo.addLink(openingId, url, user.id, name);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Saved to Excel Tables as Shortlisted.");
+  await done(
+    name
+      ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
+      : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.",
+  );
 }
 
 export async function toggleEyeMark(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  repo.toggleEyeMark(String(formData.get("entryId")));
+  const entryId = String(formData.get("entryId"));
+  repo.toggleEyeMark(entryId);
   revalidatePath(`/openings/${openingId}`, "layout");
+  const now = repo.linkVault(openingId).find((l) => l.id === entryId)?.isEyeMarked;
+  await done(now ? "Eye-marked." : "Eye-mark removed.");
 }
 
 
@@ -421,7 +478,8 @@ export async function createOpeningStep1(formData: FormData) {
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
   const openingId = await saveNewOpening(formData, user);
-  if (!openingId) return;
+  // Returned nothing before, so an incomplete form was a button that did nothing.
+  if (!openingId) await fail("Choose a client and a position.");
 
   if (next === "jd") redirect(`/openings/${openingId}/jd`);
   if (next === "again") redirect(`/openings/new?created=${openingId}`);
@@ -453,7 +511,7 @@ export async function createOpeningInline(
   try {
     const openingId = await saveNewOpening(formData, user);
     if (!openingId) {
-      return { ok: false, error: "Choose a client, a position and — for a lead — at least one TA." };
+      return { ok: false, error: "Choose a client and a position." };
     }
     const clientId = String(formData.get("clientId") ?? "");
     return {
@@ -492,7 +550,8 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
     ? formData.getAll("assignedTaIds").map(String).filter((id) => tas.has(id))
     : [user.id];
 
-  if (!clientId || !title || assigned.length === 0) return null;
+  // No TA is fine: it is assigned later, by workload (plan 4.1).
+  if (!clientId || !title) return null;
 
   const users = repo.users();
   const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
@@ -600,9 +659,13 @@ export async function saveBriefNotes(formData: FormData) {
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const user = await getCurrentUser();
-  saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
+  // It used to return nothing either way, so a save that found no opening
+  // lost the notes without a word (testing, 21 Sep).
+  if (!saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""))) {
+    await fail("The opening could not be found, so the notes were not saved. Reload the page and try again.");
+  }
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Notes saved.");
+  await done("Notes saved.");
 }
 
 /**
@@ -612,16 +675,16 @@ export async function saveBriefNotes(formData: FormData) {
  * what the lead had left. Each person now has a brief of their own, and the JD
  * is written from all of them (see `jdBriefsFor`).
  */
-function saveOwnNotes(openingId: string, userId: string, notes: string) {
+function saveOwnNotes(openingId: string, userId: string, notes: string): boolean {
   const opening = repo.opening(openingId);
-  if (!opening) return;
+  if (!opening) return false;
   const extracted = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
   const mine = repo.briefsForOpening(openingId).filter((b) => b.capturedBy === userId).pop();
   if (mine) {
     if (mine.notesMarkdown !== notes) repo.updateBrief(mine.id, { notesMarkdown: notes, extracted });
-    return;
+    return true;
   }
-  if (!notes.trim()) return;
+  if (!notes.trim()) return true;
   repo.createBrief({
     clientId: opening.clientId,
     openingId,
@@ -639,6 +702,7 @@ function saveOwnNotes(openingId: string, userId: string, notes: string) {
     consentText: null,
     extracted,
   });
+  return true;
 }
 
 /** Everyone's details about an opening, for the JD: the lead's brief and each TA's notes. */
@@ -801,11 +865,9 @@ async function rematchWhenRequirementsSettle(openingId: string, actorId: string)
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
-const listField = (formData: FormData, name: string) =>
-  String(formData.get(name) ?? "")
-    .split(/[,;\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+// Split the same way the backend does, so a comma inside brackets
+// ("Version Control (e.g., Git)") never cuts a skill in two.
+const listField = (formData: FormData, name: string) => splitSkills(String(formData.get(name) ?? ""));
 
 const optionalNumber = (formData: FormData, name: string): number | null => {
   const raw = String(formData.get(name) ?? "").replace(/,/g, "").trim();
@@ -854,7 +916,7 @@ export async function saveJobDetails(formData: FormData) {
   }
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await back("Job details saved. Matching is re-running against them.");
+  await done("Job details saved. Matching is re-running against them.");
 }
 
 /** Read the approved JD again and replace the details — including hand corrections. */
@@ -869,7 +931,7 @@ export async function reextractJobDetails(formData: FormData) {
   }
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await back("Reading the JD again — the details update in a few seconds.");
+  await done("Reading the JD again — the details update in a few seconds.");
 }
 
 export async function addJobPost(formData: FormData) {
@@ -953,6 +1015,8 @@ export async function toggleAddOn(formData: FormData) {
   const on = String(formData.get("on")) === "1";
   repo.setAddOn(appId, on);
   revalidatePath(`/openings/${openingId}`, "layout");
+  // Toggled silently before; only the tick changing gave it away (21 Sep).
+  await done(on ? "Marked as an add-on — you and the lead are notified." : "No longer an add-on.");
 }
 
 // ─── Link vault (spec §4.5) ──────────────────────────────────────────────────
@@ -970,8 +1034,19 @@ export async function updateLink(formData: FormData) {
   const company = String(formData.get("company") ?? "").trim() || null;
   repo.updateLink(entryId, { outcome, phoneNumber, phoneSource, name, company });
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back(name ? `${name} saved.` : "Saved.");
+  // It saved silently; testers could not tell it had (21 Sep).
+  await done(`Saved — ${LINK_OUTCOME_LABEL[outcome] ?? outcome}.`);
 }
+
+const LINK_OUTCOME_LABEL: Record<string, string> = {
+  no_contact: "Not contacted",
+  contacted: "Contacted",
+  responded: "Responded",
+  cv_received: "CV received",
+  shortlisted: "Shortlisted",
+  declined: "Declined",
+  unreachable: "Unreachable",
+};
 
 export async function logOutreach(formData: FormData) {
   await primeStore({ allApplications: true });
@@ -980,10 +1055,10 @@ export async function logOutreach(formData: FormData) {
   const entryId = String(formData.get("entryId"));
   const note = String(formData.get("note") ?? "").trim();
   const channel = String(formData.get("channel") ?? "linkedin");
-  if (!note) await fail("Write what happened first — the note is what gets logged.");
+  if (!note) await fail("Write what happened on the approach first.");
   repo.logOutreach(entryId, user.id, channel, note);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Logged.");
+  await done(`Logged · ${channel === "whatsapp" ? "WhatsApp" : channel === "linkedin" ? "LinkedIn" : channel[0].toUpperCase() + channel.slice(1)}.`);
 }
 
 
@@ -1000,12 +1075,14 @@ export async function addLinkToPipeline(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const entryId = String(formData.get("entryId"));
 
-  // From the row's edit panel the button also saves what was just typed, so
-  // picking "Shortlisted" and pressing Add to pipeline is one step.
+  // From the row's edit panel the button also saves what was just typed —
+  // and it means Shortlisted: pressing "Save and add to pipeline" and being
+  // told "Set the outcome to Shortlisted first" at the top of the page was
+  // the one thing it should not say (testing, 21 Sep).
   if (formData.has("outcome")) {
     await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
     repo.updateLink(entryId, {
-      outcome: String(formData.get("outcome")) as import("@/data/types").LinkOutcome,
+      outcome: "shortlisted",
       phoneNumber: String(formData.get("phoneNumber") ?? "").trim() || null,
       phoneSource: (String(formData.get("phoneSource") ?? "") || null) as import("@/data/types").LinkVaultEntry["phoneSource"],
       name: String(formData.get("name") ?? "").trim() || null,
@@ -1016,7 +1093,17 @@ export async function addLinkToPipeline(formData: FormData) {
   const made = repo.linkToApplication(entryId, user.id);
   if (!made.ok) return fail(made.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  if (made.stage !== "follow_up") return note("Already on the pipeline past Follow-up.");
+  // Someone already on the opening: from Database CVs they go on to Follow-up
+  // like anyone else; rejected or dropped out, they are brought back first.
+  if (made.stage === "rejected" || made.stage === "dropped_out") {
+    const r = await reinstate(user.id, made.applicationId, openingId);
+    if (!r.ok) return fail(`They were ${STAGE_LABEL[made.stage].toLowerCase()} here and could not be brought back: ${r.message}`);
+    made.stage = "follow_up";
+  }
+  if (made.stage === "matched" || made.stage === "new_cv") made.stage = "follow_up";
+  if (made.stage !== "follow_up") {
+    return note(`Already on this opening's pipeline, in ${STAGE_LABEL[made.stage] ?? made.stage}.`);
+  }
 
   if (isConvex()) {
     let problem: string | null = null;
@@ -1025,15 +1112,20 @@ export async function addLinkToPipeline(formData: FormData) {
       if (!claimed.ok) problem = "Another recruiter already claimed this candidate.";
       else await backend.moveStage({ id: user.id }, made.applicationId, "director_review");
     } catch (e) {
-      problem = `On the pipeline at Follow-up, not yet in Director review: ${backendMessage(e, "the move could not be made.")}`;
+      problem = `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${backendMessage(e, "the move could not be made.")})`;
     }
     await afterBackendWrite(openingId);
-    return problem ? note(problem) : back("Moved to Director review.");
+    if (problem) return note(problem);
+    return done("Added to the pipeline and moved to Director review.");
   }
   repo.shortlist(made.applicationId, user.id);
   const moved = repo.moveStage(made.applicationId, "director_review", user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
-  return moved.ok ? back("Moved to Director review.") : note(`On the pipeline at Follow-up: ${moved.message}`);
+  if (!moved.ok) {
+    return note(
+      `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${moved.message})`);
+  }
+  return done("Added to the pipeline and moved to Director review.");
 }
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
@@ -1141,7 +1233,7 @@ export async function createClientInline(
 
 async function saveNewClient(formData: FormData, user: User): Promise<{ id: string; name: string; industry: string } | null> {
   const name = String(formData.get("name") ?? "").trim();
-  const industry = String(formData.get("industry") ?? "").trim() || "—";
+  const industry = String(formData.get("industry") ?? "").trim() || "Other";
   if (!name) return null;
 
   // The form has always asked for the main contact. Until the 12 Sep sweep it
@@ -1185,7 +1277,7 @@ export async function updateClient(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const esa = String(formData.get("esaSignedAt") ?? "").trim();
-  const industry = String(formData.get("industry") ?? "").trim() || "—";
+  const industry = String(formData.get("industry") ?? "").trim() || "Other";
   const status = String(formData.get("status") ?? "active") as "active" | "dormant" | "archived";
   const esaSignedAt = esa ? new Date(esa).getTime() : null;
 
@@ -1357,16 +1449,31 @@ export async function deleteLink(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   repo.deleteLink(String(formData.get("entryId")));
   revalidatePath(`/openings/${openingId}/hh`, "layout");
+  await done("Row deleted.");
 }
 
 export async function removeApplication(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
-  const r = repo.removeApplication(String(formData.get("appId")));
-  if (!r.ok) await fail(r.message);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}`);
+  const appId = String(formData.get("appId"));
+  // Removing is a move to Dropped out with the reason "Removed", not a delete:
+  // it took the application's history, calls and interviews with it and could
+  // not be undone (plan 3.2, 21 Sep). "Bring back" reverses it.
+  if (isConvex()) {
+    try {
+      await backend.moveStage({ id: user.id }, appId, "dropped_out", "Removed from the opening");
+    } catch (e) {
+      await fail(backendMessage(e, "They could not be removed."));
+    }
+    await afterBackendWrite(openingId);
+  } else {
+    const r = repo.moveStage(appId, "dropped_out", user.id, "Removed from the opening", { force: true });
+    if (!r.ok) await fail(r.message);
+    revalidatePath(`/openings/${openingId}`, "layout");
+  }
+  await done("Removed from the opening — they are under Dropped out, and can be brought back from there.");
 }
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
@@ -1422,6 +1529,7 @@ export async function scheduleInterview(formData: FormData) {
   if (!booked.ok) await fail(booked.message);
 
   revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Interview booked for ${dateAt(scheduledAt!)} — moved to Interview.`);
 }
 
 export async function confirmInterview(formData: FormData) {
@@ -1473,12 +1581,13 @@ export async function saveReport(formData: FormData) {
   const user = await authorize(formData, "report.read");
   const name = String(formData.get("name") ?? "").trim();
   const spec = String(formData.get("spec") ?? "");
-  if (!name || !spec) return;
-  let parsed: unknown;
+  if (!name) await fail("Give the report a name first.");
+  if (!spec) await fail("There is no report on screen to save.");
+  let parsed: unknown = null;
   try {
     parsed = JSON.parse(spec);
   } catch {
-    return;
+    await fail("This report could not be read, so it was not saved. Build it again and save.");
   }
   const id = repo.saveReport({
     name,
@@ -1507,7 +1616,8 @@ export async function askReport(formData: FormData) {
   await primeStore();
   await authorize(formData, "report.read");
   const question = String(formData.get("question") ?? "").trim();
-  if (!question) return;
+  // An empty box did nothing at all (21 Sep).
+  if (!question) redirect(`/reports?askErr=empty`);
   const { askForReport } = await import("@/lib/reportAsk");
   const res = await askForReport(question);
 
@@ -1781,8 +1891,17 @@ export async function addToOpening(formData: FormData) {
 
   const onOpening = () => repo.applications(openingId).find((a) => a.candidateId === candidateId);
   const existing = onOpening();
+  // Rejected or dropped out is not "in the pipeline": they were refused with
+  // "Already in X's pipeline" and could never be brought back (21 Sep).
+  if (existing && (existing.stage === "rejected" || existing.stage === "dropped_out")) {
+    const was = STAGE_LABEL[existing.stage];
+    const r = await reinstate(user.id, existing.id, openingId);
+    refresh();
+    if (!r.ok) await fail(`They were ${was.toLowerCase()} on ${title} and could not be brought back: ${r.message}`);
+    await done(`Back on ${title} in Follow-up — they had been ${was.toLowerCase()}.`);
+  }
   if (existing && !["matched", "new_cv"].includes(existing.stage)) {
-    await note(`Already in ${title}'s pipeline.`);
+    await note(`Already on ${title}'s pipeline, in ${STAGE_LABEL[existing.stage]}.`);
   }
   if (existing?.ownerTaId && existing.ownerTaId !== user.id) {
     const owner = repo.users().find((u) => u.id === existing.ownerTaId)?.name ?? "another recruiter";
@@ -1798,7 +1917,7 @@ export async function addToOpening(formData: FormData) {
   const appId = onOpening()?.id;
   if (!appId) {
     refresh();
-    await fail("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.");
+    await note("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.");
   }
 
   if (isConvex()) {
@@ -1816,13 +1935,13 @@ export async function addToOpening(formData: FormData) {
     refresh();
     if (problem) await note(`Added to ${title} under Database CVs, but not moved to Follow-up: ${problem}`);
     if (owner) await fail(`${owner} has already claimed this candidate on ${title}.`);
-    await back(`Added to ${title} in Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
+    await done(`Added to ${title} in Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
   }
 
   const claimed = repo.shortlist(appId!, user.id);
   refresh();
   if (!claimed.ok) await fail("Somebody else claimed this candidate first.");
-  await back(`Added to ${title} in Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
+  await done(`Added to ${title} in Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
 }
 
 // ─── Headhunting intelligence (spec §8A) ─────────────────────────────────────
@@ -1850,8 +1969,15 @@ export async function runResearch(formData: FormData) {
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const res = await researchOpening(openingId, user.id);
-  if (!res.ok) redirect(`/openings/${openingId}/hh/research?err=${res.reason}`);
   revalidatePath(`/openings/${openingId}/hh/research`);
+  if (!res.ok) await fail(`Research did not run — ${reasonInWords(res.reason)}`);
+  const filled = res.filled ?? 0;
+  if (filled === 0) {
+    await note(
+      "The search ran but nothing could be sourced, so every field is still empty. Try again, or fill in what you know by hand.",
+    );
+  }
+  await done(`Research filled in ${filled} of 8 fields${res.sources ? ` from ${res.sources} sources` : ""}. Check anything going in front of the client.`);
 }
 
 export async function runBenchmark(formData: FormData) {
@@ -1859,29 +1985,40 @@ export async function runBenchmark(formData: FormData) {
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
-  if (!o) return;
-  const client = repo.client(o.clientId);
+  if (!o) await fail("The opening could not be found. Reload the page and try again.");
+  const client = repo.client(o!.clientId);
   // Searches, then a cheap sort of what they returned: every named person and
   // link comes from a result. The older path let a model name people and could
   // attach an unrelated source to them (13 September review).
   const run = await benchmarkViaSearch(
     {
-      title: o.title,
+      title: o!.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: withJobDetails(o),
-      locations: o.locations,
-      targetNationalities: o.targetNationalities,
-      targetGender: o.targetGender,
-      salaryNote: o.packageNotes || salaryNoteOf(o),
+      jdText: withJobDetails(o!),
+      locations: o!.locations,
+      targetNationalities: o!.targetNationalities,
+      targetGender: o!.targetGender,
+      salaryNote: o!.packageNotes || salaryNoteOf(o!),
       targetEmployers: [],
       alreadyKnown: repo.suggestions(openingId).map((x) => canonicalProfile(x.linkedinUrl ?? "")).filter((x): x is string => Boolean(x)),
     },
     openingId,
   );
-  if (run.error) redirect(`/openings/${openingId}/hh/research?err=${run.error}`);
+  // Answered under Benchmark itself. A failure used to land in Research's
+  // red box above, and "nothing found" was never shown at all (21 Sep).
+  if (run.error) await fail(`Benchmark did not run — ${searchReasonInWords(run.error)}`);
   repo.replaceBenchmarks(openingId, run.rows);
-  redirect(`/openings/${openingId}/hh/research?found=${run.rows.length}&searches=${run.queries.length}${run.note ? `&note=${run.note}` : ""}`);
+  revalidatePath(`/openings/${openingId}/hh/research`);
+  const searched = `${run.queries.length} web ${run.queries.length === 1 ? "search" : "searches"}`;
+  if (run.rows.length === 0) {
+    await note(
+      run.note === "client_not_searchable"
+        ? `Nothing found: "${client?.name ?? "the client"}" returned no search results (${searched}). Check the client's name, or tick target employers and run again.`
+        : `Nothing found that could be sourced (${searched}). People without a search result behind them are left out rather than guessed.`,
+    );
+  }
+  await done(`Found ${run.rows.length} ${run.rows.length === 1 ? "person" : "people"}, each with a source · ${searched}.`);
 }
 
 export async function pickBenchmark(formData: FormData) {
@@ -1941,14 +2078,17 @@ export async function runSuggestions(formData: FormData) {
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = await sourceFor(openingId, user.id);
-  if (r.error) redirect(`/openings/${openingId}/hh/suggestions?err=${r.error}`);
-  const q = new URLSearchParams({
-    found: String(r.found), scanned: String(r.scanned),
-    queries: String(r.queries), cost: r.cost.toFixed(3),
-    rejected: String(r.rejected ?? 0),
-    ...(r.note ? { note: r.note } : {}),
-  });
-  redirect(`/openings/${openingId}/hh/suggestions?${q.toString()}`);
+  revalidatePath(`/openings/${openingId}/hh/suggestions`);
+  if (r.error) await fail(`Suggestions did not run — ${searchReasonInWords(r.error)}`);
+  const searched = `${r.scanned} profiles read from ${r.queries} searches`;
+  if (r.found === 0) {
+    await note(
+      r.note === "nothing_survived_filter"
+        ? `No new profiles this round (${searched}) — everyone found was already suggested or in Excel Tables. Keep or reject a few, or widen the brief, then refine.`
+        : `No profiles found (${searched}). Widen the brief or tick target employers on Research, then try again.`,
+    );
+  }
+  await done(`${r.found} new ${r.found === 1 ? "profile" : "profiles"} to review · ${searched}.`);
 }
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
@@ -2104,7 +2244,7 @@ async function extractJobDetails(openingId: string, c: OpeningContext, briefs: J
 }
 
 /** Market research for an opening, keeping any field a TA corrected by hand. */
-async function researchOpening(openingId: string, userId: string): Promise<{ ok: boolean; reason?: string }> {
+async function researchOpening(openingId: string, userId: string): Promise<{ ok: boolean; reason?: string; filled?: number; sources?: number }> {
   const c = contextFor(openingId);
   const o = repo.opening(openingId);
   if (!c || !o) return { ok: false, reason: "missing" };
@@ -2130,7 +2270,8 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
     generatedBy: userId,
     generatedAt: Date.now(),
   });
-  return { ok: true };
+  const filled = Object.values(fields).filter((x) => (Array.isArray(x) ? x.length > 0 : String(x ?? "").trim() !== "")).length;
+  return { ok: true, filled, sources: res.sources.length };
 }
 
 export async function generateJdWithModel(formData: FormData) {
@@ -2141,13 +2282,12 @@ export async function generateJdWithModel(formData: FormData) {
   // saved notes are still the TA's notes, and the draft must include them.
   if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
   const res = await draftJd(openingId);
-  if (!res) return;
-  redirect(
-    `/openings/${openingId}/jd?msg=${encodeURIComponent(
-      res.ok
-        ? "Written by the model. Read it before approving."
-        : `The model could not write it — ${res.reason}. The template version is in place.`,
-    )}`,
+  if (!res) await fail("The opening could not be found. Reload the page and try again.");
+  revalidatePath(`/openings/${openingId}`, "layout");
+  if (res!.ok) await done("Written by the AI. Read it through before approving.");
+  // Said plainly and beside the button: the fallback reads like a finished JD.
+  await note(
+    `The AI could not write it — ${reasonInWords(res!.reason)} A basic version built from your notes is in place: try again, or edit it by hand.`,
   );
 }
 
@@ -2488,8 +2628,15 @@ export async function saveReviewDetails(formData: FormData) {
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const app = repo.application(String(formData.get("applicationId")));
   if (!app) return fail("That application no longer exists.");
-  const currentSalary = String(formData.get("currentSalary") ?? "").trim();
-  const expectedSalary = String(formData.get("expectedSalary") ?? "").trim();
+  // A bare amount is saved with the currency picked beside it: "25,000" alone
+  // could not be read as a salary later (21 Sep).
+  const withCurrency = (field: string) => {
+    const amount = String(formData.get(field) ?? "").trim();
+    const currency = String(formData.get(`${field}Currency`) ?? "").trim();
+    return amount && currency && /^[\d.,\s]+(k|m|l)?(\s*(a|per)\s*month)?$/i.test(amount) ? `${currency} ${amount}` : amount;
+  };
+  const currentSalary = withCurrency("currentSalary");
+  const expectedSalary = withCurrency("expectedSalary");
   const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
   const notice = noticeRaw === "" ? null : Number(noticeRaw);
   if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return fail("Notice period is a number of days, 0 or more.");
@@ -2499,7 +2646,7 @@ export async function saveReviewDetails(formData: FormData) {
     ...(notice !== null ? { noticePeriodDays: Math.round(notice) } : {}),
   });
   revalidatePath(`/openings/${app.openingId}`, "layout");
-  return back("Details saved.");
+  return done("Details saved.");
 }
 
 /**
@@ -2548,6 +2695,37 @@ export async function setOpeningQuestions(formData: FormData) {
   repo.setOpeningQuestions(openingId, questions);
   revalidatePath(`/openings/${openingId}`, "layout");
   await back("Follow-up questions saved.");
+}
+
+/**
+ * One more follow-up question for this opening, asked from the Follow-up page
+ * (plan 3.4, 21 Sep: the only place to add one was a collapsed box at the
+ * bottom of the Overview). It goes out with the next follow-up to everyone
+ * still in Follow-up, and nobody counts as complete until it is answered.
+ */
+export async function addOpeningQuestion(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  const label = String(formData.get("question") ?? "").trim().replace(/\s+/g, " ");
+  if (!label) await fail("Type the question first.");
+  if (label.length > 200) await fail("Keep the question under 200 characters — it goes out on WhatsApp.");
+  const existing = repo.opening(openingId)?.followUpQuestions ?? [];
+  if (existing.some((q) => q.label.toLowerCase() === label.toLowerCase())) {
+    await note("That question is already asked on this opening.");
+  }
+  repo.setOpeningQuestions(openingId, [...existing, { id: `q${Math.random().toString(36).slice(2, 8)}`, label }]);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  const waiting = repo.applications(openingId).filter((a) => a.stage === "follow_up").length;
+  await done(
+    waiting
+      ? `Question added. It goes with the next follow-up to the ${waiting} ${waiting === 1 ? "person" : "people"} in Follow-up.`
+      : "Question added. It will be asked in every follow-up on this opening.",
+  );
+}
+
+export async function addOpeningQuestionInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addOpeningQuestion(formData));
 }
 
 export async function setAutoShortlistScore(formData: FormData) {
@@ -2808,6 +2986,8 @@ export async function sendEod(formData: FormData) {
       applicationIds: fresh,
       to: String(formData.get("to") ?? ""),
       subject: String(formData.get("subject") ?? ""),
+      // The counts and targets as the TA corrected them (plan 6.3).
+      effort: await import("@/lib/eod").then((m) => m.effortFromForm(formData, m.effortRow(openingId, user))),
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
@@ -2818,9 +2998,19 @@ export async function sendEod(formData: FormData) {
   if (kind === "director") {
     for (const id of fresh) {
       if (repo.application(id)?.stage === "follow_up") {
-        repo.moveStage(id, "director_review", user.id, "Sent to the Director in the end-of-day email");
+        // Through the backend's own move on Convex, so its stage counts, its
+        // history and the stop of the follow-up sequence happen too — the
+        // store's write skipped all three (plan 3.2, 21 Sep).
+        if (isConvex()) {
+          await backend
+            .moveStage({ id: user.id }, id, "director_review", "Sent to the Director in the end-of-day email")
+            .catch((e) => console.warn(`[eod] ${id} stays in Follow-up: ${backendMessage(e, "move refused")}`));
+        } else {
+          repo.moveStage(id, "director_review", user.id, "Sent to the Director in the end-of-day email");
+        }
       }
     }
+    if (isConvex()) await afterBackendWrite(openingId);
   }
 
   repo.openReviewRound({
@@ -2860,6 +3050,7 @@ async function emailEod(input: {
   applicationIds: string[];
   to: string;
   subject: string;
+  effort?: EffortRow;
 }): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
   const opening = repo.opening(openingId);
@@ -2930,7 +3121,7 @@ async function emailEod(input: {
   const lead = repo.user(opening.taLeadId);
   const html = eodEmailHtml({
     rows,
-    effort: effortRow(openingId, user),
+    effort: input.effort ?? effortRow(openingId, user),
     senderName: user.name,
     attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
   });
@@ -3240,4 +3431,146 @@ export async function syncMailboxNow(formData: FormData) {
   }
   revalidatePath("/settings");
   await back(`Syncing ${mailbox}. New messages appear below within a minute; each waits 20 minutes before it is filed.`);
+}
+
+
+// ─── Answers beside the button ───────────────────────────────────────────────
+//
+// The same actions, for forms that show the outcome where it was asked for
+// rather than at the top of the page (lib/inlineResult). `useActionState`
+// hands the previous answer first; it is not needed.
+
+export async function saveJobDetailsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveJobDetails(formData));
+}
+
+export async function reextractJobDetailsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => reextractJobDetails(formData));
+}
+
+export async function saveBriefNotesInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveBriefNotes(formData));
+}
+
+export async function addToOpeningInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addToOpening(formData));
+}
+
+/** A successful save still navigates to the new opening; only a refusal answers here. */
+export async function createOpeningStep1Inline(_: ActionResult | null, formData: FormData) {
+  return inline(() => createOpeningStep1(formData));
+}
+
+export async function addLinkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLink(formData));
+}
+
+export async function generateJdInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => generateJdWithModel(formData));
+}
+
+export async function moveStageInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => moveStage(formData));
+}
+
+export async function runResearchInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => runResearch(formData));
+}
+
+export async function runBenchmarkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => runBenchmark(formData));
+}
+
+export async function runSuggestionsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => runSuggestions(formData));
+}
+
+export async function toggleEyeMarkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => toggleEyeMark(formData));
+}
+
+export async function updateLinkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => updateLink(formData));
+}
+
+export async function logOutreachInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => logOutreach(formData));
+}
+
+export async function addLinkToPipelineInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLinkToPipeline(formData));
+}
+
+export async function deleteLinkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => deleteLink(formData));
+}
+
+export async function toggleAddOnInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => toggleAddOn(formData));
+}
+
+export async function scheduleInterviewInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => scheduleInterview(formData));
+}
+
+export async function saveReviewDetailsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveReviewDetails(formData));
+}
+
+export async function sendFollowUpNowInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => sendFollowUpNow(formData));
+}
+
+export async function stopFollowUpNowInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => stopFollowUpNow(formData));
+}
+
+/**
+ * A referee's current role, looked up on LinkedIn (plan 5.2, 21 Sep): the
+ * designation on a CV is from when the CV was written, often years ago. One
+ * web search for their LinkedIn profile; the title and company are read from
+ * the result, never invented, and shown beside the CV's for the TA to judge.
+ */
+export async function verifyReferee(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const refereeId = String(formData.get("refereeId") ?? "");
+  const openingId = String(formData.get("openingId") ?? "");
+  const r = repo.refereesForPipeline(openingId).flatMap((g) => g.referees).find((x) => x.id === refereeId);
+  if (!r) await fail("That referee is not on this opening's list any more. Reload the page.");
+  const { search, serperConfigured } = await import("@/lib/serper");
+  if (!serperConfigured()) await fail("Web search is not set up on this system, so LinkedIn cannot be checked.");
+  const query = `"${r!.name}"${r!.company ? ` "${r!.company}"` : ""} site:linkedin.com/in`;
+  const res = await search(query, 5);
+  if (res.error) await fail(`The search did not run (${res.error}). Try again.`);
+  const first = r!.name.split(/\s+/).filter((w) => w.length > 1 && !/^(dr|mr|mrs|ms|prof)\.?$/i.test(w))[0]?.toLowerCase() ?? "";
+  const hit = res.hits.find((h) => canonicalProfile(h.url) && h.title.toLowerCase().includes(first));
+  if (!hit) await note(`No LinkedIn profile found for ${r!.name}${r!.company ? ` at ${r!.company}` : ""}. Check by hand, or call them.`);
+  const { profileFacts } = await import("@/lib/sourcing");
+  const parts = hit!.title.replace(/\s*\|\s*LinkedIn.*$/i, "").split(/\s+[-–—]\s+/);
+  const title = (parts[1] ?? "").replace(/\s+(?:at|@)\s+.+$/i, "").trim() || null;
+  const company = profileFacts({ title: hit!.title, snippets: [hit!.snippet] }).company;
+  const now = [title, company && `at ${company}`].filter(Boolean).join(" ") || "role not shown in the search result";
+  const cv = [r!.title, r!.company && `at ${r!.company}`].filter(Boolean).join(" ");
+  const same = !!company && !!r!.company && employerMatches(company, r!.company);
+  await done(
+    `LinkedIn today: ${now}.${cv ? ` The CV says ${cv}${same ? " — same company." : " — this may be out of date."}` : ""} Profile: ${displayUrl(canonicalProfile(hit!.url)!)}`,
+  );
+}
+
+/** "Hayleys PLC" and "hayleys" are the same employer for this check. */
+function employerMatches(a: string, b: string): boolean {
+  const k = (x: string) => x.toLowerCase().replace(/(plc|pvt|ltd|limited|inc|llc|group|\(pvt\))/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const x = k(a);
+  const y = k(b);
+  return !!x && !!y && (x.includes(y) || y.includes(x));
+}
+
+export async function verifyRefereeInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => verifyReferee(formData));
+}
+
+/** A saved report navigates to itself; a refusal answers beside Save. */
+export async function saveReportInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveReport(formData));
 }

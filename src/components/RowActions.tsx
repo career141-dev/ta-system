@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL, type Candidate, type Stage } from "@/data/types";
-import { declineOffer, moveStage, scheduleInterview, toggleAddOn } from "@/app/actions";
+import { declineOffer, moveStageInline, scheduleInterviewInline, toggleAddOnInline } from "@/app/actions";
+import { ActionNote, SubmitButton, Spinner, latest, submitted, useInline } from "./Submit";
 import { directorReviewBlockers, nextStages } from "@/lib/pipeline";
 import { inputClass } from "./form";
 
@@ -52,29 +53,50 @@ export function RowActions({
   const missingForDirector = candidate ? directorReviewBlockers(candidate) : [];
   const [open, setOpen] = useState<false | "stage" | "reject" | "dropout" | "decline" | "interview">(false);
   const allowed = nextStages(current);
+  // Each button answers here, under the buttons — the sheet sits over the
+  // page, so an answer at the top of the page was out of sight (21 Sep).
+  const addOn = useInline(toggleAddOnInline);
+  const move = useInline(moveStageInline);
+  const book = useInline(scheduleInterviewInline);
+  const [movingTo, setMovingTo] = useState<Stage | null>(null);
+  const busy = addOn.pending || move.pending || book.pending;
+  const answer = latest(addOn.result, move.result, book.result);
+  const moveTo = (e: React.FormEvent<HTMLFormElement>) => {
+    const { formData } = submitted(e);
+    setMovingTo(String(formData.get("stage")) as Stage);
+    setOpen(false);
+    move.run(formData);
+  };
 
   return (
+    <div className="flex flex-col items-end gap-2">
     <div className="relative flex items-center gap-2">
-      <form action={toggleAddOn}>
+      <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
         <input type="hidden" name="appId" value={appId} />
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="on" value={isAddOn ? "0" : "1"} />
-        <button
-          title={isAddOn ? "Remove from add-ons" : "Mark as an add-on — notifies you and the lead"}
-          className={`whitespace-nowrap rounded-full border px-3.5 py-[7px] text-[12.5px] transition-colors ${
+        <SubmitButton
+          busy={addOn.pending}
+          locked={busy}
+          pendingLabel="Saving…"
+          tone="dark"
+          className={`whitespace-nowrap rounded-full border px-3.5 py-[7px] text-[12.5px] transition-colors disabled:opacity-60 ${
             isAddOn
               ? "border-brand bg-brand-soft font-medium text-brand"
               : "border-rule-strong text-ink-soft hover:border-ink-faint hover:text-ink"
           }`}
         >
           {isAddOn ? "Add-on ✓" : "Add-on"}
-        </button>
+        </SubmitButton>
       </form>
       <button
         onClick={() => setOpen(open === "stage" ? false : "stage")}
-        className="rounded-full border border-brand-line px-3.5 py-[7px] text-[12.5px] font-medium text-brand hover:bg-brand-soft whitespace-nowrap"
+        disabled={busy}
+        aria-busy={move.pending}
+        className="inline-flex items-center gap-2 rounded-full border border-brand-line px-3.5 py-[7px] text-[12.5px] font-medium text-brand hover:bg-brand-soft whitespace-nowrap disabled:opacity-60"
       >
-        Change stage
+        {move.pending && <Spinner tone="dark" />}
+        {move.pending && movingTo ? `Moving to ${STAGE_LABEL[movingTo]}…` : "Change stage"}
       </button>
       {current === "offer" ? (
         <button
@@ -147,7 +169,7 @@ export function RowActions({
             // cannot see them — so it can still be pressed once it looks right.
             if (s === "director_review" && missingForDirector.length > 0) {
               return (
-                <form key={s} action={moveStage} title={`Still needs ${missingForDirector.join(", ")}.`}>
+                <form key={s} onSubmit={moveTo}>
                   <input type="hidden" name="appId" value={appId} />
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="stage" value={s} />
@@ -159,7 +181,7 @@ export function RowActions({
               );
             }
             return (
-              <form key={s} action={moveStage}>
+              <form key={s} onSubmit={moveTo}>
                 <input type="hidden" name="appId" value={appId} />
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="stage" value={s} />
@@ -186,8 +208,11 @@ export function RowActions({
 
       {open === "interview" && (
         <form
-          action={scheduleInterview}
-          onSubmit={() => setOpen(false)}
+          onSubmit={(e) => {
+            const { formData } = submitted(e);
+            setOpen(false);
+            book.run(formData);
+          }}
           className="absolute right-0 top-full z-30 mt-2 w-[330px] rounded-xl border border-rule bg-surface p-4 text-left shadow-lg"
         >
           <input type="hidden" name="appId" value={appId} />
@@ -296,7 +321,7 @@ export function RowActions({
 
       {(open === "reject" || open === "dropout") && (
         <form
-          action={moveStage}
+          onSubmit={moveTo}
           className="absolute right-0 top-full z-30 mt-2 w-[260px] rounded-xl border border-rule bg-surface p-3.5 text-left shadow-lg"
         >
           <input type="hidden" name="appId" value={appId} />
@@ -336,6 +361,8 @@ export function RowActions({
           </div>
         </form>
       )}
+    </div>
+    <ActionNote result={answer} className="max-w-[440px]" />
     </div>
   );
 }

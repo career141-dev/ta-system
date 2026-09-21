@@ -26,8 +26,15 @@ export const SENIORITY_LABEL: Record<SeniorityLevel, string> = {
   agm: "AGM", gm: "GM", director: "Director", c_suite: "C-Suite", other: "Other",
 };
 
+/**
+ * The one list of industries. It was three: the new-client dialog, the client
+ * editor and the job details each had their own, so "Apparel Manufacturing"
+ * from the editor showed as "Other" on the job, and a save wrote "Other" back
+ * for the JD reader to overwrite with its own guess (testing, 21 Sep).
+ */
 export const INDUSTRIES = [
-  "FMCG", "Finance", "Technology", "Apparel", "Healthcare", "Retail", "Manufacturing", "Telecoms", "Other",
+  "Apparel", "FMCG", "Manufacturing", "Finance", "Retail", "Technology", "Telecoms", "Healthcare",
+  "Energy", "Logistics", "Construction", "Hospitality", "Plantation", "Education", "Other",
 ] as const;
 
 export const EDUCATION_LEVELS = [
@@ -79,10 +86,31 @@ export interface Extracted {
 
 // ─── Field rules ─────────────────────────────────────────────────────────────
 
-/** Split pasted skills on commas, semicolons, newlines and bullets; trim; de-duplicate case-insensitively. */
+/**
+ * Split pasted skills on commas, semicolons, newlines and bullets; trim;
+ * de-duplicate case-insensitively.
+ *
+ * Never inside brackets: "Version Control (e.g. Git, SVN)" is one skill. It
+ * was cut at every comma, and because a saved list went through here again on
+ * each save, "Version Control (e.g." and "Git)" became two tags (testing,
+ * 21 Sep). Pieces already broken that way are joined back while an opening
+ * bracket is still unclosed, so the next save repairs them.
+ */
 export function splitSkills(input: string | string[] | null | undefined): string[] {
-  const parts = (Array.isArray(input) ? input : [input ?? ""])
-    .flatMap((s) => String(s ?? "").split(/[,;\n•·|]+/))
+  const pieces: string[] = [];
+  let open = "";
+  for (const item of Array.isArray(input) ? input : [input ?? ""]) {
+    for (const part of splitOutsideBrackets(String(item ?? ""))) {
+      // A piece left with an unclosed "(" takes the next ones until it closes.
+      open = open ? `${open}, ${part.trim()}` : part;
+      if (bracketDepth(open) <= 0) {
+        pieces.push(open);
+        open = "";
+      }
+    }
+  }
+  if (open) pieces.push(open);
+  const parts = pieces
     .map((s) => s.replace(/^[\s\-*]+|\s+$/g, "").replace(/\s+/g, " "))
     .filter((s) => s.length > 0 && s.length <= 80);
   const seen = new Set<string>();
@@ -94,6 +122,35 @@ export function splitSkills(input: string | string[] | null | undefined): string
     out.push(p);
   }
   return out.slice(0, 40);
+}
+
+/** Brackets opened and not yet closed in a piece of text. */
+function bracketDepth(text: string): number {
+  let d = 0;
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") d++;
+    else if ((ch === ")" || ch === "]") && d > 0) d--;
+  }
+  return d;
+}
+
+/** Split on , ; newline and bullets, except inside ( ) or [ ]. */
+function splitOutsideBrackets(text: string): string[] {
+  const out: string[] = [];
+  let d = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") d++;
+    else if ((ch === ")" || ch === "]") && d > 0) d--;
+    if (d === 0 && /[,;\n•·|]/.test(ch)) {
+      out.push(cur);
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  out.push(cur);
+  return out.filter((p) => p.trim());
 }
 
 /** Any wording the model or a person uses, onto the schema's eleven levels. */
@@ -121,6 +178,7 @@ export function mapIndustry(raw: string | null | undefined): string | null {
   if (!s.trim()) return null;
   const exact = INDUSTRIES.find((i) => i.toLowerCase() === s.trim());
   if (exact) return exact;
+  if (/apparel|garment|textile|fashion/.test(s)) return "Apparel";
   if (/fmcg|consumer goods|beverage|food|personal care/.test(s)) return "FMCG";
   if (/bank|financ|insurance|account|audit|fintech|investment|leasing/.test(s)) return "Finance";
   if (/tech|software|\bit\b|information technology|saas|digital|data/.test(s)) return "Technology";
@@ -129,6 +187,12 @@ export function mapIndustry(raw: string | null | undefined): string | null {
   if (/retail|e-?commerce|supermarket/.test(s)) return "Retail";
   if (/manufactur|industrial|factory|engineering|automotive/.test(s)) return "Manufacturing";
   if (/telecom|telco|mobile network/.test(s)) return "Telecoms";
+  if (/energy|power|solar|utilit/.test(s)) return "Energy";
+  if (/logistic|shipping|freight|courier|supply chain/.test(s)) return "Logistics";
+  if (/construct|real estate|property|infrastructure/.test(s)) return "Construction";
+  if (/hotel|hospitality|leisure|tourism|restaurant/.test(s)) return "Hospitality";
+  if (/plantation|\btea\b|rubber|agri/.test(s)) return "Plantation";
+  if (/education|school|universit|training/.test(s)) return "Education";
   return "Other";
 }
 

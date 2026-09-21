@@ -1,10 +1,11 @@
 import { externalUrl } from "@/lib/url";
 import Link from "next/link";
+import { CvFrame } from "@/components/CvFrame";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
-import { addToOpening } from "@/app/actions";
+import { AddToOpening } from "@/components/AddToOpening";
 import { dateAt } from "@/lib/format";
 import { allows } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
@@ -264,7 +265,9 @@ export default async function CandidatePage({
               </div>
               {cvLink?.ok ? (
                 previewsInline(cv) || /pdf/i.test(cvLink.fileType ?? "") ? (
-                  <iframe src={cvHref} title={`CV — ${c.fullName}`} className="h-[720px] w-full rounded-lg border border-rule bg-paper" />
+                  <div className="overflow-hidden rounded-lg border border-rule">
+                    <CvFrame src={cvHref} title={`CV — ${c.fullName}`} />
+                  </div>
                 ) : (
                   <p className="text-[12.5px] text-ink-soft">
                     This file type does not preview in the browser.{" "}
@@ -354,11 +357,7 @@ export default async function CandidatePage({
                       <span className="font-medium">{o.title}</span>
                       <span className="text-ink-soft"> · {clients.find((x) => x.id === o.clientId)?.name}</span>
                     </span>
-                    <form action={addToOpening}>
-                      <input type="hidden" name="candidateId" value={c.id} />
-                      <input type="hidden" name="openingId" value={o.id} />
-                      <button className="rounded-full border border-rule px-3 py-1 text-[12px] font-medium hover:bg-paper">Add</button>
-                    </form>
+                    <AddToOpening candidateId={c.id} openings={[{ id: o.id, label: o.title }]} variant="single" />
                   </li>
                 ))}
               </ul>
@@ -366,19 +365,11 @@ export default async function CandidatePage({
           )}
 
           {mine.length > 0 && (
-            <form action={addToOpening} className="rounded-2xl border border-rule bg-surface px-5 py-4">
-              <input type="hidden" name="candidateId" value={c.id} />
-              <h2 className="text-[13px] font-semibold">Add to an opening</h2>
-              <p className="mt-1 text-[12px] text-ink-faint">Goes straight into Follow-up, claimed by you.</p>
-              <select name="openingId" className="mt-2.5 w-full rounded border border-rule bg-paper px-2.5 py-2 text-[12.5px]">
-                {mine.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {clients.find((x) => x.id === o.clientId)?.name} — {o.title}
-                  </option>
-                ))}
-              </select>
-              <button className="mt-2.5 rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white">Add</button>
-            </form>
+            <AddToOpening
+              candidateId={c.id}
+              openings={mine.map((o) => ({ id: o.id, label: `${clients.find((x) => x.id === o.clientId)?.name} — ${o.title}` }))}
+              variant="card"
+            />
           )}
 
           {(profile?.pastTitles.length ?? 0) > 1 && (

@@ -7,6 +7,7 @@
 // both are optional here, because the restored production rows predate them
 // and must keep working until the backfill (plan step 5) has run.
 
+import { mapIndustry } from "../lib/jobRequirements";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -245,7 +246,7 @@ export const create = internalMutation({
       const clientDoc = await ctx.db.get(args.clientId as Id<"clients">);
       if (clientDoc) {
         clientName = clientDoc.name;
-        clientIndustry = clientDoc.industry || "Other";
+        clientIndustry = mapIndustry(clientDoc.industry) ?? "Other";
         clientIdVal = clientDoc._id;
       }
     } catch {

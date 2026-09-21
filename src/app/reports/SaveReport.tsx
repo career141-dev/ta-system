@@ -1,12 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { saveReport } from "@/app/actions";
+import { saveReportInline } from "@/app/actions";
 import { inputClass } from "@/components/form";
+import { ActionNote, SubmitButton, submitted, useInline } from "@/components/Submit";
 
 /** Keeps the query, not the figures — so it is right again next month. */
 export function SaveReport({ spec, suggested }: { spec: string; suggested: string }) {
   const [open, setOpen] = useState(false);
+  // Saving opens the saved report; anything refused says why, here.
+  const save = useInline(saveReportInline);
 
   if (!open) {
     return (
@@ -20,7 +23,7 @@ export function SaveReport({ spec, suggested }: { spec: string; suggested: strin
   }
 
   return (
-    <form action={saveReport} className="flex flex-wrap items-center gap-2">
+    <form onSubmit={(e) => save.run(submitted(e).formData)} className="flex flex-wrap items-center gap-2">
       <input type="hidden" name="spec" value={spec} />
       <input
         name="name"
@@ -34,10 +37,18 @@ export function SaveReport({ spec, suggested }: { spec: string; suggested: strin
         <input type="checkbox" name="shared" value="1" />
         Share with the desk
       </label>
-      <button className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white">Save</button>
+      <SubmitButton
+        busy={save.pending}
+        locked={save.pending}
+        pendingLabel="Saving…"
+        className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+      >
+        Save
+      </SubmitButton>
       <button type="button" onClick={() => setOpen(false)} className="px-2 text-[12.5px] text-ink-soft hover:text-ink">
         Cancel
       </button>
+      <ActionNote result={save.result} className="w-full" />
     </form>
   );
 }

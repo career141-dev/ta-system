@@ -992,6 +992,10 @@ export default defineSchema({
     /** A profile worked beyond the assigned scope of the role. */
     isAddOn: v.optional(v.boolean()),
     addedOnAt: v.optional(v.number()),
+    // A scoop: another TA brought this CV in (plan 6.4, 21 Sep). Credited to
+    // them on their end-of-day L-sheet; the owner is unchanged.
+    scoopByUserId: v.optional(v.string()),
+    scoopAt: v.optional(v.number()),
     /** Cover for someone who declined, and the decline that started the search. */
     backupForApplicationId: v.optional(v.id("applications")),
     offerDeclinedAt: v.optional(v.number()),

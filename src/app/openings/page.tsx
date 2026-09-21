@@ -17,6 +17,8 @@ const PAGE_SIZE = 20;
 const BUCKETS = [
   { key: "mine", label: "My openings" },
   { key: "all", label: "All active" },
+  // Openings entered before anyone is free to take them (plan 4.1, 21 Sep).
+  { key: "unassigned", label: "Unassigned" },
   { key: "hold", label: "On hold" },
   { key: "closed", label: "Closed" },
 ];
@@ -41,7 +43,9 @@ export default async function OpeningsPage({
   let list =
     bucket === "mine"
       ? mine.filter((o) => o.status === "open")
-      : bucket === "hold"
+      : bucket === "unassigned"
+        ? all.filter((o) => o.status === "open" && o.assignedTaIds.length === 0)
+        : bucket === "hold"
         ? all.filter((o) => o.status === "on_hold")
         : bucket === "closed"
           ? all.filter((o) => ["closed", "filled"].includes(o.status))
@@ -60,6 +64,7 @@ export default async function OpeningsPage({
   const counts = {
     mine: mine.filter((o) => o.status === "open").length,
     all: all.filter((o) => o.status === "open").length,
+    unassigned: all.filter((o) => o.status === "open" && o.assignedTaIds.length === 0).length,
     hold: all.filter((o) => o.status === "on_hold").length,
     closed: all.filter((o) => ["closed", "filled"].includes(o.status)).length,
   } as Record<string, number>;
@@ -167,7 +172,11 @@ export default async function OpeningsPage({
                     </div>
                     <p className="mt-1.5 text-[12.5px] text-ink-soft">
                       {o.locations.join(", ")} · {posts.length} {posts.length === 1 ? "post" : "posts"} ·{" "}
-                      {o.assignedTaIds.map((t) => users.find((u) => u.id === t)?.name).join(", ")}
+                      {o.assignedTaIds.length ? (
+                        o.assignedTaIds.map((t) => users.find((u) => u.id === t)?.name).join(", ")
+                      ) : (
+                        <span className="rounded bg-warn-soft px-1.5 py-px text-warn">Unassigned</span>
+                      )}
                     </p>
                   </div>
 

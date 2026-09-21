@@ -1,5 +1,6 @@
 "use client";
 
+import { INDUSTRIES } from "../../convex/lib/jobRequirements";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
@@ -9,11 +10,9 @@ import { inputClass } from "./form";
 import { CloseIcon } from "./icons";
 import type { User } from "@/data/types";
 
-export const INDUSTRIES = [
-  "Apparel", "FMCG", "Manufacturing", "Banking & Finance", "Power & Energy",
-  "Shipping & Freight", "Logistics", "Retail", "Hospitality", "Healthcare",
-  "Construction", "Telecom", "Plantation", "IT Services", "Other",
-];
+// The one industry list (convex/lib/jobRequirements), shared with the client
+// editor and the job details, so a client's industry means the same everywhere.
+export { INDUSTRIES } from "../../convex/lib/jobRequirements";
 
 export type NewClient = { id: string; name: string; industry: string };
 type Created = { openingId: string; title: string };

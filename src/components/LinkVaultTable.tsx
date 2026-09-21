@@ -1,10 +1,9 @@
 import { repo } from "@/data/store";
-import { addLink } from "@/app/actions";
+import { AddLinkForm } from "./AddLinkForm";
 import { LinkRow } from "./LinkRow";
 import { scopeLinks } from "@/lib/visibility";
 import type { User } from "@/data/types";
 import { Pager } from "./Pager";
-import { SubmitButton } from "./SubmitButton";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 
 const PAGE_SIZE = 25;
@@ -43,24 +42,7 @@ export function LinkVaultTable({
 
   return (
     <>
-      <form action={addLink} className="mb-6 flex flex-wrap items-end gap-3">
-        <input type="hidden" name="openingId" value={openingId} />
-        <label className="relative min-w-[280px] flex-1">
-          <span className="absolute -top-2 left-3 bg-paper px-1.5 text-[11px] text-ink-soft">
-            LinkedIn profile
-          </span>
-          <input
-            name="url"
-            required
-            type="url"
-            placeholder="https://lk.linkedin.com/in/…"
-            className="w-full rounded-lg border border-rule bg-surface px-3.5 py-3 text-[13.5px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand"
-          />
-        </label>
-        <SubmitButton pendingLabel="Adding…" className="!rounded-lg !px-8 !py-3 !text-[13px]">
-          Add to table
-        </SubmitButton>
-      </form>
+      <AddLinkForm openingId={openingId} />
 
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">
         {rows.length === 0 && q && everyRow.length > 0 ? (

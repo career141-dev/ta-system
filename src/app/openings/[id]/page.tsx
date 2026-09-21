@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { openingFacts } from "./ProjectHeader";
 import Link from "next/link";
 import { HealthBar } from "@/components/HealthBar";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
@@ -6,7 +7,7 @@ import { getCurrentUser } from "@/lib/session";
 import { PIPELINE_STAGES, STAGE_LABEL, PRIORITY_TARGET, URGENT_ALERTS } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { JdApproval } from "@/components/JdApproval";
-import { JobDetailsPanel } from "@/components/JobDetailsPanel";
+import { JobDetailsSummary } from "@/components/JobDetailsSummary";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
@@ -104,10 +105,7 @@ export default async function OverviewPage({
       <div className="mb-8 flex items-start justify-between gap-8">
         <div>
           <h1 className="text-[21px] font-semibold tracking-tight">Overview</h1>
-          <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">
-            {o.locations.join(", ")} · {o.packageNotes}
-            {o.targetNationalities.length > 0 && ` · ${o.targetNationalities.join(", ")} only`}
-          </p>
+          {openingFacts(o) && <p className="mt-1 text-[12.5px] leading-relaxed text-ink-soft">{openingFacts(o)}</p>}
         </div>
         <div className="flex shrink-0 gap-9 text-right">
           <div>
@@ -142,17 +140,9 @@ export default async function OverviewPage({
         />
       )}
 
-      {/* Job details live here only; the Job description page shows the JD alone. */}
-      {o.requirements && (
-        <JobDetailsPanel
-          openingId={id}
-          title={o.title}
-          requirements={o.requirements}
-          jdApproved={o.jdStatus === "approved"}
-          canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
-          editedByName={users.find((u) => u.id === o.requirements?.editedBy)?.name ?? null}
-        />
-      )}
+      {/* The facts only; the form is edited on the Job description page, beside
+          the JD it is read from (testing, 21 Sep). */}
+      {o.requirements && <JobDetailsSummary openingId={id} requirements={o.requirements} />}
 
       {suggested.length > 0 && (
         <section className="mb-9">
