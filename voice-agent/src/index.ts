@@ -80,9 +80,20 @@ process.on("unhandledRejection", (reason) => console.warn("[Aura] Unhandled prom
  * still being written; `minWords: 2` stops a cough or a "mm" cutting Aura off
  * mid-sentence.
  */
+/**
+ * 21 Sep: testers still heard long pauses. Three waits were stacked — Deepgram
+ * endpointing, VAD silence and the turn's minimum delay, 300 ms each, up to
+ * 1.5 s when a final transcript was late. Each is shorter now, and each can
+ * be set from the environment (AURA_*) so a call that starts cutting people
+ * off is a config change, not a rebuild.
+ */
+const ms = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
 const TURN_HANDLING = {
   turnDetection: "stt" as const,
-  endpointing: { minDelay: 300, maxDelay: 1500 },
+  endpointing: { minDelay: ms("AURA_MIN_ENDPOINT_MS", 150), maxDelay: ms("AURA_MAX_ENDPOINT_MS", 1000) },
   interruption: { enabled: true, mode: "adaptive" as const, minWords: 2, falseInterruptionTimeout: 500 },
   preemptiveGeneration: { enabled: true, preemptiveTts: true },
 };
@@ -99,7 +110,7 @@ function textOf(item: any): string {
 export default defineAgent<UserData>({
   prewarm: async (proc: JobProcess<UserData>) => {
     proc.userData.vad = await silero.VAD.load({
-      minSilenceDuration: 300,
+      minSilenceDuration: ms("AURA_VAD_SILENCE_MS", 200),
       minSpeechDuration: 100,
       // Keeps the first syllable of an answer, which endpointing otherwise clips.
       prefixPaddingDuration: 300,
@@ -116,10 +127,13 @@ export default defineAgent<UserData>({
 
     const stt = new deepgram.STT({
       apiKey: DEEPGRAM_API_KEY,
-      model: "nova-2-general",
+      // nova-3: Deepgram's faster, more accurate model for live calls.
+      model: (process.env.AURA_STT_MODEL ?? "nova-3") as never,
       language: "en",
-      endpointing: 300,
-      smartFormat: true,
+      endpointing: ms("AURA_STT_ENDPOINTING_MS", 200),
+      // Formatting waits on the final transcript; the model reads words, not
+      // formatted numbers, so it only added delay.
+      smartFormat: false,
       interimResults: true,
       mipOptOut: true,
     });

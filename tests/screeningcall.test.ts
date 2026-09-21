@@ -55,10 +55,13 @@ has("checklist asks notice period", details[3], "notice period");
 eq("checklist ends with the opening's question", details[4], "Valid driving licence?");
 
 // ── The brief ───────────────────────────────────────────────────────────────
-has("brief names the client", callBrief({ title: "CFO", clientName: "Hayleys", jobDescription: "Lead finance." }), "Hiring company: Hayleys");
+const open = callBrief({ title: "CFO", clientName: "Hayleys", clientIndustry: "Finance", jobDescription: "## CFO\n\n**Client** Hayleys\nLead finance at Hayleys." });
+eq("the brief never names the client on a cold call", open.includes("Hayleys"), false);
+has("it says a client of Career141 in the industry", open, "A client of Career141 in Finance");
+has("the JD keeps its substance", open, "Lead finance at the client.");
 const secret = callBrief({ title: "CFO", clientName: "Hayleys", clientIndustry: "Conglomerate", isConfidential: true });
 eq("confidential brief never names the client", secret.includes("Hayleys"), false);
-has("confidential brief says so", secret, "confidential client in Conglomerate");
+has("confidential brief gives only the industry", secret, "A client of Career141 in Conglomerate");
 
 // ── Aura's prompt, from the room metadata the backend writes ────────────────
 const brief = readBrief(

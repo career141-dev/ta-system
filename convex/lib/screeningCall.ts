@@ -94,19 +94,30 @@ type BriefJob = {
   jobDescription?: string;
 };
 
-/** The call brief the agent answers job questions from. A confidential client is never named. */
+/**
+ * The call brief the agent answers job questions from.
+ *
+ * The client is never named, confidential or not (21 Sep): this is a cold
+ * call from Career141, and a candidate is not told who is hiring before they
+ * are vetted. The brief said "Hiring company: <client>" and the JD itself
+ * often opens "**Client** <client>", so both are taken out — the industry is
+ * all the agent may say. Kept short, because every word of it is read on
+ * every turn of the call.
+ */
 export function callBrief(job: BriefJob): string {
-  const client = job.isConfidential
-    ? `A confidential client${job.clientIndustry ? ` in ${job.clientIndustry}` : ""}. Do not name or guess the company.`
-    : job.clientName
-      ? job.clientName
-      : "Not stated";
+  const client = `A client of Career141${job.clientIndustry && job.clientIndustry !== "Other" ? ` in ${job.clientIndustry}` : ""}. Do not name or guess the company; if asked, say the recruiter will share it at the next stage.`;
+  const name = (job.clientName ?? "").trim();
+  let jd = (job.jobDescription ?? "")
+    .split("\n")
+    .filter((line) => !/^\s*\**\s*(client|company|hiring company)\s*\**\s*:?/i.test(line))
+    .join("\n");
+  if (name.length > 2) jd = jd.replace(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), "the client");
   return [
     `Role: ${job.title}`,
     `Hiring company: ${client}`,
     job.location ? `Location: ${job.location}` : "",
     "",
-    (job.jobDescription ?? "").trim().slice(0, 3000),
+    jd.trim().slice(0, 1500),
   ]
     .filter((l, i) => l !== "" || i === 3)
     .join("\n");
