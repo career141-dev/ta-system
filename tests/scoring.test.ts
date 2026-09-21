@@ -1,4 +1,4 @@
-import { requirementsFromOpening, scoreCandidate, seniorityOf, skillsScore, type Requirements } from "@/lib/scoring";
+import { bandFor, exaggeratedScore, requirementsFromOpening, scoreCandidate, seniorityOf, skillsScore, type Requirements } from "@/lib/scoring";
 import { countryOf, locationFit } from "@/lib/places";
 import type { Candidate } from "@/data/types";
 
@@ -105,6 +105,26 @@ console.log("\nlocation ranks, it does not exclude (13 September)");
   eq("another country costs little when not local only", at(open, "Colombo") - at(open, "Dubai") <= 10, true);
   eq("another country costs a lot when local only", at(local, "Colombo") - at(local, "Dubai") >= 20, true);
   eq("local only: another city is not marked down", at(local, "Kandy, Sri Lanka"), at(local, "Colombo"));
+}
+
+console.log("\nexaggeratedScore: boosts the number, never the order (database search and reverse-match screens)");
+{
+  eq("0 stays 0", exaggeratedScore(0), 0);
+  eq("100 stays 100", exaggeratedScore(100), 100);
+  eq("a mid score is boosted", exaggeratedScore(45) > 45, true);
+  eq("a high score is boosted less, in absolute terms, than a mid one", exaggeratedScore(80) - 80 < exaggeratedScore(45) - 45, true);
+  eq("out-of-range input is clamped low", exaggeratedScore(-10), 0);
+  eq("out-of-range input is clamped high", exaggeratedScore(150), 100);
+  for (let a = 0; a <= 100; a += 5) {
+    for (let b = a + 1; b <= 100; b += 5) {
+      if (exaggeratedScore(b) < exaggeratedScore(a)) {
+        eq(`monotonic: ${a} <= ${b} must not invert (got ${exaggeratedScore(a)}, ${exaggeratedScore(b)})`, false, true);
+      }
+    }
+  }
+  // A real 45 reads "weak" on the pipeline; boosted for display it reads
+  // "worth a look" or better — the word always matches the number shown.
+  eq("a boosted mid score no longer reads as weak", bandFor(exaggeratedScore(45)), "worth a look");
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

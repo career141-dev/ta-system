@@ -147,8 +147,9 @@ function indexes(): Indexes {
   };
   return indexCache;
 }
-/** The file's mtime when `cache` was filled. See `load`. */
+/** The file's mtime and size when `cache` was filled. See `load`. */
 let cacheStamp = 0;
+let cacheSize = 0;
 
 /**
  * A file written before a table existed is missing that table, and every read of
@@ -221,18 +222,25 @@ function load(): Database {
   }
 
   let stamp = 0;
+  let size = 0;
   try {
-    stamp = fs.existsSync(DB_FILE) ? fs.statSync(DB_FILE).mtimeMs : 0;
+    if (fs.existsSync(DB_FILE)) {
+      const st = fs.statSync(DB_FILE);
+      stamp = st.mtimeMs;
+      size = st.size;
+    }
   } catch {
     stamp = 0;
+    size = 0;
   }
-  if (cache && stamp === cacheStamp) return cache;
+  if (cache && stamp === cacheStamp && size === cacheSize) return cache;
 
   if (stamp > 0) {
     const raw = fs.readFileSync(DB_FILE, "utf8");
     try {
       cache = backfill(JSON.parse(raw) as Partial<Database>);
       cacheStamp = stamp;
+      cacheSize = size;
       return cache;
     } catch (err) {
       // A damaged file used to be reseeded over, which turned a half-written
@@ -294,9 +302,12 @@ function writeOut(db: Database) {
     }
   }
   try {
-    cacheStamp = fs.statSync(DB_FILE).mtimeMs;
+    const st = fs.statSync(DB_FILE);
+    cacheStamp = st.mtimeMs;
+    cacheSize = st.size;
   } catch {
     cacheStamp = 0;
+    cacheSize = 0;
   }
 }
 

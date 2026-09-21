@@ -470,6 +470,36 @@ export interface Breakdown {
   industry: number;
 }
 
+/**
+ * The number shown on the database search and reverse-match screens —
+ * boosted for how it reads, never for what anything decides.
+ *
+ * Requested 17 September: a real fit score in the 40s or 50s reads as "this
+ * barely matches" even when the reasoning behind it is sound, and those two
+ * screens are where a TA is skimming a long list rather than deciding one
+ * candidate's fate. So the printed number is stretched upward — nothing else
+ * changes. Ranking, the auto-shortlist bar, and every other screen (the
+ * pipeline board, Director Review, the candidate's own Fit breakdown) keep
+ * reading the real `score.overall`; this function is called only at the two
+ * places that show it, and only for the headline number.
+ *
+ * A power curve, exponent 0.55: 0 still reads as 0, 100 still reads as 100,
+ * and a higher real score always shows as a higher number — the order inside
+ * a list never changes, only how generous the number looks. Low and middle
+ * scores move the most (45 → 65, 60 → 76); a score already high barely moves
+ * (80 → 88).
+ */
+export function exaggeratedScore(overall: number): number {
+  const clamped = Math.min(100, Math.max(0, overall));
+  return Math.round(100 * Math.pow(clamped / 100, 0.55));
+}
+
+/** The band word, worked out from a displayed number rather than the real one —
+ *  so a boosted number is never shown next to a word that contradicts it. */
+export function bandFor(overall: number): Score["band"] {
+  return overall >= FIT_BANDS.strong ? "strong" : overall >= FIT_BANDS.worth ? "worth a look" : "weak";
+}
+
 export interface Score {
   overall: number;
   band: "strong" | "worth a look" | "weak";

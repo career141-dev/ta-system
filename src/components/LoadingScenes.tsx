@@ -39,6 +39,11 @@ export const DATABASE_STEPS: LoadingStep[] = [
   { after: 14, title: "Ranking the closest people", detail: "Scoring each CV against what you asked for, best first.", scene: "rank" },
 ];
 
+export const REPORT_STEPS: LoadingStep[] = [
+  { after: 0, title: "Reading your question", detail: "Working out which records, filters and grouping you are actually asking for.", scene: "read" },
+  { after: 4, title: "Building the report", detail: "Checking every field against what the records actually hold, then running it.", scene: "check" },
+];
+
 export function LoadingProgress({
   steps,
   heading,

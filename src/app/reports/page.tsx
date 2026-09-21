@@ -2,6 +2,7 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { askReport, deleteReport } from "@/app/actions";
+import { AskReportForm } from "@/components/AskReportForm";
 import { ReportBuilder } from "./ReportBuilder";
 import { SaveReport } from "./SaveReport";
 import { Confirm } from "@/components/Confirm";
@@ -127,23 +128,7 @@ export default async function ReportsPage({
       </header>
 
       {/* ── ask ─────────────────────────────────────────────────────────── */}
-      <form action={askReport} className="mb-6">
-        <div className="flex flex-wrap items-center gap-2.5 rounded-2xl border border-rule bg-surface p-2.5 shadow-[0_1px_2px_rgba(23,28,24,0.04)] focus-within:border-brand-line">
-          <input
-            name="question"
-            defaultValue={sp.q ?? ""}
-            placeholder="How many placements has each TA made this quarter?"
-            className="min-w-[280px] flex-1 bg-transparent px-4 py-3 text-[15px] outline-none placeholder:text-ink-faint"
-          />
-          <button className="rounded-xl bg-brand px-6 py-3 text-[13.5px] font-medium text-white transition-opacity hover:opacity-90">
-            Show me
-          </button>
-        </div>
-        <p className="mt-2.5 px-1 text-[11.5px] text-ink-faint">
-          Try &ldquo;roles open more than 30 days&rdquo; · &ldquo;why candidates dropped out at
-          CKDL&rdquo; · &ldquo;who we approached but never reached&rdquo;
-        </p>
-      </form>
+      <AskReportForm action={askReport} defaultValue={sp.q ?? ""} />
 
       {sp.askErr && (
         <p className="mb-6 rounded-xl border border-warn/35 bg-warn-soft px-5 py-3.5 text-[12.5px] text-warn">
