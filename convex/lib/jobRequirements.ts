@@ -26,8 +26,15 @@ export const SENIORITY_LABEL: Record<SeniorityLevel, string> = {
   agm: "AGM", gm: "GM", director: "Director", c_suite: "C-Suite", other: "Other",
 };
 
+/**
+ * The one list of industries. It was three: the new-client dialog, the client
+ * editor and the job details each had their own, so "Apparel Manufacturing"
+ * from the editor showed as "Other" on the job, and a save wrote "Other" back
+ * for the JD reader to overwrite with its own guess (testing, 21 Sep).
+ */
 export const INDUSTRIES = [
-  "FMCG", "Finance", "Technology", "Apparel", "Healthcare", "Retail", "Manufacturing", "Telecoms", "Other",
+  "Apparel", "FMCG", "Manufacturing", "Finance", "Retail", "Technology", "Telecoms", "Healthcare",
+  "Energy", "Logistics", "Construction", "Hospitality", "Plantation", "Education", "Other",
 ] as const;
 
 export const EDUCATION_LEVELS = [
@@ -171,6 +178,7 @@ export function mapIndustry(raw: string | null | undefined): string | null {
   if (!s.trim()) return null;
   const exact = INDUSTRIES.find((i) => i.toLowerCase() === s.trim());
   if (exact) return exact;
+  if (/apparel|garment|textile|fashion/.test(s)) return "Apparel";
   if (/fmcg|consumer goods|beverage|food|personal care/.test(s)) return "FMCG";
   if (/bank|financ|insurance|account|audit|fintech|investment|leasing/.test(s)) return "Finance";
   if (/tech|software|\bit\b|information technology|saas|digital|data/.test(s)) return "Technology";
@@ -179,6 +187,12 @@ export function mapIndustry(raw: string | null | undefined): string | null {
   if (/retail|e-?commerce|supermarket/.test(s)) return "Retail";
   if (/manufactur|industrial|factory|engineering|automotive/.test(s)) return "Manufacturing";
   if (/telecom|telco|mobile network/.test(s)) return "Telecoms";
+  if (/energy|power|solar|utilit/.test(s)) return "Energy";
+  if (/logistic|shipping|freight|courier|supply chain/.test(s)) return "Logistics";
+  if (/construct|real estate|property|infrastructure/.test(s)) return "Construction";
+  if (/hotel|hospitality|leisure|tourism|restaurant/.test(s)) return "Hospitality";
+  if (/plantation|\btea\b|rubber|agri/.test(s)) return "Plantation";
+  if (/education|school|universit|training/.test(s)) return "Education";
   return "Other";
 }
 

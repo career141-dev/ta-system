@@ -26,7 +26,7 @@ import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess } from "./guard";
 import {
   EDUCATION_LEVELS, INDUSTRIES, RECRUITMENT_TYPES, REQUIREMENT_FIELDS, SENIORITY_LEVELS,
-  mergeRequirements, splitSkills, type RequirementField, type RequirementValues,
+  mapIndustry, mergeRequirements, splitSkills, type RequirementField, type RequirementValues,
 } from "../lib/jobRequirements";
 
 /** Who may edit an opening's requirements — the same seats that approve its JD. */
@@ -161,8 +161,10 @@ export const save = internalMutation({
       set("title", title.slice(0, 160), false);
     }
     if (args.clientIndustry !== undefined) {
-      if (!(INDUSTRIES as readonly string[]).includes(args.clientIndustry)) throw new Error("Pick an industry from the list.");
-      set("clientIndustry", args.clientIndustry);
+      const industry = (INDUSTRIES as readonly string[]).includes(args.clientIndustry)
+        ? args.clientIndustry
+        : mapIndustry(args.clientIndustry) ?? "Other";
+      set("clientIndustry", industry);
     }
     if (args.recruitmentType !== undefined) {
       if (!(RECRUITMENT_TYPES as readonly string[]).includes(args.recruitmentType)) throw new Error("Unknown recruitment type.");

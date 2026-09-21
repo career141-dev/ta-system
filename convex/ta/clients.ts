@@ -6,6 +6,7 @@
 // were two clients with two separate histories and neither was complete. These
 // rows are written by the backfill, folded on a normalised name.
 
+import { mapIndustry } from "../lib/jobRequirements";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { optionalActor } from "./guard";
@@ -95,7 +96,21 @@ export const update = internalMutation({
     if (args.status !== undefined) patch.status = args.status;
     if (args.esaSignedAt !== undefined) patch.esaSignedAt = args.esaSignedAt;
     await ctx.db.patch(id, patch);
-    return { ok: true };
+    // The job keeps its own copy of the industry, and it never followed an
+    // edit here (21 Sep). It does now — except where someone set the job's
+    // industry by hand, which stays theirs.
+    let jobsUpdated = 0;
+    if (args.industry !== undefined) {
+      const industry = mapIndustry(args.industry) ?? "Other";
+      const jobs = await ctx.db.query("jobs").withIndex("by_clientId", (q) => q.eq("clientId", id)).collect();
+      for (const job of jobs) {
+        if ((job.requirementsLockedFields ?? []).includes("clientIndustry")) continue;
+        if (job.clientIndustry === industry) continue;
+        await ctx.db.patch(job._id, { clientIndustry: industry });
+        jobsUpdated++;
+      }
+    }
+    return { ok: true, jobsUpdated };
   },
 });
 

@@ -93,7 +93,9 @@ export function CaptureForm({
   const [client, setClient] = useState<string | null>(lockedClient?.id ?? initialClientId ?? null);
   const [assigned, setAssigned] = useState<string[]>([]);
 
-  const ready = Boolean(title.trim() && client && (!isLead || assigned.length));
+  // A TA is not required: openings are often entered before anyone is free
+  // to take them, and assigned later by workload (plan 4.1, 21 Sep).
+  const ready = Boolean(title.trim() && client);
 
   // The buttons are never greyed out for an incomplete form: a greyed button
   // that does nothing when clicked read as broken (testing, 21 Sep). Pressing
@@ -101,7 +103,6 @@ export function CaptureForm({
   const missing = [
     !client && { id: "capture-client", label: "a client" },
     !title.trim() && { id: "capture-position", label: "a position" },
-    isLead && !assigned.length && { id: "capture-assign", label: "at least one TA" },
   ].filter(Boolean) as { id: string; label: string }[];
   const [tried, setTried] = useState(false);
   const flagged = (id: string) => tried && missing.some((m) => m.id === id);
@@ -286,7 +287,9 @@ export function CaptureForm({
         <>
           <section id="capture-assign" className={`${card} ${flagged("capture-assign") ? flag : ""}`}>
             <div className={head}>
-              <h2 className="text-[13.5px] font-semibold">Assign to</h2>
+              <h2 className="text-[13.5px] font-semibold">
+                Assign to <span className="ml-1.5 font-normal text-[12px] text-ink-faint">optional — can be done later</span>
+              </h2>
               <p className="mt-0.5 text-[12.5px] text-ink-soft">
                 They write and approve the JD.
               </p>
@@ -356,11 +359,11 @@ export function CaptureForm({
             {!ready
               ? tried
                 ? missingText
-                : isLead
-                  ? "Add a position and at least one TA"
-                  : "Add a position"
+                : "Add a position"
               : isLead
-                ? "The TA is notified and writes the JD"
+                ? assigned.length
+                  ? "The TA is notified and writes the JD"
+                  : "No TA yet — it shows as Unassigned until one is added"
                 : "You write the JD next"}
           </span>
           {error && (
@@ -412,11 +415,11 @@ export function CaptureForm({
             {!ready
               ? tried
                 ? missingText
-                : isLead
-                  ? "Choose a client, a position and at least one TA"
-                  : "Choose a client and a position"
+                : "Choose a client and a position"
               : isLead
-                ? "The TA is notified and writes the JD"
+                ? assigned.length
+                  ? "The TA is notified and writes the JD"
+                  : "No TA yet — it shows as Unassigned until one is added"
                 : "Next: notes and the JD"}
           </span>
         </div>

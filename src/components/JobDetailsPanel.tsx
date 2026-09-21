@@ -1,5 +1,6 @@
 "use client";
 
+import { INDUSTRIES, mapIndustry } from "../../convex/lib/jobRequirements";
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { OpeningRequirements } from "@/data/types";
@@ -21,7 +22,7 @@ const SENIORITY = [
   ["senior_executive", "Senior Executive"], ["manager", "Manager"], ["senior_manager", "Senior Manager"],
   ["agm", "AGM"], ["gm", "GM"], ["director", "Director"], ["c_suite", "C-Suite"], ["other", "Other"],
 ] as const;
-const INDUSTRIES = ["FMCG", "Finance", "Technology", "Apparel", "Healthcare", "Retail", "Manufacturing", "Telecoms", "Other"];
+// The one industry list — see convex/lib/jobRequirements.
 const EDUCATION = [
   ["any", "Any"], ["diploma", "Diploma"], ["bachelor", "Bachelor's"], ["master", "Master's"], ["phd", "PhD"],
   ["professional_cert", "Professional certification"], ["bachelor_or_master", "Bachelor's or Master's"],
@@ -111,7 +112,10 @@ export function JobDetailsPanel({
               <Field label="Client Industry" hint={mark("clientIndustry")}>
                 <Select
                   name="clientIndustry"
-                  defaultValue={INDUSTRIES.includes(r.clientIndustry ?? "") ? r.clientIndustry! : "Other"}
+                  // An older value not on the list is shown as the list item it
+                  // means, not as "Other" — saving "Other" let the JD reader
+                  // put its own guess in (21 Sep).
+                  defaultValue={mapIndustry(r.clientIndustry) ?? "Other"}
                   options={INDUSTRIES.map((i) => ({ value: i, label: i }))}
                 />
               </Field>

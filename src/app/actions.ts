@@ -451,7 +451,7 @@ export async function createOpeningStep1(formData: FormData) {
   const next = String(formData.get("next") ?? "save");
   const openingId = await saveNewOpening(formData, user);
   // Returned nothing before, so an incomplete form was a button that did nothing.
-  if (!openingId) await back("Choose a client, a position and — for a lead — at least one TA.");
+  if (!openingId) await back("Choose a client and a position.");
 
   if (next === "jd") redirect(`/openings/${openingId}/jd`);
   if (next === "again") redirect(`/openings/new?created=${openingId}`);
@@ -483,7 +483,7 @@ export async function createOpeningInline(
   try {
     const openingId = await saveNewOpening(formData, user);
     if (!openingId) {
-      return { ok: false, error: "Choose a client, a position and — for a lead — at least one TA." };
+      return { ok: false, error: "Choose a client and a position." };
     }
     const clientId = String(formData.get("clientId") ?? "");
     return {
@@ -522,7 +522,8 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
     ? formData.getAll("assignedTaIds").map(String).filter((id) => tas.has(id))
     : [user.id];
 
-  if (!clientId || !title || assigned.length === 0) return null;
+  // No TA is fine: it is assigned later, by workload (plan 4.1).
+  if (!clientId || !title) return null;
 
   const users = repo.users();
   const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
@@ -1204,7 +1205,7 @@ export async function createClientInline(
 
 async function saveNewClient(formData: FormData, user: User): Promise<{ id: string; name: string; industry: string } | null> {
   const name = String(formData.get("name") ?? "").trim();
-  const industry = String(formData.get("industry") ?? "").trim() || "—";
+  const industry = String(formData.get("industry") ?? "").trim() || "Other";
   if (!name) return null;
 
   // The form has always asked for the main contact. Until the 12 Sep sweep it
@@ -1248,7 +1249,7 @@ export async function updateClient(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const esa = String(formData.get("esaSignedAt") ?? "").trim();
-  const industry = String(formData.get("industry") ?? "").trim() || "—";
+  const industry = String(formData.get("industry") ?? "").trim() || "Other";
   const status = String(formData.get("status") ?? "active") as "active" | "dormant" | "archived";
   const esaSignedAt = esa ? new Date(esa).getTime() : null;
 

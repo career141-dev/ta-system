@@ -1,5 +1,6 @@
 "use client";
 
+import { INDUSTRIES } from "../../convex/lib/jobRequirements";
 import { useEffect, useRef, useState } from "react";
 import { deleteClient, saveContacts, updateClient } from "@/app/actions";
 import { inputClass } from "./form";
@@ -14,11 +15,7 @@ export interface Contact {
 
 export type Pane = "record" | "contacts" | null;
 
-const INDUSTRIES = [
-  "Apparel Manufacturing", "FMCG & Retail", "Healthcare", "Power & Energy",
-  "Logistics & Freight", "Banking & Finance", "Construction", "Hospitality",
-  "Technology", "Education", "Agriculture", "Other",
-];
+// The one industry list — see convex/lib/jobRequirements.
 
 const STATUS = [
   { value: "active", label: "Active" },

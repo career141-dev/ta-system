@@ -16,6 +16,7 @@
 //
 // Pure: no reads except through the `cx.get` it is handed, so it can be tested.
 
+import { mapIndustry } from "../../lib/jobRequirements";
 import type { Id } from "@/data/types";
 import { channelOf, mapApplication, mapCandidateDoc, mapJobPost, mapOpening, mapUser } from "../../../src/data/convex/map";
 import { toBackendStage, toTaStage } from "../stages";
@@ -210,7 +211,7 @@ export const TABLES: Record<string, TableModel> = {
       };
       if (client) {
         doc.clientName = client.name;
-        doc.clientIndustry = client.industry ?? "";
+        doc.clientIndustry = mapIndustry(client.industry as string | undefined) ?? "Other";
       }
       // The CV pipeline's follow-up asks, and reads replies, by the question's
       // wording. Kept in step — except on a job never backfilled, whose own
@@ -225,7 +226,7 @@ export const TABLES: Record<string, TableModel> = {
         const slug = String(r.title ?? "role").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
         Object.assign(doc, {
           clientName: client?.name ?? "",
-          clientIndustry: client?.industry ?? "",
+          clientIndustry: mapIndustry(client?.industry as string | undefined) ?? "Other",
           recruitmentType: "job_posting",
           isConfidential: false,
           requiredSkills: [],
