@@ -1550,12 +1550,13 @@ export async function saveReport(formData: FormData) {
   const user = await authorize(formData, "report.read");
   const name = String(formData.get("name") ?? "").trim();
   const spec = String(formData.get("spec") ?? "");
-  if (!name || !spec) return;
-  let parsed: unknown;
+  if (!name) await back("Give the report a name first.");
+  if (!spec) await back("There is no report on screen to save.");
+  let parsed: unknown = null;
   try {
     parsed = JSON.parse(spec);
   } catch {
-    return;
+    await back("This report could not be read, so it was not saved. Build it again and save.");
   }
   const id = repo.saveReport({
     name,
@@ -1584,7 +1585,8 @@ export async function askReport(formData: FormData) {
   await primeStore();
   await authorize(formData, "report.read");
   const question = String(formData.get("question") ?? "").trim();
-  if (!question) return;
+  // An empty box did nothing at all (21 Sep).
+  if (!question) redirect(`/reports?askErr=empty`);
   const { askForReport } = await import("@/lib/reportAsk");
   const res = await askForReport(question);
 
@@ -3536,4 +3538,9 @@ function employerMatches(a: string, b: string): boolean {
 
 export async function verifyRefereeInline(_: ActionResult | null, formData: FormData) {
   return inline(() => verifyReferee(formData));
+}
+
+/** A saved report navigates to itself; a refusal answers beside Save. */
+export async function saveReportInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveReport(formData));
 }
