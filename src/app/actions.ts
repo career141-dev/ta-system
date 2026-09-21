@@ -14,6 +14,7 @@ import { markTablesStale, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
+import type { EffortRow } from "@/lib/eod-format";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -2953,6 +2954,8 @@ export async function sendEod(formData: FormData) {
       applicationIds: fresh,
       to: String(formData.get("to") ?? ""),
       subject: String(formData.get("subject") ?? ""),
+      // The counts and targets as the TA corrected them (plan 6.3).
+      effort: await import("@/lib/eod").then((m) => m.effortFromForm(formData, m.effortRow(openingId, user))),
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
@@ -3015,6 +3018,7 @@ async function emailEod(input: {
   applicationIds: string[];
   to: string;
   subject: string;
+  effort?: EffortRow;
 }): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
   const opening = repo.opening(openingId);
@@ -3085,7 +3089,7 @@ async function emailEod(input: {
   const lead = repo.user(opening.taLeadId);
   const html = eodEmailHtml({
     rows,
-    effort: effortRow(openingId, user),
+    effort: input.effort ?? effortRow(openingId, user),
     senderName: user.name,
     attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
   });

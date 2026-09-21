@@ -55,7 +55,14 @@ export const attach = internalMutation({
     // not delete what was there.
     const previous = candidate.cvUploadId ?? null;
     await ctx.db.patch(candidate._id, { cvUploadId: uploadId, cvFileName: args.fileName } as never);
-    await ctx.db.patch(appId, { cvFileId: uploadId, cvFileName: args.fileName } as never);
+    // Brought in by someone other than the owner — a support TA — it is their
+    // scoop, and counts on their end-of-day L-sheet (plan 6.4).
+    const scoop = app.ownerTaId && (app.ownerTaId as string) !== (user._id as string);
+    await ctx.db.patch(appId, {
+      cvFileId: uploadId,
+      cvFileName: args.fileName,
+      ...(scoop ? { scoopByUserId: user._id as string, scoopAt: Date.now() } : {}),
+    } as never);
     return { uploadId: uploadId as string, replaced: previous !== null };
   },
 });

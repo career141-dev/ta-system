@@ -142,6 +142,14 @@ async function main() {
   eq("email body carries today's progress", body.includes("NO.OF L EFFORT") && body.includes(">12<"), true);
   eq("email body signs off as the TA", body.includes("Best Regards,<br><br>Nimali"), true);
   eq("email body leaves out the candidate's address", body.includes("LOCATION"), false);
+  const followUpDay = eodEmailHtml({
+    rows: [],
+    effort: { date: "21 Sept", assignee: "Nimali", hundredOrFollowUp: "Follow-up", lEffort: 4, sets: 1, da: 0, scoop: 0, l: 0, post: 0, addOns: 1, backUp: 0, targets: { lEffort: 5 } },
+    senderName: "Nimali",
+  });
+  eq("a follow-up day counts CVs in the fourth column", followUpDay.includes("NO. OF CVs") && !followUpDay.includes("NO.OF L EFFORT"), true);
+  eq("targets go out as a row", followUpDay.includes("<i>Target</i>") && followUpDay.includes(">5<"), true);
+  eq("add-ons are a figure, not a blank", followUpDay.includes(">1<"), true);
 
   // ── A queued message that should no longer go ─────────────────────────────
   eq("pending, in Follow-up → send", followUpCancelledReason({ deliveryStatus: "pending" }, { currentStage: "follow_up" }), null);

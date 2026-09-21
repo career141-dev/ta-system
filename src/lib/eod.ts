@@ -1,4 +1,5 @@
 import { repo, setsForOpening } from "@/data/store";
+import { EFFORT_NUMBERS, OUTREACH_TYPES } from "@/lib/eod-format";
 import { colomboDayStart } from "@/lib/calendar";
 import type { Application, Candidate, Id, User } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
@@ -101,23 +102,58 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
   const mySets = setsForOpening(openingId, ta.id);
   const tonight = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
 
+  const approached = vault.filter((v) => v.addedBy === ta.id && v.outcome !== "no_contact" && v.createdAt >= since).length;
+  const addOns = mine.filter((a) => a.isAddOn && (a.addedOnAt ?? 0) >= since).length;
+  // What kind of day it looks like from the records; the TA changes it in the
+  // composer when it was something else (plan 6.1). A day spent chasing
+  // follow-ups with nothing new approached reads as Follow-up.
+  const kind = approached === 0 && todays.length > 0 ? "Follow-up" : addOns > 0 && approached === 0 ? "Add-on" : "100%";
+
   return {
     date: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" }),
     assignee: ta.name,
-    // There is no day plan recorded yet, so this is left blank rather than
-    // printing "FOLLOW UP" for every day regardless (audit finding 28).
-    hundredOrFollowUp: "",
-    // Profiles approached today, not everything ever approached.
-    lEffort: vault.filter((v) => v.addedBy === ta.id && v.outcome !== "no_contact" && v.createdAt >= since).length,
+    hundredOrFollowUp: kind,
+    // Profiles approached today on a hunt; on a follow-up day, CVs brought in.
+    lEffort: kind === "Follow-up" ? todays.length : approached,
     sets: tonight,
     da: todays.filter((a) => a.sourcingChannel === "DA").length,
-    scoop: todays.filter((a) => a.sourcingChannel === "SCOOP").length,
+    // Database picks shortlisted today, plus scoops: CVs this TA brought in on
+    // someone else's candidate today (plan 6.4).
+    scoop:
+      todays.filter((a) => a.sourcingChannel === "SCOOP").length +
+      apps.filter((a) => a.scoopBy === ta.id && (a.scoopAt ?? 0) >= since).length,
     l: todays.filter((a) => a.sourcingChannel === "L").length,
-    // Q4a — undefined, so not reported rather than reported as zero.
-    post: null,
-    addOns: null,
-    backUp: null,
+    // Counted now, not left blank (21 Sep): adverts this TA put live today,
+    // add-ons marked today, and backups lined up today.
+    post: repo.jobPosts(openingId).filter((p) => (p.postedAt ?? 0) >= since && (!p.assignedTaId || p.assignedTaId === ta.id)).length,
+    addOns,
+    backUp: mine.filter((a) => a.backupForApplicationId && a.createdAt >= since).length,
   };
+}
+
+/**
+ * The L-sheet as the TA left it in the composer: every count and target they
+ * typed, over the figures the records give. Anything unreadable keeps the
+ * record's figure.
+ */
+export function effortFromForm(formData: FormData, base: EffortRow): EffortRow {
+  const num = (name: string): number | null | undefined => {
+    if (!formData.has(name)) return undefined;
+    const raw = String(formData.get(name) ?? "").trim();
+    if (raw === "") return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
+  };
+  const out: EffortRow = { ...base, targets: {} };
+  const kind = String(formData.get("effort_kind") ?? "");
+  if ((OUTREACH_TYPES as readonly string[]).includes(kind)) out.hundredOrFollowUp = kind;
+  for (const k of EFFORT_NUMBERS) {
+    const v = num(`effort_${k}`);
+    if (v !== undefined) (out as unknown as Record<string, number | null>)[k] = v;
+    const t = num(`target_${k}`);
+    if (t !== undefined && t !== null) out.targets![k] = t;
+  }
+  return out;
 }
 
 export function subjectLine(clientName: string, title: string, date = new Date()): string {
