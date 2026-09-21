@@ -2128,13 +2128,13 @@ export async function generateJdWithModel(formData: FormData) {
   // saved notes are still the TA's notes, and the draft must include them.
   if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
   const res = await draftJd(openingId);
-  if (!res) return;
-  redirect(
-    `/openings/${openingId}/jd?msg=${encodeURIComponent(
-      res.ok
-        ? "Written by the model. Read it before approving."
-        : `The model could not write it — ${res.reason}. The template version is in place.`,
-    )}`,
+  if (!res) await back("The opening could not be found. Reload the page and try again.");
+  revalidatePath(`/openings/${openingId}`, "layout");
+  if (res!.ok) await done("Written by the AI. Read it through before approving.");
+  // Said plainly and beside the button: the fallback reads like a finished JD.
+  await back(
+    `The AI could not write it (${res!.reason}), so a basic version built from your notes is in place. Try again, or edit it by hand.`,
+    "warn",
   );
 }
 
@@ -3258,4 +3258,8 @@ export async function createOpeningStep1Inline(_: ActionResult | null, formData:
 
 export async function addLinkInline(_: ActionResult | null, formData: FormData) {
   return inline(() => addLink(formData));
+}
+
+export async function generateJdInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => generateJdWithModel(formData));
 }

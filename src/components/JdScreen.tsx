@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { approveJd, generateJdWithModel, saveBriefNotesInline } from "@/app/actions";
+import { approveJd, generateJdInline, saveBriefNotesInline } from "@/app/actions";
 import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
+import { JdEditor } from "./JdEditor";
 import { inputClass } from "./form";
 import { BriefRecorder } from "./BriefRecorder";
 
@@ -42,11 +43,19 @@ export function JdScreen({
   const [savedNotes, setSavedNotes] = useState(initialNotes);
   const [sentNotes, setSentNotes] = useState(initialNotes);
   const saveNotes = useInline(saveBriefNotesInline);
+  const generate = useInline(generateJdInline);
+  // A fresh draft replaces what is in the box once the page has it.
+  useEffect(() => setJdText(jd), [jd]);
   useEffect(() => {
     if (saveNotes.result?.ok) setSavedNotes(sentNotes);
     // Only when an answer arrives; sentNotes is what that answer is about.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [saveNotes.result]);
+  useEffect(() => {
+    // Generating saves the notes as typed, so they are no longer unsaved.
+    if (generate.result && generate.result.tone !== "error") setSavedNotes(sentNotes);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generate.result]);
   const unsaved = notes !== savedNotes;
   useEffect(() => {
     if (!unsaved) return;
@@ -147,18 +156,23 @@ export function JdScreen({
             </p>
           </div>
           <form
-            action={generateJdWithModel}
             onSubmit={(e) => {
               // Regenerating replaces the JD below, hand edits included.
               if (generated && jdText !== jd && !window.confirm("Regenerate replaces the JD below, including your edits. Continue?")) {
                 e.preventDefault();
+                return;
               }
+              const { formData } = submitted(e);
+              setSentNotes(String(formData.get("notes") ?? ""));
+              generate.run(formData);
             }}
           >
             <input type="hidden" name="openingId" value={openingId} />
             {/* The notes as typed, saved or not — they are part of the draft. */}
             <input type="hidden" name="notes" value={notes} />
             <SubmitButton
+              busy={generate.pending}
+              locked={generate.pending}
               pendingLabel="Writing the JD…"
               tone={generated ? "dark" : "light"}
               className={
@@ -171,18 +185,17 @@ export function JdScreen({
             </SubmitButton>
           </form>
         </div>
+        {generate.result && (
+          <div className="px-7 pt-4">
+            <ActionNote result={generate.result} />
+          </div>
+        )}
 
         {generated ? (
           <form action={approveJd} className="px-7 py-6">
             <input type="hidden" name="openingId" value={openingId} />
             <input type="hidden" name="thenGo" value="opening" />
-            <textarea
-              name="jdMarkdown"
-              rows={18}
-              value={jdText}
-              onChange={(e) => setJdText(e.target.value)}
-              className={`${inputClass} leading-[1.8]`}
-            />
+            <JdEditor name="jdMarkdown" value={jdText} onChange={setJdText} />
             <div className="mt-5 flex flex-wrap items-center gap-4">
               <SubmitButton
                 pendingLabel="Approving…"

@@ -6,6 +6,8 @@ import { JdRead } from "./JdRead";
 import { ProjectHeader } from "../ProjectHeader";
 import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { JobDetailsPanel } from "@/components/JobDetailsPanel";
+import { allows } from "@/lib/auth";
 
 export default async function JdPage({
   params,
@@ -56,6 +58,21 @@ export default async function JdPage({
 
   const approved = o.jdStatus === "approved";
 
+  // Moved here from the Overview: the fields are read from this JD, so they
+  // are checked beside it (testing, 21 Sep).
+  const details = o.requirements ? (
+    <div id="job-details" className="mt-8 scroll-mt-24">
+      <JobDetailsPanel
+        openingId={id}
+        title={o.title}
+        requirements={o.requirements}
+        jdApproved={approved}
+        canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
+        editedByName={repo.user(o.requirements.editedBy ?? "")?.name ?? null}
+      />
+    </div>
+  ) : null;
+
   if (approved) {
     return (
       <>
@@ -68,6 +85,7 @@ export default async function JdPage({
           approvedAt={o.jdApprovedAt ? dateAt(o.jdApprovedAt) : null}
           canAmend={canWrite}
         />
+        {details}
       </>
     );
   }
@@ -105,6 +123,7 @@ export default async function JdPage({
         </div>
       )}
 
+      {details}
     </div>
   );
 }

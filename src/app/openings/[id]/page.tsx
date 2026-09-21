@@ -7,7 +7,7 @@ import { getCurrentUser } from "@/lib/session";
 import { PIPELINE_STAGES, STAGE_LABEL, PRIORITY_TARGET, URGENT_ALERTS } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { JdApproval } from "@/components/JdApproval";
-import { JobDetailsPanel } from "@/components/JobDetailsPanel";
+import { JobDetailsSummary } from "@/components/JobDetailsSummary";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
@@ -141,17 +141,9 @@ export default async function OverviewPage({
         />
       )}
 
-      {/* Job details live here only; the Job description page shows the JD alone. */}
-      {o.requirements && (
-        <JobDetailsPanel
-          openingId={id}
-          title={o.title}
-          requirements={o.requirements}
-          jdApproved={o.jdStatus === "approved"}
-          canEdit={allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null })}
-          editedByName={users.find((u) => u.id === o.requirements?.editedBy)?.name ?? null}
-        />
-      )}
+      {/* The facts only; the form is edited on the Job description page, beside
+          the JD it is read from (testing, 21 Sep). */}
+      {o.requirements && <JobDetailsSummary openingId={id} requirements={o.requirements} />}
 
       {suggested.length > 0 && (
         <section className="mb-9">
