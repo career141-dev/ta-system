@@ -967,6 +967,8 @@ export async function toggleAddOn(formData: FormData) {
   const on = String(formData.get("on")) === "1";
   repo.setAddOn(appId, on);
   revalidatePath(`/openings/${openingId}`, "layout");
+  // Toggled silently before; only the tick changing gave it away (21 Sep).
+  await done(on ? "Marked as an add-on — you and the lead are notified." : "No longer an add-on.");
 }
 
 // ─── Link vault (spec §4.5) ──────────────────────────────────────────────────
@@ -1455,6 +1457,7 @@ export async function scheduleInterview(formData: FormData) {
   if (!booked.ok) await back(booked.message);
 
   revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Interview booked for ${dateAt(scheduledAt!)} — moved to Interview.`);
 }
 
 export async function confirmInterview(formData: FormData) {
@@ -2543,8 +2546,15 @@ export async function saveReviewDetails(formData: FormData) {
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
   const app = repo.application(String(formData.get("applicationId")));
   if (!app) return back("That application no longer exists.");
-  const currentSalary = String(formData.get("currentSalary") ?? "").trim();
-  const expectedSalary = String(formData.get("expectedSalary") ?? "").trim();
+  // A bare amount is saved with the currency picked beside it: "25,000" alone
+  // could not be read as a salary later (21 Sep).
+  const withCurrency = (field: string) => {
+    const amount = String(formData.get(field) ?? "").trim();
+    const currency = String(formData.get(`${field}Currency`) ?? "").trim();
+    return amount && currency && /^[\d.,\s]+(k|m|l)?(\s*(a|per)\s*month)?$/i.test(amount) ? `${currency} ${amount}` : amount;
+  };
+  const currentSalary = withCurrency("currentSalary");
+  const expectedSalary = withCurrency("expectedSalary");
   const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
   const notice = noticeRaw === "" ? null : Number(noticeRaw);
   if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return back("Notice period is a number of days, 0 or more.");
@@ -2554,7 +2564,7 @@ export async function saveReviewDetails(formData: FormData) {
     ...(notice !== null ? { noticePeriodDays: Math.round(notice) } : {}),
   });
   revalidatePath(`/openings/${app.openingId}`, "layout");
-  return back("Details saved.");
+  return done("Details saved.");
 }
 
 /**
@@ -3367,4 +3377,16 @@ export async function addLinkToPipelineInline(_: ActionResult | null, formData: 
 
 export async function deleteLinkInline(_: ActionResult | null, formData: FormData) {
   return inline(() => deleteLink(formData));
+}
+
+export async function toggleAddOnInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => toggleAddOn(formData));
+}
+
+export async function scheduleInterviewInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => scheduleInterview(formData));
+}
+
+export async function saveReviewDetailsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveReviewDetails(formData));
 }

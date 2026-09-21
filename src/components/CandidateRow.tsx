@@ -1,4 +1,5 @@
 import { dateAt, packageLine } from "@/lib/format";
+import { channelTag } from "@/lib/format";
 import Link from "next/link";
 import type { Application, Candidate, User } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
@@ -38,12 +39,7 @@ export function CandidateRow({
   const stamp = (t: number) =>
     dateAt(t);
 
-  const tag =
-    app.sourcingChannel === "HH"
-      ? "Sourced"
-      : app.sourcingChannel === "SCOOP"
-        ? "Database"
-        : "Applicant";
+  const tag = channelTag(app.sourcingChannel);
 
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <>
