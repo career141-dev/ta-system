@@ -6,7 +6,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { addToOpening } from "@/app/actions";
 import { FitChip } from "@/components/FitBadge";
-import { exaggeratedScore, type Score } from "@/lib/scoring";
+import type { Score } from "@/lib/scoring";
 import type { CandidateSignal } from "@/lib/match";
 import type { Candidate } from "@/data/types";
 
@@ -103,8 +103,7 @@ export function ResultRow({
             <Link href={targetLink} scroll={false} className="text-[15px] font-semibold text-accent hover:underline">
               {c.fullName}
             </Link>
-            {/* Boosted for how it reads on this screen — see lib/scoring.ts `exaggeratedScore`. */}
-            {fit && <FitChip score={fit} displayOverall={exaggeratedScore(fit.overall)} />}
+            {fit && <FitChip score={fit} />}
           </div>
           <p className="mt-0.5 text-[13px]">
             {c.currentTitle} at {c.currentEmployer}

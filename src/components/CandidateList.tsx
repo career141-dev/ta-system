@@ -85,13 +85,6 @@ export function CandidateList({
    * shortlisted second-guesses a decision that has already been made.
    */
   scored: showScore = false,
-  /**
-   * Boost the printed score for how it reads (lib/scoring.ts
-   * `exaggeratedScore`) — set only on the Database CVs (reverse-match) screen.
-   * Ranking, ownership and every other list of a candidate's real score are
-   * unaffected; this only changes the number this list prints.
-   */
-  exaggerate = false,
   basePath,
   keepQuery = {},
 }: {
@@ -102,7 +95,6 @@ export function CandidateList({
   filters?: ListFilters;
   claimable?: boolean;
   scored?: boolean;
-  exaggerate?: boolean;
   basePath: string;
   /** Query the filter form must carry through — the post being viewed, say. */
   keepQuery?: Record<string, string>;
@@ -314,7 +306,6 @@ export function CandidateList({
                 openingId={openingId}
                 score={scored.get(a.id)}
                 rank={scored.has(a.id) ? rankOf(a.id) : undefined}
-                exaggerate={exaggerate}
                 canDecideDirector={canDecideDirector}
                 canDecideClient={canDecideClient}
               />

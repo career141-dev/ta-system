@@ -5,7 +5,7 @@ import { STAGE_LABEL } from "@/data/types";
 import { RowActions } from "./RowActions";
 import { claimCandidate } from "@/app/actions";
 import { FitMark, FitReason } from "./FitBadge";
-import { exaggeratedScore, type Score } from "@/lib/scoring";
+import type { Score } from "@/lib/scoring";
 import { FollowUpActions } from "./FollowUpActions";
 import { repo } from "@/data/store";
 import { isConvex } from "@/data/mode";
@@ -19,8 +19,6 @@ export function CandidateRow({
   openingId,
   score,
   rank,
-  /** Set only from the Database CVs (reverse-match) list — see CandidateList. */
-  exaggerate = false,
   canDecideDirector = false,
   canDecideClient = false,
 }: {
@@ -34,13 +32,11 @@ export function CandidateRow({
    *  before that, and a score with no agreed requirements is a made-up number. */
   score?: Score;
   rank?: number;
-  exaggerate?: boolean;
   canDecideDirector?: boolean;
   canDecideClient?: boolean;
 }) {
   const stamp = (t: number) =>
     dateAt(t);
-  const displayOverall = exaggerate && score ? exaggeratedScore(score.overall) : undefined;
 
   const tag =
     app.sourcingChannel === "HH"
@@ -60,7 +56,7 @@ export function CandidateRow({
     <article className="flex gap-6 px-8 py-7">
       {/* The score leads the row, so the list reads top to bottom as a ranking
           rather than as a column of cards bolted to the right. */}
-      {score && <FitMark score={score} rank={rank} displayOverall={displayOverall} />}
+      {score && <FitMark score={score} rank={rank} />}
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -84,7 +80,7 @@ export function CandidateRow({
           {[candidate.location, candidate.currentEmployer].filter(Boolean).join(" · ")}
         </p>
 
-        {score && <FitReason score={score} displayOverall={displayOverall} />}
+        {score && <FitReason score={score} />}
 
         <dl className="mt-4 grid grid-cols-[96px_1fr] gap-x-6 gap-y-3">
           <Field label="Experience">

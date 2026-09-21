@@ -1,4 +1,4 @@
-import { bandFor, type Score } from "@/lib/scoring";
+import type { Score } from "@/lib/scoring";
 
 /**
  * The score, as the first thing on the row.
@@ -19,29 +19,21 @@ const BAND: Record<Score["band"], { rule: string; text: string; word: string }> 
   weak: { rule: "bg-rule-strong", text: "text-ink-faint", word: "weak" },
 };
 
-/**
- * The left gutter: rank, number, a rule the width of the score.
- *
- * `displayOverall` is set only on the database search and reverse-match
- * screens (lib/scoring.ts `exaggeratedScore`) — the number and the band word
- * both move together, so nothing on screen contradicts itself. Every other
- * screen leaves it unset and shows the real score, unchanged.
- */
-export function FitMark({ score, rank, displayOverall }: { score: Score; rank?: number; displayOverall?: number }) {
-  const shown = displayOverall ?? score.overall;
-  const tone = BAND[displayOverall === undefined ? score.band : bandFor(displayOverall)];
+/** The left gutter: rank, number, a rule the width of the score. */
+export function FitMark({ score, rank }: { score: Score; rank?: number }) {
+  const tone = BAND[score.band];
   return (
     <div className="w-[46px] shrink-0 pt-0.5">
       {rank !== undefined && (
         <div className="tabular text-[10.5px] leading-none text-ink-faint">#{rank}</div>
       )}
       <div className="tabular mt-1 text-[22px] font-semibold leading-none tracking-tight">
-        {shown}
+        {score.overall}
       </div>
       <div className="mt-1.5 h-[3px] w-full overflow-hidden rounded-full bg-paper">
         <span
           className={`block h-full rounded-full ${tone.rule}`}
-          style={{ width: `${Math.max(6, shown)}%` }}
+          style={{ width: `${Math.max(6, score.overall)}%` }}
         />
       </div>
       <div className={`mt-1.5 text-[10.5px] leading-tight ${tone.text}`}>{tone.word}</div>
@@ -56,8 +48,7 @@ export function FitMark({ score, rank, displayOverall }: { score: Score; rank?: 
  * is for the TA who wants to know why this person got 64 and not 80: each part
  * with its evidence, its weight for this kind of job, and the points it put in.
  */
-export function FitReason({ score, displayOverall }: { score: Score; displayOverall?: number }) {
-  const shown = displayOverall ?? score.overall;
+export function FitReason({ score }: { score: Score }) {
   const gap = score.penalties[0];
   return (
     <div className="mt-1.5">
@@ -72,7 +63,7 @@ export function FitReason({ score, displayOverall }: { score: Score; displayOver
       </p>
       <details className="group mt-1">
         <summary className="cursor-pointer list-none text-[11.5px] text-ink-faint hover:text-ink-soft">
-          <span className="group-open:hidden">Why {shown}?</span>
+          <span className="group-open:hidden">Why {score.overall}?</span>
           <span className="hidden group-open:inline">Hide the working</span>
         </summary>
         <dl className="mt-2 max-w-[560px] divide-y divide-rule border-y border-rule text-[12px]">
@@ -108,12 +99,11 @@ export function FitReason({ score, displayOverall }: { score: Score; displayOver
  * number as the row appears, the number inside, the band beside it. It was
  * 12px text and easy to miss (17 September).
  */
-export function FitChip({ score, displayOverall }: { score: Score; displayOverall?: number }) {
-  const shown = displayOverall ?? score.overall;
-  const tone = BAND[displayOverall === undefined ? score.band : bandFor(displayOverall)];
+export function FitChip({ score }: { score: Score }) {
+  const tone = BAND[score.band];
   const r = 15;
   const len = 2 * Math.PI * r;
-  const to = len * (1 - Math.max(0, Math.min(100, shown)) / 100);
+  const to = len * (1 - Math.max(0, Math.min(100, score.overall)) / 100);
   return (
     <span
       className="c141-score-pop tabular inline-flex items-center gap-2 align-middle"
@@ -136,7 +126,7 @@ export function FitChip({ score, displayOverall }: { score: Score; displayOveral
             style={{ "--c141-len": `${len}`, "--c141-to": `${to}` } as React.CSSProperties}
           />
         </svg>
-        <span className="relative text-[13px] font-bold text-ink">{shown}</span>
+        <span className="relative text-[13px] font-bold text-ink">{score.overall}</span>
       </span>
       <span className={`text-[12px] font-semibold ${tone.text}`}>{tone.word}</span>
     </span>
