@@ -637,6 +637,27 @@ const rawRepo = {
       .sort((a, b) => b.score - a.score);
   },
 
+  /**
+   * Referees of the people being followed up or shortlisted on this opening —
+   * and nobody else's (testing, 21 Sep: the list drew on whatever candidates
+   * happened to be loaded, from any stage or opening, so it changed from visit
+   * to visit). Grouped by candidate, in stage order.
+   */
+  refereesForPipeline(openingId: Id) {
+    const db = load();
+    const STAGES: Stage[] = ["follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"];
+    const apps = db.applications
+      .filter((a) => a.openingId === openingId && STAGES.includes(a.stage))
+      .sort((a, b) => STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage));
+    return apps
+      .map((app) => ({
+        app,
+        candidate: db.candidates.find((c) => c.id === app.candidateId) ?? null,
+        referees: (db.referees ?? []).filter((r) => r.fromCandidateId === app.candidateId),
+      }))
+      .filter((g) => g.candidate);
+  },
+
   /** Notebook pages 1 and 3 — who else in the database works at this company? */
   peopleAtCompany(company: string, excludeCandidateId?: Id) {
     const db = load();

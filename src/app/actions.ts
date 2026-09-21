@@ -39,7 +39,7 @@ import {
 } from "@/lib/headhunt";
 import { FAILURE_MESSAGE, aiStatus, gemini } from "@/lib/ai";
 import { MAX_ROUNDS, benchmarkViaSearch, runSourcing } from "@/lib/sourcing";
-import { canonicalProfile } from "@/lib/serper";
+import { canonicalProfile, displayUrl } from "@/lib/serper";
 import { profileLink } from "@/lib/url";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
@@ -3487,4 +3487,49 @@ export async function sendFollowUpNowInline(_: ActionResult | null, formData: Fo
 
 export async function stopFollowUpNowInline(_: ActionResult | null, formData: FormData) {
   return inline(() => stopFollowUpNow(formData));
+}
+
+/**
+ * A referee's current role, looked up on LinkedIn (plan 5.2, 21 Sep): the
+ * designation on a CV is from when the CV was written, often years ago. One
+ * web search for their LinkedIn profile; the title and company are read from
+ * the result, never invented, and shown beside the CV's for the TA to judge.
+ */
+export async function verifyReferee(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const refereeId = String(formData.get("refereeId") ?? "");
+  const openingId = String(formData.get("openingId") ?? "");
+  const r = repo.refereesForPipeline(openingId).flatMap((g) => g.referees).find((x) => x.id === refereeId);
+  if (!r) await back("That referee is not on this opening's list any more. Reload the page.");
+  const { search, serperConfigured } = await import("@/lib/serper");
+  if (!serperConfigured()) await back("Web search is not set up on this system, so LinkedIn cannot be checked.");
+  const query = `"${r!.name}"${r!.company ? ` "${r!.company}"` : ""} site:linkedin.com/in`;
+  const res = await search(query, 5);
+  if (res.error) await back(`The search did not run (${res.error}). Try again.`);
+  const first = r!.name.split(/\s+/).filter((w) => w.length > 1 && !/^(dr|mr|mrs|ms|prof)\.?$/i.test(w))[0]?.toLowerCase() ?? "";
+  const hit = res.hits.find((h) => canonicalProfile(h.url) && h.title.toLowerCase().includes(first));
+  if (!hit) await back(`No LinkedIn profile found for ${r!.name}${r!.company ? ` at ${r!.company}` : ""}. Check by hand, or call them.`, "warn");
+  const { profileFacts } = await import("@/lib/sourcing");
+  const parts = hit!.title.replace(/\s*\|\s*LinkedIn.*$/i, "").split(/\s+[-–—]\s+/);
+  const title = (parts[1] ?? "").replace(/\s+(?:at|@)\s+.+$/i, "").trim() || null;
+  const company = profileFacts({ title: hit!.title, snippets: [hit!.snippet] }).company;
+  const now = [title, company && `at ${company}`].filter(Boolean).join(" ") || "role not shown in the search result";
+  const cv = [r!.title, r!.company && `at ${r!.company}`].filter(Boolean).join(" ");
+  const same = !!company && !!r!.company && employerMatches(company, r!.company);
+  await done(
+    `LinkedIn today: ${now}.${cv ? ` The CV says ${cv}${same ? " — same company." : " — this may be out of date."}` : ""} Profile: ${displayUrl(canonicalProfile(hit!.url)!)}`,
+  );
+}
+
+/** "Hayleys PLC" and "hayleys" are the same employer for this check. */
+function employerMatches(a: string, b: string): boolean {
+  const k = (x: string) => x.toLowerCase().replace(/(plc|pvt|ltd|limited|inc|llc|group|\(pvt\))/g, "").replace(/[^a-z0-9]+/g, " ").trim();
+  const x = k(a);
+  const y = k(b);
+  return !!x && !!y && (x.includes(y) || y.includes(x));
+}
+
+export async function verifyRefereeInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => verifyReferee(formData));
 }
