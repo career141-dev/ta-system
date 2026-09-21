@@ -1,5 +1,6 @@
 import { externalUrl } from "@/lib/url";
 import Link from "next/link";
+import { CvFrame } from "@/components/CvFrame";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
@@ -346,7 +347,7 @@ export default async function CandidateDrawer({
                 </div>
               </div>
               {cvFile?.ok && cvIsPdf ? (
-                <iframe src={cvHref} title={`CV — ${c.fullName}`} className="h-[720px] w-full bg-paper" />
+                <CvFrame src={cvHref} title={`CV — ${c.fullName}`} />
               ) : cvFile?.ok ? (
                 <p className="px-4 py-10 text-center text-[12.5px] text-ink-soft">
                   This CV is not a PDF, so the browser cannot show it here.{" "}

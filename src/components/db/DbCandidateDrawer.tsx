@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CvFrame } from "@/components/CvFrame";
 import { ChevronIcon, CloseIcon } from "@/components/icons";
 import { AddToOpening } from "@/components/AddToOpening";
 import { dateAt } from "@/lib/format";
@@ -253,7 +254,7 @@ export function DbCandidateDrawer({
                   )}
                 </div>
                 {cv.href && cv.inline ? (
-                  <iframe key={c.id} src={cv.href} title={`CV — ${c.fullName}`} className="h-[760px] w-full bg-paper" />
+                  <CvFrame key={c.id} src={cv.href} title={`CV — ${c.fullName}`} height={760} />
                 ) : cv.href ? (
                   <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
                     This CV is not a PDF, so the browser cannot show it here.{" "}

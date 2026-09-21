@@ -2,6 +2,7 @@ import { convexQuery } from "@/lib/convexServer";
 import { timeAt } from "@/lib/format";
 import { stopFollowUpNow } from "@/app/actions";
 import { FollowUpActions } from "./FollowUpActions";
+import { SendToDirectorReview } from "./SendToDirectorReview";
 
 /**
  * Follow-up, as it really happened — read from the backend, sent through it.
@@ -140,7 +141,7 @@ export async function LiveFollowUp({
         {!locked && (
           <div className="mt-4 flex flex-wrap items-center gap-3">
             {missing === 0 ? (
-              <span className="text-[12.5px] text-brand">Everything is in — ready for Director review.</span>
+              <SendToDirectorReview applicationId={applicationId} openingId={openingId} />
             ) : exhausted ? (
               <span className="text-[12.5px] text-ink-soft">All {max} follow-ups sent. Call them, or mark them as dropped out.</span>
             ) : (

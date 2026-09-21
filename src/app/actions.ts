@@ -7,7 +7,7 @@ import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
 import type { FollowUpCallOutcome, User } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
-import { ASSIGNMENT_LABEL } from "@/data/types";
+import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
@@ -185,11 +185,12 @@ export async function moveStage(formData: FormData) {
       await back(backendMessage(e, "That move could not be made."));
     }
     await afterBackendWrite(openingId);
-    return;
+    await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
   }
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
   if (!res.ok) await back(res.message);
   revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
 }
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
@@ -3262,4 +3263,8 @@ export async function addLinkInline(_: ActionResult | null, formData: FormData) 
 
 export async function generateJdInline(_: ActionResult | null, formData: FormData) {
   return inline(() => generateJdWithModel(formData));
+}
+
+export async function moveStageInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => moveStage(formData));
 }

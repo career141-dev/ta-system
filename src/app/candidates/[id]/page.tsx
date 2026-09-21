@@ -1,5 +1,6 @@
 import { externalUrl } from "@/lib/url";
 import Link from "next/link";
+import { CvFrame } from "@/components/CvFrame";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
@@ -264,7 +265,9 @@ export default async function CandidatePage({
               </div>
               {cvLink?.ok ? (
                 previewsInline(cv) || /pdf/i.test(cvLink.fileType ?? "") ? (
-                  <iframe src={cvHref} title={`CV — ${c.fullName}`} className="h-[720px] w-full rounded-lg border border-rule bg-paper" />
+                  <div className="overflow-hidden rounded-lg border border-rule">
+                    <CvFrame src={cvHref} title={`CV — ${c.fullName}`} />
+                  </div>
                 ) : (
                   <p className="text-[12.5px] text-ink-soft">
                     This file type does not preview in the browser.{" "}
