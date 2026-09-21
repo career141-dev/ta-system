@@ -9,12 +9,13 @@ name: Deploy Staging
 # app or only Convex, to redeploy an older commit, or to run a one-off Convex
 # function such as a migration.
 
+#
+# PAUSED 21 Sep: no automatic deploy on push. ta-system.career141.com is now
+# PRODUCTION (deploy-production.yml), and the staging database is gone. Pushing
+# to main used to replace the container on 127.0.0.1:3110 — which is now the
+# live app — so the push trigger stays off until a new staging exists with its
+# own port and database. Run by hand only once that is so.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   workflow_dispatch:
     inputs:
       components:

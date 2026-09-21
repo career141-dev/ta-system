@@ -1,8 +1,6 @@
 # Convex settings that must already be set on the production deployment, or the
 # deploy stops before touching anything. Same format as staging.required.
 OPENAI_API_KEY|OPENROUTER_API_KEY
-QDRANT_URL
-QDRANT_API_KEY
 R2_ACCESS_KEY_ID
 R2_SECRET_ACCESS_KEY
 R2_ENDPOINT
@@ -10,6 +8,12 @@ R2_BUCKET_NAME
 MS_GRAPH_CLIENT_ID|MS_CLIENT_ID
 MS_GRAPH_CLIENT_SECRET|MS_CLIENT_SECRET
 MS_GRAPH_TENANT_ID|MS_TENANT_ID
+# WhatsApp templates have no fallback token any more (metaTemplateSender.ts).
+META_ACCESS_TOKEN
+META_PHONE_NUMBER_ID
+# QDRANT_URL is pinned in production.env. QDRANT_API_KEY belongs here as soon
+# as the live Qdrant has a key — it has none yet (21 Sep), and asking for one
+# would stop every deploy.
 # A test copy's switches must never reach production.
 !C141_DISABLE_CRONS
 !C141_OUTBOUND_LOCK

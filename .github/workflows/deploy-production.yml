@@ -1,8 +1,8 @@
 name: Deploy Production
 
-# The `production` branch is what runs live. A release is a fast-forward of
-# production to a commit that is already on main — and so has already been
-# through staging:
+# The `production` branch is what runs live — https://ta-system.career141.com
+# on the live database (api.career141.com). A release is a fast-forward of
+# production to a commit that is already on main:
 #
 #   git push origin main:production
 #
@@ -99,13 +99,16 @@ jobs:
       components: ${{ inputs.components || 'all' }}
       run_function: ${{ inputs.run_function || '' }}
       run_args: ${{ inputs.run_args || '{}' }}
-      deploy_dir: ${{ vars.PRODUCTION_DEPLOY_DIR }}
-      env_file: ${{ vars.PRODUCTION_ENV_FILE }}
-      compose_source: ${{ vars.PRODUCTION_COMPOSE_SOURCE }}
-      app_service: ${{ vars.PRODUCTION_APP_SERVICE }}
-      app_container: ${{ vars.PRODUCTION_APP_CONTAINER }}
-      health_url: ${{ vars.PRODUCTION_HEALTH_URL }}
-      convex_port: ${{ vars.PRODUCTION_CONVEX_PORT }}
-      backup_postgres_container: ${{ vars.PRODUCTION_POSTGRES_CONTAINER }}
-      backup_postgres_db: ${{ vars.PRODUCTION_POSTGRES_DB }}
-      backup_postgres_user: ${{ vars.PRODUCTION_POSTGRES_USER }}
+      # Where production lives (21 Sep): the app in /opt/ta-prod, on the CV
+      # platform's Convex backend (loopback 3210) and its Postgres. A repository
+      # variable still overrides each, should the server layout change.
+      deploy_dir: ${{ vars.PRODUCTION_DEPLOY_DIR || '/opt/ta-prod' }}
+      env_file: ${{ vars.PRODUCTION_ENV_FILE || '.env.production' }}
+      compose_source: ${{ vars.PRODUCTION_COMPOSE_SOURCE || 'deploy/production/docker-compose.yml' }}
+      app_service: ${{ vars.PRODUCTION_APP_SERVICE || 'app' }}
+      app_container: ${{ vars.PRODUCTION_APP_CONTAINER || 'ta-prod-app' }}
+      health_url: ${{ vars.PRODUCTION_HEALTH_URL || 'http://127.0.0.1:3110/signin' }}
+      convex_port: ${{ vars.PRODUCTION_CONVEX_PORT || '3210' }}
+      backup_postgres_container: ${{ vars.PRODUCTION_POSTGRES_CONTAINER || 'career141-postgres-1' }}
+      backup_postgres_db: ${{ vars.PRODUCTION_POSTGRES_DB || 'convex_self_hosted' }}
+      backup_postgres_user: ${{ vars.PRODUCTION_POSTGRES_USER || 'convex' }}

@@ -1,0 +1,49 @@
+# The TA System, live, on the production database.
+#
+# The app only: the database (Convex backend `backend`, Postgres, Qdrant
+# `qdrant`) is the CV platform's own stack in ~/career141, reached over its
+# network `career141_default`. The screening-call stack (LiveKit + agent) is the
+# one staging built, reached over `ta-staging-voice`.
+#
+#   docker compose -p ta-prod --env-file .env.production up -d
+#
+# Deployed by .github/workflows/deploy-production.yml, which copies this file to
+# /opt/ta-prod/docker-compose.yml. Secrets live only in
+# /opt/ta-prod/.env.production on the server (chmod 600).
+services:
+  app:
+    image: ${TA_APP_IMAGE:?set TA_APP_IMAGE}
+    container_name: ta-prod-app
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3110:3000"
+    env_file: .env.production
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      NEXT_TELEMETRY_DISABLED: "1"
+      C141_DEPLOYMENT: production
+      C141_CONVEX_HOST: backend
+      CONVEX_SELF_HOSTED_URL: http://backend:3210
+      QDRANT_URL: http://qdrant:6333
+      LIVEKIT_URL: http://livekit:7880
+    # The pipeline (deploy/scripts/remote-app.sh) waits for "healthy" before it
+    # keeps a new image, and rolls back if it never gets there.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/signin').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+    networks:
+      - career141_default
+      - ta-staging-voice
+
+networks:
+  career141_default:
+    external: true
+  ta-staging-voice:
+    external: true
