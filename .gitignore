@@ -16,7 +16,10 @@ tools/embed/.venv
 .data-live-test
 tools/embed/models
 *.log
-.claude/
+# Local Claude state (worktrees, launch config, personal settings) stays out;
+# the team's shared skills are tracked.
+.claude/*
+!.claude/skills/
 
 # Invented sample data for UI-only work (deploy/local/start-ui.sh)
 .data-ui
