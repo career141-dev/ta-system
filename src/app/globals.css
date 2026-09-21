@@ -31,6 +31,29 @@
   --color-danger-soft: #fbeae8;
 }
 
+/*
+ * Tailwind 4 resets buttons to the arrow cursor, so nothing on the desk looked
+ * pressable — testers read Save job and Re-extract as dead (21 Sep). One rule
+ * here instead of `cursor-pointer` on every button.
+ */
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  summary,
+  select:not(:disabled),
+  input[type="checkbox"]:not(:disabled),
+  input[type="radio"]:not(:disabled) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+  button[aria-busy="true"] {
+    cursor: progress;
+  }
+}
+
 html,
 body {
   background: var(--color-paper);

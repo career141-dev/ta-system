@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { approveJd, generateJdWithModel, saveBriefNotes } from "@/app/actions";
+import { useEffect, useState } from "react";
+import { approveJd, generateJdWithModel, saveBriefNotesInline } from "@/app/actions";
+import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { inputClass } from "./form";
 import { BriefRecorder } from "./BriefRecorder";
 
@@ -36,6 +37,24 @@ export function JdScreen({
   const [jdText, setJdText] = useState(jd);
   const generated = jdText.trim().length > 0;
 
+  // What was last saved, so the button can say there is something to save and
+  // leaving the page can warn before a recording's transcript is lost.
+  const [savedNotes, setSavedNotes] = useState(initialNotes);
+  const [sentNotes, setSentNotes] = useState(initialNotes);
+  const saveNotes = useInline(saveBriefNotesInline);
+  useEffect(() => {
+    if (saveNotes.result?.ok) setSavedNotes(sentNotes);
+    // Only when an answer arrives; sentNotes is what that answer is about.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveNotes.result]);
+  const unsaved = notes !== savedNotes;
+  useEffect(() => {
+    if (!unsaved) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsaved]);
+
   const card =
     "overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]";
   const head = "border-b border-rule px-7 py-4";
@@ -59,7 +78,14 @@ export function JdScreen({
             <p className="whitespace-pre-wrap text-[13px] leading-[1.75] text-ink">{b.notes}</p>
           </div>
         ))}
-        <form action={saveBriefNotes} className="px-7 py-6">
+        <form
+          onSubmit={(e) => {
+            const { formData } = submitted(e);
+            setSentNotes(String(formData.get("notes") ?? ""));
+            saveNotes.run(formData);
+          }}
+          className="px-7 py-6"
+        >
           <div className="mb-4">
             <BriefRecorder
               label="Record your notes"
@@ -83,16 +109,28 @@ export function JdScreen({
             className={`${inputClass} leading-[1.75]`}
           />
           <div className="mt-4 flex flex-wrap items-center gap-4">
-            <button className="rounded-full border border-rule-strong px-4 py-2 text-[12.5px] font-medium text-ink transition-colors hover:border-ink-faint">
-              Save notes
-            </button>
+            <SubmitButton
+              busy={saveNotes.pending}
+              locked={saveNotes.pending}
+              pendingLabel="Saving…"
+              tone={unsaved ? "light" : "dark"}
+              className={
+                unsaved
+                  ? "rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  : "rounded-full border border-rule-strong px-4 py-2 text-[12.5px] font-medium text-ink transition-colors hover:border-ink-faint disabled:opacity-60"
+              }
+            >
+              {unsaved ? "Save notes •" : "Save notes"}
+            </SubmitButton>
+            {unsaved && !saveNotes.pending && <span className="text-[12px] text-warn">Not saved yet</span>}
             {extractedSummary.length > 0 && (
               <span className="text-[12px] text-ink-faint">
-                Read from these:{" "}
+                Picked up from the notes:{" "}
                 <span className="text-ink-soft">{extractedSummary.join(" · ")}</span>
               </span>
             )}
           </div>
+          <ActionNote result={saveNotes.result} className="mt-3" />
         </form>
       </section>
 
@@ -108,19 +146,29 @@ export function JdScreen({
                   : "Written from your notes."}
             </p>
           </div>
-          <form action={generateJdWithModel}>
+          <form
+            action={generateJdWithModel}
+            onSubmit={(e) => {
+              // Regenerating replaces the JD below, hand edits included.
+              if (generated && jdText !== jd && !window.confirm("Regenerate replaces the JD below, including your edits. Continue?")) {
+                e.preventDefault();
+              }
+            }}
+          >
             <input type="hidden" name="openingId" value={openingId} />
             {/* The notes as typed, saved or not — they are part of the draft. */}
             <input type="hidden" name="notes" value={notes} />
-            <button
+            <SubmitButton
+              pendingLabel="Writing the JD…"
+              tone={generated ? "dark" : "light"}
               className={
                 generated
-                  ? "text-[12.5px] text-ink-soft transition-colors hover:text-ink"
-                  : "rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+                  ? "text-[12.5px] text-ink-soft transition-colors hover:text-ink disabled:opacity-60"
+                  : "rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               }
             >
               {generated ? "Regenerate from brief and notes" : "Generate the JD"}
-            </button>
+            </SubmitButton>
           </form>
         </div>
 
@@ -136,9 +184,12 @@ export function JdScreen({
               className={`${inputClass} leading-[1.8]`}
             />
             <div className="mt-5 flex flex-wrap items-center gap-4">
-              <button className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+              <SubmitButton
+                pendingLabel="Approving…"
+                className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
                 Approve and open the job
-              </button>
+              </SubmitButton>
               <span className="text-[12.5px] text-ink-faint">
                 Your edits are saved with the approval. Nothing goes live until then.
               </span>

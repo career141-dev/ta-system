@@ -2,12 +2,11 @@
 
 import Link from "next/link";
 import { ChevronIcon, CloseIcon } from "@/components/icons";
-import { addToOpening } from "@/app/actions";
+import { AddToOpening } from "@/components/AddToOpening";
 import { dateAt } from "@/lib/format";
 import type { Candidate } from "@/data/types";
 import { externalUrl } from "@/lib/url";
 import type { RowApp } from "./ResultRow";
-import { useState } from "react";
 
 /** The open candidate's CV file, as the results page found it. */
 export interface DrawerCv {
@@ -43,7 +42,9 @@ export function DbCandidateDrawer({
   statusLabel?: string | null;
   cv?: DrawerCv | null;
 }) {
-  const [adding, setAdding] = useState(false);
+  // An opening they are already on is not offered again.
+  const onAlready = new Set(apps.map((a) => a.openingId));
+  const offered = openings.filter((o) => !onAlready.has(o.id));
 
   const row = (label: string, value: React.ReactNode) => (
     <>
@@ -218,37 +219,10 @@ export function DbCandidateDrawer({
                   )}
                 </section>
 
-                {openings.length > 0 && (
-                  <form
-                    action={addToOpening}
-                    onSubmit={() => setAdding(true)}
-                    className="rounded-2xl border border-rule bg-surface px-5 py-4"
-                  >
-                    <input type="hidden" name="candidateId" value={c.id} />
-                    <h3 className="text-[13px] font-semibold">Add to an opening</h3>
-                    <p className="mt-1 text-[12px] text-ink-faint">
-                      Goes straight into Follow-up, claimed by you.
-                    </p>
-                    <select
-                      name="openingId"
-                      required
-                      className="mt-2.5 w-full rounded border border-rule bg-paper px-2.5 py-2 text-[12.5px] outline-none transition-colors focus:border-brand"
-                    >
-                      {openings.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      type="submit"
-                      disabled={adding}
-                      className="mt-2.5 rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-                    >
-                      {adding ? "Adding…" : "Add"}
-                    </button>
-                  </form>
-                )}
+                {/* Mounted while there is anything to offer, and stays after the last
+                    one is used so its answer is still read. Keyed by person, so
+                    Previous / Next starts clean. */}
+                {openings.length > 0 && <AddToOpening key={c.id} candidateId={c.id} openings={offered} variant="card" />}
               </aside>
             </div>
 

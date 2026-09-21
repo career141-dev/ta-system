@@ -13,6 +13,7 @@ import { redirect as nextRedirect } from "next/navigation";
 import { markTablesStale, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
+import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -63,7 +64,9 @@ function candidateIdsIn(formData: FormData): string[] {
   return id ? [id] : [];
 }
 
-async function back(message: string): Promise<never> {
+async function back(message: string, tone: "error" | "warn" = "error"): Promise<never> {
+  // Called through inline(), the message goes back to the form instead.
+  if (isInline()) answer(message, tone);
   const ref = (await headers()).get("referer");
   let to = "/";
   if (ref) {
@@ -78,6 +81,12 @@ async function back(message: string): Promise<never> {
     to = `/?msg=${encodeURIComponent(message)}`;
   }
   redirect(to);
+}
+
+/** back(), for a message that says it worked — shown green beside the button when inline. */
+async function done(message: string): Promise<never> {
+  if (isInline()) answer(message, "ok");
+  return back(message);
 }
 
 type RefKind = Parameters<typeof repo.openingOf>[0];
@@ -385,7 +394,8 @@ export async function createOpeningStep1(formData: FormData) {
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
   const openingId = await saveNewOpening(formData, user);
-  if (!openingId) return;
+  // Returned nothing before, so an incomplete form was a button that did nothing.
+  if (!openingId) await back("Choose a client, a position and — for a lead — at least one TA.");
 
   if (next === "jd") redirect(`/openings/${openingId}/jd`);
   if (next === "again") redirect(`/openings/new?created=${openingId}`);
@@ -564,8 +574,13 @@ export async function saveBriefNotes(formData: FormData) {
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const user = await getCurrentUser();
-  saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
+  // It used to return nothing either way, so a save that found no opening
+  // lost the notes without a word (testing, 21 Sep).
+  if (!saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""))) {
+    await back("The opening could not be found, so the notes were not saved. Reload the page and try again.");
+  }
   revalidatePath(`/openings/${openingId}`, "layout");
+  await done("Notes saved.");
 }
 
 /**
@@ -575,16 +590,16 @@ export async function saveBriefNotes(formData: FormData) {
  * what the lead had left. Each person now has a brief of their own, and the JD
  * is written from all of them (see `jdBriefsFor`).
  */
-function saveOwnNotes(openingId: string, userId: string, notes: string) {
+function saveOwnNotes(openingId: string, userId: string, notes: string): boolean {
   const opening = repo.opening(openingId);
-  if (!opening) return;
+  if (!opening) return false;
   const extracted = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
   const mine = repo.briefsForOpening(openingId).filter((b) => b.capturedBy === userId).pop();
   if (mine) {
     if (mine.notesMarkdown !== notes) repo.updateBrief(mine.id, { notesMarkdown: notes, extracted });
-    return;
+    return true;
   }
-  if (!notes.trim()) return;
+  if (!notes.trim()) return true;
   repo.createBrief({
     clientId: opening.clientId,
     openingId,
@@ -602,6 +617,7 @@ function saveOwnNotes(openingId: string, userId: string, notes: string) {
     consentText: null,
     extracted,
   });
+  return true;
 }
 
 /** Everyone's details about an opening, for the JD: the lead's brief and each TA's notes. */
@@ -817,7 +833,7 @@ export async function saveJobDetails(formData: FormData) {
   }
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await back("Job details saved. Matching is re-running against them.");
+  await done("Job details saved. Matching is re-running against them.");
 }
 
 /** Read the approved JD again and replace the details — including hand corrections. */
@@ -832,7 +848,7 @@ export async function reextractJobDetails(formData: FormData) {
   }
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await back("Reading the JD again — the details update in a few seconds.");
+  await done("Reading the JD again — the details update in a few seconds.");
 }
 
 export async function addJobPost(formData: FormData) {
@@ -1751,7 +1767,7 @@ export async function addToOpening(formData: FormData) {
   const appId = onOpening()?.id;
   if (!appId) {
     refresh();
-    await back("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.");
+    await back("They were added, but the application could not be found to move into Follow-up. Reload and use Shortlist on Database CVs.", "warn");
   }
 
   if (isConvex()) {
@@ -1767,15 +1783,15 @@ export async function addToOpening(formData: FormData) {
     const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
     await afterBackendWrite(openingId);
     refresh();
-    if (problem) await back(`Added to ${title} under Database CVs, but not moved to Follow-up: ${problem}`);
+    if (problem) await back(`Added to ${title} under Database CVs, but not moved to Follow-up: ${problem}`, "warn");
     if (owner) await back(`${owner} has already claimed this candidate on ${title}.`);
-    await back(`Added to ${title} in Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
+    await done(`Added to ${title} in Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
   }
 
   const claimed = repo.shortlist(appId!, user.id);
   refresh();
   if (!claimed.ok) await back("Somebody else claimed this candidate first.");
-  await back(`Added to ${title} in Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
+  await done(`Added to ${title} in Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
 }
 
 // ─── Headhunting intelligence (spec §8A) ─────────────────────────────────────
@@ -3191,4 +3207,32 @@ export async function syncMailboxNow(formData: FormData) {
   }
   revalidatePath("/settings");
   await back(`Syncing ${mailbox}. New messages appear below within a minute; each waits 20 minutes before it is filed.`);
+}
+
+
+// ─── Answers beside the button ───────────────────────────────────────────────
+//
+// The same actions, for forms that show the outcome where it was asked for
+// rather than at the top of the page (lib/inlineResult). `useActionState`
+// hands the previous answer first; it is not needed.
+
+export async function saveJobDetailsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveJobDetails(formData));
+}
+
+export async function reextractJobDetailsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => reextractJobDetails(formData));
+}
+
+export async function saveBriefNotesInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => saveBriefNotes(formData));
+}
+
+export async function addToOpeningInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addToOpening(formData));
+}
+
+/** A successful save still navigates to the new opening; only a refusal answers here. */
+export async function createOpeningStep1Inline(_: ActionResult | null, formData: FormData) {
+  return inline(() => createOpeningStep1(formData));
 }

@@ -40,15 +40,18 @@ export default async function JdPage({
   const lead = repo.user(o.taLeadId);
   const canWrite = o.assignedTaIds.includes(user.id) || user.role === "admin";
 
+  // Named, not bare values: "P3" on its own read as a code (testing, 21 Sep).
   const summary = [
     e?.salaryMin
-      ? `${e.currency} ${e.salaryMin.toLocaleString()}${e.salaryMax ? `–${e.salaryMax.toLocaleString()}` : ""}`
-      : null,
-    e?.locations?.length ? e.locations.join(", ") : null,
-    e?.nationalities?.length ? `${e.nationalities.join(", ")} only` : null,
+      ? `Salary ${e.currency} ${e.salaryMin.toLocaleString()}${e.salaryMax ? `–${e.salaryMax.toLocaleString()}` : ""}`
+      : e?.packageNotes?.trim()
+        ? `Package ${e.packageNotes.trim()}`
+        : null,
+    e?.locations?.length ? `Location ${e.locations.join(", ")}` : null,
+    e?.nationalities?.length ? `${e.nationalities.join(", ")} nationals only` : null,
     e?.headcount && e.headcount > 1 ? `${e.headcount} positions` : null,
-    e?.mustHaves?.length ? `${e.mustHaves.length} requirements` : null,
-    e?.priorityTier ?? null,
+    e?.mustHaves?.length ? `${e.mustHaves.length} requirement${e.mustHaves.length === 1 ? "" : "s"}` : null,
+    e?.priorityTier ? `Priority ${e.priorityTier.replace(/^P/, "")}` : null,
   ].filter(Boolean) as string[];
 
   const approved = o.jdStatus === "approved";

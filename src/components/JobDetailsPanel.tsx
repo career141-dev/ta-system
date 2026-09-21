@@ -4,7 +4,8 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { OpeningRequirements } from "@/data/types";
 import { Field, Select, TokenInput, inputClass } from "@/components/form";
-import { reextractJobDetails, saveJobDetails } from "@/app/actions";
+import { reextractJobDetailsInline, saveJobDetailsInline } from "@/app/actions";
+import { ActionNote, SubmitButton, latest, submitted, useInline } from "@/components/Submit";
 
 /**
  * Job details — the structured requirements matching and sourcing run on.
@@ -49,6 +50,9 @@ export function JobDetailsPanel({
   editedByName: string | null;
 }) {
   const router = useRouter();
+  const save = useInline(saveJobDetailsInline);
+  const reextract = useInline(reextractJobDetailsInline);
+  const working = save.pending || reextract.pending;
 
   // While the model reads the JD, look again every few seconds.
   useEffect(() => {
@@ -88,7 +92,13 @@ export function JobDetailsPanel({
         <span className={`text-[11.5px] ${r.status === "failed" ? "text-danger" : "text-ink-faint"}`}>{statusLine}</span>
       </div>
 
-      <form action={saveJobDetails} className="mt-5">
+      <form
+        onSubmit={(e) => {
+          const { formData, pressed } = submitted(e);
+          (pressed === "reextract" ? reextract : save).run(formData);
+        }}
+        className="mt-5"
+      >
         <input type="hidden" name="openingId" value={openingId} />
         <fieldset disabled={fieldset} className="grid gap-5 disabled:opacity-70">
           <Field label="Job Title *">
@@ -172,26 +182,40 @@ export function JobDetailsPanel({
         </fieldset>
 
         {canEdit && (
-          <div className="mt-5 flex flex-wrap items-center gap-4">
-            <button
-              disabled={r.status === "extracting"}
-              className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
-            >
-              Save job details
-            </button>
-            {jdApproved && (
-              <button
-                formAction={reextractJobDetails}
-                formNoValidate
+          <div className="mt-5">
+            <div className="flex flex-wrap items-center gap-4">
+              <SubmitButton
+                name="intent"
+                value="save"
+                busy={save.pending}
+                locked={working}
                 disabled={r.status === "extracting"}
-                className="text-[12.5px] text-ink-soft hover:text-ink disabled:opacity-50"
+                pendingLabel="Saving…"
+                className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-50"
               >
-                ✨ Re-extract from JD
-              </button>
-            )}
-            <span className="text-[11.5px] text-ink-faint">
-              Saved fields are kept if the JD changes; Re-extract replaces them.
-            </span>
+                Save job details
+              </SubmitButton>
+              {jdApproved && (
+                <SubmitButton
+                  name="intent"
+                  value="reextract"
+                  formNoValidate
+                  busy={reextract.pending}
+                  locked={working}
+                  disabled={r.status === "extracting"}
+                  pendingLabel="Reading the JD…"
+                  tone="dark"
+                  className="text-[12.5px] text-ink-soft hover:text-ink disabled:opacity-50"
+                >
+                  ✨ Re-extract from JD
+                </SubmitButton>
+              )}
+              <span className="text-[11.5px] text-ink-faint">
+                Saved fields are kept if the JD changes; Re-extract replaces them.
+              </span>
+            </div>
+            {/* Here, not at the top of the page: this button sits a long scroll below it. */}
+            <ActionNote result={latest(save.result, reextract.result)} className="mt-3" />
           </div>
         )}
       </form>

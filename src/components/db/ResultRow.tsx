@@ -4,7 +4,7 @@ import { externalUrl } from "@/lib/url";
 import { packageLine } from "@/lib/format";
 import { useState } from "react";
 import Link from "next/link";
-import { addToOpening } from "@/app/actions";
+import { AddToOpening } from "@/components/AddToOpening";
 import { FitChip } from "@/components/FitBadge";
 import type { Score } from "@/lib/scoring";
 import type { CandidateSignal } from "@/lib/match";
@@ -188,32 +188,17 @@ export function ResultRow({
           </dl>
 
           <div className="mt-4 flex flex-wrap items-center gap-2.5">
-            {addable.length === 0 ? (
+            {/* Open first: after the last opening is used, its answer still shows. */}
+            {adding ? (
+              <AddToOpening
+                candidateId={c.id}
+                openings={addable}
+                variant="compact"
+                defaultOpeningId={defaultOpeningId}
+                onCancel={() => setAdding(false)}
+              />
+            ) : addable.length === 0 ? (
               <span className="text-[11.5px] text-ink-faint">On every opening you could add them to</span>
-            ) : adding ? (
-              <form action={addToOpening} className="flex flex-wrap items-center gap-2">
-                <input type="hidden" name="candidateId" value={c.id} />
-                <div className="relative">
-                  <select
-                    name="openingId"
-                    defaultValue={defaultOpeningId && addable.some((o) => o.id === defaultOpeningId) ? defaultOpeningId : addable[0].id}
-                    className="cursor-pointer appearance-none rounded-full border border-rule bg-surface py-1.5 pl-3.5 pr-8 text-[12px] outline-none focus:border-brand"
-                  >
-                    {addable.map((o) => (
-                      <option key={o.id} value={o.id}>{o.label}</option>
-                    ))}
-                  </select>
-                  <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint">
-                    <path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-                <button className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90">
-                  Add
-                </button>
-                <button type="button" onClick={() => setAdding(false)} className="px-1.5 text-[12px] text-ink-soft hover:text-ink">
-                  Cancel
-                </button>
-              </form>
             ) : (
               <button
                 onClick={() => setAdding(true)}

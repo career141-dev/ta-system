@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { BriefRecorder, type SavedRecording } from "./BriefRecorder";
-import { createOpeningInline, createOpeningStep1 } from "@/app/actions";
+import { createOpeningInline, createOpeningStep1Inline } from "@/app/actions";
+import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { ClientPicker, PeoplePicker, inputClass } from "./form";
 import { NewClientDialog, Spinner, type NewClient } from "./NewClientDialog";
 import type { Client, User } from "@/data/types";
@@ -94,6 +95,28 @@ export function CaptureForm({
 
   const ready = Boolean(title.trim() && client && (!isLead || assigned.length));
 
+  // The buttons are never greyed out for an incomplete form: a greyed button
+  // that does nothing when clicked read as broken (testing, 21 Sep). Pressing
+  // one with something missing says what, outlines it, and scrolls to it.
+  const missing = [
+    !client && { id: "capture-client", label: "a client" },
+    !title.trim() && { id: "capture-position", label: "a position" },
+    isLead && !assigned.length && { id: "capture-assign", label: "at least one TA" },
+  ].filter(Boolean) as { id: string; label: string }[];
+  const [tried, setTried] = useState(false);
+  const flagged = (id: string) => tried && missing.some((m) => m.id === id);
+  const flag = "border-danger ring-[3px] ring-danger/15";
+  const refuseIfIncomplete = () => {
+    if (!missing.length) return false;
+    setTried(true);
+    document.getElementById(missing[0].id)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return true;
+  };
+  const missingText = `Add ${missing.map((m) => m.label).join(", ").replace(/, ([^,]*)$/, " and $1")} first.`;
+  // A refusal from the server comes back here; a successful save navigates.
+  const save = useInline(createOpeningStep1Inline);
+  const [pressed, setPressed] = useState<string | null>(null);
+
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-10`;
   const card =
     "overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]";
@@ -101,7 +124,7 @@ export function CaptureForm({
 
   const submitInline = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!ready || pending) return;
+    if (pending || refuseIfIncomplete()) return;
     setError(null);
     const data = new FormData(e.currentTarget);
     startTransition(async () => {
@@ -113,14 +136,23 @@ export function CaptureForm({
 
   return (
     <form
-      action={inline ? undefined : createOpeningStep1}
-      onSubmit={inline ? submitInline : undefined}
+      noValidate
+      onSubmit={
+        inline
+          ? submitInline
+          : (e) => {
+              const { formData, pressed: which } = submitted(e);
+              if (save.pending || refuseIfIncomplete()) return;
+              setPressed(which);
+              save.run(formData);
+            }
+      }
       className={`flex flex-col ${inline ? "gap-4" : "gap-5"}`}
     >
       {lockedClient ? (
         <input type="hidden" name="clientId" value={lockedClient.id} />
       ) : (
-        <section className={card}>
+        <section id="capture-client" className={`${card} ${flagged("capture-client") ? flag : ""}`}>
           <div className={`${head} flex items-center justify-between gap-3`}>
             <h2 className="text-[13.5px] font-semibold">Client</h2>
             {canAddClient && (
@@ -150,7 +182,7 @@ export function CaptureForm({
         />
       )}
 
-      <section className={card}>
+      <section id="capture-position" className={card}>
         <div className={head}>
           <h2 className="text-[13.5px] font-semibold">Position</h2>
         </div>
@@ -162,7 +194,8 @@ export function CaptureForm({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Head of Finance"
-            className={`${inputClass} max-w-[420px] text-[15px]`}
+            aria-invalid={flagged("capture-position") || undefined}
+            className={`${inputClass} max-w-[420px] text-[15px] ${flagged("capture-position") ? flag : ""}`}
           />
 
           {/* Where the job is and whose passport the client wants are two
@@ -251,7 +284,7 @@ export function CaptureForm({
 
       {isLead && (
         <>
-          <section className={card}>
+          <section id="capture-assign" className={`${card} ${flagged("capture-assign") ? flag : ""}`}>
             <div className={head}>
               <h2 className="text-[13.5px] font-semibold">Assign to</h2>
               <p className="mt-0.5 text-[12.5px] text-ink-soft">
@@ -312,17 +345,20 @@ export function CaptureForm({
           <input type="hidden" name="next" value="save" />
           <button
             type="submit"
-            disabled={!ready || pending}
-            className="flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35"
+            disabled={pending}
+            aria-busy={pending}
+            className="flex items-center gap-2 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             {pending && <Spinner />}
             {pending ? "Creating opening…" : "Create opening"}
           </button>
-          <span className="text-[12.5px] text-ink-faint">
+          <span className={`text-[12.5px] ${tried && !ready ? "text-danger" : "text-ink-faint"}`}>
             {!ready
-              ? isLead
-                ? "Add a position and at least one TA"
-                : "Add a position"
+              ? tried
+                ? missingText
+                : isLead
+                  ? "Add a position and at least one TA"
+                  : "Add a position"
               : isLead
                 ? "The TA is notified and writes the JD"
                 : "You write the JD next"}
@@ -334,45 +370,57 @@ export function CaptureForm({
           )}
         </div>
       ) : (
-      <div className="flex flex-wrap items-center gap-3 pt-1">
-        <button
-          name="next"
-          value="save"
-          disabled={!ready}
-          className="rounded-full border border-rule-strong px-5 py-2.5 text-[13px] font-medium text-ink transition-colors hover:border-ink-faint disabled:opacity-35"
-        >
-          Save job
-        </button>
-
-        {isLead ? (
-          <button
+      <div className="flex flex-col gap-3 pt-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <SubmitButton
             name="next"
-            value="again"
-            disabled={!ready}
-            className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35"
+            value="save"
+            busy={save.pending && pressed === "save"}
+            locked={save.pending}
+            pendingLabel="Saving…"
+            tone="dark"
+            className="rounded-full border border-rule-strong px-5 py-2.5 text-[13px] font-medium text-ink transition-colors hover:border-ink-faint disabled:opacity-60"
           >
-            Save and create next opening
-          </button>
-        ) : (
-          <button
-            name="next"
-            value="jd"
-            disabled={!ready}
-            className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35"
-          >
-            Next
-          </button>
-        )}
+            Save job
+          </SubmitButton>
 
-        <span className="text-[12.5px] text-ink-faint">
-          {!ready
-            ? isLead
-              ? "Choose a client, a position and at least one TA"
-              : "Choose a client and a position"
-            : isLead
-              ? "The TA is notified and writes the JD"
-              : "Next: notes and the JD"}
-        </span>
+          {isLead ? (
+            <SubmitButton
+              name="next"
+              value="again"
+              busy={save.pending && pressed === "again"}
+              locked={save.pending}
+              pendingLabel="Saving…"
+              className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              Save and create next opening
+            </SubmitButton>
+          ) : (
+            <SubmitButton
+              name="next"
+              value="jd"
+              busy={save.pending && pressed === "jd"}
+              locked={save.pending}
+              pendingLabel="Saving…"
+              className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              Next
+            </SubmitButton>
+          )}
+
+          <span className={`text-[12.5px] ${tried && !ready ? "text-danger" : "text-ink-faint"}`}>
+            {!ready
+              ? tried
+                ? missingText
+                : isLead
+                  ? "Choose a client, a position and at least one TA"
+                  : "Choose a client and a position"
+              : isLead
+                ? "The TA is notified and writes the JD"
+                : "Next: notes and the JD"}
+          </span>
+        </div>
+        <ActionNote result={save.result} />
       </div>
       )}
     </form>
