@@ -3,6 +3,7 @@ import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { internal } from "../_generated/api";
 import { adjustJobStageStat } from "../jobs/stats";
 import { buildStructuredEmailHtml } from "../communications/emailHtml";
+import { resolveRecipient } from "../lib/outreachSafety";
 
 /**
  * Checks per-application follow-up completion flags.
@@ -167,7 +168,7 @@ export async function initiateFollowUpOutreach(
      */
     sameRound?: boolean;
     /** Filled in with what happened, for callers that need to say so. */
-    report?: { sent: boolean; kind?: "initial" | "reminder" };
+    report?: { sent: boolean; kind?: "initial" | "reminder"; blocked?: boolean };
   }
 ): Promise<Id<"communications"> | undefined> {
   const app = await ctx.db.get(applicationId);
@@ -297,9 +298,18 @@ export async function initiateFollowUpOutreach(
   // Within a round the count already includes this round, so the round's kind
   // is read from the count before it.
   const isNudge = sameRound ? currentAttempts > 1 : currentAttempts > 0;
+  // Whether any channel of this round can actually reach someone. With
+  // outreach off and no test recipient every message is stopped by the safety
+  // guard — and each stopped round still counted as one of the three, so a
+  // candidate "used up" their follow-ups without receiving one (21 Sep).
+  // Stopped rounds are still recorded; they are not counted or rescheduled.
+  const deliverable =
+    (isWhatsAppEnabled && resolveRecipient("whatsapp", candidate.phone ?? "").ok) ||
+    (isEmailEnabled && resolveRecipient("email", candidate.email ?? "").ok);
   if (options?.report) {
     options.report.sent = true;
     options.report.kind = isNudge ? "reminder" : "initial";
+    options.report.blocked = !deliverable;
   }
 
   if (isNudge) {
@@ -388,6 +398,10 @@ export async function initiateFollowUpOutreach(
 
     // 3. Increment attempts and reschedule nudge for 24h later
     if (sameRound) return whatsappCommId || emailCommId;
+    if (!deliverable) {
+      await ctx.db.patch(app._id, { nextFollowUpScheduledAt: undefined });
+      return whatsappCommId || emailCommId;
+    }
     await ctx.db.patch(app._id, {
       nextFollowUpScheduledAt: now + NUDGE_RESCHEDULE_MS,
       nextFollowUpMessage: undefined,
@@ -472,6 +486,10 @@ export async function initiateFollowUpOutreach(
 
     // 3. Persist state and schedule the next nudge 24 hours out
     if (sameRound) return emailCommId;
+    if (!deliverable) {
+      await ctx.db.patch(app._id, { followUpEnteredAt: app.followUpEnteredAt ?? now, nextFollowUpScheduledAt: undefined });
+      return emailCommId;
+    }
     const followUpState = app.followUpState;
     await ctx.db.patch(app._id, {
       followUpEnteredAt: app.followUpEnteredAt ?? now,

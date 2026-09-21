@@ -258,7 +258,7 @@ export async function sendFollowUpNow(formData: FormData) {
   // The WhatsApp and Email buttons send one channel; the older button sends both.
   const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
   if (!isConvex()) await back("Sending needs the Convex store.");
-  let r: { sent: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
+  let r: { sent: boolean; blocked?: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
   try {
     r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
   } catch (e) {
@@ -271,12 +271,11 @@ export async function sendFollowUpNow(formData: FormData) {
       : channel === "email"
         ? r?.kind === "initial" ? "Follow-up email sent" : "Reminder email sent"
         : r?.kind === "initial" ? "Follow-up sent — WhatsApp template and email" : "Reminder sent";
-  await back(
-    !r?.sent
-      ? r?.reason ?? "Nothing was sent."
-      : r.kind === "initial" || r.sameRound
-        ? `${what}. Delivery shows in the conversation in a few seconds.`
-        : `${what} — follow-up ${r.attempt} of ${r.maxAttempts}.`,
+  if (!r?.sent) await back(r?.reason ?? "Nothing was sent.", r?.blocked ? "warn" : "error");
+  await done(
+    r!.kind === "initial" || r!.sameRound
+      ? `${what}. Delivery shows in the conversation in a few seconds.`
+      : `${what} — follow-up ${r!.attempt} of ${r!.maxAttempts}.`,
   );
 }
 
@@ -291,7 +290,7 @@ export async function stopFollowUpNow(formData: FormData) {
     await back(backendMessage(e, "Could not stop the follow-up."));
   }
   await afterBackendWrite(openingId);
-  await back("Follow-up stopped. Nothing further will be sent.");
+  await done("Follow-up stopped. Nothing further will be sent.");
 }
 
 /**
@@ -3389,4 +3388,12 @@ export async function scheduleInterviewInline(_: ActionResult | null, formData: 
 
 export async function saveReviewDetailsInline(_: ActionResult | null, formData: FormData) {
   return inline(() => saveReviewDetails(formData));
+}
+
+export async function sendFollowUpNowInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => sendFollowUpNow(formData));
+}
+
+export async function stopFollowUpNowInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => stopFollowUpNow(formData));
 }

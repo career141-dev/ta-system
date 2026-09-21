@@ -34,13 +34,40 @@ export function outreachLive(): boolean {
 }
 
 const digits = (s: string) => s.replace(/[^0-9]/g, "");
+
+/**
+ * A phone number as WhatsApp needs it: country code first, no "+" or "00".
+ *
+ * CVs and Excel Tables hold Sri Lankan numbers the local way — "0703205525" —
+ * which WhatsApp cannot deliver to (21 Sep). A ten-digit number starting 0 is
+ * read as Sri Lankan (OUTREACH_DEFAULT_COUNTRY_CODE, 94 unless set); "0094…"
+ * loses its 00. Anything else is kept as its digits.
+ */
+export function internationalPhone(raw: string): string {
+  let d = digits(raw);
+  if (d.startsWith("00")) d = d.slice(2);
+  const cc = (process.env.OUTREACH_DEFAULT_COUNTRY_CODE ?? "94").replace(/\D/g, "") || "94";
+  if (/^0\d{9}$/.test(d)) d = cc + d.slice(1);
+  return d;
+}
 const emailNorm = (s: string) => s.trim().toLowerCase();
 
 function testRecipient(channel: OutreachChannel): string {
   const raw = channel === "email" ? process.env.OUTREACH_TEST_EMAIL : process.env.OUTREACH_TEST_PHONE;
   const value = (raw ?? "").trim();
   if (!value) return "";
-  return channel === "email" ? emailNorm(value) : digits(value);
+  return channel === "email" ? emailNorm(value) : internationalPhone(value);
+}
+
+/**
+ * What happens to a message on this channel right now, for screens that should
+ * say so before the click: sent to the candidate, redirected to the test
+ * recipient, or stopped. Reads the same settings as resolveRecipient; decides
+ * nothing itself.
+ */
+export function deliveryMode(channel: OutreachChannel): "live" | "test" | "off" {
+  if (outreachLive()) return "live";
+  return testRecipient(channel) ? "test" : "off";
 }
 
 /**
@@ -51,7 +78,7 @@ function testRecipient(channel: OutreachChannel): string {
  * recipient configured it is refused.
  */
 export function resolveRecipient(channel: OutreachChannel, intended: string): RecipientDecision {
-  const want = channel === "email" ? emailNorm(intended ?? "") : digits(intended ?? "");
+  const want = channel === "email" ? emailNorm(intended ?? "") : internationalPhone(intended ?? "");
   if (outreachLive()) {
     if (!want) return { ok: false, reason: `No ${channel === "email" ? "email address" : "phone number"} to send to.` };
     return { ok: true, to: want, redirected: false, note: "" };

@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { sendFollowUpNow, stopFollowUpNow } from "@/app/actions";
+import { sendFollowUpNowInline, stopFollowUpNowInline } from "@/app/actions";
+import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
 
 /**
  * What has already been said to this candidate, and the next message.
@@ -26,6 +27,8 @@ type Line = {
 };
 
 type State = {
+  /** live: to the candidate; test: to the test recipient; off: stopped by the safety guard. */
+  delivery?: { whatsapp: "live" | "test" | "off"; email: "live" | "test" | "off" };
   attemptCount: number;
   maxAttempts: number | null;
   nextScheduledAt: number | null;
@@ -61,10 +64,18 @@ export function FollowUpDialog({
   const [data, setData] = useState<{ state: State; messages: Line[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
+  // Send and Stop answer inside the dialog, which stays open to show it and
+  // the conversation re-reads (21 Sep: they closed it and answered at the top).
+  const send = useInline(sendFollowUpNowInline);
+  const stop = useInline(stopFollowUpNowInline);
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    if (send.result || stop.result) setReload((n) => n + 1);
+  }, [send.result, stop.result]);
 
   useEffect(() => {
     if (!open) return;
-    setData(null);
+    if (reload === 0) setData(null);
     setError(null);
     fetch(`/api/conversation/${applicationId}`)
       .then(async (r) => (r.ok ? r.json() : Promise.reject(new Error(await r.text()))))
@@ -73,7 +84,7 @@ export function FollowUpDialog({
     const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     document.addEventListener("keydown", esc);
     return () => document.removeEventListener("keydown", esc);
-  }, [open, applicationId]);
+  }, [open, applicationId, reload]);
 
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
@@ -91,6 +102,8 @@ export function FollowUpDialog({
   const missing = checklist.filter(([, ok]) => !ok);
   const sent = data?.state.attemptCount ?? 0;
   const max = data?.state.maxAttempts ?? 3;
+  const mode = data?.state.delivery?.[channel] ?? "live";
+  const channelName = channel === "whatsapp" ? "WhatsApp" : "email";
 
   return (
     <>
@@ -127,6 +140,13 @@ export function FollowUpDialog({
                 </p>
               )}
 
+              {mode !== "live" && (
+                <p className="border-b border-warn/30 bg-warn-soft px-5 py-2.5 text-[12px] leading-relaxed text-warn">
+                  {mode === "off"
+                    ? `Test system: ${channelName} to candidates is switched off. Messages are recorded here but not sent, and are not counted as follow-ups.`
+                    : `Test system: ${channelName} goes to the test ${channel === "whatsapp" ? "number" : "address"}, not to ${candidateName}.`}
+                </p>
+              )}
               <div ref={scroller} className="flex-1 space-y-3 overflow-y-auto px-5 py-4">
                 {error && <p className="py-10 text-center text-[12.5px] text-danger">{error}</p>}
                 {!data && !error && <p className="py-10 text-center text-[12.5px] text-ink-faint">Reading the conversation…</p>}
@@ -142,14 +162,12 @@ export function FollowUpDialog({
                     <div key={m.id} className={`flex ${out ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 ${out ? "bg-brand-soft" : "bg-paper"}`}>
                         <p className="mb-1 text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">
-                          {m.channel} · {out ? "us" : candidateName} · {when(m.sentAt)}
-                          {failed ? " · not delivered" : ""}
+                          {m.channel} · {out ? "Career141" : candidateName} · {when(m.sentAt)}
+                          {failed ? (blockedByTestMode(m.errorMessage) ? " · not sent (test mode)" : " · not delivered") : ""}
                         </p>
                         {m.subject && <p className="text-[12.5px] font-medium">{m.subject}</p>}
-                        <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">{m.body}</p>
-                        {failed && m.errorMessage && (
-                          <p className="mt-1 text-[11px] leading-snug text-danger">{m.errorMessage}</p>
-                        )}
+                        <p className="whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink">{withoutSendNote(m.body)}</p>
+                        {failed && m.errorMessage && <DeliveryProblem text={m.errorMessage} />}
                       </div>
                     </div>
                   );
@@ -157,33 +175,81 @@ export function FollowUpDialog({
               </div>
 
               <div className="flex flex-wrap items-center justify-between gap-3 border-t border-rule px-5 py-3.5">
-                <form action={sendFollowUpNow} onSubmit={() => setOpen(false)}>
+                <form onSubmit={(e) => send.run(submitted(e).formData)}>
                   <input type="hidden" name="appId" value={applicationId} />
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="channel" value={channel} />
-                  <button
+                  <SubmitButton
+                    busy={send.pending}
+                    locked={send.pending || stop.pending}
                     disabled={sent >= max}
+                    pendingLabel="Sending…"
                     className="rounded-full bg-brand px-4 py-2 text-[12.5px] font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:bg-rule-strong"
                   >
-                    {sent === 0
-                      ? `Send the first ${channel === "whatsapp" ? "WhatsApp" : "email"}`
-                      : sent >= max
-                        ? `All ${max} sent`
-                        : `Send follow-up ${sent + 1} of ${max}`}
-                  </button>
+                    {mode === "off"
+                      ? `Record ${channelName} (not sent)`
+                      : mode === "test"
+                        ? `Send to the test ${channel === "whatsapp" ? "number" : "address"}`
+                        : sent === 0
+                          ? `Send the first ${channelName}`
+                          : sent >= max
+                            ? `All ${max} sent`
+                            : `Send follow-up ${sent + 1} of ${max}`}
+                  </SubmitButton>
                 </form>
                 {sent > 0 && (
-                  <form action={stopFollowUpNow} onSubmit={() => setOpen(false)}>
+                  <form
+                    onSubmit={(e) => {
+                      if (!window.confirm(`Stop following up ${candidateName}? No more reminders will go.`)) {
+                        e.preventDefault();
+                        return;
+                      }
+                      stop.run(submitted(e).formData);
+                    }}
+                  >
                     <input type="hidden" name="appId" value={applicationId} />
                     <input type="hidden" name="openingId" value={openingId} />
-                    <button className="text-[12.5px] text-ink-faint hover:text-ink">Stop follow-up</button>
+                    <SubmitButton
+                      busy={stop.pending}
+                      locked={send.pending || stop.pending}
+                      pendingLabel="Stopping…"
+                      tone="dark"
+                      className="text-[12.5px] text-ink-faint hover:text-ink disabled:opacity-60"
+                    >
+                      Stop follow-up
+                    </SubmitButton>
                   </form>
                 )}
+                <ActionNote result={latest(send.result, stop.result)} className="w-full" />
               </div>
             </div>
           </div>,
           document.body,
         )}
     </>
+  );
+}
+
+/** A message the safety guard stopped, as opposed to one the network lost. */
+function blockedByTestMode(error: string | null | undefined): boolean {
+  return /test mode: blocked/i.test(error ?? "");
+}
+
+/** "[reengagement template not sent] Test mode: …" — the sender's note, not the message. */
+function withoutSendNote(body: string): string {
+  return body.replace(/^\[[^\]]*not sent\]\s*Test mode:[^\n]*\n?/i, "").trim() || body;
+}
+
+/**
+ * Why a message did not go, in one line. The safety guard's own wording names
+ * environment variables; that stays behind Details for whoever administers it.
+ */
+function DeliveryProblem({ text }: { text: string }) {
+  if (!blockedByTestMode(text)) return <p className="mt-1 text-[11px] leading-snug text-danger">{text}</p>;
+  return (
+    <details className="mt-1 text-[11px] leading-snug text-warn">
+      <summary>Not sent — messages to candidates are switched off on this system.</summary>
+      <p className="mt-1 text-ink-faint">{text}</p>
+    </details>
   );
 }
