@@ -2663,6 +2663,37 @@ export async function setOpeningQuestions(formData: FormData) {
   await back("Follow-up questions saved.");
 }
 
+/**
+ * One more follow-up question for this opening, asked from the Follow-up page
+ * (plan 3.4, 21 Sep: the only place to add one was a collapsed box at the
+ * bottom of the Overview). It goes out with the next follow-up to everyone
+ * still in Follow-up, and nobody counts as complete until it is answered.
+ */
+export async function addOpeningQuestion(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  const label = String(formData.get("question") ?? "").trim().replace(/\s+/g, " ");
+  if (!label) await back("Type the question first.");
+  if (label.length > 200) await back("Keep the question under 200 characters — it goes out on WhatsApp.");
+  const existing = repo.opening(openingId)?.followUpQuestions ?? [];
+  if (existing.some((q) => q.label.toLowerCase() === label.toLowerCase())) {
+    await back("That question is already asked on this opening.", "warn");
+  }
+  repo.setOpeningQuestions(openingId, [...existing, { id: `q${Math.random().toString(36).slice(2, 8)}`, label }]);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  const waiting = repo.applications(openingId).filter((a) => a.stage === "follow_up").length;
+  await done(
+    waiting
+      ? `Question added. It goes with the next follow-up to the ${waiting} ${waiting === 1 ? "person" : "people"} in Follow-up.`
+      : "Question added. It will be asked in every follow-up on this opening.",
+  );
+}
+
+export async function addOpeningQuestionInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addOpeningQuestion(formData));
+}
+
 export async function setAutoShortlistScore(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "user.manage");
