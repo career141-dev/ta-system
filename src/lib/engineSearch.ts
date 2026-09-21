@@ -236,9 +236,16 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   // 1 and 2 overlap: the words and the vectors are searched on the sentence
   // itself while the model reads it.
   const intent = withModel ? intentFor(parser, q) : null;
+  // Which routes failed. One down is fine — the other still answers — but an
+  // empty answer with a route down is not "nothing matched": it was cached as
+  // that for five minutes, and a refresh could not clear it (21 Sep).
+  const down: string[] = [];
   const firstPass = Promise.all([
-    vectorPool(q, args),
-    backend.keywordSearchMany(NO_ACTOR, [q, ...args.chips.titles, ...args.chips.skills.slice(0, 3)], FETCH_LIMIT).catch(() => []),
+    vectorPool(q, args, down),
+    backend.keywordSearchMany(NO_ACTOR, [q, ...args.chips.titles, ...args.chips.skills.slice(0, 3)], FETCH_LIMIT).catch((e) => {
+      down.push(`keyword search (${(e as Error)?.message ?? e})`);
+      return [];
+    }),
   ]);
 
   const parsed = intent ? (await intent).requirements : requirementsFromChips(args);
@@ -258,9 +265,16 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     for (const t of req.alternativeTitles.slice(0, 3)) if (t) terms.add(t);
     for (const t of req.requiredSkills.slice(0, 4)) if (t) terms.add(t);
     for (const t of parser.buildSearchTerms(req, q).slice(0, 4)) if (t) terms.add(t);
-    secondPass = backend.keywordSearchMany(NO_ACTOR, [...terms].slice(0, 3), FETCH_LIMIT).catch(() => []);
+    secondPass = backend.keywordSearchMany(NO_ACTOR, [...terms].slice(0, 3), FETCH_LIMIT).catch((e) => {
+      down.push(`keyword search (${(e as Error)?.message ?? e})`);
+      return [];
+    });
   }
   const [[vectors, words], more] = await Promise.all([firstPass, secondPass]);
+  if (down.length && vectors.length + words.length + more.length === 0) {
+    console.warn(`[database search] no results with ${down.join("; ")}`);
+    throw new Error("The search could not reach part of the database just now, so this is not a real \"nothing found\". Try again in a moment.");
+  }
 
   // 3. Fusion: vector hits first, then words, no one twice.
   const vectorScore = new Map<Id, number>();
@@ -318,16 +332,20 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
 }
 
 /** Meaning: the query embedded the same way the index was, the nearest 200. */
-async function vectorPool(q: string, args: EngineArgs): Promise<{ candidateId: Id; score: number }[]> {
+async function vectorPool(q: string, args: EngineArgs, down: string[] = []): Promise<{ candidateId: Id; score: number }[]> {
   try {
     const e = await embedQuery(q);
-    if (!e.ok) return [];
+    if (!e.ok) {
+      down.push("meaning search (the query could not be embedded)");
+      return [];
+    }
     const hits = await searchVectors(e.vectors[0], 200, { minExperience: args.minExperience ?? null });
     // As the action does: a filtered search that finds nobody usually means the
     // index lacks the field, so ask by meaning alone.
     return hits.length > 0 || !args.minExperience ? hits : await searchVectors(e.vectors[0], 200);
-  } catch {
+  } catch (err) {
     // Either route can be down without the other stopping.
+    down.push(`meaning search (${(err as Error)?.message ?? err})`);
     return [];
   }
 }

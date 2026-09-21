@@ -195,6 +195,14 @@ export async function moveStage(formData: FormData) {
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
 
+/** A sourcing or benchmark failure code as a sentence. */
+function searchReasonInWords(code: string): string {
+  if (code === "no_serper") return "web search is not set up on this system (no search key). An admin needs to add one.";
+  if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
+  if (code === "no_opening") return "the opening could not be found. Reload the page.";
+  return reasonInWords(code);
+}
+
 /** A model failure code ("spend_cap") as the sentence it stands for. */
 function reasonInWords(reason: string | undefined): string {
   const said = reason && (FAILURE_MESSAGE as Record<string, string>)[reason];
@@ -1845,8 +1853,16 @@ export async function runResearch(formData: FormData) {
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const res = await researchOpening(openingId, user.id);
-  if (!res.ok) redirect(`/openings/${openingId}/hh/research?err=${res.reason}`);
   revalidatePath(`/openings/${openingId}/hh/research`);
+  if (!res.ok) await back(`Research did not run — ${reasonInWords(res.reason)}`);
+  const filled = res.filled ?? 0;
+  if (filled === 0) {
+    await back(
+      "The search ran but nothing could be sourced, so every field is still empty. Try again, or fill in what you know by hand.",
+      "warn",
+    );
+  }
+  await done(`Research filled in ${filled} of 8 fields${res.sources ? ` from ${res.sources} sources` : ""}. Check anything going in front of the client.`);
 }
 
 export async function runBenchmark(formData: FormData) {
@@ -1854,29 +1870,41 @@ export async function runBenchmark(formData: FormData) {
   await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
-  if (!o) return;
-  const client = repo.client(o.clientId);
+  if (!o) await back("The opening could not be found. Reload the page and try again.");
+  const client = repo.client(o!.clientId);
   // Searches, then a cheap sort of what they returned: every named person and
   // link comes from a result. The older path let a model name people and could
   // attach an unrelated source to them (13 September review).
   const run = await benchmarkViaSearch(
     {
-      title: o.title,
+      title: o!.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: withJobDetails(o),
-      locations: o.locations,
-      targetNationalities: o.targetNationalities,
-      targetGender: o.targetGender,
-      salaryNote: o.packageNotes || salaryNoteOf(o),
+      jdText: withJobDetails(o!),
+      locations: o!.locations,
+      targetNationalities: o!.targetNationalities,
+      targetGender: o!.targetGender,
+      salaryNote: o!.packageNotes || salaryNoteOf(o!),
       targetEmployers: [],
       alreadyKnown: repo.suggestions(openingId).map((x) => canonicalProfile(x.linkedinUrl ?? "")).filter((x): x is string => Boolean(x)),
     },
     openingId,
   );
-  if (run.error) redirect(`/openings/${openingId}/hh/research?err=${run.error}`);
+  // Answered under Benchmark itself. A failure used to land in Research's
+  // red box above, and "nothing found" was never shown at all (21 Sep).
+  if (run.error) await back(`Benchmark did not run — ${searchReasonInWords(run.error)}`);
   repo.replaceBenchmarks(openingId, run.rows);
-  redirect(`/openings/${openingId}/hh/research?found=${run.rows.length}&searches=${run.queries.length}${run.note ? `&note=${run.note}` : ""}`);
+  revalidatePath(`/openings/${openingId}/hh/research`);
+  const searched = `${run.queries.length} web ${run.queries.length === 1 ? "search" : "searches"}`;
+  if (run.rows.length === 0) {
+    await back(
+      run.note === "client_not_searchable"
+        ? `Nothing found: "${client?.name ?? "the client"}" returned no search results (${searched}). Check the client's name, or tick target employers and run again.`
+        : `Nothing found that could be sourced (${searched}). People without a search result behind them are left out rather than guessed.`,
+      "warn",
+    );
+  }
+  await done(`Found ${run.rows.length} ${run.rows.length === 1 ? "person" : "people"}, each with a source · ${searched}.`);
 }
 
 export async function pickBenchmark(formData: FormData) {
@@ -1936,14 +1964,18 @@ export async function runSuggestions(formData: FormData) {
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const r = await sourceFor(openingId, user.id);
-  if (r.error) redirect(`/openings/${openingId}/hh/suggestions?err=${r.error}`);
-  const q = new URLSearchParams({
-    found: String(r.found), scanned: String(r.scanned),
-    queries: String(r.queries), cost: r.cost.toFixed(3),
-    rejected: String(r.rejected ?? 0),
-    ...(r.note ? { note: r.note } : {}),
-  });
-  redirect(`/openings/${openingId}/hh/suggestions?${q.toString()}`);
+  revalidatePath(`/openings/${openingId}/hh/suggestions`);
+  if (r.error) await back(`Suggestions did not run — ${searchReasonInWords(r.error)}`);
+  const searched = `${r.scanned} profiles read from ${r.queries} searches`;
+  if (r.found === 0) {
+    await back(
+      r.note === "nothing_survived_filter"
+        ? `No new profiles this round (${searched}) — everyone found was already suggested or in Excel Tables. Keep or reject a few, or widen the brief, then refine.`
+        : `No profiles found (${searched}). Widen the brief or tick target employers on Research, then try again.`,
+      "warn",
+    );
+  }
+  await done(`${r.found} new ${r.found === 1 ? "profile" : "profiles"} to review · ${searched}.`);
 }
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
@@ -2098,7 +2130,7 @@ async function extractJobDetails(openingId: string, c: OpeningContext, briefs: J
 }
 
 /** Market research for an opening, keeping any field a TA corrected by hand. */
-async function researchOpening(openingId: string, userId: string): Promise<{ ok: boolean; reason?: string }> {
+async function researchOpening(openingId: string, userId: string): Promise<{ ok: boolean; reason?: string; filled?: number; sources?: number }> {
   const c = contextFor(openingId);
   const o = repo.opening(openingId);
   if (!c || !o) return { ok: false, reason: "missing" };
@@ -2124,7 +2156,8 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
     generatedBy: userId,
     generatedAt: Date.now(),
   });
-  return { ok: true };
+  const filled = Object.values(fields).filter((x) => (Array.isArray(x) ? x.length > 0 : String(x ?? "").trim() !== "")).length;
+  return { ok: true, filled, sources: res.sources.length };
 }
 
 export async function generateJdWithModel(formData: FormData) {
@@ -3273,4 +3306,16 @@ export async function generateJdInline(_: ActionResult | null, formData: FormDat
 
 export async function moveStageInline(_: ActionResult | null, formData: FormData) {
   return inline(() => moveStage(formData));
+}
+
+export async function runResearchInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => runResearch(formData));
+}
+
+export async function runBenchmarkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => runBenchmark(formData));
+}
+
+export async function runSuggestionsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => runSuggestions(formData));
 }

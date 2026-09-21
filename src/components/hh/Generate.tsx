@@ -2,6 +2,7 @@ import { externalUrl } from "@/lib/url";
 import { aiStatus, FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 import { serperConfigured } from "@/lib/serper";
 import { GenerateForm } from "./GenerateForm";
+import type { ActionResult } from "@/lib/inlineResult";
 
 /**
  * The bar above every generated page — spec §8A.
@@ -22,7 +23,7 @@ export function Generate({
   needs = "grounded",
 }: {
   openingId: string;
-  action: (formData: FormData) => Promise<void>;
+  action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
   label: string;
   sub: string;
   err?: string;
@@ -35,7 +36,7 @@ export function Generate({
   const st = aiStatus();
   const missing: string[] = [];
   if (needs === "sourcing" && !serperConfigured()) {
-    missing.push("SERPER_API_KEY (serper.dev — this is what finds the profiles)");
+    missing.push("a web search key — SERPER_API_KEY, or OPENAI_API_KEY with C141_SEARCH_PROVIDER=openai");
   }
   if (!st.configured) missing.push("OPENROUTER_API_KEY (openrouter.ai/keys)");
   else if (needs === "grounded" && !st.webSearch) {
@@ -49,7 +50,7 @@ export function Generate({
     <>
       {blocked && (
         <p className="mt-3 rounded-lg bg-warn-soft px-3.5 py-2.5 text-[12px] leading-relaxed text-warn">
-          Add to <code>.env.local</code> and restart: {missing.join(" · ")}
+          Not set up on this system yet — an admin needs to add: {missing.join(" · ")}
         </p>
       )}
 

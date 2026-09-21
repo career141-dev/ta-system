@@ -3,7 +3,7 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { ProjectHeader } from "../../ProjectHeader";
 import { Generate } from "@/components/hh/Generate";
-import { runSuggestions, keepSuggestion, dismissSuggestion } from "@/app/actions";
+import { runSuggestionsInline, keepSuggestion, dismissSuggestion } from "@/app/actions";
 import { MAX_ROUNDS } from "@/lib/sourcing";
 import { SuggestionName } from "@/components/hh/ProfilePanel";
 import { dateAt } from "@/lib/format";
@@ -59,7 +59,11 @@ export default async function Page({
   const kept = all.filter((s) => s.status === "kept");
   const dismissed = all.filter((s) => s.status === "dismissed");
   const picked = repo.benchmarks(id).filter((b) => b.isSelected);
-  const round = all.length ? Math.max(...all.map((s) => s.round)) : 0;
+  // Rounds are the opening's, counted from every run on it — the server counts
+  // them that way, so counting only the visible ones offered a round the
+  // server then refused ("works once", 21 Sep).
+  const everyRun = repo.suggestions(id);
+  const round = everyRun.length ? Math.max(...everyRun.map((s) => s.round)) : 0;
   const roundsLeft = Math.max(0, MAX_ROUNDS - round);
   const steered = all.filter((s) => s.status !== "new").length;
 
@@ -97,7 +101,7 @@ export default async function Page({
 
       <Generate
         openingId={id}
-        action={runSuggestions}
+        action={runSuggestionsInline}
         label={
           round === 0
             ? "Find profiles to headhunt"

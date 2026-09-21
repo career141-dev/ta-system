@@ -75,7 +75,13 @@ const OPENROUTER_MODEL: Record<Task, string> = {
   // zero-retention providers this route insists on.
   jd: "deepseek/deepseek-v4-flash",
   extract: "anthropic/claude-sonnet-5",
-  research: "google/gemini-3.1-pro-preview",
+  // Was google/gemini-3.1-pro-preview, which this account's OpenRouter
+  // guardrails do not serve — the same 404 that took the other Gemini models
+  // off (see rank below). Research and Benchmark then read "The model
+  // returned something unusable" (testing, 21 Sep). DeepSeek V4 Flash is
+  // served; it has no search of its own, so the web plugin uses Exa for it
+  // (webEngine below). Override with C141_MODEL_RESEARCH.
+  research: "deepseek/deepseek-v4-flash",
   // rank, plan and parse read text into a fixed structure. They were Gemini
   // 3.6 Flash and 2.5 Flash Lite, which this account's OpenRouter guardrails do
   // not serve (404, checked 16 September) — Reports' sentence box, reading the
@@ -116,6 +122,28 @@ const TASK_ENV: Record<Task, string> = {
   parse: "C141_MODEL_PARSE",
   assist: "C141_MODEL_ASSIST",
 };
+
+/**
+ * Tasks that turn text into a fixed shape. DeepSeek reasons before it answers,
+ * and on these it could spend the whole token allowance thinking and return
+ * nothing — the Copilot's 17 Sep failure, and Suggestions' plan step's on
+ * 21 Sep ("The model returned something unusable"). They need no reasoning.
+ */
+const NO_REASONING: ReadonlySet<Task> = new Set<Task>(["assist", "plan", "rank", "parse", "research"]);
+
+/** Whose search the web plugin uses: the model's own where it has one, else Exa. */
+export function webEngine(model: string): "native" | "exa" {
+  return /^(openai|anthropic|google|x-ai|perplexity)\//.test(model) ? "native" : "exa";
+}
+
+/**
+ * Every failure, said in the server log with what the provider answered.
+ * The pages show one sentence; without this, "unusable" had no cause anyone
+ * could see (21 Sep).
+ */
+export function logAiFailure(task: string, model: string, r: { reason: AiFailure; detail?: string }): void {
+  console.warn(`[ai ${task} · ${model}] ${r.reason}${r.detail ? `: ${String(r.detail).slice(0, 400)}` : ""}`);
+}
 
 export function viaOpenRouter(): boolean {
   return openrouterKey().length > 0;
@@ -167,7 +195,14 @@ async function callOpenRouter(
   // A failed request's charge is unknown, not zero: it keeps its full reservation (NaN settles at the maximum).
   let cost = Number.NaN;
   try {
-    const r = await openRouterRequest(key, model, task, prompt, opts);
+    let r = await openRouterRequest(key, model, task, prompt, opts);
+    // An empty answer is nearly always a model that thought until it ran out
+    // of room. Once more, without the thinking, before calling it a failure.
+    if (!r.ok && r.reason === "bad_response" && r.detail === "empty") {
+      logAiFailure(task, model, r);
+      r = await openRouterRequest(key, model, task, prompt, { ...opts, noReasoning: true });
+    }
+    if (!r.ok) logAiFailure(task, model, r);
     if (r.ok) cost = r.cost ?? modelCost(model, r.usage?.inputTokens ?? 0, r.usage?.outputTokens ?? 0);
     const { cost: _c, ...rest } = r as typeof r & { cost?: number };
     return rest;
@@ -181,7 +216,7 @@ async function openRouterRequest(
   model: string,
   task: Task,
   prompt: string,
-  opts: { maxTokens?: number; temperature?: number; search?: boolean },
+  opts: { maxTokens?: number; temperature?: number; search?: boolean; noReasoning?: boolean },
 ): Promise<(AiResult & { usage?: Usage; cost?: number })> {
 
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -200,7 +235,7 @@ async function openRouterRequest(
           messages: [{ role: "user", content: prompt }],
           // Ask for the real charge, so the spending ledger records it rather than an estimate.
           usage: { include: true },
-          ...(opts.search ? { plugins: [{ id: "web", engine: "native" }] } : {}),
+          ...(opts.search ? { plugins: [{ id: "web", engine: webEngine(model) }] } : {}),
           // Only providers that keep nothing and train on nothing — set on every
           // request, not left to the account settings (13 September: with the
           // account switches on, requests still went to first-party endpoints).
@@ -211,7 +246,7 @@ async function openRouterRequest(
           // up to 540 of its 600 tokens reasoning and sometimes returned
           // nothing — "The model returned something unusable" (17 September).
           // Off, it answers in 3–5 seconds instead of 13–33.
-          ...(task === "assist" ? { reasoning: { enabled: false } } : {}),
+          ...(NO_REASONING.has(task) || opts.noReasoning ? { reasoning: { enabled: false } } : {}),
         }),
       });
     } catch (e) {
@@ -531,6 +566,59 @@ async function callOpenAI(opts: {
   }
 }
 
+/**
+ * OpenAI's own web search (the Responses API `web_search` tool): the answer
+ * and the pages it cited, which become the sources. The model is
+ * C141_MODEL_RESEARCH_OPENAI, gpt-4.1-mini unless set.
+ */
+async function callOpenAIWebSearch(args: { system: string; prompt: string; maxTokens: number }): Promise<AiResult> {
+  const key = openaiKey();
+  if (!key) return { ok: false, reason: "no_key", detail: "OPENAI_API_KEY is not set" };
+  const model = (process.env.C141_MODEL_RESEARCH_OPENAI ?? "").trim() || "gpt-4.1-mini";
+  let res: Response;
+  try {
+    res = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        instructions: args.system,
+        input: args.prompt,
+        tools: [{ type: "web_search" }],
+        max_output_tokens: args.maxTokens,
+        store: false,
+      }),
+    });
+  } catch (e) {
+    return { ok: false, reason: "network", detail: String(e) };
+  }
+  if (res.status === 429) return { ok: false, reason: "rate_limited" };
+  if (!res.ok) return { ok: false, reason: "bad_response", detail: `${res.status} ${(await res.text()).slice(0, 300)}` };
+  const json = (await res.json()) as {
+    output?: {
+      type?: string;
+      content?: { type?: string; text?: string; annotations?: { type?: string; url?: string; title?: string }[] }[];
+    }[];
+  };
+  let text = "";
+  const sources: Source[] = [];
+  let searches = 0;
+  for (const item of json.output ?? []) {
+    if (item.type === "web_search_call") searches++;
+    for (const c of item.content ?? []) {
+      if (c.type !== "output_text") continue;
+      text += c.text ?? "";
+      for (const a of c.annotations ?? []) {
+        if (a.type === "url_citation" && a.url && !sources.some((x) => x.url === a.url)) {
+          sources.push({ url: a.url, title: a.title ?? a.url, quote: "" });
+        }
+      }
+    }
+  }
+  if (!text.trim()) return { ok: false, reason: "bad_response", detail: "empty" };
+  return { ok: true, text, sources, searches, provider: `openai/${model}` };
+}
+
 // ─── What the app actually calls ─────────────────────────────────────────────
 
 /** Writing, from material the caller supplies. No claims about the world. */
@@ -548,7 +636,17 @@ export async function write(system: string, prompt: string, maxTokens = 2000, ta
  * is worse than no claim at all.
  */
 export async function research(system: string, prompt: string, maxTokens = 3000, maxSearches = 8): Promise<AiResult> {
-  if (viaOpenRouter()) {
+  // C141_RESEARCH_PROVIDER picks who searches the web: "openai" (OpenAI's own
+  // web search), "openrouter" or "anthropic". Unset, OpenRouter wins when its
+  // key is present, as before.
+  const chosen = (process.env.C141_RESEARCH_PROVIDER ?? "").trim().toLowerCase();
+  if (chosen === "openai" || (!chosen && !viaOpenRouter() && !anthropicKey() && openaiKey())) {
+    if (capActive()) return { ok: false, reason: "spend_cap", detail: "The capped test only spends through OpenRouter, where every call is metered." };
+    const r = await callOpenAIWebSearch({ system, prompt, maxTokens });
+    if (!r.ok) logAiFailure("research", "openai-web-search", r);
+    return r;
+  }
+  if (chosen !== "anthropic" && viaOpenRouter()) {
     return callOpenRouter("research", `${system}\n\n${prompt}`, { maxTokens, search: true });
   }
   if (capActive()) return { ok: false, reason: "spend_cap", detail: "The capped test only spends through OpenRouter, where every call is metered." };
@@ -559,11 +657,11 @@ export async function research(system: string, prompt: string, maxTokens = 3000,
 }
 
 export const FAILURE_MESSAGE: Record<AiFailure, string> = {
-  no_key: "No model key is set. Add one to .env.local and restart.",
+  no_key: "The AI is not set up on this system (no model key). An admin needs to add one.",
   rate_limited: "The model is rate-limited right now. Try again in a minute.",
   refused: "The model declined to answer this one.",
-  bad_response: "The model returned something unusable.",
-  network: "Could not reach the model.",
+  bad_response: "The AI's answer could not be read. Try again — if it keeps happening, the reason is in the server log.",
+  network: "Could not reach the AI service. Check the connection and try again.",
   spend_cap: "The test's $5 spending cap would be passed, so this was not run.",
   search_disabled:
     "Web search is off, so this would have to be answered from memory — which for company facts means inventing them. Set C141_WEB_SEARCH=on in .env.local (Anthropic key required).",
