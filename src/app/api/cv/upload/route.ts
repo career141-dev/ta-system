@@ -5,7 +5,7 @@ import { isConvex } from "@/data/mode";
 import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
-import { convexMutation } from "@/lib/convexServer";
+import { convexMutation, internalUploadUrl } from "@/lib/convexServer";
 
 /**
  * A CV added from the candidate sheet (21 Sep: "uploading one from here is not
@@ -27,6 +27,14 @@ const answer = (ok: boolean, message: string, status = ok ? 200 : 400) =>
   NextResponse.json({ ok, message }, { status });
 
 export async function POST(req: NextRequest) {
+  // Who is asking, and how big the upload says it is, before reading any of
+  // it: the body was read into memory first, so anybody could make the server
+  // hold large uploads without being signed in (review of PR #2, 21 Sep).
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (declared > MAX_BYTES + 64 * 1024) return answer(false, "That file is over 10 MB. Save a smaller PDF and try again.", 413);
+  await primeStore({});
+  if (!(await currentUser())) return answer(false, "Your session has ended. Sign in again.", 401);
+
   const form = await req.formData().catch(() => null);
   if (!form) return answer(false, "The upload could not be read. Try again.");
   const applicationId = String(form.get("applicationId") ?? "");
@@ -53,7 +61,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const url = await convexMutation<string>("ta/cv:uploadUrl", { actorId: user.id });
-    const put = await fetch(url, {
+    const put = await fetch(internalUploadUrl(url), {
       method: "POST",
       headers: { "content-type": file.type || "application/octet-stream" },
       body: Buffer.from(await file.arrayBuffer()),

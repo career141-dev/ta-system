@@ -47,7 +47,10 @@ export function GenerateForm({
         pending={run.pending}
         notes={
           <>
-            {notes}
+            {/* Once this bar has answered, the page's own note is an older run's —
+                an error from before sat beside a new success (review of PR #2).
+                A blocked bar never runs, so its "not set up" note stays. */}
+            {run.result ? null : notes}
             <ActionNote result={run.result} className="mt-3" />
           </>
         }

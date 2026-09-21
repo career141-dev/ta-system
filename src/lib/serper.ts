@@ -24,8 +24,12 @@ export interface SearchResult {
 /**
  * Who answers a search: "serper" (Google through Serper) or "openai" (OpenAI's
  * web search). C141_SEARCH_PROVIDER picks; unset, Serper when its key is
- * there, else OpenAI when that key is. Suggestions and Benchmark stopped dead
- * on "no_serper" wherever the Serper key was missing (21 Sep).
+ * there. Suggestions and Benchmark stopped dead on "no_serper" wherever the
+ * Serper key was missing (21 Sep).
+ *
+ * OpenAI only when chosen by name. Every server has an OpenAI key for other
+ * work, so falling back to it turned a missing Serper key into paid web
+ * searches nobody had asked for (review of PR #2, 21 Sep).
  */
 export function searchProvider(): "serper" | "openai" | null {
   const chosen = (process.env.C141_SEARCH_PROVIDER ?? "").trim().toLowerCase();
@@ -33,7 +37,7 @@ export function searchProvider(): "serper" | "openai" | null {
   const openai = (process.env.OPENAI_API_KEY ?? "").trim().length > 0;
   if (chosen === "openai") return openai ? "openai" : null;
   if (chosen === "serper") return serper ? "serper" : null;
-  return serper ? "serper" : openai ? "openai" : null;
+  return serper ? "serper" : null;
 }
 
 /** Whether any search can run. Kept under its old name: callers ask "can we search?". */
@@ -86,9 +90,24 @@ export async function search(q: string, num = 10, page = 1): Promise<SearchResul
  * kept — a URL the model wrote but did not fetch is dropped, which keeps the
  * rule above: no model in the pipeline produces a profile address.
  */
+/**
+ * What one OpenAI web search may cost: the tool call (about 2.5 cents) and a
+ * small model's tokens around it. Reserved against the test cap like a Serper
+ * credit, so this path is counted too.
+ */
+const OPENAI_SEARCH_MAX_USD = 0.04;
+
 async function searchOpenAI(q: string, num: number, page: number): Promise<SearchResult> {
   const key = (process.env.OPENAI_API_KEY ?? "").trim();
   const model = (process.env.C141_MODEL_SEARCH_OPENAI ?? "").trim() || "gpt-4.1-mini";
+  let settle: (usd: number) => void;
+  try {
+    settle = reserve(`search · openai`, OPENAI_SEARCH_MAX_USD);
+  } catch (e) {
+    if (e instanceof SpendCapError) return { hits: [], credits: 0, error: "spend_cap" };
+    throw e;
+  }
+  // A failed call may still have been charged, so the reservation is recorded as spent.
   try {
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -130,6 +149,8 @@ Search: ${q}`,
     return { hits: hits.slice(0, num), credits: 1 };
   } catch (e) {
     return { hits: [], credits: 0, error: String(e) };
+  } finally {
+    settle(Number.NaN);
   }
 }
 

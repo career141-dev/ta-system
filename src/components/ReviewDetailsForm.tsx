@@ -34,7 +34,9 @@ export function ReviewDetailsForm({
   expectedSalary,
   noticePeriodDays,
   hasCv,
-  defaultCurrency = "LKR",
+  // None by default: a bare "12000" already on file, for a Gulf role, was
+  // re-saved as "LKR 12000" by a plain Save (review of PR #2, 21 Sep).
+  defaultCurrency = "",
 }: {
   applicationId: string;
   openingId: string;
@@ -103,6 +105,7 @@ export function ReviewDetailsForm({
           aria-label={`${label} currency`}
           className="rounded-l-lg border border-r-0 border-rule bg-paper px-2 text-[12.5px] outline-none focus:border-brand"
         >
+          <option value="">Currency</option>
           {CURRENCIES.map((c) => (
             <option key={c}>{c}</option>
           ))}

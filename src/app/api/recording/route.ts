@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { can } from "@/lib/auth";
-import { convexMutation } from "@/lib/convexServer";
+import { convexMutation, internalUploadUrl } from "@/lib/convexServer";
 import { primeStore } from "@/data/prime";
 import { transcribeAudio } from "@/lib/transcribe";
 
@@ -55,7 +55,7 @@ export async function POST(req: Request) {
     (async () => {
       try {
         const uploadUrl = await convexMutation<string>("ta/storage:recordingUploadUrl", {});
-        const put = await fetch(uploadUrl, {
+        const put = await fetch(internalUploadUrl(uploadUrl), {
           method: "POST",
           headers: { "content-type": file.type || "audio/webm" },
           body: Buffer.from(await file.arrayBuffer()),
