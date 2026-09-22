@@ -198,6 +198,31 @@ export async function moveStage(formData: FormData) {
     await fail(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
   }
 
+  // Into TA Follow-up from an unclaimed stage (AI Follow-up, New CVs, Database
+  // matches) is a shortlist: the TA takes the person on, with their set number,
+  // exactly as the Shortlist button does. The plain move left them with no
+  // owner (review of PR #11, 22 September).
+  const from = repo.application(appId)?.stage;
+  if (stage === "ta_follow_up" && (from === "ai_follow_up" || from === "new_cv" || from === "matched")) {
+    if (isConvex()) {
+      let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+      try {
+        r = await backend.shortlist({ id: user.id }, appId);
+      } catch (e) {
+        await fail(backendMessage(e, "They could not be shortlisted."));
+      }
+      await afterBackendWrite(openingId);
+      if (r && !r.ok) {
+        const owner = repo.users().find((u) => u.id === r!.ownerTaId)?.name ?? "another recruiter";
+        await fail(`${owner} has already claimed this candidate.`);
+      }
+      await done("Shortlisted — in TA Follow-up.");
+    }
+    repo.shortlist(appId, user.id);
+    revalidatePath(`/openings/${openingId}`, "layout");
+    await done("Shortlisted — in TA Follow-up.");
+  }
+
   if (isConvex()) {
     // The backend owns the pipeline: its state machine checks the move, stops
     // any running follow-up on the way out, and (by design) sends nothing on
@@ -1255,7 +1280,9 @@ export async function setWorkingStage(formData: FormData) {
       });
       markTablesStale();
     } catch (e) {
-      console.error("Failed to update working stage on Convex:", e);
+      // Swallowed, the menu showed the new value while nothing was saved
+      // (review of PR #11, 22 September).
+      await fail(backendMessage(e, "The working stage could not be saved."));
     }
   } else {
     repo.setWorkingStage(openingId, user.id, stage);
@@ -3208,8 +3235,9 @@ export async function sendEod(formData: FormData) {
             openingId,
             stage: effort.hundredOrFollowUp as WorkingStage,
           });
-        } catch {
-          /* ignore */
+        } catch (e) {
+          // The email still goes; the working stage is only a label on it.
+          console.warn("[eod] working stage not saved:", backendMessage(e, "refused"));
         }
       } else {
         repo.setWorkingStage(openingId, user.id, effort.hundredOrFollowUp as WorkingStage);

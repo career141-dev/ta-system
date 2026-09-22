@@ -359,38 +359,18 @@ export default async function CandidateDrawer({
                   </span>
                 )}
               </div>
+              {/* The full list, with Verify, lives on the Reference tab; the CV
+                  tab names who they are and links there, so the same referees
+                  are not listed twice (review of PR #11, 22 September). */}
               {referees.length === 0 ? (
                 <p className="py-2 text-[12.5px] text-ink-faint">No referees named on this CV.</p>
               ) : (
-                <div className="divide-y divide-rule">
-                  {referees.map((r) => (
-                    <div key={r.id} className="flex flex-wrap items-start justify-between gap-4 py-3.5 first:pt-0 last:pb-0">
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[13.5px] font-medium text-ink">{r.name}</p>
-                        <p className="mt-0.5 text-[12.5px] text-ink-soft">
-                          {r.title ?? "Role not on the CV"}
-                          {r.company && (
-                            <>
-                              <span className="text-ink-faint"> at </span>
-                              {r.company}
-                            </>
-                          )}
-                          <span className="ml-1.5 text-[11px] text-ink-faint">(from the CV)</span>
-                        </p>
-                        {r.relationship && <p className="mt-1 text-[12px] text-ink-faint">{r.relationship}</p>}
-                      </div>
-                      <div className="shrink-0 text-right text-[12.5px]">
-                        {r.phone ? (
-                          <span className="tabular block font-medium">{r.phone}</span>
-                        ) : (
-                          <span className="block text-ink-faint">No number on file</span>
-                        )}
-                        {r.email && <span className="mt-0.5 block text-[11.5px] text-ink-faint">{r.email}</span>}
-                        <VerifyReferee refereeId={r.id} openingId={id} />
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <p className="py-1 text-[12.5px] text-ink-soft">
+                  {referees.map((r) => r.name).join(", ")}.{" "}
+                  <Link href={tabHref("reference")} className="font-medium text-brand hover:underline">
+                    Details and verify on the Reference tab →
+                  </Link>
+                </p>
               )}
             </div>
           </>

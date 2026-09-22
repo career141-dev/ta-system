@@ -89,8 +89,10 @@ export default async function OverviewPage({
     },
     ((counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0)) > 0 && {
       title: `${(counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0)} in follow-up`,
-      sub: "The AI call, WhatsApp and email are working through their details today",
-      href: `/openings/${id}/pipeline/ta_follow_up`,
+      // Both lists are counted, so both are named, and the link goes to the
+      // TA's own list when it has anyone (review of PR #11, 22 September).
+      sub: `${counts.ta_follow_up ?? 0} in TA Follow-up · ${counts.ai_follow_up ?? 0} in AI Follow-up`,
+      href: `/openings/${id}/pipeline/${(counts.ta_follow_up ?? 0) > 0 ? "ta_follow_up" : "ai_follow_up"}`,
       action: "Continue",
     },
   ].filter(Boolean) as { title: string; sub: string; href: string; action: string }[];

@@ -85,6 +85,9 @@ export function toTaStage(stage: string | null | undefined): TaStage {
 /** A TA stage as it must be stored. Throws on an unknown one — a write is not
  *  a place to guess. */
 export function toBackendStage(stage: string): BackendStage {
+  // "follow_up" was one stage until 22 September; a page left open over the
+  // release, or a saved report, still sends it. It meant the TA's Follow-up.
+  if (stage === "follow_up") return TO_BACKEND.ta_follow_up;
   const mapped = TO_BACKEND[stage as TaStage];
   if (!mapped) throw new Error(`Unknown TA stage "${stage}"`);
   return mapped;
