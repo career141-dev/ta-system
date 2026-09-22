@@ -21,6 +21,11 @@ export const processCvIngestion = mutation({
     metaHeadline: v.optional(v.string()),
     batchId: v.optional(v.id("ingestionBatches")),
     extractionDelayMs: v.optional(v.number()),
+    // Post routing (pipeline/postFiling.ts): the advert matched, and the
+    // other openings the same advert serves.
+    jobPostId: v.optional(v.id("jobPosts")),
+    alsoTo: v.optional(v.array(v.object({ jobId: v.id("jobs"), jobPostId: v.id("jobPosts") }))),
+    routeNote: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const startTime = Date.now();
@@ -53,24 +58,27 @@ export const processCvIngestion = mutation({
     if (existingFile) {
       if (existingFile.candidateId) {
         let appId: any = null;
-        if (args.jobId) {
+        // The same CV sent for a job it is not on yet: file it there, on the
+        // advert it came through — and to each other opening that advert serves.
+        const link = async (jobId: Id<"jobs">, jobPostId?: Id<"jobPosts">) => {
           const existingApp = await ctx.db.query("applications")
             .withIndex("by_candidateId", (q) => q.eq("candidateId", existingFile.candidateId!))
-            .filter((q) => q.eq(q.field("jobId"), args.jobId))
+            .filter((q) => q.eq(q.field("jobId"), jobId))
             .first();
 
-          appId = existingApp?._id;
+          let id = existingApp?._id;
           if (!existingApp) {
             const now = Date.now();
-            appId = await ctx.db.insert("applications", {
+            id = await ctx.db.insert("applications", {
               candidateId: existingFile.candidateId,
-              jobId: args.jobId,
+              jobId,
               currentStage: "new_cvs",
               sourceChannel: args.sourceChannel,
               createdAt: now,
               isActive: true,
               lastStageChangedAt: now,
               loopIteration: 0,
+              ...(jobPostId ? { jobPostId } : {}),
               stageHistory: [{
                 stage: "new_cvs",
                 enteredAt: new Date(now).toISOString(),
@@ -80,9 +88,18 @@ export const processCvIngestion = mutation({
             // Scored against this opening like any new applicant, so a strong
             // returning candidate reaches the shortlist instead of waiting unread.
             await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
-              candidateId: existingFile.candidateId,
-              jobId: args.jobId,
+              candidateId: existingFile.candidateId!,
+              jobId,
             });
+          } else if (jobPostId && !existingApp.jobPostId) {
+            await ctx.db.patch(existingApp._id, { jobPostId } as any);
+          }
+          return id;
+        };
+        if (args.jobId) {
+          appId = await link(args.jobId, args.jobPostId);
+          for (const extra of args.alsoTo ?? []) {
+            if (extra.jobId !== args.jobId) await link(extra.jobId, extra.jobPostId);
           }
           console.log(`[processCvIngestion] Linked existing candidate ${existingFile.candidateId} to job ${args.jobId} (appId: ${appId})`);
         }
@@ -111,6 +128,7 @@ export const processCvIngestion = mutation({
           extractionAttempts: attempts + 1,
           lastAttemptAt: now,
           assignToJob: args.jobId ?? existingFile.assignToJob,
+          ...(args.jobId ? { assignToJobPost: args.jobPostId, alsoAssignTo: args.alsoTo?.length ? args.alsoTo : undefined, routeNote: args.routeNote } : {}),
           storageId: args.storageId ?? existingFile.storageId,
           s3Key: args.s3Key ?? existingFile.s3Key,
           storageProvider: args.storageProvider ?? existingFile.storageProvider,
@@ -185,6 +203,9 @@ export const processCvIngestion = mutation({
       metaSourceId: args.metaSourceId,
       metaHeadline: args.metaHeadline,
       assignToJob: args.jobId,
+      assignToJobPost: args.jobPostId,
+      alsoAssignTo: args.alsoTo?.length ? args.alsoTo : undefined,
+      routeNote: args.routeNote,
       uploadedBy: "system",
       status: "pending",
     });

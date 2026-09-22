@@ -313,9 +313,17 @@ export const recheckExtractingLater = internalMutation({
 
 /** Live adverts on openings that are taking applicants, in the routing rules' shape. */
 export const livePosts = internalQuery({
-  args: {},
-  handler: async (ctx): Promise<RoutablePost[]> => {
+  args: {
+    // Draft posts too: a post stays draft until its JD is approved, but the
+    // advert is often already up on LinkedIn and collecting (post routing on
+    // the shared mailboxes, 22 September). Paused and closed never route.
+    includeDraft: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<RoutablePost[]> => {
     const posts = await ctx.db.query("jobPosts").withIndex("by_status", (q) => q.eq("status", "live")).collect();
+    if (args.includeDraft) {
+      posts.push(...(await ctx.db.query("jobPosts").withIndex("by_status", (q) => q.eq("status", "draft")).collect()));
+    }
     const out: RoutablePost[] = [];
     const openings = new Map<string, Doc<"jobs"> | null>();
     for (const p of posts) {

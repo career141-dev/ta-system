@@ -80,6 +80,7 @@ import { action, internalAction } from "../_generated/server";
 import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { api, internal } from "../_generated/api";
+import { filePosts, postRoutingOn } from "../pipeline/postFiling";
 import OpenAI from "openai";
 import crypto from "crypto";
 import { z } from "zod";
@@ -117,6 +118,10 @@ import {
   deriveCurrentRole,
 } from "../candidates/derivations";
 import { generateNvidiaEmbedding, logLLMUsage, callNvidiaVisionOCR, getOpenAI, getModelForTask, executeLLMWithNvidiaFallback, OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODELS, OPENROUTER_CV_EXTRACTION_MODEL, OPENROUTER_CV_FALLBACK_MODELS } from "../lib/llm";
+
+/** The shared-mailbox channels post routing decides for. */
+const isEmailChannel = (channel: string | undefined) =>
+  channel === "linkedin" || channel === "email" || channel === "email_campaign";
 
 // ──────────────────────────────────────────────────
 // Types & Schemas
@@ -1058,6 +1063,14 @@ export async function runCvExtraction(
             jobId: jobId as any,
           });
         }
+        await filePosts(ctx, {
+          candidateId: existingCandidate._id,
+          cvUploadId,
+          jobId,
+          sourceChannel: sourceChannel ?? "manual_upload",
+          upload: cvUpload,
+          score: !skipLLM,
+        });
       }
 
       if (args.logId) {
@@ -1382,6 +1395,17 @@ export async function runCvExtraction(
           jobId: jobId as any,
         });
       }
+      await filePosts(ctx, {
+        candidateId: resolvedCandidateId,
+        cvUploadId,
+        jobId,
+        sourceChannel: sourceChannel ?? "manual_upload",
+        upload: cvUpload,
+        score: !skipLLM,
+      });
+    } else if (postRoutingOn() && isEmailChannel(sourceChannel)) {
+      // No post matched the email: the person stays in the database. The
+      // guess below put people on jobs they never applied for (22 September).
     } else {
       // Tier 3 Fallback: If Subject & Body matching didn't yield a jobId during ingestion,
       // match the extracted candidate details against all active jobs after CV extraction.
@@ -1465,6 +1489,14 @@ export async function runCvExtraction(
           jobId: assignedJobId as any,
           cvFileId: cvUploadId,
           sourceChannel: sourceChannel ?? "manual_upload",
+        });
+        await filePosts(ctx, {
+          candidateId,
+          cvUploadId,
+          jobId: assignedJobId,
+          sourceChannel: sourceChannel ?? "manual_upload",
+          upload: cvUpload,
+          score: false,
         });
         console.log(`[CvExtraction] Preserved candidate ${candidateId} in job ${assignedJobId} (New CVs) despite extraction error: ${message}`);
       }
