@@ -2,6 +2,7 @@
 
 import { externalUrl, profileLink } from "@/lib/url";
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   addLinkToPipelineInline,
   deleteLinkInline,
@@ -12,7 +13,6 @@ import {
 import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
 import Link from "next/link";
 import { inputClass } from "./form";
-import { Confirm } from "./Confirm";
 import { dateAt } from "@/lib/format";
 import { STAGE_LABEL } from "@/data/types";
 import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
@@ -63,6 +63,7 @@ export function LinkRow({
   /** Their application on this opening, once they have been added. */
   onPipeline?: Pick<Application, "id" | "stage"> | null;
 }) {
+  const router = useRouter();
   const [edit, setEdit] = useState(false);
   // Opened from "Add to pipeline" on a row that is not shortlisted yet.
   const [forPipeline, setForPipeline] = useState(false);
@@ -80,6 +81,18 @@ export function LinkRow({
     if (logIt.result?.tone === "ok") logForm.current?.reset();
   }, [logIt.result]);
   const del = useInline(deleteLinkInline);
+
+  useEffect(() => {
+    if (
+      del.result?.tone === "ok" ||
+      save.result?.tone === "ok" ||
+      toPipeline.result?.tone === "ok" ||
+      eye.result?.tone === "ok" ||
+      logIt.result?.tone === "ok"
+    ) {
+      router.refresh();
+    }
+  }, [del.result, save.result, toPipeline.result, eye.result, logIt.result, router]);
   const busy = eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending;
   const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result);
   // The name the row can go to the pipeline under: typed, or read from the link.
@@ -184,6 +197,24 @@ export function LinkRow({
                 >
                   Open profile
                 </a>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!window.confirm("Are you sure you want to remove this link from the table?")) return;
+                    const { formData } = submitted(e);
+                    del.run(formData);
+                  }}
+                >
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <input type="hidden" name="entryId" value={r.id} />
+                  <button
+                    type="submit"
+                    disabled={busy}
+                    className="rounded-full border border-rule px-3.5 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:border-danger hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+                  >
+                    {del.pending ? "Removing…" : "Remove"}
+                  </button>
+                </form>
                 <button
                   onClick={() => setEdit((v) => !v)}
                   aria-label="More"
@@ -324,20 +355,24 @@ export function LinkRow({
                 <ActionNote result={latest(save.result, toPipeline.result)} />
               </form>
 
-              {/* Finding 02 — a row pasted by mistake, or a person who turns out
-                  to be the wrong one, had to stay in the table forever. */}
-              <form onSubmit={(e) => del.run(submitted(e).formData)} className="lg:col-span-2">
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!window.confirm("Are you sure you want to remove this link from the table?")) return;
+                  const { formData } = submitted(e);
+                  del.run(formData);
+                }}
+                className="lg:col-span-2"
+              >
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="entryId" value={r.id} />
-                <Confirm
-                  label="Delete this row"
-                  question={
-                    log.length > 0
-                      ? `Delete ${r.name ?? "this row"} and the ${log.length} approach${log.length === 1 ? "" : "es"} logged against them?`
-                      : `Delete ${r.name ?? "this row"} from the table?`
-                  }
-                  className="text-[12px] text-ink-faint transition-colors hover:text-danger"
-                />
+                <button
+                  type="submit"
+                  disabled={busy}
+                  className="text-[12px] text-ink-faint transition-colors hover:text-danger disabled:opacity-50"
+                >
+                  {del.pending ? "Removing…" : "Remove this link from table"}
+                </button>
               </form>
 
               <form

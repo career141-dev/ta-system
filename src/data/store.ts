@@ -77,7 +77,7 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
-import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
+import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, markTablesStale, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
 
 const DATA_DIR = dataDir();
@@ -449,6 +449,7 @@ function commitToConvex(fn: (db: Database) => void) {
   }
   dataVersion++;
   bumpPrimed();
+  markTablesStale();
 }
 
 /** "Bangladesh" → "Bangladeshi", so an unstated brief still routes correctly. */

@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { addLinkInline } from "@/app/actions";
 import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 
@@ -13,7 +15,15 @@ import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
  * there, not a profile — shows under the box.
  */
 export function AddLinkForm({ openingId }: { openingId: string }) {
+  const router = useRouter();
   const add = useInline(addLinkInline);
+
+  useEffect(() => {
+    if (add.result?.tone === "ok") {
+      router.refresh();
+    }
+  }, [add.result, router]);
+
   return (
     <form
       onSubmit={(e) => {
