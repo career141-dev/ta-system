@@ -364,20 +364,11 @@ export const setWorkingStage = internalMutation({
       .withIndex("by_jobId_userId", (q) => q.eq("jobId", jobId).eq("userId", targetUserId))
       .first();
 
-    const now = new Date().toISOString();
-    if (assignment) {
-      await ctx.db.patch(assignment._id, { workingStage: args.stage });
-    } else {
-      await ctx.db.insert("jobAssignments", {
-        jobId,
-        userId: targetUserId,
-        assignmentRole: "primary_recruiter",
-        assignedBy: actor._id,
-        assignedAt: now,
-        isActive: true,
-        workingStage: args.stage,
-      });
-    }
+    // Only someone already on the job has a working stage. Creating the row
+    // here made a lead who changed the menu the job's primary recruiter
+    // (review, 22 Sep).
+    if (!assignment || !assignment.isActive) throw new Error("You are not on this opening.");
+    await ctx.db.patch(assignment._id, { workingStage: args.stage });
     return { ok: true, stage: args.stage };
   },
 });

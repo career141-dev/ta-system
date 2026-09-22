@@ -797,11 +797,10 @@ const rawRepo = {
     }
 
     const candidate = db.candidates.find((c) => c.id === app.candidateId);
-    const opening = db.openings.find((o) => o.id === app.openingId);
     const from = app.stage;
-    const claimable = from === "new_cv" || from === "matched";
-    const targetStage: Stage = opening?.autoFollowUp ? "ai_follow_up" : "ta_follow_up";
-    const to: Stage = claimable ? targetStage : from;
+    // A TA's shortlist is TA Follow-up, from the AI's shortlist too.
+    const claimable = from === "new_cv" || from === "matched" || from === "ai_follow_up";
+    const to: Stage = claimable ? "ta_follow_up" : from;
 
     let setNumber: number | null = app.setNumber;
     mutate((d) => {
@@ -1776,8 +1775,7 @@ const rawRepo = {
       return { ok: true, applicationId: onOpening.id, stage: onOpening.stage };
     }
 
-    const opening = db.openings.find((o) => o.id === e.openingId);
-    const targetStage: Stage = opening?.autoFollowUp ? "ai_follow_up" : "ta_follow_up";
+    const targetStage: Stage = "ta_follow_up";
     const by = db.users.find((u) => u.id === byUserId)?.name ?? "a TA";
     const now = Date.now();
     const applicationId = `app_${Math.random().toString(36).slice(2, 10)}`;
@@ -1962,24 +1960,19 @@ const rawRepo = {
     return a?.workingStage ?? "100%";
   },
 
-  /** Update or record the TA's working stage for this opening. */
+  /** Update the TA's working stage for this opening. Only someone on the job has one. */
   setWorkingStage(openingId: Id, userId: Id, stage: WorkingStage) {
+    const team = this.assignments(openingId);
+    if (!team.some((x) => x.userId === userId)) return;
     mutate((db) => {
-      let a = db.assignments.find((x) => x.openingId === openingId && x.userId === userId);
-      if (!a) {
-        a = {
-          id: `as_${Math.random().toString(36).slice(2, 10)}`,
-          openingId,
-          userId,
-          role: "primary_recruiter",
-          assignedAt: Date.now(),
-          assignedBy: null,
-          workingStage: stage,
-        };
-        db.assignments.push(a);
-      } else {
-        a.workingStage = stage;
+      // An older opening's team is derived on read (assignments above) until
+      // one row is stored, and then only stored rows count — so store the
+      // whole team, or the others would drop off it.
+      if (!db.assignments.some((x) => x.openingId === openingId)) {
+        for (const x of team) db.assignments.push({ ...x, id: `as_${Math.random().toString(36).slice(2, 10)}` });
       }
+      const a = db.assignments.find((x) => x.openingId === openingId && x.userId === userId);
+      if (a) a.workingStage = stage;
     });
   },
 

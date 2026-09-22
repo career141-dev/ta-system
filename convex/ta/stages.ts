@@ -40,7 +40,11 @@ export type TaStage =
 const TO_TA: Record<BackendStage, TaStage> = {
   new_cvs: "new_cv",
   matched_candidates: "matched",
-  ta_shortlist: "ta_follow_up",
+  // Follow-up split in two (22 Sep): the AI's own shortlist (a CV scored
+  // high enough is filed as ta_shortlist, cvs/cvScoringActions.ts) is AI
+  // Follow-up; a TA's shortlist has always gone to follow_up, which starts
+  // the outreach, and is TA Follow-up. ai_call is no longer written.
+  ta_shortlist: "ai_follow_up",
   ai_call: "ai_follow_up",
   follow_up: "ta_follow_up",
   second_shortlist: "director_review",
@@ -58,8 +62,8 @@ const TO_TA: Record<BackendStage, TaStage> = {
 const TO_BACKEND: Record<TaStage, BackendStage> = {
   new_cv: "new_cvs",
   matched: "matched_candidates",
-  ai_follow_up: "ai_call",
-  ta_follow_up: "ta_shortlist",
+  ai_follow_up: "ta_shortlist",
+  ta_follow_up: "follow_up",
   director_review: "second_shortlist",
   director_shortlist: "director_shortlist",
   client_shortlist: "client_review",

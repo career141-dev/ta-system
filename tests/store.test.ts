@@ -35,13 +35,13 @@ const opening = repo.openings().find((o) => repo.applications(o.id).some((a) => 
 const fresh1 = repo.applications(opening.id).filter((a) => a.stage === "new_cv" && !a.ownerTaId);
 const r = repo.shortlist(fresh1[0].id, ta.id);
 const after = repo.application(fresh1[0].id)!;
-eq("goes to Follow-up", after.stage, opening.autoFollowUp ? "ai_follow_up" : "ta_follow_up");
+eq("goes to Follow-up", after.stage, "ta_follow_up");
 eq("gets a set number", after.setNumber !== null, true);
 eq("writes a history event", repo.events(after.id).some((e) => e.eventType === "shortlisted"), true);
 const stamp = after.shortlistedAt;
 repo.shortlist(fresh1[0].id, ta.id);
 eq("shortlisting twice changes nothing", repo.application(fresh1[0].id)!.shortlistedAt, stamp);
-eq("returns the stage", r.ok && r.stage, opening.autoFollowUp ? "ai_follow_up" : "ta_follow_up");
+eq("returns the stage", r.ok && r.stage, "ta_follow_up");
 
 console.log("\nsets: the day rule, per TA");
 fresh();

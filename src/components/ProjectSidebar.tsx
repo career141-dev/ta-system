@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { addJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
@@ -171,13 +171,18 @@ export function ProjectSidebar({
             {pipeOpen && (
               <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                 {PIPELINE_STAGES.map((s) => (
-                  <Link
-                    key={s}
-                    href={`${base}/pipeline/${s}`}
-                    className={sub(path === `${base}/pipeline/${s}`)}
-                  >
-                    {STAGE_LABEL[s]}
-                  </Link>
+                  <Fragment key={s}>
+                    <Link href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
+                      {STAGE_LABEL[s]}
+                    </Link>
+                    {/* Under the last Follow-up stage, as it sat under Follow-up
+                        before the split (22 Sep) — nothing else links to it. */}
+                    {s === "ta_follow_up" && canSeeSourcing && (
+                      <Link href={`${base}/reference`} className={`${sub(inReference)} ml-3 gap-1.5`}>
+                        <span aria-hidden="true" className="text-ink-faint">└</span> Reference
+                      </Link>
+                    )}
+                  </Fragment>
                 ))}
                 <div className="my-1.5 border-t border-rule" />
                 {CLOSED_STAGES.map((s) => (

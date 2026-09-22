@@ -29,6 +29,8 @@ export async function ContextBar({
   if (!o || !client) return null;
   const tas = o.assignedTaIds.map((t) => repo.user(t)).filter(Boolean);
   const user = await getCurrentUser().catch(() => null);
+  // Only someone on the job has a working stage; a lead looking in does not.
+  const onJob = user ? !!repo.assignmentFor(openingId, user.id) : false;
   const workingStage = user ? repo.workingStage(openingId, user.id) : "100%";
 
   return (
@@ -47,7 +49,7 @@ export async function ContextBar({
       {/* Findings 05-07 — reachable from every screen of the opening, by
           whoever is working it. */}
       <StatusMenu openingId={openingId} status={o.status as OpeningStatus} size="small" />
-      <WorkingStageMenu openingId={openingId} stage={workingStage} size="small" />
+      {onJob && <WorkingStageMenu openingId={openingId} stage={workingStage} size="small" />}
 
       {crumbs.map((c) => (
         <span key={c} className="flex shrink-0 items-center gap-2.5 text-[12.5px]">

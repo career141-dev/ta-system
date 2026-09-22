@@ -22,12 +22,14 @@ import type { Candidate, Stage } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 
 export const ALLOWED_TRANSITIONS: Record<Stage, Stage[]> = {
-  new_cv: ["ai_follow_up", "ta_follow_up", "rejected", "dropped_out"],
-  matched: ["ai_follow_up", "ta_follow_up", "rejected", "dropped_out"],
+  // AI Follow-up is filled by the AI's own shortlist, never by hand (22 Sep):
+  // a TA moves people on from it into TA Follow-up, not back into it.
+  new_cv: ["ta_follow_up", "rejected", "dropped_out"],
+  matched: ["ta_follow_up", "rejected", "dropped_out"],
   ai_follow_up: ["ta_follow_up", "director_review", "rejected", "dropped_out"],
-  ta_follow_up: ["ai_follow_up", "director_review", "rejected", "dropped_out"],
+  ta_follow_up: ["director_review", "rejected", "dropped_out"],
   // The director sending it back for more detail is a real outcome, not a rejection.
-  director_review: ["director_shortlist", "ta_follow_up", "ai_follow_up", "rejected", "dropped_out"],
+  director_review: ["director_shortlist", "ta_follow_up", "rejected", "dropped_out"],
   director_shortlist: ["client_shortlist", "rejected", "dropped_out"],
   client_shortlist: ["interview", "offer", "rejected", "dropped_out"],
   interview: ["offer", "placed", "rejected", "dropped_out"],
@@ -38,8 +40,8 @@ export const ALLOWED_TRANSITIONS: Record<Stage, Stage[]> = {
   // Straight back to Director review too, when nothing is missing — a
   // rejection reversed the same day should not mean a second follow-up
   // (testing, 21 Sep). The Director review gate still applies.
-  rejected: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review"],
-  dropped_out: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review"],
+  rejected: ["new_cv", "ta_follow_up", "director_review"],
+  dropped_out: ["new_cv", "ta_follow_up", "director_review"],
 };
 
 export type Requirement = "interview_scheduled" | "placement_recorded" | "offer_made";

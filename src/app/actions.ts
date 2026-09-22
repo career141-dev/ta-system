@@ -233,8 +233,7 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
     const name = repo.users().find((u) => u.id === owner)?.name ?? "another recruiter";
     return { ok: false, message: `${name} owns this candidate here. Ask them or the TA lead to bring them back.` };
   }
-  const opening = repo.opening(openingId);
-  const targetStage: Stage = opening?.autoFollowUp ? "ai_follow_up" : "ta_follow_up";
+  const targetStage: Stage = "ta_follow_up";
   if (isConvex()) {
     try {
       await backend.moveStage({ id: userId }, appId, targetStage, "Brought back");

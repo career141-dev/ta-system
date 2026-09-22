@@ -347,7 +347,7 @@ export function propose(user: User, intent: Intent, now = Date.now()): ActionRep
       // Into Follow-up from a new CV or a match is a shortlist — it takes the
       // candidate, numbers the set and starts the chase, which a bare stage
       // move would skip.
-      if ((intent.stage === "ta_follow_up" || intent.stage === "ai_follow_up" || (intent.stage as string) === "follow_up") && (hit.app.stage === "new_cv" || hit.app.stage === "matched")) {
+      if ((intent.stage === "ta_follow_up" || intent.stage === "ai_follow_up" || (intent.stage as string) === "follow_up") && (hit.app.stage === "new_cv" || hit.app.stage === "matched" || hit.app.stage === "ai_follow_up")) {
         action = { kind: "shortlist", appId: hit.app.id };
         break;
       }
