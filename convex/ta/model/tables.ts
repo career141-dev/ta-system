@@ -688,6 +688,9 @@ export function sameValue(a: unknown, b: unknown): boolean {
   if (a === undefined) a = null;
   if (b === undefined) b = null;
   if (a === b) return true;
+  if (typeof a === "string" && typeof b === "string") {
+    if (a.replace(/,/g, "").trim().toLowerCase() === b.replace(/,/g, "").trim().toLowerCase()) return true;
+  }
   if (typeof a !== typeof b || a === null || b === null) return false;
   if (typeof a !== "object") return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;

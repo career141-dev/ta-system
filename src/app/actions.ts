@@ -10,7 +10,7 @@ import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from 
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { redirect as nextRedirect } from "next/navigation";
-import { markTablesStale, withRealIds } from "@/data/primeState";
+import { invalidateCandidate, markTablesStale, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
@@ -406,9 +406,9 @@ export async function logCall(formData: FormData) {
 }
 
 export async function addLink(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const typed = String(formData.get("url") ?? "").trim();
   if (!typed) await fail("Paste a LinkedIn profile link first.");
   // Tidied before it is saved: "linkedin.com/in/x", "lk.linkedin.com/in/x/"
@@ -425,7 +425,10 @@ export async function addLink(formData: FormData) {
   }
   const name = String(formData.get("name") ?? "").trim() || guessedName;
   repo.addLink(openingId, url, user.id, name);
+  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  revalidatePath(`/openings/${openingId}/hh/links`);
   await done(
     name
       ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
@@ -434,12 +437,15 @@ export async function addLink(formData: FormData) {
 }
 
 export async function toggleEyeMark(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const entryId = String(formData.get("entryId"));
   repo.toggleEyeMark(entryId);
+  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  revalidatePath(`/openings/${openingId}/hh/links`);
   const now = repo.linkVault(openingId).find((l) => l.id === entryId)?.isEyeMarked;
   await done(now ? "Eye-marked." : "Eye-mark removed.");
 }
@@ -1103,9 +1109,9 @@ export async function toggleAddOn(formData: FormData) {
 // ─── Link vault (spec §4.5) ──────────────────────────────────────────────────
 
 export async function updateLink(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const entryId = String(formData.get("entryId"));
   const outcome = String(formData.get("outcome") ?? "") as import("@/data/types").LinkOutcome;
   const phoneNumber = String(formData.get("phoneNumber") ?? "").trim() || null;
@@ -1114,7 +1120,10 @@ export async function updateLink(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim() || null;
   const company = String(formData.get("company") ?? "").trim() || null;
   repo.updateLink(entryId, { outcome, phoneNumber, phoneSource, name, company });
+  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  revalidatePath(`/openings/${openingId}/hh/links`);
   // It saved silently; testers could not tell it had (21 Sep).
   await done(`Saved — ${LINK_OUTCOME_LABEL[outcome] ?? outcome}.`);
 }
@@ -1130,15 +1139,18 @@ const LINK_OUTCOME_LABEL: Record<string, string> = {
 };
 
 export async function logOutreach(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const entryId = String(formData.get("entryId"));
   const note = String(formData.get("note") ?? "").trim();
   const channel = String(formData.get("channel") ?? "linkedin");
   if (!note) await fail("Write what happened on the approach first.");
   repo.logOutreach(entryId, user.id, channel, note);
+  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  revalidatePath(`/openings/${openingId}/hh/links`);
   await done(`Logged · ${channel === "whatsapp" ? "WhatsApp" : channel === "linkedin" ? "LinkedIn" : channel[0].toUpperCase() + channel.slice(1)}.`);
 }
 
@@ -1151,9 +1163,9 @@ export async function logOutreach(formData: FormData) {
  * something Director Review needs has not been collected yet.
  */
 export async function addLinkToPipeline(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.act", { link: "entryId", opening: "openingId" });
   const entryId = String(formData.get("entryId"));
 
   // From the row's edit panel the button also saves what was just typed —
@@ -1173,7 +1185,10 @@ export async function addLinkToPipeline(formData: FormData) {
 
   const made = repo.linkToApplication(entryId, user.id);
   if (!made.ok) return fail(made.message);
+  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  revalidatePath(`/openings/${openingId}/hh/links`);
   // Someone already on the opening: from Database CVs they go on to Follow-up
   // like anyone else; rejected or dropped out, they are brought back first.
   if (made.stage === "rejected" || made.stage === "dropped_out") {
@@ -1525,12 +1540,15 @@ export async function deleteJobPost(formData: FormData) {
 }
 
 export async function deleteLink(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   repo.deleteLink(String(formData.get("entryId")));
+  markTablesStale();
+  revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
-  await done("Row deleted.");
+  revalidatePath(`/openings/${openingId}/hh/links`);
+  await done("Link removed from table.");
 }
 
 export async function removeApplication(formData: FormData) {
@@ -2707,10 +2725,13 @@ export async function saveFollowUpAnswers(formData: FormData) {
  * what is already on file.
  */
 export async function saveReviewDetails(formData: FormData) {
+  const applicationId = String(formData.get("applicationId"));
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
-  const app = repo.application(String(formData.get("applicationId")));
+  const app = repo.application(applicationId);
   if (!app) return fail("That application no longer exists.");
+  invalidateCandidate(app.candidateId);
+  await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId });
   // A bare amount is saved with the currency picked beside it: "25,000" alone
   // could not be read as a salary later (21 Sep).
   const withCurrency = (field: string) => {
@@ -2723,12 +2744,41 @@ export async function saveReviewDetails(formData: FormData) {
   const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
   const notice = noticeRaw === "" ? null : Number(noticeRaw);
   if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return fail("Notice period is a number of days, 0 or more.");
-  repo.updateCandidate(app.candidateId, {
-    ...(currentSalary ? { currentSalary } : {}),
-    ...(expectedSalary ? { expectedSalary } : {}),
-    ...(notice !== null ? { noticePeriodDays: Math.round(notice) } : {}),
-  });
+  const labels = formData.getAll("customLabel").map(String);
+  const values = formData.getAll("customValue").map(String);
+  const customNotes: string[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]?.trim();
+    if (!v) continue;
+    const l = labels[i]?.trim();
+    customNotes.push(l ? `${l}: ${v}` : v);
+  }
+
+  const patch = {
+    currentSalary: currentSalary || null,
+    expectedSalary: expectedSalary || null,
+    noticePeriodDays: notice !== null ? Math.round(notice) : null,
+  };
+
+  try {
+    repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);
+  } catch (err) {
+    const msg = (err as Error).message || "";
+    if (msg.includes("Someone else changed this record") || msg.includes("conflict")) {
+      // Re-prime with latest DB values and retry the update once
+      invalidateCandidate(app.candidateId);
+      markTablesStale();
+      await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId, allApplications: true });
+      repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);
+    } else {
+      throw err;
+    }
+  }
+
+  markTablesStale();
+  invalidateCandidate(app.candidateId);
   revalidatePath(`/openings/${app.openingId}`, "layout");
+  revalidatePath(`/candidates/${app.candidateId}`);
   return done("Details saved.");
 }
 
@@ -3177,30 +3227,61 @@ async function emailEod(input: {
     const c = app ? repo.candidate(app.candidateId) : null;
     if (!app || !c) continue;
     try {
-      const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
-      const { pdf } = buildPreparedCv(
-        {
-          fullName: c.fullName,
-          currentTitle: c.currentTitle,
-          currentEmployer: c.currentEmployer,
-          location: c.location,
-          totalExperienceYears: c.totalExperienceYears,
-          educationDegree: c.educationDegree,
-          educationInstitution: c.educationInstitution,
-          summary: profile?.summary ?? null,
-          career: profile?.career ?? [],
-          education: profile?.education ?? [],
-          skills: c.skills ?? [],
-          languages: profile?.languages ?? [],
-          certifications: profile?.certifications ?? [],
-        },
-        {
-          currentSalary: r.currentRemuneration,
-          expectedSalary: r.expectedRemuneration,
-          notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
-        },
-      );
-      const base64 = Buffer.from(pdf).toString("base64");
+      let pdfBytes: Uint8Array | null = null;
+      const { isConvex } = await import("@/data/mode");
+      if (isConvex()) {
+        try {
+          const link = await backend.cvLink({ id: null }, c.id, false);
+          if (link.ok && link.url) {
+            const cvRes = await fetch(link.url);
+            if (cvRes.ok) {
+              const baseBuf = await cvRes.arrayBuffer();
+              const { stampPdfWithCareer141Box } = await import("@/lib/pdf");
+              pdfBytes = await stampPdfWithCareer141Box(
+                baseBuf,
+                {
+                  currentSalary: r.currentRemuneration,
+                  expectedSalary: r.expectedRemuneration,
+                  notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+                },
+                undefined,
+                link.fileName ?? c.cvFileName
+              );
+            }
+          }
+        } catch {
+          /* Fallback */
+        }
+      }
+
+      if (!pdfBytes) {
+        const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
+        const { pdf } = buildPreparedCv(
+          {
+            fullName: c.fullName,
+            currentTitle: c.currentTitle,
+            currentEmployer: c.currentEmployer,
+            location: c.location,
+            totalExperienceYears: c.totalExperienceYears,
+            educationDegree: c.educationDegree,
+            educationInstitution: c.educationInstitution,
+            summary: profile?.summary ?? null,
+            career: profile?.career ?? [],
+            education: profile?.education ?? [],
+            skills: c.skills ?? [],
+            languages: profile?.languages ?? [],
+            certifications: profile?.certifications ?? [],
+          },
+          {
+            currentSalary: r.currentRemuneration,
+            expectedSalary: r.expectedRemuneration,
+            notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+          },
+        );
+        pdfBytes = new Uint8Array(pdf);
+      }
+
+      const base64 = Buffer.from(pdfBytes).toString("base64");
       if (used + base64.length > EOD_ATTACHMENT_BUDGET) {
         left.push(c.fullName);
         continue;

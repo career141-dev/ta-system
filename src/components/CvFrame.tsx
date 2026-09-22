@@ -3,112 +3,133 @@
 import { useEffect, useRef, useState } from "react";
 
 /**
- * A CV in the page, with the controls a reader needs.
+ * Clean, full-height CV document viewer.
  *
- * It was a bare iframe of fixed height inside a sheet that already covered
- * the screen: one compressed page at a time, no way to enlarge it short of a
- * new tab, and no way to put it away (testing, 21 Sep). This adds zoom, fit to
- * width / whole page, full screen and minimise. The browser's PDF viewer reads
- * the zoom from the address fragment (`#zoom=`, `#view=`), so a change reloads
- * the frame at that size. The last choice is remembered on this device.
+ * - Renders the CV at full width and full document height.
+ * - Completely removes the nested internal scrollbar by clipping the overflow.
+ * - Provides a "Full screen" mode for distraction-free reading.
  */
-const ZOOMS = [50, 75, 100, 125, 150, 200];
-const KEY = "cv-frame";
-
-type Fit = "width" | "page" | number;
-
-function remembered(): { fit: Fit; minimised: boolean } {
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    if (raw && (raw.fit === "width" || raw.fit === "page" || ZOOMS.includes(raw.fit))) {
-      return { fit: raw.fit, minimised: Boolean(raw.minimised) };
-    }
-  } catch {
-    /* private window or blocked storage: the defaults */
-  }
-  return { fit: "width", minimised: false };
-}
-
-export function CvFrame({ src, title, height = 720 }: { src: string; title: string; height?: number }) {
-  const [fit, setFit] = useState<Fit>("width");
-  const [minimised, setMinimised] = useState(false);
-  const [full, setFull] = useState(false);
-  const box = useRef<HTMLDivElement | null>(null);
+export function CvFrame({
+  src,
+  title,
+  fileName,
+  downloadHref,
+  preparedCvHref,
+  height = 2600,
+}: {
+  src: string;
+  title: string;
+  fileName?: string | null;
+  downloadHref?: string;
+  preparedCvHref?: string;
+  height?: number | string;
+}) {
+  const [isFull, setIsFull] = useState(false);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    const r = remembered();
-    setFit(r.fit);
-    setMinimised(r.minimised);
-  }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem(KEY, JSON.stringify({ fit, minimised }));
-    } catch {
-      /* not remembered, still works */
-    }
-  }, [fit, minimised]);
-  useEffect(() => {
-    const on = () => setFull(document.fullscreenElement === box.current);
-    document.addEventListener("fullscreenchange", on);
-    return () => document.removeEventListener("fullscreenchange", on);
+    const handleFullscreenChange = () => {
+      setIsFull(document.fullscreenElement === containerRef.current);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  const fragment = fit === "width" ? "view=FitH" : fit === "page" ? "view=Fit" : `zoom=${fit}`;
-  const url = `${src.split("#")[0]}#toolbar=1&${fragment}`;
-  const zoomIndex = typeof fit === "number" ? ZOOMS.indexOf(fit) : ZOOMS.indexOf(100);
-  const step = (d: 1 | -1) => setFit(ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, zoomIndex + d))]);
-
-  const toggleFull = async () => {
+  const toggleFullscreen = async () => {
     try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else await box.current?.requestFullscreen();
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (containerRef.current) {
+        await containerRef.current.requestFullscreen();
+      }
     } catch {
-      /* the browser refused; the page stays as it is */
+      setIsFull((prev) => !prev);
     }
   };
 
-  const btn = (active = false) =>
-    `rounded-md px-2 py-1 text-[12px] transition-colors ${active ? "bg-brand-soft font-medium text-brand" : "text-ink-soft hover:bg-tag hover:text-ink"}`;
+  const url = `${src.split("#")[0]}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
 
   return (
-    <div ref={box} className={`flex flex-col bg-paper ${full ? "h-screen" : ""}`}>
-      <div className="flex flex-wrap items-center gap-1 border-b border-rule bg-surface px-2 py-1.5">
-        {!minimised && (
-          <>
-            <button type="button" onClick={() => step(-1)} className={btn()} aria-label="Zoom out" disabled={zoomIndex === 0 && typeof fit === "number"}>
-              −
-            </button>
-            <span className="min-w-[44px] text-center text-[11.5px] tabular-nums text-ink-soft">
-              {typeof fit === "number" ? `${fit}%` : fit === "width" ? "Width" : "Page"}
-            </span>
-            <button type="button" onClick={() => step(1)} className={btn()} aria-label="Zoom in">
-              +
-            </button>
-            <span className="mx-1 h-4 w-px bg-rule" aria-hidden="true" />
-            <button type="button" onClick={() => setFit("width")} className={btn(fit === "width")}>
-              Fit width
-            </button>
-            <button type="button" onClick={() => setFit("page")} className={btn(fit === "page")}>
-              Whole page
-            </button>
-            <button type="button" onClick={toggleFull} className={btn(full)}>
-              {full ? "Exit full screen" : "Full screen"}
-            </button>
-          </>
-        )}
-        <button type="button" onClick={() => setMinimised((v) => !v)} className={`${btn()} ml-auto`}>
-          {minimised ? "Show CV" : "Minimise"}
-        </button>
+    <div
+      ref={containerRef}
+      className={`flex flex-col bg-paper ${
+        isFull
+          ? "fixed inset-0 z-50 h-screen w-screen overflow-y-auto bg-slate-900 p-4"
+          : "w-full overflow-hidden"
+      }`}
+    >
+      {/* Top action bar with Full screen and document actions */}
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule bg-paper px-4 py-2.5">
+        <span className="text-[12.5px] font-medium text-ink">
+          {fileName ?? title}
+        </span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="flex items-center gap-1.5 rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] font-medium text-ink transition-colors hover:bg-tag hover:text-brand"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              {isFull ? (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              )}
+            </svg>
+            {isFull ? "Exit full screen" : "Full screen"}
+          </button>
+          <a
+            href={src}
+            target="_blank"
+            rel="noreferrer"
+            className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+          >
+            Open in a new tab
+          </a>
+          {downloadHref && (
+            <a
+              href={downloadHref}
+              className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+            >
+              Download
+            </a>
+          )}
+          {preparedCvHref && (
+            <a
+              href={preparedCvHref}
+              target="_blank"
+              rel="noreferrer"
+              title="The Career141 version, with the green block on page one"
+              className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+            >
+              Prepared CV
+            </a>
+          )}
+        </div>
       </div>
-      {!minimised && (
-        <iframe
-          key={url}
-          src={url}
-          title={title}
-          className="w-full flex-1 bg-paper"
-          style={full ? undefined : { height }}
-        />
-      )}
+
+      {/* CV Iframe with internal scrollbar clipped cleanly */}
+      <div
+        className={`w-full overflow-hidden bg-paper ${
+          isFull ? "mx-auto max-w-5xl flex-1 rounded-xl shadow-2xl" : ""
+        }`}
+      >
+        <div className="relative w-full overflow-hidden" style={{ width: "100%" }}>
+          <iframe
+            key={url}
+            src={url}
+            title={title}
+            className="border-0 bg-paper"
+            scrolling="no"
+            style={{
+              width: "calc(100% + 24px)",
+              marginRight: "-24px",
+              height: isFull ? "calc(100vh - 80px)" : typeof height === "number" ? `${height}px` : height,
+              minHeight: isFull ? "calc(100vh - 80px)" : "2200px",
+            }}
+          />
+        </div>
+      </div>
     </div>
   );
 }

@@ -1496,6 +1496,37 @@ const rawRepo = {
     });
   },
 
+  /** Custom detail lines / notes saved from Director review */
+  setApplicationDirectorNotes(applicationId: Id, notes: string[]) {
+    mutate((db) => {
+      const a = db.applications.find((x) => x.id === applicationId);
+      if (!a) return;
+      // Preserve internal historical / match notes if any
+      const systemNotes = (a.notes ?? []).filter((n) => /^Matched from the database/i.test(n) || /^>Historical/i.test(n));
+      a.notes = [...systemNotes, ...notes];
+    });
+  },
+
+  /** Atomic update of both Director notes and candidate review details */
+  saveReviewDetails(
+    applicationId: Id,
+    candidateId: Id,
+    notes: string[],
+    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays">>,
+  ) {
+    mutate((db) => {
+      const a = db.applications.find((x) => x.id === applicationId);
+      if (a) {
+        const systemNotes = (a.notes ?? []).filter((n) => /^Matched from the database/i.test(n) || /^>Historical/i.test(n));
+        a.notes = [...systemNotes, ...notes];
+      }
+      const c = db.candidates.find((x) => x.id === candidateId);
+      if (c) {
+        Object.assign(c, patch);
+      }
+    });
+  },
+
   // ─── People (finding 11) ──────────────────────────────────────────────────
 
   addUser(input: {

@@ -26,6 +26,9 @@ function firstFile(base) {
 }
 
 export async function resolve(specifier, context, next) {
+  if (specifier === "server-only") {
+    return { shortCircuit: true, url: "data:text/javascript,export default {};" };
+  }
   if (specifier.startsWith("@/")) {
     const hit = firstFile(path.join(SRC, specifier.slice(2)));
     if (hit) return next(pathToFileURL(hit).href, context);

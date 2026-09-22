@@ -278,7 +278,7 @@ export const runReverseMatch = action({
 
       if (activePreferences && activePreferences.trim()) {
         try {
-          const { getModelForTask, getOpenAI, logLLMUsage } = await import("../lib/llm.js");
+          const { getModelForTask, getOpenAI, logLLMUsage } = await import("../lib/llm");
           const model = getModelForTask("reverse_matching");
           const openai = getOpenAI("reverse_matching");
 
