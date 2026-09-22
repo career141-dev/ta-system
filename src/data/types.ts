@@ -488,6 +488,8 @@ export const ASSIGNMENT_NOTE: Record<AssignmentRole, string> = {
   client_contact: "Sees their shortlist onward — not the sourcing behind it.",
 };
 
+export type WorkingStage = "100%" | "Follow-up" | "Add-on";
+
 export interface Assignment {
   id: Id;
   openingId: Id;
@@ -495,6 +497,8 @@ export interface Assignment {
   role: AssignmentRole;
   assignedAt: number;
   assignedBy: Id | null;
+  /** The TA's current working stage for this job (100% / Follow-up / Add-on). */
+  workingStage?: WorkingStage;
 }
 
 export interface PipelineEvent {

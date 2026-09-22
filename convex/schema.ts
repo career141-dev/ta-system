@@ -106,6 +106,8 @@ export default defineSchema({
     assignedAt: v.string(),
     revokedAt: v.optional(v.string()),
     isActive: v.boolean(),
+    /** The TA's current working stage for this job (100% / Follow-up / Add-on). */
+    workingStage: v.optional(v.union(v.literal("100%"), v.literal("Follow-up"), v.literal("Add-on"))),
   })
     .index("by_jobId", ["jobId"])
     .index("by_userId", ["userId"])

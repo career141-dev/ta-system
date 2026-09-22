@@ -5,7 +5,7 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
-import type { FollowUpCallOutcome, User } from "@/data/types";
+import type { FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
@@ -1204,6 +1204,31 @@ export async function setOpeningStatus(formData: FormData) {
   repo.setOpeningStatus(openingId, status);
   revalidatePath("/openings", "layout");
   revalidatePath(`/openings/${openingId}`, "layout");
+}
+
+export async function setWorkingStage(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  const stage = String(formData.get("stage")) as WorkingStage;
+  if (!["100%", "Follow-up", "Add-on"].includes(stage)) return;
+
+  if (isConvex()) {
+    try {
+      await convexMutation("ta/openings:setWorkingStage", {
+        actorId: user.id,
+        openingId,
+        stage,
+      });
+      markTablesStale();
+    } catch (e) {
+      console.error("Failed to update working stage on Convex:", e);
+    }
+  } else {
+    repo.setWorkingStage(openingId, user.id, stage);
+  }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/eod`);
 }
 
 /** "We should be able to remove and add TAs" — answer 2, 11 Sep. */
@@ -3049,6 +3074,22 @@ export async function sendEod(formData: FormData) {
   let sentNote = "";
   if (kind === "director") {
     if (!isConvex()) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent("Sending needs the Convex store.")}`);
+    const effort = await import("@/lib/eod").then((m) => m.effortFromForm(formData, m.effortRow(openingId, user)));
+    if (effort.hundredOrFollowUp && ["100%", "Follow-up", "Add-on"].includes(effort.hundredOrFollowUp)) {
+      if (isConvex()) {
+        try {
+          await convexMutation("ta/openings:setWorkingStage", {
+            actorId: user.id,
+            openingId,
+            stage: effort.hundredOrFollowUp as WorkingStage,
+          });
+        } catch {
+          /* ignore */
+        }
+      } else {
+        repo.setWorkingStage(openingId, user.id, effort.hundredOrFollowUp as WorkingStage);
+      }
+    }
     const r = await emailEod({
       openingId,
       user,
@@ -3056,7 +3097,7 @@ export async function sendEod(formData: FormData) {
       to: String(formData.get("to") ?? ""),
       subject: String(formData.get("subject") ?? ""),
       // The counts and targets as the TA corrected them (plan 6.3).
-      effort: await import("@/lib/eod").then((m) => m.effortFromForm(formData, m.effortRow(openingId, user))),
+      effort,
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;

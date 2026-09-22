@@ -367,6 +367,7 @@ export const TABLES: Record<string, TableModel> = {
       role: d.assignmentRole,
       assignedAt: msOf(d.assignedAt),
       assignedBy: nul(d.assignedBy as string | undefined),
+      workingStage: (d.workingStage as string | undefined) ?? undefined,
     }),
     toDoc: async (r, cx) => ({
       jobId: r.openingId,
@@ -377,6 +378,7 @@ export const TABLES: Record<string, TableModel> = {
       assignedBy: r.assignedBy ?? r.userId,
       assignedAt: iso(msOf(r.assignedAt, cx.now)),
       isActive: true,
+      ...(r.workingStage ? { workingStage: r.workingStage } : {}),
     }),
     // Assignments are revoked, not erased: the backend keeps who was on a job.
     softDelete: (cx) => ({ isActive: false, revokedAt: iso(cx.now) }),

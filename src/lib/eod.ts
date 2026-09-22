@@ -104,10 +104,9 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
 
   const approached = vault.filter((v) => v.addedBy === ta.id && v.outcome !== "no_contact" && v.createdAt >= since).length;
   const addOns = mine.filter((a) => a.isAddOn && (a.addedOnAt ?? 0) >= since).length;
-  // What kind of day it looks like from the records; the TA changes it in the
-  // composer when it was something else (plan 6.1). A day spent chasing
-  // follow-ups with nothing new approached reads as Follow-up.
-  const kind = approached === 0 && todays.length > 0 ? "Follow-up" : addOns > 0 && approached === 0 ? "Add-on" : "100%";
+  // The TA's working stage for this opening (100% / Follow-up / Add-on),
+  // set manually in the sticky bar or defaulting to "100%".
+  const kind = repo.workingStage(openingId, ta.id);
 
   return {
     date: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" }),

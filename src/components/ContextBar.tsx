@@ -2,6 +2,7 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { CONTEXT_H, HEADER_H } from "@/lib/chrome";
 import { StatusMenu, type OpeningStatus } from "./StatusMenu";
+import { WorkingStageMenu } from "./WorkingStageMenu";
 import { OpeningMenu } from "./OpeningMenu";
 import { getCurrentUser } from "@/lib/session";
 import { isDeskWide } from "@/lib/auth";
@@ -28,6 +29,7 @@ export async function ContextBar({
   if (!o || !client) return null;
   const tas = o.assignedTaIds.map((t) => repo.user(t)).filter(Boolean);
   const user = await getCurrentUser().catch(() => null);
+  const workingStage = user ? repo.workingStage(openingId, user.id) : "100%";
 
   return (
     <div
@@ -45,6 +47,7 @@ export async function ContextBar({
       {/* Findings 05-07 — reachable from every screen of the opening, by
           whoever is working it. */}
       <StatusMenu openingId={openingId} status={o.status as OpeningStatus} size="small" />
+      <WorkingStageMenu openingId={openingId} stage={workingStage} size="small" />
 
       {crumbs.map((c) => (
         <span key={c} className="flex shrink-0 items-center gap-2.5 text-[12.5px]">

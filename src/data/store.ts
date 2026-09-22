@@ -38,6 +38,7 @@ import type {
   ChatMessage,
   Assignment,
   AssignmentRole,
+  WorkingStage,
   Interview,
   IntakeItem,
   IntakeSource,
@@ -1947,6 +1948,33 @@ const rawRepo = {
         const director = rows.find((r) => r.role === "director");
         o.directorId = director?.userId ?? o.directorId;
         o.updatedAt = Date.now();
+      }
+    });
+  },
+
+  /** The TA's working stage on an opening (100% / Follow-up / Add-on). Defaults to "100%". */
+  workingStage(openingId: Id, userId: Id): WorkingStage {
+    const a = this.assignmentFor(openingId, userId);
+    return a?.workingStage ?? "100%";
+  },
+
+  /** Update or record the TA's working stage for this opening. */
+  setWorkingStage(openingId: Id, userId: Id, stage: WorkingStage) {
+    mutate((db) => {
+      let a = db.assignments.find((x) => x.openingId === openingId && x.userId === userId);
+      if (!a) {
+        a = {
+          id: `as_${Math.random().toString(36).slice(2, 10)}`,
+          openingId,
+          userId,
+          role: "primary_recruiter",
+          assignedAt: Date.now(),
+          assignedBy: null,
+          workingStage: stage,
+        };
+        db.assignments.push(a);
+      } else {
+        a.workingStage = stage;
       }
     });
   },
