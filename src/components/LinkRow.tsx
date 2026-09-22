@@ -2,7 +2,6 @@
 
 import { externalUrl, profileLink } from "@/lib/url";
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import {
   addLinkToPipelineInline,
   deleteLinkInline,
@@ -63,7 +62,6 @@ export function LinkRow({
   /** Their application on this opening, once they have been added. */
   onPipeline?: Pick<Application, "id" | "stage"> | null;
 }) {
-  const router = useRouter();
   const [edit, setEdit] = useState(false);
   // Opened from "Add to pipeline" on a row that is not shortlisted yet.
   const [forPipeline, setForPipeline] = useState(false);
@@ -81,18 +79,6 @@ export function LinkRow({
     if (logIt.result?.tone === "ok") logForm.current?.reset();
   }, [logIt.result]);
   const del = useInline(deleteLinkInline);
-
-  useEffect(() => {
-    if (
-      del.result?.tone === "ok" ||
-      save.result?.tone === "ok" ||
-      toPipeline.result?.tone === "ok" ||
-      eye.result?.tone === "ok" ||
-      logIt.result?.tone === "ok"
-    ) {
-      router.refresh();
-    }
-  }, [del.result, save.result, toPipeline.result, eye.result, logIt.result, router]);
   const busy = eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending;
   const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result);
   // The name the row can go to the pipeline under: typed, or read from the link.
