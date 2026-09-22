@@ -14,7 +14,12 @@
     "live:check": "node --import ./tests/alias.mjs scripts/live-check.ts",
     "live:sync": "node --max-old-space-size=12000 --import ./tests/alias.mjs scripts/live-sync.ts",
     "db:restore": "node scripts/restore-local.mjs",
-    "convex:dev": "node scripts/convex-local-only.mjs dev --once",
+    "convex:dev": "node scripts/convex-local-only.mjs dev",
+    "convex:dev:once": "node scripts/convex-local-only.mjs dev --once",
+    "convex:logs": "node scripts/convex-local-only.mjs logs",
+    "convex:logs:prod": "npx convex logs --url https://api.career141.com --admin-key $CONVEX_PROD_ADMIN_KEY",
+    "convex:logs:staging": "ssh root@94.136.189.48 \"cd /opt/ta-staging && npx convex logs --url http://127.0.0.1:3220 --admin-key $CONVEX_STAGING_ADMIN_KEY\"",
+    "convex:logs:staging:docker": "ssh root@94.136.189.48 \"docker logs -f ta-staging-convex\"",
     "convex:codegen": "node scripts/convex-local-only.mjs codegen",
     "convex:import": "node scripts/convex-local-only.mjs import",
     "e2e": "node scripts/e2e/run-all.mjs"

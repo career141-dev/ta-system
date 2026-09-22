@@ -253,8 +253,8 @@ async function refresh(scope: PrimeScope): Promise<void> {
     // just-created opening was then missing from it — Save job went straight
     // to a 404 for an opening that had been saved (testing, 21 Sep). The
     // opening was fetched on its own anyway; it is now kept.
-    if (detail && !db.openings.some((o) => o.id === detail.opening.id)) {
-      db.openings = [detail.opening, ...db.openings];
+    if (detail) {
+      db.openings = [detail.opening, ...db.openings.filter((o) => o.id !== detail.opening.id)];
       const known = new Set(db.jobPosts.map((p) => p.id));
       db.jobPosts = [...db.jobPosts, ...detail.posts.filter((p) => !known.has(p.id))];
       state.version++;

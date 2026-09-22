@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { BriefRecorder, type SavedRecording } from "./BriefRecorder";
 import { createOpeningInline, createOpeningStep1Inline } from "@/app/actions";
 import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
@@ -65,6 +65,11 @@ export function CaptureForm({
 }) {
   const inline = Boolean(onCreated);
   const [pending, startTransition] = useTransition();
+  // Blocks double-submission synchronously, before React re-renders.
+  // save.pending from useActionState isn't fast enough: startTransition is
+  // non-urgent and a second click can arrive before the next render marks the
+  // button disabled — causing two openings to be created (22 Sep).
+  const runningRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   // A client added from the picker joins the list and is selected; the picker
   // is remounted (`pickerKey`) so it starts from the new selection.
@@ -117,6 +122,12 @@ export function CaptureForm({
   // A refusal from the server comes back here; a successful save navigates.
   const save = useInline(createOpeningStep1Inline);
   const [pressed, setPressed] = useState<string | null>(null);
+  // Reset the ref once the action replies (success navigates away;
+  // an error means the person has to fix something and try again).
+  useEffect(() => {
+    if (save.result) runningRef.current = false;
+  }, [save.result]);
+
 
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-10`;
   const card =
@@ -143,7 +154,8 @@ export function CaptureForm({
           ? submitInline
           : (e) => {
               const { formData, pressed: which } = submitted(e);
-              if (save.pending || refuseIfIncomplete()) return;
+              if (runningRef.current || save.pending || refuseIfIncomplete()) return;
+              runningRef.current = true;
               setPressed(which);
               save.run(formData);
             }
@@ -379,7 +391,7 @@ export function CaptureForm({
             name="next"
             value="save"
             busy={save.pending && pressed === "save"}
-            locked={save.pending}
+            locked={runningRef.current || save.pending}
             pendingLabel="Saving…"
             tone="dark"
             className="rounded-full border border-rule-strong px-5 py-2.5 text-[13px] font-medium text-ink transition-colors hover:border-ink-faint disabled:opacity-60"
@@ -392,7 +404,7 @@ export function CaptureForm({
               name="next"
               value="again"
               busy={save.pending && pressed === "again"}
-              locked={save.pending}
+              locked={runningRef.current || save.pending}
               pendingLabel="Saving…"
               className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
             >
@@ -403,7 +415,7 @@ export function CaptureForm({
               name="next"
               value="jd"
               busy={save.pending && pressed === "jd"}
-              locked={save.pending}
+              locked={runningRef.current || save.pending}
               pendingLabel="Saving…"
               className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
             >
@@ -412,15 +424,18 @@ export function CaptureForm({
           )}
 
           <span className={`text-[12.5px] ${tried && !ready ? "text-danger" : "text-ink-faint"}`}>
-            {!ready
-              ? tried
-                ? missingText
-                : "Choose a client and a position"
-              : isLead
-                ? assigned.length
-                  ? "The TA is notified and writes the JD"
-                  : "No TA yet — it shows as Unassigned until one is added"
-                : "Next: notes and the JD"}
+            {runningRef.current || save.pending
+              ? "Saving opening…"
+              : !ready
+                ? tried
+                  ? missingText
+                  : "Choose a client and a position"
+                : isLead
+                  ? assigned.length
+                    ? "The TA is notified and writes the JD"
+                    : "No TA yet — it shows as Unassigned until one is added"
+                  : "Next: notes and the JD"}
+
           </span>
         </div>
         <ActionNote result={save.result} />

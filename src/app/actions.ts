@@ -483,7 +483,11 @@ function readExtract(f: FormData): ExtractedBrief {
  * booking several off a single client call).
  */
 export async function createOpeningStep1(formData: FormData) {
-  await primeStore({ allApplications: true });
+  // Creating an opening needs users and clients — not every application in the
+  // database. allApplications:true was a full scan of every candidate's record,
+  // which made this 10–15 s slower than it needed to be (22 Sep).
+  await primeStore({});
+
   const user = await authorize(formData, "opening.create");
   const next = String(formData.get("next") ?? "save");
   const openingId = await saveNewOpening(formData, user);
@@ -513,7 +517,8 @@ async function refusal(capability: Capability): Promise<string | null> {
 export async function createOpeningInline(
   formData: FormData,
 ): Promise<InlineResult<{ openingId: string; title: string; clientName: string }>> {
-  await primeStore({ allApplications: true });
+  await primeStore({});
+
   const refused = await refusal("opening.create");
   if (refused) return { ok: false, error: refused };
   const user = await authorize(formData, "opening.create");
@@ -664,9 +669,9 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
 
 /** Screen two — the TA saves their notes before generating from them. */
 export async function saveBriefNotes(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  await authorize(formData, "opening.manage", { opening: "openingId" });
   const user = await getCurrentUser();
   // It used to return nothing either way, so a save that found no opening
   // lost the notes without a word (testing, 21 Sep).
@@ -734,10 +739,13 @@ function jdBriefsFor(openingId: string): JdBrief[] {
  */
 /** Spec §5.2 — the TA reads the JD and approves it; only then is it live. */
 export async function approveJd(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const jd = String(formData.get("jdMarkdown") ?? "");
+  if (jd.trim()) repo.updateJd(openingId, jd);
+  repo.approveJd(openingId, user.id);
+
   if (isConvex()) {
     // Approval in the backend also starts reading the JD's requirements
     // (skills, seniority, years, location, salary …) into the Job details.
@@ -755,7 +763,10 @@ export async function approveJd(formData: FormData) {
       revalidatePath(`/openings/${openingId}`, "layout");
     });
     await afterBackendWrite(openingId);
-    if (String(formData.get("thenGo") ?? "") === "opening") redirect(`/openings/${openingId}`);
+    if (String(formData.get("thenGo") ?? "") === "opening") {
+      redirect(`/openings/${openingId}?msg=${encodeURIComponent("The job description is approved. The job is live.")}&tone=ok`);
+    }
+    await done("The job description is approved. The job is live.");
     return;
   }
   if (jd.trim()) repo.updateJd(openingId, jd);
@@ -2224,6 +2235,7 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
         (e) => console.error(`[draftJd ${openingId}]`, e),
       );
     }
+    repo.updateJd(openingId, res.ok ? res.text : template);
     return res.ok ? { ok: true } : { ok: false, reason: res.reason };
   }
 
@@ -2345,15 +2357,16 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
 }
 
 export async function generateJdWithModel(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   // The notes box as it stands when Generate is pressed — typed but not yet
   // saved notes are still the TA's notes, and the draft must include them.
   if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
   const res = await draftJd(openingId);
   if (!res) await fail("The opening could not be found. Reload the page and try again.");
-  revalidatePath(`/openings/${openingId}`, "layout");
+  if (isConvex()) await afterBackendWrite(openingId);
+  else revalidatePath(`/openings/${openingId}`, "layout");
   if (res!.ok) await done("Written by the AI. Read it through before approving.");
   // Said plainly and beside the button: the fallback reads like a finished JD.
   await note(
