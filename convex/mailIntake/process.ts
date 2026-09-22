@@ -106,7 +106,7 @@ async function placeCandidate(
 
 function describe(route: PostPick | null): string {
   if (!route) return "No live advert matched, so the candidate went to the database.";
-  const how = route.how === "linkedin_job" ? "the LinkedIn job link" : route.how === "campaign_code" ? "the campaign code" : "the headline";
+  const how = route.how === "linkedin_job" ? "the LinkedIn job link" : route.how === "linkedin_project" ? "the LinkedIn project in the View applicant link" : route.how === "campaign_code" ? "the campaign code" : "the headline";
   const extra = route.alsoTo.length ? ` and ${route.alsoTo.length} more opening${route.alsoTo.length > 1 ? "s" : ""} the advert serves` : "";
   return `Matched "${route.matchedOn}" by ${how}${extra}.`;
 }

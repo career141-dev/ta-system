@@ -178,11 +178,11 @@ export function PostManager({
                     )}
                     {p.externalUrl ? (
                       <a href={p.externalUrl} target="_blank" rel="noreferrer" className="text-brand hover:underline">
-                        LinkedIn job
+                        LinkedIn link
                       </a>
                     ) : (
                       p.channel === "linkedin" && (
-                        <span className="text-[11.5px] text-ink-faint">No LinkedIn job link — filed by title only</span>
+                        <span className="text-[11.5px] text-ink-faint">No LinkedIn link — filed by title only</span>
                       )
                     )}
                   </div>
@@ -334,15 +334,15 @@ export function PostManager({
 
                   <label className="sm:col-span-2">
                     <span className="mb-2 block text-[12.5px] font-medium">
-                      LinkedIn job link
+                      LinkedIn link
                       <span className="ml-2 font-normal text-[11.5px] text-ink-faint">
-                        the surest match — LinkedIn puts the job number in every application email
+                        the surest match — copy the &ldquo;View applicant&rdquo; link from any application email for this job
                       </span>
                     </span>
                     <input
                       name="externalUrl"
                       defaultValue={p.externalUrl ?? ""}
-                      placeholder="https://www.linkedin.com/jobs/view/4012345678"
+                      placeholder="https://www.linkedin.com/talent/redirect/batchReview?project=1528413625&…"
                       className={inputClass}
                     />
                   </label>

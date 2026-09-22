@@ -42,7 +42,7 @@ export interface PostPick {
   /** The same advert serving more than one opening — the CV belongs on each. */
   alsoTo: { postId: string; openingId: string }[];
   /** How it was decided, for the log a person reads. */
-  how: "linkedin_job" | "campaign_code" | "headline";
+  how: "linkedin_job" | "linkedin_project" | "campaign_code" | "headline";
 }
 
 // ── normalisation ───────────────────────────────────────────────────────────
@@ -279,6 +279,35 @@ export function linkedinJobId(text: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * A LinkedIn Recruiter project's number.
+ *
+ * The desk posts through LinkedIn Recruiter. Every application email's "View
+ * applicant" button links to `talent/redirect/batchReview?project=1528413625&…`,
+ * and a project's own page is `talent/hire/1528413625/…` — the same number
+ * (22 September). A TA saves either link on the post once; every later
+ * application for that job carries the number, whatever its title says. The
+ * link may arrive HTML-escaped (`&amp;`) or URL-encoded in a tracking wrapper,
+ * so both forms are read.
+ */
+export function linkedinProjectId(text: string | null | undefined): string | null {
+  const raw = String(text ?? "");
+  const unescaped = raw.replace(/&amp;/gi, "&");
+  let decoded = unescaped;
+  try {
+    decoded = decodeURIComponent(unescaped);
+  } catch {
+    /* a stray % — the undecoded text is still read */
+  }
+  for (const t of [unescaped, decoded]) {
+    const m =
+      t.match(/linkedin\.com\/talent\/hire\/(\d{6,})/i) ??
+      t.match(/linkedin\.com\/talent\/[^\s"'<>]*?[?&]project=(\d{6,})/i);
+    if (m) return m[1];
+  }
+  return null;
+}
+
 /** The live post whose campaign code appears in the text, if exactly one does. */
 export function postByCampaignCode<P extends RoutablePost>(text: string, posts: P[]): P | null {
   const hay = text.toUpperCase();
@@ -326,6 +355,25 @@ export function routeShared<P extends RoutablePost>(
         matchedOn: `LinkedIn job ${jobNo}`,
         alsoTo: [...others.values()].map((p) => ({ postId: p.id, openingId: p.openingId })),
         how: "linkedin_job",
+      };
+    }
+  }
+
+  // The LinkedIn Recruiter project behind the "View applicant" button.
+  const projectNo = linkedinProjectId(input.body);
+  if (projectNo) {
+    const byProject = live.filter((p) => linkedinProjectId(p.externalUrl) === projectNo);
+    if (byProject.length >= 1) {
+      const [primary, ...rest] = [...byProject].sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0));
+      const others = new Map<string, P>();
+      for (const p of rest) if (p.openingId !== primary.openingId && !others.has(p.openingId)) others.set(p.openingId, p);
+      return {
+        postId: primary.id,
+        openingId: primary.openingId,
+        confidence: "exact",
+        matchedOn: `LinkedIn project ${projectNo}`,
+        alsoTo: [...others.values()].map((p) => ({ postId: p.id, openingId: p.openingId })),
+        how: "linkedin_project",
       };
     }
   }

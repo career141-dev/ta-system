@@ -4,7 +4,7 @@
  * Pure — no Graph, no database.
  */
 import { firstPostFor } from "../convex/lib/firstPost";
-import { routeShared, type RoutablePost } from "../convex/lib/postRouting";
+import { linkedinProjectId, routeShared, type RoutablePost } from "../convex/lib/postRouting";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -60,6 +60,36 @@ const posts = [
   eq("a near title is not a match — nothing is guessed", r, null);
   const r2 = routeShared({ subject: "CV for any suitable vacancy", linkedinOnly: false }, posts);
   eq("no title at all goes to the database", r2, null);
+}
+
+console.log("\nthe LinkedIn Recruiter project number");
+// The "View applicant" button of a real application email (22 September).
+const viewApplicant =
+  "https://www.linkedin.com/talent/redirect/batchReview?project=1528413625&status=applicants&contractId=462248986&profile=AEMAAEafLzABhOh3321IuYHQ_r3fBMKBEqPdEbg&rightRail=jobApplication&trk=eml-email_ent_job_post_new_applicant-null-0-null";
+eq("from the View applicant link", linkedinProjectId(viewApplicant), "1528413625");
+eq("from the project's own page", linkedinProjectId("https://www.linkedin.com/talent/hire/1528413625/overview"), "1528413625");
+eq("from an HTML body (&amp;)", linkedinProjectId(`<a href="https://www.linkedin.com/talent/redirect/batchReview?status=applicants&amp;project=1528413625&amp;x=1">View applicant</a>`), "1528413625");
+eq(
+  "from a URL-encoded tracking wrapper",
+  linkedinProjectId(`https://safe.example/?url=${encodeURIComponent(viewApplicant)}`),
+  "1528413625",
+);
+eq("not from a public job link", linkedinProjectId("https://www.linkedin.com/jobs/view/4012345678"), null);
+eq("nothing in plain text", linkedinProjectId("Your job has a new applicant"), null);
+{
+  const withProject = [
+    ...posts,
+    post("p9", "op_dev", "AI-Powered Full Stack Application Developer (Intern)", {
+      externalUrl: "https://www.linkedin.com/talent/hire/1528413625/overview",
+    }),
+  ];
+  const body = `<p>Your job has a new applicant</p><a href="${viewApplicant.replace(/&/g, "&amp;")}">View applicant</a>`;
+  const r = routeShared({ subject: "New application: AI-Powered Full Stack Application Developer from Kawya Warnasuriya", body, linkedinOnly: true }, withProject);
+  eq("the project number finds the job, whatever the title says", [r?.openingId, r?.how], ["op_dev", "linkedin_project"]);
+  const fwd = routeShared({ subject: "FW: New application: AI-Powered Full Stack Application Developer from Kawya Warnasuriya", body, linkedinOnly: true }, withProject);
+  eq("a forwarded application still matches", fwd?.openingId, "op_dev");
+  const other = routeShared({ subject: "New application: AI-Powered Full Stack Application Developer from A B", body: body.replace("1528413625", "1999999999"), linkedinOnly: true }, withProject);
+  eq("another project's number does not", other, null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
