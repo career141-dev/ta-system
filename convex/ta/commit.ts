@@ -23,7 +23,7 @@
 import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
 import { resolveActor } from "../lib/auth";
-import { TABLES, sameValue, type ModelCx, type Row } from "./model/tables";
+import { TABLES, looselySame, sameValue, type ModelCx, type Row } from "./model/tables";
 
 const opValidator = v.object({
   table: v.string(),
@@ -115,18 +115,34 @@ export const apply = internalMutation({
       if (!doc) throw new Error(`conflict:${op.table}:${op.key}:*: it was deleted by someone else`);
       const current = model.fromDoc(doc);
       const before = op.before as Row;
+      const after = rename(op.after) as Row;
       for (const field of op.changed ?? []) {
-        if (!sameValue(current[field], before[field])) {
+        if (!looselySame(current[field], before[field])) {
+          // If the database already holds what this action wants to write, continue
+          if (looselySame(current[field], after?.[field])) continue;
           throw new Error(`conflict:${op.table}:${op.key}:${field}: changed by someone else since it was loaded`);
         }
       }
-      const after = rename(op.after) as Row;
       const [was, will] = await Promise.all([model.toDoc(before, cx, false), model.toDoc(after, cx, false)]);
       const patch: Record<string, unknown> = {};
+      const unsets: string[] = [];
       for (const k of new Set([...Object.keys(was), ...Object.keys(will)])) {
-        if (!sameValue(was[k], will[k])) patch[k] = will[k];
+        if (!sameValue(was[k], will[k])) {
+          if (will[k] === undefined) {
+            unsets.push(k);
+          } else {
+            patch[k] = will[k];
+          }
+        }
       }
-      if (Object.keys(patch).length > 0) await ctx.db.patch(doc._id as never, patch as never);
+      if (unsets.length > 0) {
+        const nextDoc = { ...doc, ...clean(patch) };
+        for (const k of unsets) delete (nextDoc as Record<string, unknown>)[k];
+        const { _id, _creationTime, ...body } = nextDoc as Record<string, unknown>;
+        await ctx.db.replace(doc._id as never, clean(body) as never);
+      } else if (Object.keys(patch).length > 0) {
+        await ctx.db.patch(doc._id as never, clean(patch) as never);
+      }
     }
 
     // ── deletes ───────────────────────────────────────────────────────────────

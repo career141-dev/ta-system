@@ -253,8 +253,8 @@ async function refresh(scope: PrimeScope): Promise<void> {
     // just-created opening was then missing from it — Save job went straight
     // to a 404 for an opening that had been saved (testing, 21 Sep). The
     // opening was fetched on its own anyway; it is now kept.
-    if (detail && !db.openings.some((o) => o.id === detail.opening.id)) {
-      db.openings = [detail.opening, ...db.openings];
+    if (detail) {
+      db.openings = [detail.opening, ...db.openings.filter((o) => o.id !== detail.opening.id)];
       const known = new Set(db.jobPosts.map((p) => p.id));
       db.jobPosts = [...db.jobPosts, ...detail.posts.filter((p) => !known.has(p.id))];
       state.version++;
@@ -329,30 +329,36 @@ const WHOLE_TABLES = [
 ] as const;
 
 async function loadWholeTables(): Promise<Partial<Database>> {
-  const entries = await Promise.all(
-    WHOLE_TABLES.map(async (table) => {
-      const rows: unknown[] = [];
-      let cursor: string | null = null;
-      // A page that runs past the backend's one-second query limit is asked
-      // for again at half the size, rather than failing the whole page load.
-      let numItems = 1000;
-      for (let pages = 0; pages < 400; pages++) {
-        let page: { rows: unknown[]; isDone: boolean; continueCursor: string | null };
-        try {
-          page = await convexQuery("ta/tables:page", { table, cursor, numItems });
-        } catch (e) {
-          if (numItems <= 50 || !/timed out|Server Error/i.test((e as Error).message)) throw e;
-          numItems = Math.floor(numItems / 2);
-          pages--;
-          continue;
+  const chunkSize = 6;
+  const entries: (readonly [string, unknown[]])[] = [];
+  for (let i = 0; i < WHOLE_TABLES.length; i += chunkSize) {
+    const chunk = WHOLE_TABLES.slice(i, i + chunkSize);
+    const chunkEntries = await Promise.all(
+      chunk.map(async (table) => {
+        const rows: unknown[] = [];
+        let cursor: string | null = null;
+        // A page that runs past the backend's one-second query limit is asked
+        // for again at half the size, rather than failing the whole page load.
+        let numItems = 1000;
+        for (let pages = 0; pages < 400; pages++) {
+          let page: { rows: unknown[]; isDone: boolean; continueCursor: string | null };
+          try {
+            page = await convexQuery("ta/tables:page", { table, cursor, numItems });
+          } catch (e) {
+            if (numItems <= 50 || !/timed out|Server Error|fetch failed/i.test((e as Error).message)) throw e;
+            numItems = Math.floor(numItems / 2);
+            pages--;
+            continue;
+          }
+          rows.push(...page.rows);
+          if (page.isDone || !page.continueCursor) break;
+          cursor = page.continueCursor;
         }
-        rows.push(...page.rows);
-        if (page.isDone || !page.continueCursor) break;
-        cursor = page.continueCursor;
-      }
-      return [table, rows] as const;
-    }),
-  );
+        return [table, rows] as const;
+      }),
+    );
+    entries.push(...chunkEntries);
+  }
   return Object.fromEntries(entries) as Partial<Database>;
 }
 

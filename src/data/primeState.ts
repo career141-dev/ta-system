@@ -199,6 +199,16 @@ export function withRealIds(text: string): string {
   return text.replace(/[a-z]{1,5}_[a-z0-9]{6,12}/g, (m) => aliases.get(m) ?? m);
 }
 
+export function invalidateCandidate(id: Id): void {
+  state.candidates.delete(id);
+  state.version++;
+}
+
+export function invalidateOpening(id: Id): void {
+  state.openings.delete(id);
+  state.version++;
+}
+
 /**
  * A write went to Convex directly rather than through the store (the client and
  * people actions keep their own backend rules). The loaded tables are now
@@ -210,3 +220,4 @@ export function markTablesStale(): void {
   state.allAt = 0;
   state.version++;
 }
+

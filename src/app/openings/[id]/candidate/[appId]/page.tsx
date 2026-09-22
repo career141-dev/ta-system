@@ -23,6 +23,7 @@ import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
 import { ReviewDetailsForm } from "@/components/ReviewDetailsForm";
+import { extractCareer141BoxFromText, isSystemNote } from "@/lib/pdf";
 import { LiveFollowUp } from "@/components/LiveFollowUp";
 import { AuraCallButton } from "@/components/AuraCallButton";
 import { WebCallResults } from "@/components/WebCallResults";
@@ -284,6 +285,7 @@ export default async function CandidateDrawer({
           expectedSalary={c.expectedSalary}
           noticePeriodDays={c.noticePeriodDays}
           hasCv={Boolean(c.cvFileName)}
+          notes={app.notes?.filter((n) => !isSystemNote(n))}
         />
       )}
 
@@ -314,50 +316,32 @@ export default async function CandidateDrawer({
                 Career141 block, for the Director and the client) is still one
                 click away. */}
             <div className="mb-5 overflow-hidden rounded-xl border border-rule">
-              <div className="flex flex-wrap items-center gap-3 border-b border-rule bg-paper px-4 py-2.5">
-                <span className="text-[12.5px] font-medium">
-                  {(cvFile?.ok ? cvFile.fileName : null) ?? c.cvFileName ?? "CV"}
-                </span>
-                <div className="ml-auto flex flex-wrap items-center gap-2">
-                  {cvFile?.ok && (
-                    <>
-                      <a
-                        href={cvHref}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                      >
-                        Open in a new tab
-                      </a>
-                      <a
-                        href={`${cvHref}&download=1`}
-                        className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                      >
-                        Download
-                      </a>
-                    </>
-                  )}
-                  <a
-                    href={`/api/prepared-cv/${app.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    title="The Career141 version, with the green block on page one"
-                    className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                  >
-                    Prepared CV
-                  </a>
-                </div>
-              </div>
               {cvFile?.ok && cvIsPdf ? (
-                <CvFrame src={cvHref} title={`CV — ${c.fullName}`} />
+                <CvFrame
+                  src={cvHref}
+                  title={`CV — ${c.fullName}`}
+                  fileName={(cvFile?.ok ? cvFile.fileName : null) ?? c.cvFileName ?? "CV"}
+                  downloadHref={`${cvHref}&download=1`}
+                  preparedCvHref={`/api/prepared-cv/${app.id}`}
+                />
               ) : cvFile?.ok ? (
-                <p className="px-4 py-10 text-center text-[12.5px] text-ink-soft">
-                  This CV is not a PDF, so the browser cannot show it here.{" "}
-                  <a href={`${cvHref}&download=1`} className="text-brand hover:underline">
-                    Download it
-                  </a>
-                  .
-                </p>
+                <div className="p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-3">
+                    <span className="text-[12.5px] font-medium">
+                      {(cvFile?.ok ? cvFile.fileName : null) ?? c.cvFileName ?? "CV"}
+                    </span>
+                    <a href={`${cvHref}&download=1`} className="rounded-full border border-rule bg-surface px-3.5 py-1.5 text-[12px] text-brand hover:bg-tag">
+                      Download CV
+                    </a>
+                  </div>
+                  <p className="px-4 py-8 text-center text-[12.5px] text-ink-soft">
+                    This CV is not a PDF, so the browser cannot show it inline.{" "}
+                    <a href={`${cvHref}&download=1`} className="text-brand hover:underline">
+                      Download it
+                    </a>
+                    .
+                  </p>
+                </div>
               ) : (
                 <p className="px-4 py-10 text-center text-[12.5px] text-ink-soft">
                   {cvFile?.detail ?? "No CV file is on record for this candidate."}

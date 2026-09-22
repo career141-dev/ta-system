@@ -19,6 +19,7 @@ const PAGE = { w: 595.28, h: 841.89 }; // A4 points
 export interface CvAnnotation {
   currentSalary: string;
   expectedSalary: string;
+  noticePeriod?: string | number | null;
   notes: string[];
 }
 
@@ -154,6 +155,19 @@ function wrap(text: string, maxChars: number): string[] {
  *  "BASIC RS 610K + FUEL + DRIVER ALLOWANCE 50K" runs off the page otherwise. */
 const BLOCK_CHARS = 46;
 
+export function isSystemNote(note: string): boolean {
+  const t = (note ?? "").trim();
+  return (
+    /^Matched from the database/i.test(t) ||
+    /^fit \d+/i.test(t) ||
+    /similarity \d+/i.test(t) ||
+    /^>Historical/i.test(t) ||
+    /^Imported from/i.test(t) ||
+    /^Reverse match/i.test(t) ||
+    /^System:/i.test(t)
+  );
+}
+
 export function buildAnnotationLines(a: CvAnnotation): string[] {
   const lines = ["CAREER141 CANDIDATE"];
 
@@ -166,15 +180,309 @@ export function buildAnnotationLines(a: CvAnnotation): string[] {
   labelled("CURRENT SALARY", a.currentSalary || "NOT DISCLOSED");
   labelled("EXPECTED SALARY", a.expectedSalary || "OPEN TO DISCUSS");
 
-  if (a.notes.length) {
+  if (a.noticePeriod !== undefined && a.noticePeriod !== null && String(a.noticePeriod).trim() !== "") {
+    const np = String(a.noticePeriod).trim();
+    const npFormatted =
+      np === "0" || np.toLowerCase() === "immediate"
+        ? "Immediate"
+        : /^\d+$/.test(np)
+          ? `${np} Days`
+          : np;
+    labelled("NOTICE PERIOD", npFormatted);
+  }
+
+  const validNotes = (a.notes || [])
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0 && !isSystemNote(n));
+
+  if (validNotes.length) {
     lines.push("NOTE:-");
-    for (const n of a.notes) {
-      const parts = wrap(n, BLOCK_CHARS - 2);
+    for (const n of validNotes) {
+      const clean = n.replace(/^[->•*]\s*/, "").trim();
+      const parts = wrap(clean, BLOCK_CHARS - 2);
       lines.push(`- ${parts[0]}`);
       for (const p of parts.slice(1)) lines.push(`  ${p}`);
     }
   }
   return lines;
+}
+
+export function extractCareer141BoxFromText(rawText: string | null | undefined): {
+  currentSalary: string | null;
+  expectedSalary: string | null;
+  noticePeriodDays: number | null;
+  noticePeriodText: string | null;
+  notes: string[];
+} | null {
+  if (!rawText || !/CAREER\s*141/i.test(rawText)) return null;
+
+  const text = rawText
+    .replace(/&#13;/g, "\n")
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+
+  const curMatch = text.match(/CURRENT\s+SALARY\s*[-:]\s*([^\n\r]+)/i);
+  const expMatch = text.match(/EXPECTED\s+SALARY\s*[-:]\s*([^\n\r]+)/i);
+  const noticeMatch = text.match(/NOTICE(?:\s*PERIOD)?\s*[-:]\s*([^\n\r]+)/i);
+  const noteMatch = text.match(/NOTE\s*:-?\s*([\s\S]*?)(?=\n[A-Z\s]{4,}:|\n\n[A-Z]|$)/i);
+
+  const cleanVal = (v: string | null | undefined) => {
+    if (!v) return null;
+    const t = v.trim();
+    if (/^NOT\s+DISCLOSED$/i.test(t) || /^OPEN\s+TO\s+DISCUSS$/i.test(t) || /^N\/?A$/i.test(t)) return null;
+    return t;
+  };
+
+  let noticeDays: number | null = null;
+  let noticeText: string | null = null;
+  if (noticeMatch) {
+    const raw = noticeMatch[1].trim();
+    const dMatch = raw.match(/(\d+)/);
+    if (dMatch) noticeDays = Number(dMatch[1]);
+    else if (/immediate/i.test(raw)) noticeDays = 0;
+    noticeText = raw;
+  }
+
+  const notes = noteMatch
+    ? noteMatch[1]
+        .split("\n")
+        .map((s) => s.replace(/^[>\-•*]\s*/, "").trim())
+        .filter((s) => s.length > 0 && !isSystemNote(s))
+    : [];
+
+  return {
+    currentSalary: cleanVal(curMatch?.[1]),
+    expectedSalary: cleanVal(expMatch?.[1]),
+    noticePeriodDays: noticeDays,
+    noticePeriodText: noticeText,
+    notes,
+  };
+}
+
+export async function extractCareer141BoxFromPdfBuffer(
+  basePdfBuffer: ArrayBuffer | Buffer
+): Promise<{
+  currentSalary: string | null;
+  expectedSalary: string | null;
+  noticePeriodDays: number | null;
+  noticePeriodText: string | null;
+  notes: string[];
+} | null> {
+  try {
+    const { PDFDocument } = await import("pdf-lib");
+    const doc = await PDFDocument.load(basePdfBuffer, { ignoreEncryption: true });
+    if (doc.getPageCount() === 0) return null;
+    const page = doc.getPage(0);
+    const annots = page.node.Annots();
+    if (annots) {
+      for (let i = 0; i < annots.size(); i++) {
+        const ref = annots.get(i);
+        const annotObj = doc.context.lookup(ref) as any;
+        const contents = annotObj?.get(doc.context.obj("Contents"))?.toString() || "";
+        const rc = annotObj?.get(doc.context.obj("RC"))?.toString() || "";
+        const combined = `${contents}\n${rc}`;
+        if (/CAREER\s*141/i.test(combined)) {
+          const parsed = extractCareer141BoxFromText(combined);
+          if (parsed) return parsed;
+        }
+      }
+    }
+  } catch {
+    /* Fallback */
+  }
+  return null;
+}
+
+/**
+ * Stamps the green Career141 box on page one of a candidate's actual CV PDF.
+ * If the CV already has a Career141 box stamped, this locates it and cleanly
+ * updates the details inside that box with a solid background and green border.
+ * If the CV already has a box and no new details are provided, it leaves the
+ * original intact without stamping duplicate "NOT DISCLOSED" banners.
+ * If no box exists, it stamps it at the top right.
+ */
+export async function stampPdfWithCareer141Box(
+  basePdfBuffer: ArrayBuffer | Buffer,
+  annotation: CvAnnotation,
+  override?: { x: number; y: number },
+  fileName?: string | null,
+): Promise<Uint8Array> {
+  const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
+  const doc = await PDFDocument.load(basePdfBuffer, { ignoreEncryption: true });
+  if (doc.getPageCount() === 0) throw new Error("PDF has no pages");
+  const page = doc.getPage(0);
+  const { width: pageWidth, height: pageHeight } = page.getSize();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+  let foundX: number | null = null;
+  let foundY: number | null = null;
+  let foundBoxWidth: number | null = null;
+  let foundBoxHeight: number | null = null;
+  let hasExistingBox = false;
+
+  // 1. First check if there is an existing FreeText / text annotation on page 0
+  const annots = page.node.Annots();
+  if (annots) {
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i);
+      const annotObj = doc.context.lookup(ref) as any;
+      const contents = annotObj?.get(doc.context.obj("Contents"))?.toString() || "";
+      const rc = annotObj?.get(doc.context.obj("RC"))?.toString() || "";
+      if (/CAREER\s*141/i.test(`${contents} ${rc}`)) {
+        hasExistingBox = true;
+        const rectArr = annotObj?.get(doc.context.obj("Rect"))?.asArray?.();
+        if (rectArr && rectArr.length >= 4) {
+          const [x1, y1, x2, y2] = rectArr.map((v: any) =>
+            v?.asNumber ? v.asNumber() : Number(v)
+          );
+          foundX = Math.min(x1, x2);
+          foundY = Math.min(y1, y2);
+          foundBoxWidth = Math.abs(x2 - x1);
+          foundBoxHeight = Math.abs(y2 - y1);
+        }
+        break;
+      }
+    }
+  }
+
+  // 2. If not found in annotations, search in text streams via pdfjs
+  if (!hasExistingBox && !override) {
+    try {
+      // @ts-ignore
+      const pdfjs: any = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => import("pdfjs-dist/build/pdf.mjs"));
+      const copy = Buffer.isBuffer(basePdfBuffer)
+        ? Uint8Array.from(basePdfBuffer)
+        : new Uint8Array(basePdfBuffer.slice(0));
+      const loadingTask = pdfjs.getDocument({
+        data: copy,
+        useSystemFonts: true,
+        disableFontFace: true,
+        verbosity: 0,
+      });
+      const pdfDoc = await loadingTask.promise;
+      if (pdfDoc.numPages >= 1) {
+        const p1 = await pdfDoc.getPage(1);
+        const tc = await p1.getTextContent();
+        for (let i = 0; i < tc.items.length; i++) {
+          const it = tc.items[i];
+          if (!("str" in it) || typeof it.str !== "string") continue;
+          if (/CAREER\s*141/i.test(it.str)) {
+            hasExistingBox = true;
+            foundX = it.transform[4];
+            foundY = it.transform[5];
+            break;
+          }
+          if (/CAREER/i.test(it.str) && i + 1 < tc.items.length) {
+            const next = tc.items[i + 1];
+            if ("str" in next && typeof next.str === "string" && /141/i.test(next.str)) {
+              hasExistingBox = true;
+              foundX = it.transform[4];
+              foundY = it.transform[5];
+              break;
+            }
+          }
+        }
+      }
+    } catch {
+      /* Fallback to default placement if detection fails */
+    }
+  }
+
+  const isAlreadyCareer141 = Boolean(
+    hasExistingBox ||
+    (fileName && /CAREER\s*141/i.test(fileName))
+  );
+
+  const hasRealUserSalaries = Boolean(
+    (annotation.currentSalary && !/^NOT\s+DISCLOSED$/i.test(annotation.currentSalary.trim())) ||
+    (annotation.expectedSalary && !/^OPEN\s+TO\s+DISCUSS$/i.test(annotation.expectedSalary.trim())) ||
+    (annotation.noticePeriod != null && String(annotation.noticePeriod).trim() !== "")
+  );
+
+  const customNotes = (annotation.notes || []).filter((n) => !isSystemNote(n));
+
+  // If no user-edited details or override were provided,
+  // do NOT stamp a dummy/empty box — preserve the original PDF cleanly as-is.
+  // The box will only appear when Director review details are filled and saved.
+  if (!hasRealUserSalaries && !override && customNotes.length === 0) {
+    return new Uint8Array(basePdfBuffer);
+  }
+
+  // If re-stamping on a PDF that had a FreeText annotation, strip the old annotation so it does not collide
+  if (annots && hasExistingBox) {
+    const remainingRefs = [];
+    for (let i = 0; i < annots.size(); i++) {
+      const ref = annots.get(i);
+      const annotObj = doc.context.lookup(ref) as any;
+      const contents = annotObj?.get(doc.context.obj("Contents"))?.toString() || "";
+      const rc = annotObj?.get(doc.context.obj("RC"))?.toString() || "";
+      if (!/CAREER\s*141/i.test(`${contents} ${rc}`)) {
+        remainingRefs.push(ref);
+      }
+    }
+    page.node.set(doc.context.obj("Annots"), doc.context.obj(remainingRefs));
+  }
+
+  const lines = buildAnnotationLines(annotation);
+  const padding = 8;
+  const lineHeight = 12.5;
+  const longest = Math.max(...lines.map((l) => l.length), 1);
+  const boxWidth = Math.max(
+    foundBoxWidth ?? 0,
+    Math.min(320, Math.max(250, longest * 5.2 + padding * 2 + 10))
+  );
+  const boxHeight = Math.max(
+    foundBoxHeight ?? 0,
+    padding * 2 + lines.length * lineHeight + 4
+  );
+
+  let x: number;
+  let y: number;
+
+  if (override && Number.isFinite(override.x) && Number.isFinite(override.y)) {
+    x = override.x;
+    y = pageHeight - override.y - boxHeight;
+  } else if (foundX !== null && foundY !== null) {
+    // Found existing Career141 box: place the updated box right over it
+    x = Math.max(15, Math.min(pageWidth - boxWidth - 15, foundX));
+    y = Math.max(15, Math.min(pageHeight - boxHeight - 15, foundY));
+  } else {
+    // Default top-right placement
+    x = Math.max(15, pageWidth - boxWidth - 25);
+    const yTop = pageHeight - 25;
+    y = Math.max(15, yTop - boxHeight);
+  }
+
+  // Draw solid white box with green border to cleanly cover any existing box underneath
+  page.drawRectangle({
+    x,
+    y,
+    width: boxWidth,
+    height: boxHeight,
+    color: rgb(1, 1, 1),
+    borderColor: rgb(GREEN.r, GREEN.g, GREEN.b),
+    borderWidth: 1.5,
+  });
+
+  let textY = y + boxHeight - padding - 10;
+  for (let i = 0; i < lines.length; i++) {
+    const isHeader = i === 0;
+    page.drawText(lines[i], {
+      x: x + padding,
+      y: textY,
+      size: isHeader ? 9.5 : 8.5,
+      font: isHeader ? fontBold : font,
+      color: rgb(GREEN.r, GREEN.g, GREEN.b),
+    });
+    textY -= lineHeight;
+  }
+
+  return await doc.save();
 }
 
 function textBlock(

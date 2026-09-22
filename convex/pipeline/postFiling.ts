@@ -47,7 +47,7 @@ export async function routeByPosts(
     return { alsoTo: [], note: `No job post matched "${input.subject.slice(0, 80)}", so the candidate went to the database.` };
   }
   const how =
-    pick.how === "linkedin_job" ? "the LinkedIn job link" : pick.how === "campaign_code" ? "the campaign code" : `the ${pick.confidence === "keyword" ? "keyword" : "title"} "${pick.matchedOn}"`;
+    pick.how === "linkedin_job" ? "the LinkedIn job link" : pick.how === "linkedin_project" ? "the LinkedIn project in the View applicant link" : pick.how === "campaign_code" ? "the campaign code" : `the ${pick.confidence === "keyword" ? "keyword" : "title"} "${pick.matchedOn}"`;
   const extra = pick.alsoTo.length ? `, and ${pick.alsoTo.length} more opening${pick.alsoTo.length > 1 ? "s" : ""} with the same advert` : "";
   return {
     jobId: pick.openingId as Id<"jobs">,
