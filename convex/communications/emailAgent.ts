@@ -2,6 +2,14 @@ import { action, internalAction, internalMutation, query, internalQuery } from "
 import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
+import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
+
+/** Which channel a shared mailbox's CVs are recorded under. */
+function inboxChannel(inbox: string): string {
+  const box = inbox.toLowerCase();
+  if (inbox === process.env.LINKEDIN_SHARED_INBOX || box === "linkedin@career141.com") return "linkedin";
+  return box === "cv@career141.com" ? "email" : "email_campaign";
+}
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
 import { followUpCancelledReason, isEmail, sendFollowUpMail } from "../lib/graphMail";
@@ -313,9 +321,21 @@ export const pollEmailInbox = action({
       
       // Intelligent Email Routing via LLMia LLM
       let resolvedJobId = jobId;
-      
-      // Fetch active jobs for LLM to evaluate
-      const activeJobs = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
+
+      // With C141_POST_ROUTING on, the job comes from the post rules alone —
+      // LinkedIn job number, campaign code, exact title / old title / alias —
+      // and nothing is guessed (pipeline/postFiling.ts, 22 September). A per-job
+      // mailbox (jobId pinned) is its job already.
+      let postRoute: EmailRoute | null = null;
+      if (postRoutingOn() && !resolvedJobId) {
+        postRoute = await routeByPosts(ctx, { subject, body: emailBody, channel: inboxChannel(targetInboxEmail) });
+        resolvedJobId = postRoute.jobId;
+        console.log(`[EmailAgent] ${postRoute.note}`);
+      }
+
+      // Fetch active jobs for LLM to evaluate — the old routing, used only
+      // while post routing is off.
+      const activeJobs = postRoutingOn() ? [] : await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
       
       if (!resolvedJobId && activeJobs.length > 0) {
         // Fallback 1: Fast direct title / keyword matching from email subject
@@ -409,6 +429,9 @@ Respond ONLY with a valid JSON object in this exact format:
           attachmentName: attachment.name ?? "cv.pdf",
           contentType: attachment.contentType || "application/pdf",
           resolvedJobId: resolvedJobId || undefined,
+          jobPostId: postRoute?.jobPostId,
+          alsoTo: postRoute?.alsoTo.length ? postRoute.alsoTo : undefined,
+          routeNote: postRoute?.note,
           rawSender: senderEmail,
           // Carried through so the routing downstream can read the headline.
           // It was read here and dropped, which left the only reliable signal
@@ -852,8 +875,16 @@ export const processSingleRecoveredEmail = action({
     let resolvedJobId: any = args.targetJobId ?? undefined;
     const subjectText = args.subject ?? "";
     const bodyText = args.emailBody ?? "";
-    
-    if (!resolvedJobId) {
+
+    // Post routing: the same rules as the live poller, no model (22 September).
+    let postRoute: EmailRoute | null = null;
+    if (postRoutingOn() && !resolvedJobId) {
+      postRoute = await routeByPosts(ctx, { subject: subjectText, body: bodyText, channel: inboxChannel(args.targetInboxEmail) });
+      resolvedJobId = postRoute.jobId;
+      console.log(`[EmailRecovery] ${postRoute.note}`);
+    }
+
+    if (!resolvedJobId && !postRoutingOn()) {
       const activeJobs = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
       if (activeJobs.length > 0) {
         try {
@@ -961,6 +992,9 @@ Respond ONLY with a valid JSON object in this exact format:
       } else {
         await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
           jobId: resolvedJobId || undefined,
+          jobPostId: postRoute?.jobPostId,
+          alsoTo: postRoute?.alsoTo.length ? postRoute.alsoTo : undefined,
+          routeNote: postRoute?.note,
           sourceChannel: sourceChannel,
           rawSender: args.rawSender,
           s3Key: s3Key,
@@ -1178,6 +1212,9 @@ export const processSingleEmailAttachment = internalAction({
     attachmentName: v.string(),
     contentType: v.string(),
     resolvedJobId: v.optional(v.id("jobs")),
+    jobPostId: v.optional(v.id("jobPosts")),
+    alsoTo: v.optional(v.array(v.object({ jobId: v.id("jobs"), jobPostId: v.id("jobPosts") }))),
+    routeNote: v.optional(v.string()),
     rawSender: v.optional(v.string()),
     // The headline is what says WHICH of a TA's adverts this is for. The old
     // routing read it in the poller and threw it away before getting here, so
@@ -1207,6 +1244,25 @@ export const processSingleEmailAttachment = internalAction({
 
       const isAlreadyIngested = await ctx.runQuery(api.communications.emailAgent.checkFileHashExists, { fileHash });
       if (isAlreadyIngested) {
+        // The same CV sent for another job: with post routing, file the
+        // person we already have to that job instead of dropping the email.
+        // Nothing is uploaded again — ingestion links the existing candidate.
+        if (postRoutingOn() && args.resolvedJobId) {
+          await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+            jobId: args.resolvedJobId,
+            jobPostId: args.jobPostId,
+            alsoTo: args.alsoTo,
+            routeNote: args.routeNote,
+            sourceChannel: inboxChannel(args.targetInboxEmail),
+            rawSender: args.rawSender,
+            fileHash,
+            fileName: args.attachmentName,
+            fileType: args.contentType || "application/pdf",
+            fileSizeBytes: fileBuffer.length,
+            extractionDelayMs: args.currentExtractionDelayMs,
+          });
+          return;
+        }
         console.log(`[processSingleEmailAttachment] Attachment ${args.attachmentName} (${fileHash.slice(0, 8)}) already ingested. Skipping upload.`);
         return;
       }
@@ -1237,6 +1293,10 @@ export const processSingleEmailAttachment = internalAction({
       } else {
         await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
           jobId: args.resolvedJobId || undefined,
+          jobPostId: args.jobPostId,
+          alsoTo: args.alsoTo,
+          routeNote: args.routeNote,
+          metaHeadline: postRoutingOn() && args.subject ? args.subject.slice(0, 200) : undefined,
           sourceChannel,
           rawSender: args.rawSender,
           s3Key,

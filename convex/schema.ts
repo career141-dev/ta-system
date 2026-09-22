@@ -604,6 +604,12 @@ export default defineSchema({
     metaSourceId: v.optional(v.string()),
     metaHeadline: v.optional(v.string()),
     assignToJob: v.optional(v.string()),
+    // Post routing on the shared mailboxes (pipeline/postFiling.ts, 22 Sep):
+    // the advert the email matched, the other openings that advert serves, and
+    // how it was decided.
+    assignToJobPost: v.optional(v.string()),
+    alsoAssignTo: v.optional(v.array(v.object({ jobId: v.string(), jobPostId: v.string() }))),
+    routeNote: v.optional(v.string()),
     uploadedBy: v.string(),
     status: v.string(),
     errorMessage: v.optional(v.string()),

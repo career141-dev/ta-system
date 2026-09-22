@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { addJobPost, deleteJobPost, setPostStatus, transferCvs, updatePost } from "@/app/actions";
+import { addJobPost, deleteJobPost, setPostStatus, testPostRouteInline, transferCvs, updatePost } from "@/app/actions";
+import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { TokenInput, inputClass } from "./form";
 import { Confirm } from "./Confirm";
 import type { JobPost, User } from "@/data/types";
@@ -125,6 +126,8 @@ export function PostManager({
         </form>
       )}
 
+      <RouteTester openingId={openingId} bare={bare} />
+
       <div className="divide-y divide-rule">
         {posts.length === 0 && (
           <p className="px-7 py-12 text-center text-[13px] text-ink-faint">
@@ -157,24 +160,30 @@ export function PostManager({
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px] text-ink-soft">
-                    <span>{p.country ?? "No region set"}</span>
+                    <span>{[p.city, p.country].filter(Boolean).join(", ") || "No region set"}</span>
                     <span className="text-ink-faint">·</span>
                     <span>{ta?.name ?? "Unassigned"}</span>
                     {/*
-                      The mailbox the advert points at belongs to the TA, not
-                      to this post — one address takes every job that TA is
-                      running, and the headline decides which. Showing a
-                      made-up per-post address here would be showing an address
-                      nothing delivers to.
+                      For now applications arrive at the desk's shared
+                      mailboxes (linkedin@, cv@) and are filed to a post by its
+                      LinkedIn job link, then its title, old titles and aliases
+                      (22 September). A TA's own applications mailbox, once set
+                      on People, is shown too — it is where their adverts will
+                      point next.
                     */}
-                    {ta?.routingEmail ? (
+                    {ta?.routingEmail && (
                       <code className="rounded-md bg-paper px-2 py-1 text-[11.5px] text-ink-soft">
                         {ta.routingEmail}
                       </code>
+                    )}
+                    {p.externalUrl ? (
+                      <a href={p.externalUrl} target="_blank" rel="noreferrer" className="text-brand hover:underline">
+                        LinkedIn job
+                      </a>
                     ) : (
-                      <span className="text-[11.5px] text-warn">
-                        No mailbox on {ta?.name ?? "this TA"} — applications cannot be routed.
-                      </span>
+                      p.channel === "linkedin" && (
+                        <span className="text-[11.5px] text-ink-faint">No LinkedIn job link — filed by title only</span>
+                      )
                     )}
                   </div>
 
@@ -193,10 +202,10 @@ export function PostManager({
                     </div>
                   )}
 
-                  {p.aliasKeywords.length > 0 && (
+                  {(p.aliasKeywords.length > 0 || p.previousTitles.length > 0) && (
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                       <span className="text-[11.5px] text-ink-faint">Headline also matches:</span>
-                      {p.aliasKeywords.map((k) => (
+                      {[...p.previousTitles, ...p.aliasKeywords].map((k) => (
                         <span
                           key={k}
                           className="rounded-md border border-rule px-2 py-[3px] text-[11.5px] text-ink-soft"
@@ -313,6 +322,31 @@ export function PostManager({
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="postId" value={p.id} />
 
+                  <label className="sm:col-span-2">
+                    <span className="mb-2 block text-[12.5px] font-medium">
+                      Title on LinkedIn
+                      <span className="ml-2 font-normal text-[11.5px] text-ink-faint">
+                        renamed? the old title keeps routing here
+                      </span>
+                    </span>
+                    <input name="title" required defaultValue={p.title} className={inputClass} />
+                  </label>
+
+                  <label className="sm:col-span-2">
+                    <span className="mb-2 block text-[12.5px] font-medium">
+                      LinkedIn job link
+                      <span className="ml-2 font-normal text-[11.5px] text-ink-faint">
+                        the surest match — LinkedIn puts the job number in every application email
+                      </span>
+                    </span>
+                    <input
+                      name="externalUrl"
+                      defaultValue={p.externalUrl ?? ""}
+                      placeholder="https://www.linkedin.com/jobs/view/4012345678"
+                      className={inputClass}
+                    />
+                  </label>
+
                   <div className="sm:col-span-2">
                     <span className="mb-2 block text-[12.5px] font-medium">
                       Alias titles
@@ -328,7 +362,12 @@ export function PostManager({
                   </div>
 
                   <label>
-                    <span className="mb-2 block text-[12.5px] font-medium">Region</span>
+                    <span className="mb-2 block text-[12.5px] font-medium">City</span>
+                    <input name="city" defaultValue={p.city ?? ""} placeholder="Colombo" className={inputClass} />
+                  </label>
+
+                  <label>
+                    <span className="mb-2 block text-[12.5px] font-medium">Country</span>
                     <input
                       name="country"
                       defaultValue={p.country ?? ""}
@@ -372,9 +411,12 @@ export function PostManager({
                   </div>
 
                   <div className="sm:col-span-2">
-                    <button className="rounded-full bg-brand px-5 py-2.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
+                    <SubmitButton
+                      pendingLabel="Saving…"
+                      className="rounded-full bg-brand px-5 py-2.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"
+                    >
                       Save post
-                    </button>
+                    </SubmitButton>
                   </div>
                 </form>
               )}
@@ -383,5 +425,46 @@ export function PostManager({
         })}
       </div>
     </section>
+  );
+}
+
+/**
+ * Paste an application email's subject, see which post it would be filed to.
+ *
+ * The shared mailboxes file by the post rules alone, so a title or alias that
+ * does not match sends applicants to the database instead of this opening.
+ * This lets the TA check before the CVs come, with the same rules
+ * (post routing, 22 September).
+ */
+function RouteTester({ openingId, bare }: { openingId: string; bare: boolean }) {
+  const test = useInline(testPostRouteInline);
+  return (
+    <form
+      onSubmit={(e) => test.run(submitted(e).formData)}
+      className={`${bare ? "pb-4" : "border-b border-rule px-7 py-5"} flex flex-col gap-2`}
+    >
+      <input type="hidden" name="openingId" value={openingId} />
+      <span className="text-[12.5px] font-medium">Test a subject</span>
+      <div className="flex flex-wrap items-center gap-2.5">
+        <input
+          id={`route-test-${openingId}`}
+          name="subject"
+          required
+          placeholder="New application: Head of Finance from Nimal Perera"
+          aria-label="An application email's subject"
+          className={`${inputClass} min-w-[260px] flex-1`}
+        />
+        <SubmitButton
+          busy={test.pending}
+          locked={test.pending}
+          pendingLabel="Checking…"
+          tone="dark"
+          className="rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+        >
+          Check
+        </SubmitButton>
+      </div>
+      <ActionNote result={test.result} />
+    </form>
   );
 }

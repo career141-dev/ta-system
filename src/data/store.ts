@@ -3590,7 +3590,14 @@ const rawRepo = {
 
     const openingId = opts.openingId ?? item.openingId;
     if (openingId) {
-      repo.addCandidateToOpening(candidateId, openingId, byUserId, item.jobPostId, {
+      // Placed where it was routed: on its post. Placed on another opening by
+      // hand: on that opening's newest post, so its TA sees it — the routed
+      // post belongs to a different opening (post routing, 22 September).
+      const postId =
+        openingId === item.openingId
+          ? item.jobPostId
+          : [...repo.jobPosts(openingId)].sort((a, b) => (b.postedAt ?? b.createdAt) - (a.postedAt ?? a.createdAt))[0]?.id ?? null;
+      repo.addCandidateToOpening(candidateId, openingId, byUserId, postId, {
         kind: "intake",
         source: item.source,
       });

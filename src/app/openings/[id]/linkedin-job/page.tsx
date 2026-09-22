@@ -119,6 +119,21 @@ export default async function LinkedInJobPage({
             />
           </div>
         </details>
+      ) : posts.length === 0 ? (
+        // With no post, the shared mailboxes have nothing to file this
+        // opening's applications to — they go to the database instead
+        // (post routing, 22 September). Said here, where it is fixed.
+        <div className="mb-5 rounded-xl border border-warn/40 bg-warn-soft px-5 py-4">
+          <p className="text-[12.5px] font-medium text-warn">
+            This opening has no job post, so LinkedIn applications cannot reach it.
+          </p>
+          <p className="mt-1 text-[12px] text-ink-soft">
+            Add the post with the title exactly as it reads on LinkedIn.
+          </p>
+          <div className="mt-3">
+            <PostManager openingId={id} posts={[]} users={repo.users()} countsByPost={countsByPost} bare />
+          </div>
+        </div>
       ) : (
         posts.length > 0 && (
           <div className="mb-5 flex flex-wrap items-center gap-1.5">
@@ -144,12 +159,14 @@ export default async function LinkedInJobPage({
                 </span>
               </Link>
             ))}
-            <Link
-              href={`/openings/${id}/linkedin-job?post=${posts[0].id}`}
-              className="ml-1 text-[12px] text-ink-faint transition-colors hover:text-ink"
-            >
-              Settings
-            </Link>
+            <details className="basis-full">
+              <summary className="mt-2 cursor-pointer text-[12px] text-ink-faint transition-colors hover:text-ink">
+                Advert settings — titles, aliases, LinkedIn links
+              </summary>
+              <div className="pt-3">
+                <PostManager openingId={id} posts={posts} users={repo.users()} countsByPost={countsByPost} bare />
+              </div>
+            </details>
           </div>
         )
       )}

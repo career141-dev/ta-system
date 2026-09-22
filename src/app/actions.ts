@@ -968,11 +968,68 @@ export async function updatePost(formData: FormData) {
     .filter(Boolean);
   const country = String(formData.get("country") ?? "").trim() || null;
   const assignedTaId = String(formData.get("assignedTaId") ?? "") || null;
-  const r = repo.updatePost(postId, { aliasKeywords: aliases, country, assignedTaId });
+  const patch: Partial<import("@/data/types").JobPost> = { aliasKeywords: aliases, country, assignedTaId };
+  // The title as it reads on LinkedIn now. Renaming keeps the old one as a
+  // previous title (store.updatePost), so applicants who clicked before the
+  // edit still reach this post (post routing, 22 September).
+  if (formData.has("title")) {
+    const title = String(formData.get("title") ?? "").trim().replace(/\s+/g, " ");
+    if (!title) await fail("A post needs the title candidates see.");
+    patch.title = title.slice(0, 160);
+  }
+  if (formData.has("city")) patch.city = String(formData.get("city") ?? "").trim() || null;
+  // The LinkedIn job link carries the job's number, which LinkedIn puts in
+  // every application email — the surest way to the right post.
+  if (formData.has("externalUrl")) {
+    const url = String(formData.get("externalUrl") ?? "").trim();
+    const { linkedinJobId } = await import("../../convex/lib/postRouting");
+    if (url && !linkedinJobId(url)) {
+      await fail("That is not a LinkedIn job link. Copy it from the job's page, e.g. linkedin.com/jobs/view/4012345678.");
+    }
+    patch.externalUrl = url || null;
+  }
+  const r = repo.updatePost(postId, patch);
   // A refusal is shown, not swallowed.
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
   await back("Job post saved.");
+}
+
+export async function updatePostInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => updatePost(formData));
+}
+
+/**
+ * Which post an application email would be filed to — the same rules the
+ * shared mailboxes use (convex/lib/postRouting.ts routeShared). Changes
+ * nothing; it is for checking a post's title and aliases before the CVs come.
+ */
+export async function testPostRoute(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const subject = String(formData.get("subject") ?? "").trim();
+  if (!subject) await fail("Paste an application email's subject first.");
+  const { routeShared } = await import("../../convex/lib/postRouting");
+  const open = new Set(repo.openings().filter((o) => o.status === "open").map((o) => o.id));
+  const posts = repo
+    .jobPosts()
+    .filter((p) => open.has(p.openingId) && (p.status === "live" || p.status === "draft"));
+  const pick = routeShared({ subject, body: String(formData.get("body") ?? ""), linkedinOnly: true }, posts);
+  if (!pick) await note("No post matches this subject, so the CV would go to the database only. Add the title as an alias on the right post.");
+  const name = (openingId: string, postId: string) => {
+    const o = repo.opening(openingId);
+    const p = posts.find((x) => x.id === postId);
+    return `${p?.title ?? o?.title ?? "a post"}${o ? ` — ${repo.client(o.clientId)?.name ?? o.title}` : ""}`;
+  };
+  const how =
+    pick!.how === "linkedin_job" ? "the LinkedIn job link" : pick!.how === "campaign_code" ? "the campaign code" : pick!.confidence === "keyword" ? `the alias "${pick!.matchedOn}"` : `the title "${pick!.matchedOn}"`;
+  const also = pick!.alsoTo.length ? ` Also filed to: ${pick!.alsoTo.map((a) => name(a.openingId, a.postId)).join("; ")}.` : "";
+  const here = pick!.openingId === String(formData.get("openingId")) ? "" : " (another opening)";
+  await done(`Would go to ${name(pick!.openingId, pick!.postId)}${here}, by ${how}.${also}`);
+}
+
+export async function testPostRouteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => testPostRoute(formData));
 }
 
 export async function setPostStatus(formData: FormData) {

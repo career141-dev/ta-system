@@ -15,6 +15,7 @@ import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
 import { scheduleExtraction } from "./requirements";
 import { autoFollowUpPatch } from "../lib/followUpScope";
+import { firstPostFor } from "../lib/firstPost";
 
 
 export const list = internalQuery({
@@ -321,6 +322,11 @@ export const create = internalMutation({
         isActive: true,
       });
     }
+
+    // Its first advert, so the shared mailboxes can route applications to it
+    // from the start (ta/firstPost.ts, 22 September).
+    const made = await ctx.db.get(jobId);
+    if (made) await ctx.db.insert("jobPosts", firstPostFor(made, Date.now()));
 
     if (args.notesMarkdown) {
       await ctx.db.insert("briefs", {
