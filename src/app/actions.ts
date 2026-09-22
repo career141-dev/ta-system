@@ -978,13 +978,17 @@ export async function updatePost(formData: FormData) {
     patch.title = title.slice(0, 160);
   }
   if (formData.has("city")) patch.city = String(formData.get("city") ?? "").trim() || null;
-  // The LinkedIn job link carries the job's number, which LinkedIn puts in
-  // every application email — the surest way to the right post.
+  // The LinkedIn link carries a number LinkedIn puts in every application
+  // email — the surest way to the right post. Either the job's own link, or
+  // the Recruiter project's: `talent/hire/…`, or the "View applicant" link
+  // copied from any application email for this job (22 September).
   if (formData.has("externalUrl")) {
     const url = String(formData.get("externalUrl") ?? "").trim();
-    const { linkedinJobId } = await import("../../convex/lib/postRouting");
-    if (url && !linkedinJobId(url)) {
-      await fail("That is not a LinkedIn job link. Copy it from the job's page, e.g. linkedin.com/jobs/view/4012345678.");
+    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
+    if (url && !linkedinJobId(url) && !linkedinProjectId(url)) {
+      await fail(
+        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+      );
     }
     patch.externalUrl = url || null;
   }
@@ -1022,7 +1026,7 @@ export async function testPostRoute(formData: FormData) {
     return `${p?.title ?? o?.title ?? "a post"}${o ? ` — ${repo.client(o.clientId)?.name ?? o.title}` : ""}`;
   };
   const how =
-    pick!.how === "linkedin_job" ? "the LinkedIn job link" : pick!.how === "campaign_code" ? "the campaign code" : pick!.confidence === "keyword" ? `the alias "${pick!.matchedOn}"` : `the title "${pick!.matchedOn}"`;
+    pick!.how === "linkedin_job" ? "the LinkedIn job link" : pick!.how === "linkedin_project" ? "the LinkedIn project in the View applicant link" : pick!.how === "campaign_code" ? "the campaign code" : pick!.confidence === "keyword" ? `the alias "${pick!.matchedOn}"` : `the title "${pick!.matchedOn}"`;
   const also = pick!.alsoTo.length ? ` Also filed to: ${pick!.alsoTo.map((a) => name(a.openingId, a.postId)).join("; ")}.` : "";
   const here = pick!.openingId === String(formData.get("openingId")) ? "" : " (another opening)";
   await done(`Would go to ${name(pick!.openingId, pick!.postId)}${here}, by ${how}.${also}`);
