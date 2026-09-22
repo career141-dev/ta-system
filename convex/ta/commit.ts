@@ -23,7 +23,7 @@
 import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
 import { resolveActor } from "../lib/auth";
-import { TABLES, sameValue, type ModelCx, type Row } from "./model/tables";
+import { TABLES, looselySame, sameValue, type ModelCx, type Row } from "./model/tables";
 
 const opValidator = v.object({
   table: v.string(),
@@ -117,9 +117,9 @@ export const apply = internalMutation({
       const before = op.before as Row;
       const after = rename(op.after) as Row;
       for (const field of op.changed ?? []) {
-        if (!sameValue(current[field], before[field])) {
+        if (!looselySame(current[field], before[field])) {
           // If the database already holds what this action wants to write, continue
-          if (sameValue(current[field], after?.[field])) continue;
+          if (looselySame(current[field], after?.[field])) continue;
           throw new Error(`conflict:${op.table}:${op.key}:${field}: changed by someone else since it was loaded`);
         }
       }

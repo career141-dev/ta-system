@@ -108,7 +108,11 @@ Instructions:
 }`;
 
   try {
-    const aiRes = await gemini("jd", prompt, { maxTokens: 900, temperature: 0.2 });
+    // DeepSeek V4 Flash through OpenRouter, as the "parse" task: a fixed JSON
+    // answer with its thinking switched off. Under "jd" it could spend the
+    // whole 900-token budget reasoning and return nothing (22 September).
+    const aiRes = await gemini("parse", prompt, { maxTokens: 900, temperature: 0.2 });
+    if (!aiRes.ok) console.warn("[snippet refine] AI did not answer:", aiRes.reason, aiRes.detail ?? "");
     if (aiRes.ok && aiRes.text) {
       const jsonMatch = aiRes.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
