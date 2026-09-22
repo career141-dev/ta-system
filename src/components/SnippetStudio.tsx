@@ -122,6 +122,8 @@ export function SnippetStudio({
   const [layout, setLayout] = useState<SnippetLayout>(DEFAULT_LAYOUT);
   const [selected, setSelected] = useState<BlockKey | null>("titleMain");
   const [showType, setShowType] = useState(false);
+  const [refining, setRefining] = useState(false);
+  const [refinedNote, setRefinedNote] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const set = <K extends keyof SnippetFields>(k: K, v: SnippetFields[K]) =>
@@ -135,6 +137,50 @@ export function SnippetStudio({
   const onCanvas = useCallback((c: HTMLCanvasElement | null) => {
     canvasRef.current = c;
   }, []);
+
+  const refineLanguage = async () => {
+    if (refining) return;
+    setRefining(true);
+    setRefinedNote(null);
+    try {
+      const res = await fetch("/api/snippet/refine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jobTitle: fields.jobTitle,
+          titleLead: fields.titleLead,
+          titleMain: fields.titleMain,
+          industry: fields.industry,
+          location: fields.location,
+          company: fields.company,
+          package: fields.package,
+          gender: fields.gender,
+          bullets: fields.bullets,
+          level: fields.level,
+        }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data) {
+        setFields((f) => ({
+          ...f,
+          titleLead: json.data.titleLead ?? f.titleLead,
+          titleMain: json.data.titleMain ?? f.titleMain,
+          industry: json.data.industry ?? f.industry,
+          location: json.data.location ?? f.location,
+          company: json.data.company ?? f.company,
+          package: json.data.package ?? f.package,
+          gender: json.data.gender ?? f.gender,
+          bullets: json.data.bullets && json.data.bullets.length > 0 ? json.data.bullets : f.bullets,
+        }));
+        setRefinedNote("All labels refined for social card.");
+        setTimeout(() => setRefinedNote(null), 4000);
+      }
+    } catch (err) {
+      console.error("Language refinement failed:", err);
+    } finally {
+      setRefining(false);
+    }
+  };
 
   // Arrow keys nudge the selection, the way they do in every canvas tool.
   useEffect(() => {
@@ -236,6 +282,45 @@ export function SnippetStudio({
       {/* ─── card and its editor ───────────────────────────────────────── */}
       <section className="flex flex-col gap-4">
         <div className="overflow-hidden rounded-xl border border-rule bg-surface">
+          {/* Header with Block title and Refine Button */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule/70 bg-paper/30 px-5 py-3">
+            <span className="text-[12px] font-semibold uppercase tracking-wider text-ink-faint">
+              {selected ? BLOCK_LABEL[selected] : "Snippet Content"}
+            </span>
+
+            <div className="flex items-center gap-2.5">
+              {refinedNote && (
+                <span className="text-[11.5px] font-medium text-brand animate-fade-in">
+                  ✓ {refinedNote}
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={refining}
+                onClick={refineLanguage}
+                className="inline-flex items-center gap-1.5 rounded-full border border-brand/40 bg-paper px-3 py-1 text-[11.5px] font-medium text-brand shadow-xs transition-all hover:bg-brand hover:text-white disabled:opacity-50"
+                title="Polish titles and requirements with AI"
+              >
+                {refining ? (
+                  <>
+                    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                    </svg>
+                    Refining language…
+                  </>
+                ) : (
+                  <>
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                    </svg>
+                    Refine language with AI
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
           {/* What you clicked, and what it says. */}
           <div className="flex flex-wrap items-end gap-3 px-5 py-4">
             {!selected || !b ? (
@@ -244,10 +329,6 @@ export function SnippetStudio({
               </p>
             ) : (
               <>
-                <span className="mb-2 w-full text-[12px] font-semibold uppercase tracking-wider text-ink-faint">
-                  {BLOCK_LABEL[selected]}
-                </span>
-
                 {FIELD_FOR[selected].length === 0 && (
                   <p className="mb-2 text-[12.5px] text-ink-soft">
                     Set by the level swatches on the left.

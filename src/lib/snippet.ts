@@ -184,6 +184,22 @@ export const BLOCK_ORDER: BlockKey[] = [
  *  uses; the rest are there for a TA who wants a different look. */
 export const SNIPPET_FONTS = ["Outfit", "Poppins", "Jost", "Quicksand", "Montserrat", "Figtree"];
 
+/**
+ * Clean and refine a raw requirement bullet point for the snippet social card.
+ * Removes filler phrases, bullet symbols, and ensures crisp formatting.
+ */
+export function cleanSnippetBullet(text: string): string {
+  let s = text
+    .replace(/^[-*•>]\s*/, "")
+    .replace(/^(\d+[\.\)]\s*)/, "")
+    .replace(/^(candidate (should|must|needs to)|must (have|possess|be)|should (have|possess|be)|responsible for|proven experience in|proven ability to|ability to)\s+/i, "")
+    .trim();
+  if (!s) return "";
+  s = s.charAt(0).toUpperCase() + s.slice(1);
+  s = s.replace(/[.:;,]+$/, "");
+  return s;
+}
+
 export function snippetFromOpening(input: {
   title: string;
   clientIndustry: string;
@@ -204,6 +220,8 @@ export function snippetFromOpening(input: {
     .filter((l) => l.trim().startsWith("- "))
     .map((l) => l.replace(/^-\s+/, "").trim())
     .filter((l) => l && !/^to be completed/i.test(l))
+    .map(cleanSnippetBullet)
+    .filter(Boolean)
     .slice(0, 4);
 
   /**
