@@ -23,6 +23,8 @@ const WEIGHTS = [
   { v: 500, label: "Medium" },
   { v: 600, label: "Semibold" },
   { v: 700, label: "Bold" },
+  { v: 800, label: "Extra Bold" },
+  { v: 900, label: "Black" },
 ];
 
 const ALIGN: { v: TextBlock["align"]; d: string }[] = [
@@ -36,8 +38,8 @@ const ALIGN: { v: TextBlock["align"]; d: string }[] = [
 const FIELD_FOR: Record<BlockKey, (keyof SnippetFields)[]> = {
   levelPill: [],
   industry: ["industry"],
-  titleLead: ["jobTitle"],
-  titleMain: ["jobTitle"],
+  titleLead: ["titleLead", "titleMain"],
+  titleMain: ["titleLead", "titleMain"],
   location: ["location"],
   company: ["company"],
   packageLine: ["package"],
@@ -48,6 +50,8 @@ const FIELD_FOR: Record<BlockKey, (keyof SnippetFields)[]> = {
 
 const FIELD_LABEL: Partial<Record<keyof SnippetFields, string>> = {
   jobTitle: "Job title",
+  titleLead: "Title (top line)",
+  titleMain: "Title (main line - bold)",
   industry: "Industry",
   location: "Location",
   company: "Company",
@@ -159,7 +163,10 @@ export function SnippetStudio({
     if (!c) return;
     await document.fonts.ready;
     const a = document.createElement("a");
-    a.download = `${fields.jobTitle.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-snippet.png`;
+    const name = (fields.titleMain || fields.titleLead || fields.jobTitle || "snippet")
+      .replace(/[^a-z0-9]+/gi, "-")
+      .toLowerCase();
+    a.download = `${name}-snippet.png`;
     a.href = c.toDataURL("image/png");
     a.click();
   };
@@ -263,7 +270,7 @@ export function SnippetStudio({
                     <label key={f} className="min-w-[220px] flex-1">
                       <span className="mb-1.5 block text-[12px] text-ink-soft">{FIELD_LABEL[f]}</span>
                       <input
-                        value={fields[f] as string}
+                        value={(fields[f] as string) ?? ""}
                         onChange={(e) => set(f, e.target.value as never)}
                         className={inputClass}
                       />
@@ -273,9 +280,7 @@ export function SnippetStudio({
 
                 {(selected === "titleLead" || selected === "titleMain") && (
                   <p className="w-full text-[11.5px] text-ink-faint">
-                    Use / to split the title over two lines — the part after the last / is shown
-                    large. Example: &ldquo;Senior / Software Engineer&rdquo;. Without a /, the last
-                    two words go on the large line.
+                    Edit the top line (e.g. &ldquo;Executive / Senior Executive&rdquo;) and the bold main line (e.g. &ldquo;ACQUISITION&rdquo;) independently above.
                   </p>
                 )}
               </>

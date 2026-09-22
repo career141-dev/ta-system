@@ -13,6 +13,8 @@
 
 export interface SnippetFields {
   jobTitle: string;
+  titleLead?: string;
+  titleMain?: string;
   level: LevelKey;
   industry: string;
   location: string;
@@ -84,7 +86,7 @@ export interface TextBlock {
   /** Text wraps inside this width. */
   w: number;
   size: number;
-  /** 300 light, 400 regular, 500 medium, 600 semibold, 700 bold. */
+  /** 300 light, 400 regular, 500 medium, 600 semibold, 700 bold, 800 extra bold, 900 black. */
   weight: number;
   color: string;
   align: "left" | "center" | "right";
@@ -141,8 +143,8 @@ export const DEFAULT_LAYOUT: SnippetLayout = {
     color: "#ffffff", align: "center", uppercase: true, letterSpacing: 0.002,
   }),
   industry: T({ font: BODY, x: 90.3, y: 241.3, w: 400, size: 42.7, weight: 700, color: "#ffffff" }),
-  titleLead: T({ x: 90.3, y: 357.5, w: 960, size: 74.7, weight: 300, lineHeight: 1, letterSpacing: -0.042 }),
-  titleMain: T({ x: 90.3, y: 435.2, w: 960, size: 93.4, weight: 700, lineHeight: 1, letterSpacing: -0.042 }),
+  titleLead: T({ x: 90.3, y: 357.5, w: 960, size: 74.7, weight: 400, lineHeight: 1, letterSpacing: -0.042 }),
+  titleMain: T({ x: 90.3, y: 435.2, w: 960, size: 93.4, weight: 800, lineHeight: 1, letterSpacing: -0.042 }),
   location: T({ x: 117.1, y: 567, w: 322, size: 18 }),
   company: T({ x: 539, y: 567, w: 341, size: 18 }),
   packageLine: T({ x: 117.1, y: 641.5, w: 322, size: 18 }),
@@ -227,9 +229,12 @@ export function snippetFromOpening(input: {
   // A client saved without an industry stores "—", which the card printed as
   // a lone dash in the industry band (testing, 21 Sep).
   const industry = /^[\s—–-]*$/.test(input.clientIndustry ?? "") ? "" : input.clientIndustry;
+  const initialTitle = splitTitle(input.title);
 
   return {
     jobTitle: input.title,
+    titleLead: initialTitle.lead,
+    titleMain: initialTitle.main,
     level: levelFromTitle(input.title),
     industry,
     location: input.locations.join(" | ") || "Sri Lanka",

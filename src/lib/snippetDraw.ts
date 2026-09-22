@@ -35,7 +35,8 @@ export const CARD = 1080;
 /** What each block says. Labels like "Package  :  " are design, not content,
  *  so they live here rather than in the fields a TA edits. */
 export function blockParagraphs(fields: SnippetFields, key: BlockKey): Run[][] {
-  const title = splitTitle(fields.jobTitle);
+  const lead = fields.titleLead !== undefined ? fields.titleLead : splitTitle(fields.jobTitle).lead;
+  const main = fields.titleMain !== undefined ? fields.titleMain : splitTitle(fields.jobTitle).main;
   const pill = (k: BlockKey, value: string): Run[][] => [
     [{ text: PILL_LABEL[k] ?? "" }, { text: value, weight: 700 }],
   ];
@@ -46,9 +47,9 @@ export function blockParagraphs(fields: SnippetFields, key: BlockKey): Run[][] {
     case "industry":
       return [[{ text: fields.industry }]];
     case "titleLead":
-      return [[{ text: title.lead }]];
+      return [[{ text: lead }]];
     case "titleMain":
-      return [[{ text: title.main }]];
+      return [[{ text: main }]];
     case "location":
       return pill("location", fields.location);
     case "company":
