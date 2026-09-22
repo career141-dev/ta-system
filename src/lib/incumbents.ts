@@ -127,7 +127,7 @@ async function gather(
   variants: string[],
   deps: IncumbentDeps,
   count: (credits: number) => void,
-): Promise<{ company: string; items: Omit<Evidence, "id">[]; profiles: SearchHit[] }> {
+): Promise<{ company: string; items: Omit<Evidence, "id">[]; profiles: SearchHit[]; errors: string[] }> {
   const t = quoted(variants);
   const queries = [`"${c.name}" ${t}`, `site:linkedin.com/in "${c.name}" ${t}`];
   if (c.isClient) queries.push(`"${c.name}" ${t} appointed OR former OR previously`);
@@ -154,7 +154,12 @@ async function gather(
     seen.add(h.url);
     items.push({ company: c.name, url: h.url, title: h.title, text });
   }
-  return { company: c.name, items, profiles: hits.filter((h) => canonicalProfile(h.url)) };
+  return {
+    company: c.name,
+    items,
+    profiles: hits.filter((h) => canonicalProfile(h.url)),
+    errors: results.map((r) => r.error).filter((e): e is string => Boolean(e)),
+  };
 }
 
 const SYSTEM = `You find who holds a job at named companies, for a recruitment desk at Career141 in Sri Lanka.
@@ -173,7 +178,15 @@ export async function findIncumbents(
 
   const evidence: Evidence[] = [];
   for (const f of found) for (const it of f.items) evidence.push({ ...it, id: `P${evidence.length + 1}` });
-  if (evidence.length === 0) return { rows: [], searches };
+  if (evidence.length === 0) {
+    // Nothing found because the searches were refused is not "nobody holds
+    // the role": the spend cap or a missing key is said as such (review of
+    // PR #11, 22 September).
+    const errors = found.flatMap((f) => f.errors);
+    if (errors.includes("spend_cap")) return { rows: [], searches, modelNote: "spend_cap" };
+    if (errors.includes("no_key")) return { rows: [], searches, modelNote: "no_key" };
+    return { rows: [], searches };
+  }
 
   const client = input.companies.find((c) => c.isClient)?.name ?? "";
   const r = await deps.model(
