@@ -27,10 +27,10 @@ export const SOURCING_STEPS: LoadingStep[] = [
 ];
 
 export const RESEARCH_STEPS: LoadingStep[] = [
-  { after: 0, title: "Reading the role", detail: "Working out what to look into for this opening.", scene: "read" },
-  { after: 8, title: "Searching the web", detail: "Looking for the market, the competitors and the companies that matter.", scene: "search" },
-  { after: 35, title: "Reading the sources", detail: "Checking what each source actually says.", scene: "check" },
-  { after: 60, title: "Writing it up", detail: "Putting the findings together, with where each one came from.", scene: "rank" },
+  { after: 0, title: "Searching the client", detail: "Their website, LinkedIn page, head office and who they compete with.", scene: "search" },
+  { after: 6, title: "Reading the client's site", detail: "Opening their own pages to see what they actually do.", scene: "read" },
+  { after: 14, title: "Searching the competitors", detail: "Finding each competitor's website and LinkedIn page, and reading their site.", scene: "search" },
+  { after: 30, title: "Writing it up", detail: "Sorting what was read into the fields, each with where it came from.", scene: "rank" },
 ];
 
 export const DATABASE_STEPS: LoadingStep[] = [

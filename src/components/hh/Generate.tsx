@@ -30,12 +30,13 @@ export function Generate({
   found?: string;
   searches?: string;
   hasResult: boolean;
-  /** What this feature actually depends on, so the message names the real gap. */
-  needs?: "grounded" | "sourcing";
+  /** What this feature actually depends on, so the message names the real gap.
+   *  "search": web search through Serper, then a model to sort what was read. */
+  needs?: "grounded" | "sourcing" | "search";
 }) {
   const st = aiStatus();
   const missing: string[] = [];
-  if (needs === "sourcing" && !serperConfigured()) {
+  if ((needs === "sourcing" || needs === "search") && !serperConfigured()) {
     missing.push("a web search key — SERPER_API_KEY, or OPENAI_API_KEY with C141_SEARCH_PROVIDER=openai");
   }
   if (!st.configured) missing.push("OPENROUTER_API_KEY (openrouter.ai/keys)");

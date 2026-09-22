@@ -9,6 +9,7 @@ import { ResearchField } from "@/components/hh/ResearchField";
 import { timeAt } from "@/lib/format";
 import { EMPTY_RESEARCH } from "@/data/types";
 import { primeStore } from "@/data/prime";
+import { SENIORITY_LABEL, benchmarkByDefault, seniorityOf } from "@/lib/incumbents";
 
 const CONFIDENCE_TONE = {
   high: "bg-brand-soft text-brand",
@@ -43,8 +44,10 @@ export default async function Page({
   const report = repo.research(id);
   const f = report?.fields ?? EMPTY_RESEARCH;
   const edited = new Set(report?.editedFields ?? []);
+  const rivals = f.competitorProfiles ?? [];
   const entries = repo.benchmarks(id);
   const picked = entries.filter((e) => e.isSelected).length;
+  const senior = benchmarkByDefault(o.title);
 
   return (
     <>
@@ -54,8 +57,9 @@ export default async function Page({
       <Generate
         openingId={id}
         action={runResearchInline}
-        label={`Research ${client?.name ?? "the client"}`}
-        sub="Fills the fields below from the open web, each with its source. Anything it cannot verify is left empty rather than guessed — and anything you correct by hand survives a re-run."
+        label={`Research ${client?.name ?? "the client"}${client?.industry ? ` · ${client.industry}` : ""}`}
+        sub={`Searches the client and its competitors by the name and industry on the client record, reads their websites, and fills the fields below — each with its source.${senior ? " For this role it also finds who holds it now, for Benchmark." : ""} Anything it cannot find is left empty rather than guessed, and anything you correct by hand survives a re-run.`}
+        needs="search"
         err={err}
         hasResult={Boolean(report)}
       />
@@ -88,6 +92,57 @@ export default async function Page({
         </div>
       </section>
 
+      {rivals.length > 0 && (
+        <section className="mt-6 rounded-xl border border-rule bg-surface">
+          <div className="border-b border-rule px-6 py-4">
+            <h2 className="text-[13px] font-semibold">
+              Competitors <span className="ml-1 font-normal text-ink-faint">{rivals.length}</span>
+            </h2>
+            <p className="mt-0.5 text-[12px] text-ink-soft">
+              Named in the search results, then searched and read one by one. Benchmark looks for this role at these companies.
+            </p>
+          </div>
+          <div className="divide-y divide-rule">
+            {rivals.map((c) => (
+              <div key={c.name} className="px-6 py-4">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                  <span className="text-[13.5px] font-semibold">{c.name}</span>
+                  {c.location && <span className="text-[12px] text-ink-faint">{c.location}</span>}
+                  <span className="ml-auto flex gap-3 text-[12px]">
+                    {c.website ? (
+                      <a href={externalUrl(c.website) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                        Website
+                      </a>
+                    ) : (
+                      <span className="text-ink-faint">No website found</span>
+                    )}
+                    {c.linkedin && (
+                      <a href={externalUrl(c.linkedin) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                        LinkedIn
+                      </a>
+                    )}
+                  </span>
+                </div>
+                {c.whatTheyDo && <p className="mt-1 text-[12.5px]">{c.whatTheyDo}</p>}
+                {c.summary && <p className="mt-1 text-[12.5px] text-ink-soft">{c.summary}</p>}
+                {!c.whatTheyDo && !c.summary && (
+                  <p className="mt-1 text-[12px] text-ink-faint">Their pages did not say what they do.</p>
+                )}
+                {c.sources.length > 0 && (
+                  <p className="mt-1.5 flex flex-wrap gap-x-3 text-[11.5px]">
+                    {c.sources.map((s) => (
+                      <a key={s.url} href={externalUrl(s.url) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                        {s.title}
+                      </a>
+                    ))}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {report && (
         <>
           <Sources sources={report.sources} />
@@ -103,11 +158,12 @@ export default async function Page({
           <div>
             <h2 className="text-[15px] font-semibold">Benchmark</h2>
             <p className="mt-0.5 text-[12px] text-ink-soft">
-              Who holds this job now, before, and at competitors. Tick the ones worth searching
-              against — they become target employers in the next Suggestions round.
+              Who holds this role now at {client?.name ?? "the client"}, who held it before, and who holds it at the
+              competitors — from their own leadership pages and the web. Tick the ones worth searching against — they
+              become target employers in the next Suggestions round.
             </p>
           </div>
-          <BenchmarkButton openingId={id} again={entries.length > 0} />
+          <BenchmarkButton openingId={id} again={entries.length > 0} anyway={!senior && entries.length === 0} />
         </div>
 
         {found !== undefined && (
@@ -121,7 +177,9 @@ export default async function Page({
         <div className="overflow-hidden rounded-xl border border-rule bg-surface">
           {entries.length === 0 ? (
             <p className="px-8 py-12 text-center text-[12.5px] leading-relaxed text-ink-faint">
-              Nothing benchmarked yet. Four people we can stand behind beats fifteen we cannot.
+              {senior
+                ? "Nothing benchmarked yet — Research finds who holds the role when it runs. Four people we can stand behind beats fifteen we cannot."
+                : `${o.title} is a ${SENIORITY_LABEL[seniorityOf(o.title)]} role, so Research does not benchmark it. Press Find them anyway if it is needed.`}
             </p>
           ) : (
             <div className="divide-y divide-rule">

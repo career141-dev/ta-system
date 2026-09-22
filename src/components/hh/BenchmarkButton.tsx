@@ -9,7 +9,7 @@ import { ActionNote, SubmitButton, submitted, useInline } from "../Submit";
  * It was a bare form: no sign of the 20–40 seconds it takes, a failure shown
  * in Research's box above, and "nothing found" never shown at all (21 Sep).
  */
-export function BenchmarkButton({ openingId, again }: { openingId: string; again: boolean }) {
+export function BenchmarkButton({ openingId, again, anyway = false }: { openingId: string; again: boolean; anyway?: boolean }) {
   const run = useInline(runBenchmarkInline);
   return (
     <form
@@ -24,7 +24,7 @@ export function BenchmarkButton({ openingId, again }: { openingId: string; again
         tone="dark"
         className="shrink-0 rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
       >
-        {again ? "Run again" : "Find them"}
+        {again ? "Run again" : anyway ? "Find them anyway" : "Find them"}
       </SubmitButton>
       {run.pending && <p className="text-[11.5px] text-ink-faint">Searching the web — usually under a minute. Keep this page open.</p>}
       <ActionNote result={run.result} className="max-w-[520px]" />

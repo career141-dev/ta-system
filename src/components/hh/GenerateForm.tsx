@@ -30,7 +30,7 @@ export function GenerateForm({
   action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
   blocked: boolean;
   hasResult: boolean;
-  needs: "grounded" | "sourcing";
+  needs: "grounded" | "sourcing" | "search";
   /** The label and the line under it. */
   children: ReactNode;
   /** Missing settings, last run's error or count. */
@@ -71,7 +71,7 @@ function Body({
 }: {
   blocked: boolean;
   hasResult: boolean;
-  needs: "grounded" | "sourcing";
+  needs: "grounded" | "sourcing" | "search";
   notes: ReactNode;
   children: ReactNode;
   pending: boolean;

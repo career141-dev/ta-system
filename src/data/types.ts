@@ -751,6 +751,19 @@ export interface ResearchFields {
   competitors: string[];
   socialMedia: string;
   companyOverview: string;
+  /** Each competitor searched and read (22 Sep). Absent on reports made before. */
+  competitorProfiles?: CompetitorProfile[];
+}
+
+/** A competitor as the search found it: addresses from the results, text from their pages. */
+export interface CompetitorProfile {
+  name: string;
+  website: string;
+  linkedin: string;
+  whatTheyDo: string;
+  location: string;
+  summary: string;
+  sources: Citation[];
 }
 
 export const EMPTY_RESEARCH: ResearchFields = {

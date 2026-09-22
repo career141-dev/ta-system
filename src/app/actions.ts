@@ -32,15 +32,14 @@ function redirect(url: string): never {
 import { after } from "next/server";
 import {
   generateJdText,
-  generateResearch,
-  parseResearch,
-  toCitations,
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
-import { FAILURE_MESSAGE, aiStatus, gemini } from "@/lib/ai";
-import { MAX_ROUNDS, benchmarkViaSearch, runSourcing } from "@/lib/sourcing";
-import { canonicalProfile, displayUrl } from "@/lib/serper";
+import { FAILURE_MESSAGE, gemini, modelFor } from "@/lib/ai";
+import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
+import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
+import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
+import { canonicalProfile, displayUrl, serperConfigured } from "@/lib/serper";
 import { profileLink } from "@/lib/url";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
@@ -252,6 +251,8 @@ function searchReasonInWords(code: string): string {
   if (code === "no_serper") return "web search is not set up on this system (no search key). An admin needs to add one.";
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
+  if (code === "nothing_found") return "the search found nothing under the client's name. Check the name on the client record.";
+  if (code === "client_not_searchable") return "the client has no searchable name (a code or \"Confidential\"). Put the real name on the client record.";
   return reasonInWords(code);
 }
 
@@ -2063,14 +2064,27 @@ export async function runResearch(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const res = await researchOpening(openingId, user.id);
   revalidatePath(`/openings/${openingId}/hh/research`);
-  if (!res.ok) await fail(`Research did not run — ${reasonInWords(res.reason)}`);
+  if (!res.ok) await fail(`Research did not run — ${searchReasonInWords(res.reason ?? "")}`);
   const filled = res.filled ?? 0;
   if (filled === 0) {
     await note(
       "The search ran but nothing could be sourced, so every field is still empty. Try again, or fill in what you know by hand.",
     );
   }
-  await done(`Research filled in ${filled} of 8 fields${res.sources ? ` from ${res.sources} sources` : ""}. Check anything going in front of the client.`);
+  const rivals = res.competitors ? ` and ${res.competitors} ${res.competitors === 1 ? "competitor" : "competitors"}` : "";
+  if (res.modelNote) {
+    await note(
+      `The client's website, LinkedIn page${rivals} were found, but the AI could not sort the pages into fields — ${reasonInWords(res.modelNote)} Try again, or fill in the rest by hand.`,
+    );
+  }
+  const o = repo.opening(openingId);
+  const bench =
+    res.people === undefined
+      ? ` Benchmark was not run: ${o?.title ?? "this"} is a ${SENIORITY_LABEL[seniorityOf(o?.title ?? "")]} role — use Find them below if it is needed.`
+      : res.benchmarkNote
+        ? ` Benchmark could not name anyone — ${reasonInWords(res.benchmarkNote)}`
+        : ` Benchmark: ${res.people} ${res.people === 1 ? "person" : "people"} holding the role, each with a source.`;
+  await done(`Research filled in ${filled} of 8 fields${rivals}${res.sources ? ` from ${res.sources} sources` : ""}.${bench} Check anything going in front of the client.`);
 }
 
 export async function runBenchmark(formData: FormData) {
@@ -2080,38 +2094,32 @@ export async function runBenchmark(formData: FormData) {
   const o = repo.opening(openingId);
   if (!o) await fail("The opening could not be found. Reload the page and try again.");
   const client = repo.client(o!.clientId);
-  // Searches, then a cheap sort of what they returned: every named person and
-  // link comes from a result. The older path let a model name people and could
-  // attach an unrelated source to them (13 September review).
-  const run = await benchmarkViaSearch(
+  if (!serperConfigured()) await fail(`Benchmark did not run — ${searchReasonInWords("no_serper")}`);
+  // Who holds the role now, at the client and at the competitors Research
+  // found — their own people pages, then the web (lib/incumbents, 22 Sep).
+  // Pressed by hand, it runs for any role; Research runs it only for senior ones.
+  const research = repo.research(openingId)?.fields;
+  const run = await findIncumbents(
     {
       title: o!.title,
-      clientName: client?.name ?? "the client",
-      clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      jdText: withJobDetails(o!),
-      locations: o!.locations,
-      targetNationalities: o!.targetNationalities,
-      targetGender: o!.targetGender,
-      salaryNote: o!.packageNotes || salaryNoteOf(o!),
-      targetEmployers: [],
-      alreadyKnown: repo.suggestions(openingId).map((x) => canonicalProfile(x.linkedinUrl ?? "")).filter((x): x is string => Boolean(x)),
+      where: o!.locations.join(", "),
+      companies: [
+        { name: client?.name ?? "the client", website: research?.websiteLink || null, isClient: true },
+        ...(research?.competitorProfiles ?? []).map((c) => ({ name: c.name, website: c.website || null, isClient: false })),
+      ],
     },
-    openingId,
+    WEB,
   );
-  // Answered under Benchmark itself. A failure used to land in Research's
-  // red box above, and "nothing found" was never shown at all (21 Sep).
-  if (run.error) await fail(`Benchmark did not run — ${searchReasonInWords(run.error)}`);
-  repo.replaceBenchmarks(openingId, run.rows);
+  if (run.modelNote) await fail(`Benchmark did not run — ${reasonInWords(run.modelNote)}`);
+  saveBenchmarks(openingId, run.rows);
   revalidatePath(`/openings/${openingId}/hh/research`);
-  const searched = `${run.queries.length} web ${run.queries.length === 1 ? "search" : "searches"}`;
+  const searched = `${run.searches} web ${run.searches === 1 ? "search" : "searches"}`;
   if (run.rows.length === 0) {
     await note(
-      run.note === "client_not_searchable"
-        ? `Nothing found: "${client?.name ?? "the client"}" returned no search results (${searched}). Check the client's name, or tick target employers and run again.`
-        : `Nothing found that could be sourced (${searched}). People without a search result behind them are left out rather than guessed.`,
+      `Nobody could be named (${searched}). A person is shown only when a page or search result says they hold the role${research ? "" : " — run Research first so the competitors are searched too"}.`,
     );
   }
-  await done(`Found ${run.rows.length} ${run.rows.length === 1 ? "person" : "people"}, each with a source · ${searched}.`);
+  await done(`Found ${run.rows.length} ${run.rows.length === 1 ? "person" : "people"} holding the role, each with a source · ${searched}.`);
 }
 
 export async function pickBenchmark(formData: FormData) {
@@ -2336,15 +2344,42 @@ async function extractJobDetails(openingId: string, c: OpeningContext, briefs: J
   markTablesStale();
 }
 
-/** Market research for an opening, keeping any field a TA corrected by hand. */
-async function researchOpening(openingId: string, userId: string): Promise<{ ok: boolean; reason?: string; filled?: number; sources?: number }> {
+/**
+ * Market research for an opening, keeping any field a TA corrected by hand.
+ *
+ * Search the client, search its competitors, read their pages, then sort what
+ * was read into fields (lib/researchSearch, 22 Sep). Replaced one model call
+ * that searched by itself and never opened the client's or a competitor's site.
+ */
+async function researchOpening(
+  openingId: string,
+  userId: string,
+): Promise<{
+  ok: boolean;
+  reason?: string;
+  filled?: number;
+  sources?: number;
+  competitors?: number;
+  modelNote?: string;
+  /** People found for Benchmark; undefined when it was not run. */
+  people?: number;
+  benchmarkNote?: string;
+}> {
   const c = contextFor(openingId);
   const o = repo.opening(openingId);
-  if (!c || !o) return { ok: false, reason: "missing" };
-  const res = await generateResearch(c);
+  if (!c || !o) return { ok: false, reason: "no_opening" };
+  const res = await researchViaSearch({
+    clientName: c.clientName,
+    industry: c.industry,
+    where: c.locations.join(", "),
+    title: c.title,
+    // Who holds the role now — only worth finding for a senior or C-level role.
+    benchmark: benchmarkByDefault(c.title),
+  });
   if (!res.ok) return { ok: false, reason: res.reason };
+  if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);
   const prior = repo.research(openingId);
-  const fields = { ...parseResearch(res.text) };
+  const fields = { ...res.fields };
   for (const k of prior?.editedFields ?? []) {
     if (k in fields && prior) {
       (fields as unknown as Record<string, unknown>)[k] =
@@ -2356,15 +2391,36 @@ async function researchOpening(openingId: string, userId: string): Promise<{ ok:
     clientId: o.clientId,
     fields,
     editedFields: prior?.editedFields ?? [],
-    markdown: res.text,
-    sources: toCitations(res.sources),
+    markdown: res.markdown,
+    sources: res.sources,
     searches: res.searches,
-    model: aiStatus().model,
+    model: `Serper + ${modelFor("plan")}`,
     generatedBy: userId,
     generatedAt: Date.now(),
   });
-  const filled = Object.values(fields).filter((x) => (Array.isArray(x) ? x.length > 0 : String(x ?? "").trim() !== "")).length;
-  return { ok: true, filled, sources: res.sources.length };
+  // The eight named fields; the competitor profiles are counted on their own.
+  const { competitorProfiles, ...named } = fields;
+  const filled = Object.values(named).filter((x) => (Array.isArray(x) ? x.length > 0 : String(x ?? "").trim() !== "")).length;
+  return {
+    ok: true,
+    filled,
+    sources: res.sources.length,
+    competitors: competitorProfiles?.length ?? 0,
+    modelNote: res.modelNote,
+    people: res.benchmarks?.length,
+    benchmarkNote: res.benchmarkNote,
+  };
+}
+
+/** New benchmark rows, keeping the TA's ticks on anyone found again. */
+function saveBenchmarks(openingId: string, rows: IncumbentRow[]) {
+  const ticked = new Set(
+    repo.benchmarks(openingId).filter((b) => b.isSelected).map((b) => `${(b.name ?? "").toLowerCase()}|${b.company.toLowerCase()}`),
+  );
+  repo.replaceBenchmarks(
+    openingId,
+    rows.map((r) => ({ ...r, openingId, isSelected: ticked.has(`${(r.name ?? "").toLowerCase()}|${r.company.toLowerCase()}`) })),
+  );
 }
 
 export async function generateJdWithModel(formData: FormData) {
