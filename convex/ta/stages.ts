@@ -24,16 +24,25 @@ export type BackendStage =
 
 /** The TA platform's vocabulary (src/data/types.ts). */
 export type TaStage =
-  | "new_cv" | "matched" | "follow_up" | "director_review" | "director_shortlist"
-  | "client_shortlist" | "interview" | "offer" | "placed" | "rejected" | "dropped_out";
+  | "new_cv"
+  | "matched"
+  | "ai_follow_up"
+  | "ta_follow_up"
+  | "director_review"
+  | "director_shortlist"
+  | "client_shortlist"
+  | "interview"
+  | "offer"
+  | "placed"
+  | "rejected"
+  | "dropped_out";
 
 const TO_TA: Record<BackendStage, TaStage> = {
   new_cvs: "new_cv",
   matched_candidates: "matched",
-  // The three that collapse.
-  ta_shortlist: "follow_up",
-  ai_call: "follow_up",
-  follow_up: "follow_up",
+  ta_shortlist: "ta_follow_up",
+  ai_call: "ai_follow_up",
+  follow_up: "ta_follow_up",
   second_shortlist: "director_review",
   director_shortlist: "director_shortlist",
   client_review: "client_shortlist",
@@ -49,7 +58,8 @@ const TO_TA: Record<BackendStage, TaStage> = {
 const TO_BACKEND: Record<TaStage, BackendStage> = {
   new_cv: "new_cvs",
   matched: "matched_candidates",
-  follow_up: "follow_up",
+  ai_follow_up: "ai_call",
+  ta_follow_up: "ta_shortlist",
   director_review: "second_shortlist",
   director_shortlist: "director_shortlist",
   client_shortlist: "client_review",

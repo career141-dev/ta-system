@@ -275,7 +275,7 @@ export default async function CandidateDrawer({
 
       {/* Everything Director Review asks for, typed in by hand when it came in
           outside the follow-up. Shown until they are past Follow-up. */}
-      {!locked && ["new_cv", "matched", "follow_up"].includes(app.stage) && (
+      {!locked && ["new_cv", "matched", "ai_follow_up", "ta_follow_up", "follow_up"].includes(app.stage) && (
         <ReviewDetailsForm
           applicationId={app.id}
           openingId={id}

@@ -130,26 +130,17 @@ export const shortlist = internalMutation({
     await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
 
     // Shortlisting is what sends somebody to Follow-up on this desk.
-    if (toTaStage(app.currentStage) !== "follow_up") {
+    const taStage = toTaStage(app.currentStage);
+    if (taStage !== "ai_follow_up" && taStage !== "ta_follow_up") {
+      const job = await ctx.db.get(app.jobId);
+      const targetTaStage = job && (job as { autoFollowUp?: boolean }).autoFollowUp ? "ai_follow_up" : "ta_follow_up";
+      const targetBackend = toBackendStage(targetTaStage);
       await executeStageTransition(ctx, {
         applicationId: appId,
-        targetStage: "follow_up" as PipelineStage,
+        targetStage: targetBackend as PipelineStage,
         actorId: user._id,
         reason: "Shortlisted by a TA",
-        // The assignment check already ran above, against this actor. The
-        // state machine's own check would look for a Clerk identity and find
-        // none — see convex/ta/guard.ts.
         bypassRoleCheck: true,
-        // Shortlisting starts the outreach by itself, as the CV platform does
-        // (18 September, the owner's decision): the approved WhatsApp template
-        // and the email go the moment a candidate reaches Follow-up, and the
-        // sweep takes over the reminders. The TA can still press Send to push
-        // the next one early, and Stop to end it.
-        //
-        // Unless the opening's follow-up switch is off, in which case nothing
-        // goes by itself — a switch that says off has to mean off. Every
-        // message still passes the outreach gate, so on staging it reaches
-        // only the test recipients (convex/lib/outreachSafety.ts).
         skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
       });
     }
@@ -219,7 +210,7 @@ export const moveStage = internalMutation({
       // and, as with shortlisting, only on an opening whose follow-up is on.
       // A rejected person brought back came through here and was sent the
       // Day 0 message on an opening switched off (review of PR #2, 21 Sep).
-      skipAutoOutreach: target === "follow_up" ? !followUpOn(await ctx.db.get(app.jobId)) : undefined,
+      skipAutoOutreach: (target === "follow_up" || target === "ai_call" || target === "ta_shortlist") ? !followUpOn(await ctx.db.get(app.jobId)) : undefined,
     });
     return { ...result, stage: toTaStage(target) };
   },

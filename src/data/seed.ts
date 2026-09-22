@@ -405,12 +405,12 @@ const TITLE_BY_OPENING: Record<string, string> = {
 // How many candidates sit in each stage, per Opening — shaped to look like a
 // real desk rather than an even spread.
 const SHAPE: Record<string, Partial<Record<Stage, number>>> = {
-  op_brand: { new_cv: 9, matched: 6, follow_up: 7, director_review: 4, director_shortlist: 3, client_shortlist: 2, interview: 1, offer: 1, placed: 2, rejected: 5, dropped_out: 2 },
-  op_hof: { new_cv: 5, matched: 4, follow_up: 5, director_review: 3, director_shortlist: 2, rejected: 3 },
-  op_gmmerc: { new_cv: 4, matched: 3, follow_up: 6, director_review: 2, director_shortlist: 2, client_shortlist: 1, interview: 2, offer: 1, placed: 1, rejected: 4, dropped_out: 1 },
-  op_hobo: { new_cv: 7, matched: 2, follow_up: 2 },
-  op_chro: { new_cv: 3, matched: 5, follow_up: 4, director_review: 3, director_shortlist: 2, client_shortlist: 2, interview: 1, placed: 1, rejected: 6 },
-  op_mktexe: { new_cv: 2, follow_up: 1, rejected: 2 },
+  op_brand: { new_cv: 9, matched: 6, ai_follow_up: 3, ta_follow_up: 4, director_review: 4, director_shortlist: 3, client_shortlist: 2, interview: 1, offer: 1, placed: 2, rejected: 5, dropped_out: 2 },
+  op_hof: { new_cv: 5, matched: 4, ai_follow_up: 2, ta_follow_up: 3, director_review: 3, director_shortlist: 2, rejected: 3 },
+  op_gmmerc: { new_cv: 4, matched: 3, ai_follow_up: 2, ta_follow_up: 4, director_review: 2, director_shortlist: 2, client_shortlist: 1, interview: 2, offer: 1, placed: 1, rejected: 4, dropped_out: 1 },
+  op_hobo: { new_cv: 7, matched: 2, ai_follow_up: 1, ta_follow_up: 1 },
+  op_chro: { new_cv: 3, matched: 5, ai_follow_up: 2, ta_follow_up: 2, director_review: 3, director_shortlist: 2, client_shortlist: 2, interview: 1, placed: 1, rejected: 6 },
+  op_mktexe: { new_cv: 2, ta_follow_up: 1, rejected: 2 },
 };
 
 const CHANNELS: SourcingChannel[] = ["DA", "L", "L", "HH", "SCOOP", "E", "IM", "FB"];
@@ -434,7 +434,7 @@ for (const opening of openings) {
       // chase sequence look like it had nothing to do. Each one loses a
       // different combination, including one with no way to reach them at all,
       // so the queue shows every state a sequence can be in.
-      if (stage === "follow_up") {
+      if (stage === "ai_follow_up" || stage === "ta_follow_up" || (stage as string) === "follow_up") {
         const gap = k % 5;
         if (gap === 0) cand.currentSalary = null;
         if (gap === 1) { cand.expectedSalary = null; cand.noticePeriodDays = null; }
@@ -489,7 +489,7 @@ for (const opening of openings) {
         // last two days, so "CVs today" and "yesterday" count something real.
         createdAt: stage === "new_cv" ? now - int(1, 44) * 3_600_000 : ago(int(2, 20)),
         // Follow-up entries are re-timed by makeOutreach to within the day.
-        lastStageChangedAt: stage === "follow_up" ? ago(k * 2 + 1) : ago(int(0, 6)),
+        lastStageChangedAt: (stage === "ai_follow_up" || stage === "ta_follow_up" || (stage as string) === "follow_up") ? ago(k * 2 + 1) : ago(int(0, 6)),
       };
       applications.push(app);
 
@@ -740,22 +740,23 @@ const savedSearches: SavedSearch[] = [
 
 const ROUTE: Partial<Record<Stage, Stage[]>> = {
   matched: [],
-  follow_up: ["new_cv"],
-  director_review: ["new_cv", "follow_up"],
-  director_shortlist: ["new_cv", "follow_up", "director_review"],
-  client_shortlist: ["new_cv", "follow_up", "director_review", "director_shortlist"],
-  interview: ["new_cv", "follow_up", "director_review", "director_shortlist", "client_shortlist"],
-  offer: ["new_cv", "follow_up", "director_review", "director_shortlist", "client_shortlist", "interview"],
-  placed: ["new_cv", "follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"],
+  ai_follow_up: ["new_cv"],
+  ta_follow_up: ["new_cv", "ai_follow_up"],
+  director_review: ["new_cv", "ai_follow_up", "ta_follow_up"],
+  director_shortlist: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review"],
+  client_shortlist: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review", "director_shortlist"],
+  interview: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review", "director_shortlist", "client_shortlist"],
+  offer: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review", "director_shortlist", "client_shortlist", "interview"],
+  placed: ["new_cv", "ai_follow_up", "ta_follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"],
   rejected: ["new_cv"],
-  dropped_out: ["new_cv", "follow_up"],
+  dropped_out: ["new_cv", "ai_follow_up", "ta_follow_up"],
 };
 
 /** Who or what made each move — the same distinction the live events carry. */
 function actorFor(to: Stage): { actorType: PipelineEvent["actorType"]; eventType: string } {
   if (to === "director_shortlist") return { actorType: "director", eventType: "director_shortlisted" };
   if (to === "client_shortlist") return { actorType: "client", eventType: "client_shortlisted" };
-  if (to === "follow_up") return { actorType: "system", eventType: "moved_to_follow_up" };
+  if (to === "ai_follow_up" || to === "ta_follow_up" || (to as string) === "follow_up") return { actorType: "system", eventType: "moved_to_follow_up" };
   return { actorType: "user", eventType: `moved_to_${to}` };
 }
 
@@ -942,7 +943,7 @@ function makeClosings(): { offers: Offer[]; placements: Placement[] } {
 
 function makeOutreach(): OutreachMessage[] {
   const out: OutreachMessage[] = [];
-  const inFollowUp = applications.filter((a) => a.stage === "follow_up");
+  const inFollowUp = applications.filter((a) => a.stage === "ai_follow_up" || a.stage === "ta_follow_up" || (a.stage as string) === "follow_up");
   const HOUR = 3_600_000;
   const outcomes: FollowUpCallOutcome[] = ["no_answer", "answered", "callback", "will_send", "no_answer"];
 

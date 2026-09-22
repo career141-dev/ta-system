@@ -38,7 +38,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
       ta: t,
       openings: mine,
       inPipeline: apps.filter((a) =>
-        ["follow_up", "director_review", "director_shortlist", "client_shortlist"].includes(a.stage),
+        ["ai_follow_up", "ta_follow_up", "follow_up", "director_review", "director_shortlist", "client_shortlist"].includes(a.stage),
       ).length,
       cvsToday,
       sets,
@@ -206,7 +206,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                       </p>
                     </div>
                     <span className="tabular shrink-0 text-[13px] text-ink-soft">
-                      {c.follow_up ?? 0}
+                      {(c.ai_follow_up ?? 0) + (c.ta_follow_up ?? 0)}
                     </span>
                   </Link>
                 );

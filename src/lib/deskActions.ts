@@ -69,7 +69,9 @@ export function looksLikeAction(message: string): boolean {
 }
 
 const STAGE_WORDS: [RegExp, Stage][] = [
-  [/follow.?up/i, "follow_up"],
+  [/ai follow.?up/i, "ai_follow_up"],
+  [/ta follow.?up/i, "ta_follow_up"],
+  [/follow.?up/i, "ta_follow_up"],
   [/director review|with the director|to the director/i, "director_review"],
   [/director shortlist/i, "director_shortlist"],
   [/client shortlist|to the client/i, "client_shortlist"],
@@ -268,7 +270,7 @@ function check(user: User, action: DeskAction): { ok: true; app: Application } |
       return { ok: true, app };
     }
     case "call":
-      if (app.stage !== "follow_up") return { ok: false, message: `They're in ${STAGE_LABEL[app.stage]}, not follow-up, so there's no follow-up call to record.` };
+      if (app.stage !== "ta_follow_up" && app.stage !== "ai_follow_up" && (app.stage as string) !== "follow_up") return { ok: false, message: `They're in ${STAGE_LABEL[app.stage]}, not follow-up, so there's no follow-up call to record.` };
       return { ok: true, app };
     default:
       return { ok: true, app };
@@ -345,7 +347,7 @@ export function propose(user: User, intent: Intent, now = Date.now()): ActionRep
       // Into Follow-up from a new CV or a match is a shortlist — it takes the
       // candidate, numbers the set and starts the chase, which a bare stage
       // move would skip.
-      if (intent.stage === "follow_up" && (hit.app.stage === "new_cv" || hit.app.stage === "matched")) {
+      if ((intent.stage === "ta_follow_up" || intent.stage === "ai_follow_up" || (intent.stage as string) === "follow_up") && (hit.app.stage === "new_cv" || hit.app.stage === "matched")) {
         action = { kind: "shortlist", appId: hit.app.id };
         break;
       }
@@ -449,7 +451,7 @@ export async function understand(message: string, call: ModelCall = (s, p) => wr
   if (rules) return rules;
   const system = [
     "Read a recruiter's instruction into JSON. Reply with JSON only.",
-    'Shape: {"kind":"shortlist"|"move"|"note"|"answers"|"call"|"none","name":string,"job":string|null,"stage":"follow_up"|"director_review"|"director_shortlist"|"client_shortlist"|"interview"|"offer"|"placed"|"rejected"|"dropped_out"|null,"reason":string|null,"text":string|null,"currentSalary":string|null,"expectedSalary":string|null,"noticeDays":number|null,"outcome":"no_answer"|"answered"|"callback"|"will_send"|"not_interested"|null,"when":string|null}',
+    'Shape: {"kind":"shortlist"|"move"|"note"|"answers"|"call"|"none","name":string,"job":string|null,"stage":"ai_follow_up"|"ta_follow_up"|"director_review"|"director_shortlist"|"client_shortlist"|"interview"|"offer"|"placed"|"rejected"|"dropped_out"|null,"reason":string|null,"text":string|null,"currentSalary":string|null,"expectedSalary":string|null,"noticeDays":number|null,"outcome":"no_answer"|"answered"|"callback"|"will_send"|"not_interested"|null,"when":string|null}',
     'Use "none" if it is a question or not a change to one candidate. Copy the candidate name exactly as written. Never invent values.',
   ].join("\n");
   const r = await call(system, message.slice(0, 500));

@@ -357,7 +357,7 @@ async function loadWholeTables(): Promise<Partial<Database>> {
 }
 
 /** Stages whose people `computeAlerts` reads by name (src/lib/sla.ts). */
-const ALERT_STAGES = new Set<Application["stage"]>(["follow_up", "interview", "offer", "placed"]);
+const ALERT_STAGES = new Set<Application["stage"]>(["ai_follow_up", "ta_follow_up", "interview", "offer", "placed"]);
 
 function merge<T>(have: T[], incoming: T[], key: (x: T) => string): T[] {
   if (incoming.length === 0) return have;

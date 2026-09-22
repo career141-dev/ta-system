@@ -45,7 +45,8 @@ export const send = internalMutation({
     if (!app) throw new Error("That application no longer exists.");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
 
-    if (toTaStage(app.currentStage) !== "follow_up") {
+    const taStage = toTaStage(app.currentStage);
+    if (taStage !== "ai_follow_up" && taStage !== "ta_follow_up") {
       throw new Error("Move the candidate to Follow-up before sending.");
     }
     const candidate = await ctx.db.get(app.candidateId);

@@ -20,7 +20,7 @@ import { finishCall, recordCallAnswer, recordConsent, startCall } from "@/app/ac
  * ring anybody.
  */
 
-const STAGES = ["follow_up", "director_review"];
+const STAGES = ["ai_follow_up", "ta_follow_up", "follow_up", "director_review"];
 
 const FIELD_LABEL: Record<string, string> = {
   currentSalary: "Current salary",

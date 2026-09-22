@@ -233,16 +233,18 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
     const name = repo.users().find((u) => u.id === owner)?.name ?? "another recruiter";
     return { ok: false, message: `${name} owns this candidate here. Ask them or the TA lead to bring them back.` };
   }
+  const opening = repo.opening(openingId);
+  const targetStage: Stage = opening?.autoFollowUp ? "ai_follow_up" : "ta_follow_up";
   if (isConvex()) {
     try {
-      await backend.moveStage({ id: userId }, appId, "follow_up", "Brought back");
+      await backend.moveStage({ id: userId }, appId, targetStage, "Brought back");
       await afterBackendWrite(openingId);
       return { ok: true };
     } catch (e) {
       return { ok: false, message: backendMessage(e, "the move was refused.") };
     }
   }
-  const r = repo.moveStage(appId, "follow_up", userId, "Brought back");
+  const r = repo.moveStage(appId, targetStage, userId, "Brought back");
   return r.ok ? { ok: true } : { ok: false, message: r.message };
 }
 
@@ -1161,13 +1163,14 @@ export async function addLinkToPipeline(formData: FormData) {
   revalidatePath(`/openings/${openingId}`, "layout");
   // Someone already on the opening: from Database CVs they go on to Follow-up
   // like anyone else; rejected or dropped out, they are brought back first.
+  const isFollowUp = (s: string) => s === "ai_follow_up" || s === "ta_follow_up" || s === "follow_up";
   if (made.stage === "rejected" || made.stage === "dropped_out") {
     const r = await reinstate(user, made.applicationId, openingId);
     if (!r.ok) return fail(`They were ${STAGE_LABEL[made.stage].toLowerCase()} here and could not be brought back: ${r.message}`);
-    made.stage = "follow_up";
+    made.stage = "ta_follow_up";
   }
-  if (made.stage === "matched" || made.stage === "new_cv") made.stage = "follow_up";
-  if (made.stage !== "follow_up") {
+  if (made.stage === "matched" || made.stage === "new_cv") made.stage = "ta_follow_up";
+  if (!isFollowUp(made.stage)) {
     return note(`Already on this opening's pipeline, in ${STAGE_LABEL[made.stage] ?? made.stage}.`);
   }
 
@@ -2810,7 +2813,7 @@ export async function addOpeningQuestion(formData: FormData) {
   }
   repo.setOpeningQuestions(openingId, [...existing, { id: `q${Math.random().toString(36).slice(2, 8)}`, label }]);
   revalidatePath(`/openings/${openingId}`, "layout");
-  const waiting = repo.applications(openingId).filter((a) => a.stage === "follow_up").length;
+  const waiting = repo.applications(openingId).filter((a) => a.stage === "ai_follow_up" || a.stage === "ta_follow_up" || (a.stage as string) === "follow_up").length;
   await done(
     waiting
       ? `Question added. It goes with the next follow-up to the ${waiting} ${waiting === 1 ? "person" : "people"} in Follow-up.`
@@ -3108,7 +3111,8 @@ export async function sendEod(formData: FormData) {
   const notMoved: string[] = [];
   if (kind === "director") {
     for (const id of fresh) {
-      if (repo.application(id)?.stage === "follow_up") {
+      const st = repo.application(id)?.stage;
+      if (st === "ai_follow_up" || st === "ta_follow_up" || (st as string) === "follow_up") {
         // Through the backend's own move on Convex, so its stage counts, its
         // history and the stop of the follow-up sequence happen too — the
         // store's write skipped all three (plan 3.2, 21 Sep).

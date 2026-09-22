@@ -74,7 +74,7 @@ const tampered = tok.replace(/^(.)/, (c) => (c === "e" ? "f" : "e"));
 eq("a changed token is refused", execute(nuha, tampered).ok, false);
 eq("an old one is refused", execute(nuha, tok, Date.now() + 11 * 60_000).ok, false);
 const done = execute(nuha, tok);
-eq("the owner confirms and it runs", [done.ok, repo.application(fresh.id)!.stage, repo.application(fresh.id)!.ownerTaId], [true, "follow_up", nuha.id]);
+eq("the owner confirms and it runs", [done.ok, repo.application(fresh.id)!.stage, repo.application(fresh.id)!.ownerTaId], [true, brand.autoFollowUp ? "ai_follow_up" : "ta_follow_up", nuha.id]);
 eq("and it runs only once", execute(nuha, tok).ok, false);
 
 console.log("\nchecked again when it runs");
@@ -94,7 +94,7 @@ eq("a move the pipeline doesn't allow is refused", propose(nuha, { kind: "move",
 eq("a colleague's candidate can't be changed", propose(nuha, { kind: "note", name: nameOf(second.id), job: brand.title, text: "hi" }).type, "refusal");
 const third = repo.applications(brand.id).find((a) => a.stage === "new_cv" && !a.ownerTaId && a.id !== fresh.id && a.id !== second.id);
 if (third) {
-  const mv = propose(nuha, { kind: "move", name: nameOf(third.id), job: brand.title, stage: "follow_up", reason: null });
+  const mv = propose(nuha, { kind: "move", name: nameOf(third.id), job: brand.title, stage: "ta_follow_up", reason: null });
   eq("'move to follow-up' from a new CV becomes a shortlist", mv.type === "proposal" && /^Shortlist/.test(mv.proposal.summary), true);
 }
 eq("a follow-up call on someone not in follow-up is refused", propose(nuha, { kind: "call", name: nameOf(repo.applications(brand.id).find((a) => a.stage === "placed")!.id), job: brand.title, outcome: "no_answer" }).type, "refusal");

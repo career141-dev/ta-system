@@ -87,10 +87,10 @@ export default async function OverviewPage({
       href: `/openings/${id}/eod`,
       action: "Review email",
     },
-    (counts.follow_up ?? 0) > 0 && {
-      title: `${counts.follow_up} in follow-up`,
+    ((counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0)) > 0 && {
+      title: `${(counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0)} in follow-up`,
       sub: "The AI call, WhatsApp and email are working through their details today",
-      href: `/openings/${id}/pipeline/follow_up`,
+      href: `/openings/${id}/pipeline/ta_follow_up`,
       action: "Continue",
     },
   ].filter(Boolean) as { title: string; sub: string; href: string; action: string }[];

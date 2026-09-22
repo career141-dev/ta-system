@@ -117,9 +117,9 @@ try {
   const claim = repo.shortlist(appId, lead.id);
   await reload({ allApplications: true, openingId, candidateIds: [CANDIDATE] });
   const app1 = repo.application(appId);
-  check("P1-01", "claiming a candidate is stored: owner, set, stage", claim.ok && app1?.ownerTaId === lead.id && app1?.stage === "follow_up" && app1?.setNumber != null, app1 ? `owner ${app1.ownerTaId === lead.id ? "lead" : app1.ownerTaId}, set ${app1.setNumber}, ${app1.stage}` : "gone");
+  check("P1-01", "claiming a candidate is stored: owner, set, stage", claim.ok && app1?.ownerTaId === lead.id && (app1?.stage === "ai_follow_up" || app1?.stage === "ta_follow_up") && app1?.setNumber != null, app1 ? `owner ${app1.ownerTaId === lead.id ? "lead" : app1.ownerTaId}, set ${app1.setNumber}, ${app1.stage}` : "gone");
   const events = repo.events(appId);
-  check("P1-01b", "the move is in the application's history", events.some((e) => e.toStage === "follow_up"), `${events.length} events`);
+  check("P1-01b", "the move is in the application's history", events.some((e) => e.toStage === "ai_follow_up" || e.toStage === "ta_follow_up" || (e.toStage as string) === "follow_up"), `${events.length} events`);
 
   // ── two people at once ─────────────────────────────────────────────────────
   // ta2's copy was loaded before the lead's change below reaches the database.

@@ -21,7 +21,7 @@ import { PRIORITY_TARGET } from "@/data/types";
  */
 const RANK: Stage[] = [
   "placed", "offer", "interview", "client_shortlist", "director_shortlist",
-  "director_review", "follow_up", "matched",
+  "director_review", "ta_follow_up", "ai_follow_up", "matched",
   "new_cv", "dropped_out", "rejected",
 ];
 
@@ -82,7 +82,7 @@ export function healthFor(input: {
   const screening = waiting === 0 ? 100 : clamp(100 - waiting * 4);
 
   // 3. Is anything reaching a decision-maker?
-  const upstream = at("new_cv") + at("matched") + at("follow_up");
+  const upstream = at("new_cv") + at("matched") + at("ai_follow_up") + at("ta_follow_up");
   const downstream =
     at("director_review") + at("director_shortlist") + at("client_shortlist") +
     at("interview") + at("offer") + at("placed");
