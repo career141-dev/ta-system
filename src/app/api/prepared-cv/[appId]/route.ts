@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { repo } from "@/data/store";
-import { buildPreparedCv, preparedCvFileName } from "@/lib/pdf";
+import { buildPreparedCv, extractCareer141BoxFromText, isSystemNote, preparedCvFileName, stampPdfWithCareer141Box, type CvAnnotation } from "@/lib/pdf";
 import { currentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { seatFor } from "@/lib/visibility";
@@ -18,15 +18,18 @@ export async function GET(
   if (!user) return NextResponse.json({ error: "signed_out" }, { status: 401 });
   const app = repo.application(appId);
   if (!app) return NextResponse.json({ error: "not found" }, { status: 404 });
+
   // A CV is the candidate's personal data. Only somebody who can see this
   // application on its opening gets the file — the same test as the page.
   const assignment = repo.assignmentFor(app.openingId, user.id) ?? null;
   const seat = seatFor(user, assignment?.role ?? null);
-  if (!allows(user, "opening.read", { openingId: app.openingId, assignment }) ||
-      (seat.stages !== null && !seat.stages.includes(app.stage))) {
+  if (
+    !allows(user, "opening.read", { openingId: app.openingId, assignment }) ||
+    (seat.stages !== null && !seat.stages.includes(app.stage))
+  ) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-  // Applications are loaded for the whole desk; the person on this one is not.
+
   await primeStore({ candidateIds: [app.candidateId] });
   const c = repo.candidate(app.candidateId);
   if (!c) return NextResponse.json({ error: "not found" }, { status: 404 });
@@ -41,22 +44,52 @@ export async function GET(
     .map((n) => n.replace(/^[->•*]\s*/, "").trim())
     .filter(Boolean);
 
-  // The CV's own structure, as extraction read it; without it the page has
-  // only the headline fields.
-  //
-  // Read without an actor, as the profile page and /api/cv do: access was
-  // decided above, against this opening. Passing the user made the backend
-  // apply its whole-database rule (admin, ta_manager, senior_ta, test_ta), so a
-  // Director, Ops or a recruiter got the headline fields only — and the refusal
-  // was swallowed by the catch, so it looked like a CV with nothing in it.
-  const profile =
-    storeMode() === "convex"
-      ? await backend.candidateProfile({ id: null }, c.id).catch((e) => {
-          console.error(`[prepared-cv ${appId}] profile could not be read:`, (e as Error).message);
-          return null;
-        })
-      : null;
+  const curSal = url.searchParams.get("current") ?? c.currentSalary ?? "";
+  const expSal = url.searchParams.get("expected") ?? c.expectedSalary ?? "";
+  const npVal = url.searchParams.get("notice") ?? (c.noticePeriodDays != null ? String(c.noticePeriodDays) : "");
+  const notesList = notes.length
+    ? notes
+    : (app.notes && app.notes.some((n) => !isSystemNote(n)))
+      ? app.notes.map((n) => n.replace(/^>/, "").trim()).filter((n) => !isSystemNote(n))
+      : [];
 
+  const annotation: CvAnnotation = {
+    currentSalary: curSal,
+    expectedSalary: expSal,
+    noticePeriod: npVal,
+    notes: notesList,
+  };
+
+  // If in Convex mode and the candidate has a real CV file in storage,
+  // fetch the real PDF and stamp or update the Career141 box on page 1.
+  if (storeMode() === "convex") {
+    try {
+      const link = await backend.cvLink({ id: null }, app.candidateId, false);
+      if (link.ok && link.url) {
+        const cvRes = await fetch(link.url);
+        if (cvRes.ok) {
+          const baseBuffer = await cvRes.arrayBuffer();
+          const stampedBytes = await stampPdfWithCareer141Box(
+            baseBuffer,
+            annotation,
+            override,
+            link.fileName ?? c.cvFileName
+          );
+          return new NextResponse(Buffer.from(stampedBytes), {
+            headers: {
+              "Content-Type": "application/pdf",
+              "Content-Disposition": `inline; filename="${preparedCvFileName(c.fullName)}"`,
+              "Cache-Control": "private, no-store",
+            },
+          });
+        }
+      }
+    } catch (err) {
+      console.warn("[prepared-cv] Could not stamp original CV file, falling back to structured CV:", err);
+    }
+  }
+
+  // Fallback for standalone test runner or candidates without a storage PDF
   const { pdf, placement } = buildPreparedCv(
     {
       fullName: c.fullName,
@@ -66,18 +99,14 @@ export async function GET(
       totalExperienceYears: c.totalExperienceYears,
       educationDegree: c.educationDegree,
       educationInstitution: c.educationInstitution,
-      summary: profile?.summary ?? null,
-      career: profile?.career ?? [],
-      education: profile?.education ?? [],
+      summary: null,
+      career: [],
+      education: [],
       skills: c.skills ?? [],
-      languages: profile?.languages ?? [],
-      certifications: profile?.certifications ?? [],
+      languages: [],
+      certifications: [],
     },
-    {
-      currentSalary: url.searchParams.get("current") ?? c.currentSalary ?? "",
-      expectedSalary: url.searchParams.get("expected") ?? c.expectedSalary ?? "",
-      notes: notes.length ? notes : app.notes.map((n) => n.replace(/^>/, "").trim()),
-    },
+    annotation,
     override,
   );
 
@@ -85,7 +114,6 @@ export async function GET(
     headers: {
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="${preparedCvFileName(c.fullName)}"`,
-      // So the composer can say where it landed, and warn if it had to move.
       "X-Annotation-Placement": placement.where,
       "X-Annotation-Own-Page": String(placement.ownPage),
     },

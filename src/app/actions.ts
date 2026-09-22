@@ -2694,10 +2694,12 @@ export async function saveFollowUpAnswers(formData: FormData) {
  * what is already on file.
  */
 export async function saveReviewDetails(formData: FormData) {
+  const applicationId = String(formData.get("applicationId"));
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
-  const app = repo.application(String(formData.get("applicationId")));
+  const app = repo.application(applicationId);
   if (!app) return fail("That application no longer exists.");
+  await primeStore({ candidateIds: [app.candidateId] });
   // A bare amount is saved with the currency picked beside it: "25,000" alone
   // could not be read as a salary later (21 Sep).
   const withCurrency = (field: string) => {
@@ -2710,12 +2712,23 @@ export async function saveReviewDetails(formData: FormData) {
   const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
   const notice = noticeRaw === "" ? null : Number(noticeRaw);
   if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return fail("Notice period is a number of days, 0 or more.");
-  repo.updateCandidate(app.candidateId, {
-    ...(currentSalary ? { currentSalary } : {}),
-    ...(expectedSalary ? { expectedSalary } : {}),
-    ...(notice !== null ? { noticePeriodDays: Math.round(notice) } : {}),
+  const labels = formData.getAll("customLabel").map(String);
+  const values = formData.getAll("customValue").map(String);
+  const customNotes: string[] = [];
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]?.trim();
+    if (!v) continue;
+    const l = labels[i]?.trim();
+    customNotes.push(l ? `${l}: ${v}` : v);
+  }
+  repo.saveReviewDetails(app.id, app.candidateId, customNotes, {
+    currentSalary: currentSalary || null,
+    expectedSalary: expectedSalary || null,
+    noticePeriodDays: notice !== null ? Math.round(notice) : null,
   });
+  markTablesStale();
   revalidatePath(`/openings/${app.openingId}`, "layout");
+  revalidatePath(`/candidates/${app.candidateId}`);
   return done("Details saved.");
 }
 
@@ -3164,30 +3177,61 @@ async function emailEod(input: {
     const c = app ? repo.candidate(app.candidateId) : null;
     if (!app || !c) continue;
     try {
-      const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
-      const { pdf } = buildPreparedCv(
-        {
-          fullName: c.fullName,
-          currentTitle: c.currentTitle,
-          currentEmployer: c.currentEmployer,
-          location: c.location,
-          totalExperienceYears: c.totalExperienceYears,
-          educationDegree: c.educationDegree,
-          educationInstitution: c.educationInstitution,
-          summary: profile?.summary ?? null,
-          career: profile?.career ?? [],
-          education: profile?.education ?? [],
-          skills: c.skills ?? [],
-          languages: profile?.languages ?? [],
-          certifications: profile?.certifications ?? [],
-        },
-        {
-          currentSalary: r.currentRemuneration,
-          expectedSalary: r.expectedRemuneration,
-          notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
-        },
-      );
-      const base64 = Buffer.from(pdf).toString("base64");
+      let pdfBytes: Uint8Array | null = null;
+      const { isConvex } = await import("@/data/mode");
+      if (isConvex()) {
+        try {
+          const link = await backend.cvLink({ id: null }, c.id, false);
+          if (link.ok && link.url) {
+            const cvRes = await fetch(link.url);
+            if (cvRes.ok) {
+              const baseBuf = await cvRes.arrayBuffer();
+              const { stampPdfWithCareer141Box } = await import("@/lib/pdf");
+              pdfBytes = await stampPdfWithCareer141Box(
+                baseBuf,
+                {
+                  currentSalary: r.currentRemuneration,
+                  expectedSalary: r.expectedRemuneration,
+                  notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+                },
+                undefined,
+                link.fileName ?? c.cvFileName
+              );
+            }
+          }
+        } catch {
+          /* Fallback */
+        }
+      }
+
+      if (!pdfBytes) {
+        const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
+        const { pdf } = buildPreparedCv(
+          {
+            fullName: c.fullName,
+            currentTitle: c.currentTitle,
+            currentEmployer: c.currentEmployer,
+            location: c.location,
+            totalExperienceYears: c.totalExperienceYears,
+            educationDegree: c.educationDegree,
+            educationInstitution: c.educationInstitution,
+            summary: profile?.summary ?? null,
+            career: profile?.career ?? [],
+            education: profile?.education ?? [],
+            skills: c.skills ?? [],
+            languages: profile?.languages ?? [],
+            certifications: profile?.certifications ?? [],
+          },
+          {
+            currentSalary: r.currentRemuneration,
+            expectedSalary: r.expectedRemuneration,
+            notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+          },
+        );
+        pdfBytes = new Uint8Array(pdf);
+      }
+
+      const base64 = Buffer.from(pdfBytes).toString("base64");
       if (used + base64.length > EOD_ATTACHMENT_BUDGET) {
         left.push(c.fullName);
         continue;

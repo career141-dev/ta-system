@@ -1,11 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveReviewDetailsInline } from "@/app/actions";
 import { inputClass } from "./form";
 import { ActionNote, SubmitButton, Spinner, submitted, useInline } from "./Submit";
 import type { ActionResult } from "@/lib/inlineResult";
+import { isSystemNote } from "@/lib/pdf";
 
 /**
  * What Director Review needs before it will take someone: current salary,
@@ -15,9 +16,8 @@ import type { ActionResult } from "@/lib/inlineResult";
  * candidate record.
  *
  * 21 Sep: Save answers here instead of at the top of the page behind the
- * sheet, a CV can be uploaded from here (it could not — headhunted people
- * stayed in Follow-up for good), and each salary carries its currency, so a
- * bare "25,000" is no longer saved as a number nobody can read.
+ * sheet, a CV can be uploaded from here, each salary carries its currency,
+ * and custom detail lines (with + icon) can be added/updated for the prepared CV box.
  */
 const CURRENCIES = ["LKR", "USD", "SAR", "AED", "QAR", "OMR", "KWD", "BHD", "MVR", "BDT", "INR", "SGD", "MYR"];
 
@@ -27,6 +27,42 @@ function split(value: string | null, fallback: string): [string, string] {
   return m && CURRENCIES.includes(m[1]) ? [m[1], m[2]] : [fallback, (value ?? "").trim()];
 }
 
+interface CustomField {
+  id: string;
+  label: string;
+  value: string;
+}
+
+function parseInitialDetails(notes: string[] = []): CustomField[] {
+  return notes
+    .filter((n) => !isSystemNote(n))
+    .map((n, i) => {
+      const trimmed = n.replace(/^[->•*]\s*/, "").trim();
+      const colonIdx = trimmed.indexOf(":");
+      const dashIdx = trimmed.indexOf(" - ");
+      if (colonIdx > 0 && (dashIdx === -1 || colonIdx < dashIdx)) {
+        return {
+          id: `f_${i}_${i}`,
+          label: trimmed.slice(0, colonIdx).trim(),
+          value: trimmed.slice(colonIdx + 1).trim(),
+        };
+      }
+      if (dashIdx > 0) {
+        return {
+          id: `f_${i}_${i}`,
+          label: trimmed.slice(0, dashIdx).trim(),
+          value: trimmed.slice(dashIdx + 3).trim(),
+        };
+      }
+      return {
+        id: `f_${i}_${i}`,
+        label: "Note",
+        value: trimmed,
+      };
+    })
+    .filter((f) => f.value.length > 0);
+}
+
 export function ReviewDetailsForm({
   applicationId,
   openingId,
@@ -34,6 +70,7 @@ export function ReviewDetailsForm({
   expectedSalary,
   noticePeriodDays,
   hasCv,
+  notes = [],
   // None by default: a bare "12000" already on file, for a Gulf role, was
   // re-saved as "LKR 12000" by a plain Save (review of PR #2, 21 Sep).
   defaultCurrency = "",
@@ -44,6 +81,7 @@ export function ReviewDetailsForm({
   expectedSalary: string | null;
   noticePeriodDays: number | null;
   hasCv: boolean;
+  notes?: string[];
   defaultCurrency?: string;
 }) {
   const router = useRouter();
@@ -55,6 +93,13 @@ export function ReviewDetailsForm({
   const [upload, setUpload] = useState<{ progress: number } | null>(null);
   const [uploaded, setUploaded] = useState<ActionResult | null>(null);
   const [cvOnFile, setCvOnFile] = useState(hasCv);
+  const [customFields, setCustomFields] = useState<CustomField[]>(() => parseInitialDetails(notes));
+
+  useEffect(() => {
+    if (save.result?.ok) {
+      router.refresh();
+    }
+  }, [save.result, router]);
 
   const missing = [
     !cvOnFile && "CV",
@@ -95,6 +140,25 @@ export function ReviewDetailsForm({
     xhr.send(body);
   };
 
+  const addField = () => {
+    setCustomFields((prev) => [
+      ...prev,
+      { id: `cf_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, label: "", value: "" },
+    ]);
+  };
+
+  const updateField = (idx: number, key: "label" | "value", val: string) => {
+    setCustomFields((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [key]: val };
+      return next;
+    });
+  };
+
+  const removeField = (idx: number) => {
+    setCustomFields((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   const money = (name: string, currency: string, amount: string, placeholder: string, label: string) => (
     <label>
       <span className="mb-1 block text-[11.5px] text-ink-soft">{label}</span>
@@ -131,6 +195,7 @@ export function ReviewDetailsForm({
     >
       <input type="hidden" name="applicationId" value={applicationId} />
       <input type="hidden" name="openingId" value={openingId} />
+      <input type="hidden" name="customDetailsSubmitted" value="1" />
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[13px] font-semibold">Details for Director review</h2>
         <span className={missing.length ? "text-warn" : "text-brand"}>
@@ -145,7 +210,64 @@ export function ReviewDetailsForm({
           <input name="noticePeriodDays" type="number" min={0} step={1} defaultValue={noticePeriodDays ?? ""} placeholder="30 (0 if immediate)" className={inputClass} />
         </label>
       </div>
-      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+
+      {/* Additional custom detail lines for Prepared CV */}
+      <div className="mt-4 border-t border-rule/70 pt-3">
+        <div className="flex items-center justify-between gap-2">
+          <h3 className="text-[12.5px] font-semibold text-ink">Additional details / notes</h3>
+          <button
+            type="button"
+            onClick={addField}
+            className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-paper px-2.5 py-1 text-[11.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+            </svg>
+            Add detail
+          </button>
+        </div>
+
+        {customFields.length > 0 && (
+          <div className="mt-3 space-y-2.5">
+            {customFields.map((f, idx) => (
+              <div key={f.id} className="flex items-end gap-2.5">
+                <label className="w-1/3 min-w-[120px]">
+                  <span className="mb-1 block text-[11.5px] text-ink-soft">Label</span>
+                  <input
+                    name="customLabel"
+                    value={f.label}
+                    onChange={(e) => updateField(idx, "label", e.target.value)}
+                    placeholder="e.g. Location, Bonus"
+                    className={inputClass}
+                  />
+                </label>
+                <label className="flex-1">
+                  <span className="mb-1 block text-[11.5px] text-ink-soft">Details</span>
+                  <input
+                    name="customValue"
+                    value={f.value}
+                    onChange={(e) => updateField(idx, "value", e.target.value)}
+                    placeholder="e.g. Sri Lanka, 15% annual bonus"
+                    className={inputClass}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={() => removeField(idx)}
+                  title="Remove this detail"
+                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-rule/70 pt-3">
         <div className="flex flex-wrap items-center gap-2.5">
           <input
             ref={fileInput}
