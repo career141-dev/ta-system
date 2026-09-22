@@ -683,14 +683,16 @@ export const TABLES: Record<string, TableModel> = {
 /** The app tables the store keeps. `liveMirror` is the JSON store's read-only copy and has no table. */
 export const TA_TABLES = Object.keys(TABLES);
 
-/** Whether two values are the same as far as the app is concerned (null and absent are). */
+/**
+ * Whether two values are the same as far as the app is concerned (null and
+ * absent are). Exact on text: this decides what a save writes, so "nimal" and
+ * "Nimal", or "250,000" and "250000", are different — a correction that only
+ * changes case or commas must be saved (review of PR #10, 22 September).
+ */
 export function sameValue(a: unknown, b: unknown): boolean {
   if (a === undefined) a = null;
   if (b === undefined) b = null;
   if (a === b) return true;
-  if (typeof a === "string" && typeof b === "string") {
-    if (a.replace(/,/g, "").trim().toLowerCase() === b.replace(/,/g, "").trim().toLowerCase()) return true;
-  }
   if (typeof a !== typeof b || a === null || b === null) return false;
   if (typeof a !== "object") return false;
   if (Array.isArray(a) !== Array.isArray(b)) return false;
@@ -702,6 +704,19 @@ export function sameValue(a: unknown, b: unknown): boolean {
   const kb = Object.keys(b as object).filter((k) => (b as Row)[k] !== undefined && (b as Row)[k] !== null);
   if (ka.length !== kb.length) return false;
   return ka.every((k) => sameValue((a as Row)[k], (b as Row)[k]));
+}
+
+/**
+ * The same value, ignoring case, commas and surrounding spaces — for the
+ * conflict check only. A field reformatted since the page loaded ("250000"
+ * read back as "250,000") is not an edit by someone else and should not refuse
+ * the save; what gets written is still decided by `sameValue`.
+ */
+export function looselySame(a: unknown, b: unknown): boolean {
+  if (typeof a === "string" && typeof b === "string") {
+    return a.replace(/,/g, "").trim().toLowerCase() === b.replace(/,/g, "").trim().toLowerCase();
+  }
+  return sameValue(a, b);
 }
 
 export type { Id };
