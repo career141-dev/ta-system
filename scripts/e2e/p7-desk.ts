@@ -198,7 +198,7 @@ try {
     const dj = (await done.json()) as { ok: boolean; message: string };
     await reload();
     const app = repo.applications(openingId).find((a) => a.candidateId === candidateIds[0]);
-    check("P7-09", "confirming shortlists them exactly as the button does: owned by the TA, in follow-up, with a set", dj.ok && app?.stage === "follow_up" && app.ownerTaId === ta.id && app.setNumber !== null, dj.message);
+    check("P7-09", "confirming shortlists them exactly as the button does: owned by the TA, in follow-up, with a set", dj.ok && (app?.stage === "ai_follow_up" || app?.stage === "ta_follow_up") && app.ownerTaId === ta.id && app.setNumber !== null, dj.message);
     const replay = await post("/api/assistant/confirm", ta.id, { token: proposal.proposal.token });
     check("P7-09b", "the same confirmation cannot be used twice", replay.status !== 200, `HTTP ${replay.status}`);
   }

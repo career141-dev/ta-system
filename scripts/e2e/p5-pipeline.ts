@@ -160,7 +160,7 @@ try {
   const sets = six.map((id) => appOf(id).setNumber);
   // The desk's rule (13 September): everyone shortlisted today joins the set open
   // this morning, even past five; the set closes on the day it reaches five.
-  check("P5-01", "six shortlisted on one day all join the open set (set 1), owned and in follow-up", sets.every((s) => s === 1) && six.every((id) => appOf(id).ownerTaId === ta.id && appOf(id).stage === "follow_up"), `sets ${sets.join(",")}`);
+  check("P5-01", "six shortlisted on one day all join the open set (set 1), owned and in follow-up", sets.every((s) => s === 1) && six.every((id) => appOf(id).ownerTaId === ta.id && (appOf(id).stage === "ai_follow_up" || appOf(id).stage === "ta_follow_up")), `sets ${sets.join(",")}`);
   const stolen = repo.shortlist(appOf(six[0]).id, lead.id);
   check("P5-01b", "a second TA cannot take a candidate someone owns, and is told who", !stolen.ok && (stolen as { ownerTaId: string }).ownerTaId === ta.id);
   check("P5-01e", "each shortlist writes a pipeline event", six.every((id) => repo.events(appOf(id).id).some((e) => e.eventType === "shortlisted")));

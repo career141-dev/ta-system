@@ -67,7 +67,7 @@ export function CandidateRow({
           <span className="rounded bg-tag px-1.5 py-[2px] text-[11px] text-ink-soft">{tag}</span>
           {/* Held in Follow-up for want of details: said on the row, so it does
               not look like the move to Director review simply failed (21 Sep). */}
-          {app.stage === "follow_up" && directorReviewBlockers(candidate).length > 0 && (
+          {(app.stage === "ta_follow_up" || app.stage === "ai_follow_up" || (app.stage as string) === "follow_up") && directorReviewBlockers(candidate).length > 0 && (
             <span className="rounded bg-warn-soft px-1.5 py-[2px] text-[11px] text-warn">
               Needs {directorReviewBlockers(candidate).join(", ")}
             </span>
@@ -143,7 +143,7 @@ export function CandidateRow({
         )}
 
         {/* In Follow-up, the three ways to reach them, one press each. */}
-        {!locked && app.stage === "follow_up" && isConvex() && (
+        {!locked && (app.stage === "ta_follow_up" || app.stage === "ai_follow_up" || (app.stage as string) === "follow_up") && isConvex() && (
           <FollowUpActions
             applicationId={app.id}
             openingId={openingId}

@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { allows } from "@/lib/auth";
 import { AskQuestion } from "@/components/AskQuestion";
 import { repo, setsForOpening } from "@/data/store";
@@ -19,6 +19,9 @@ export default async function StagePage({
   searchParams: Promise<ListFilters>;
 }) {
   const { id, stage } = await params;
+  if (stage === "follow_up") {
+    redirect(`/openings/${id}/pipeline/ta_follow_up`);
+  }
   const filters = await searchParams;
   await primeStore({ openingId: id });
   /*
@@ -63,7 +66,7 @@ export default async function StagePage({
         ]}
       />
 
-      {s === "follow_up" && (
+      {(s === "ai_follow_up" || s === "ta_follow_up") && (
         <AskQuestion
           openingId={id}
           standard={repo.followUpStandard().filter((q) => q.enabled).map((q) => q.label)}

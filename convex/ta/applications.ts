@@ -130,26 +130,15 @@ export const shortlist = internalMutation({
     await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
 
     // Shortlisting is what sends somebody to Follow-up on this desk.
-    if (toTaStage(app.currentStage) !== "follow_up") {
+    // A TA's shortlist is TA Follow-up, including someone the AI shortlisted
+    // first: the TA taking them on is what starts the outreach.
+    if (toTaStage(app.currentStage) !== "ta_follow_up") {
       await executeStageTransition(ctx, {
         applicationId: appId,
         targetStage: "follow_up" as PipelineStage,
         actorId: user._id,
         reason: "Shortlisted by a TA",
-        // The assignment check already ran above, against this actor. The
-        // state machine's own check would look for a Clerk identity and find
-        // none — see convex/ta/guard.ts.
         bypassRoleCheck: true,
-        // Shortlisting starts the outreach by itself, as the CV platform does
-        // (18 September, the owner's decision): the approved WhatsApp template
-        // and the email go the moment a candidate reaches Follow-up, and the
-        // sweep takes over the reminders. The TA can still press Send to push
-        // the next one early, and Stop to end it.
-        //
-        // Unless the opening's follow-up switch is off, in which case nothing
-        // goes by itself — a switch that says off has to mean off. Every
-        // message still passes the outreach gate, so on staging it reaches
-        // only the test recipients (convex/lib/outreachSafety.ts).
         skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
       });
     }

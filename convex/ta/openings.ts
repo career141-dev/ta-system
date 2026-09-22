@@ -94,6 +94,7 @@ export const get = internalQuery({
       assignments: assignments.map((a) => ({
         userId: a.userId as string,
         role: a.assignmentRole,
+        workingStage: a.workingStage,
       })),
     };
   },
@@ -343,6 +344,32 @@ export const create = internalMutation({
     }
 
     return { id: jobId as string };
+  },
+});
+
+export const setWorkingStage = internalMutation({
+  args: {
+    actorId: v.optional(v.string()),
+    openingId: v.string(),
+    userId: v.optional(v.string()),
+    stage: v.union(v.literal("100%"), v.literal("Follow-up"), v.literal("Add-on")),
+  },
+  handler: async (ctx, args) => {
+    const actor = await requireActor(ctx, args.actorId);
+    const jobId = args.openingId as Id<"jobs">;
+    const targetUserId = args.userId ? (args.userId as Id<"users">) : actor._id;
+
+    const assignment = await ctx.db
+      .query("jobAssignments")
+      .withIndex("by_jobId_userId", (q) => q.eq("jobId", jobId).eq("userId", targetUserId))
+      .first();
+
+    // Only someone already on the job has a working stage. Creating the row
+    // here made a lead who changed the menu the job's primary recruiter
+    // (review, 22 Sep).
+    if (!assignment || !assignment.isActive) throw new Error("You are not on this opening.");
+    await ctx.db.patch(assignment._id, { workingStage: args.stage });
+    return { ok: true, stage: args.stage };
   },
 });
 

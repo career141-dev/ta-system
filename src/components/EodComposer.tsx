@@ -181,7 +181,7 @@ export function EodComposer({
 
           {/* Table two — the L-sheet, editable before it goes (plan 6.1–6.3). */}
           <div className="mt-7">
-            <EffortSheet effort={effort} formId="eod-send" draftKey={`eod-effort:${openingId}:${effort.date}`} />
+            <EffortSheet effort={effort} formId="eod-send" draftKey={`eod-effort:${openingId}:${effort.date}`} openingId={openingId} />
           </div>
 
           <p className="mt-7 text-[13px] leading-[1.8]">

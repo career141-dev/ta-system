@@ -175,7 +175,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <div className="flex gap-7 text-right">
                       <div>
                         <div className="tabular text-[16px] font-semibold leading-none">
-                          {counts.follow_up ?? 0}
+                          {(counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0)}
                         </div>
                         <div className="mt-1.5 text-[11.5px] text-ink-soft">Follow-up</div>
                       </div>

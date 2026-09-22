@@ -109,7 +109,7 @@ export default async function ClientsPage({
                   status: o.status,
                   locations: o.locations,
                   taNames: o.assignedTaIds.map((t) => users.find((u) => u.id === t)?.name ?? "—"),
-                  followUp: counts.follow_up ?? 0,
+                  followUp: (counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0),
                   setsClosed: setsForOpening(o.id).filter((x) => x.status === "closed").length,
                   days: Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000),
                   target: PRIORITY_TARGET[o.priorityTier].days,

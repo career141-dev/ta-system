@@ -35,13 +35,13 @@ const opening = repo.openings().find((o) => repo.applications(o.id).some((a) => 
 const fresh1 = repo.applications(opening.id).filter((a) => a.stage === "new_cv" && !a.ownerTaId);
 const r = repo.shortlist(fresh1[0].id, ta.id);
 const after = repo.application(fresh1[0].id)!;
-eq("goes to Follow-up", after.stage, "follow_up");
+eq("goes to Follow-up", after.stage, "ta_follow_up");
 eq("gets a set number", after.setNumber !== null, true);
 eq("writes a history event", repo.events(after.id).some((e) => e.eventType === "shortlisted"), true);
 const stamp = after.shortlistedAt;
 repo.shortlist(fresh1[0].id, ta.id);
 eq("shortlisting twice changes nothing", repo.application(fresh1[0].id)!.shortlistedAt, stamp);
-eq("returns the stage", r.ok && r.stage, "follow_up");
+eq("returns the stage", r.ok && r.stage, "ta_follow_up");
 
 console.log("\nsets: the day rule, per TA");
 fresh();
@@ -136,7 +136,7 @@ fresh();
 {
   const o = repo.openings()[0];
   const lead = repo.users().find((u) => u.role === "ta_lead")!;
-  const inReview = repo.applications(o.id).filter((a) => a.stage === "follow_up").slice(0, 2);
+  const inReview = repo.applications(o.id).filter((a) => a.stage === "ai_follow_up" || a.stage === "ta_follow_up").slice(0, 2);
   if (inReview.length === 2) {
     for (const a of inReview) repo.moveStage(a.id, "director_review", lead.id);
     const round = repo.openReviewRound({
@@ -163,7 +163,7 @@ fresh();
 {
   const o = repo.openings()[0];
   const lead = repo.users().find((u) => u.role === "ta_lead")!;
-  const people = repo.applications(o.id).filter((a) => a.stage === "follow_up").slice(0, 3);
+  const people = repo.applications(o.id).filter((a) => a.stage === "ai_follow_up" || a.stage === "ta_follow_up").slice(0, 3);
   if (people.length === 3) {
     for (const a of people) repo.moveStage(a.id, "director_review", lead.id);
     const send = (ids: string[], subject: string) =>

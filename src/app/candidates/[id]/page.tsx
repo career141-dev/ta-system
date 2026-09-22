@@ -79,6 +79,20 @@ export default async function CandidatePage({
   const status = repo.overallStatus(c.id);
   const linkedin = externalUrl(c.linkedinUrl);
   const matchFor = new Map((profile?.matches ?? []).map((m) => [m.applicationId, m]));
+  const referees =
+    profile?.referees && profile.referees.length > 0
+      ? profile.referees
+      : repo
+          .referees()
+          .filter((r) => r.fromCandidateId === c.id)
+          .map((r) => ({
+            name: r.name,
+            designation: r.title,
+            company: r.company,
+            contactNo: r.phone,
+            email: r.email,
+            relationship: r.relationship,
+          }));
 
   const row = (label: string, value: React.ReactNode) => (
     <>
@@ -288,22 +302,35 @@ export default async function CandidatePage({
             </section>
           )}
 
-          {(profile?.referees.length ?? 0) > 0 && (
-            <section className="rounded-2xl border border-rule bg-surface px-6 py-5">
-              <h2 className="mb-3 text-[13px] font-semibold">Referees</h2>
+          <section className="rounded-2xl border border-rule bg-surface px-6 py-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-[13px] font-semibold">Referees</h2>
+              {referees.length > 0 && (
+                <span className="text-[11.5px] text-ink-faint">
+                  {referees.length} named on CV
+                </span>
+              )}
+            </div>
+            {referees.length === 0 ? (
+              <p className="text-[12.5px] text-ink-faint">No referees named on this CV.</p>
+            ) : (
               <ul className="grid gap-3 sm:grid-cols-2">
-                {profile!.referees.map((r, i) => (
+                {referees.map((r, i) => (
                   <li key={i} className="rounded-lg bg-paper px-4 py-3 text-[12.5px]">
                     <div className="font-medium text-ink">{r.name}</div>
-                    {(r.designation || r.company) && <div className="text-ink-soft">{[r.designation, r.company].filter(Boolean).join(", ")}</div>}
+                    {(r.designation || r.company) && (
+                      <div className="text-ink-soft">
+                        {[r.designation, r.company].filter(Boolean).join(", ")}
+                      </div>
+                    )}
                     {r.relationship && <div className="text-ink-faint">{r.relationship}</div>}
                     {r.contactNo && <div className="mt-1 tabular">{r.contactNo}</div>}
                     {r.email && <div className="break-all">{r.email}</div>}
                   </li>
                 ))}
               </ul>
-            </section>
-          )}
+            )}
+          </section>
         </div>
 
         <aside className="flex flex-col gap-6">

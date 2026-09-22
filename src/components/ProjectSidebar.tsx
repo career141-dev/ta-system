@@ -175,7 +175,9 @@ export function ProjectSidebar({
                     <Link href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
                       {STAGE_LABEL[s]}
                     </Link>
-                    {s === "follow_up" && canSeeSourcing && (
+                    {/* Under the last Follow-up stage, as it sat under Follow-up
+                        before the split (22 Sep) — nothing else links to it. */}
+                    {s === "ta_follow_up" && canSeeSourcing && (
                       <Link href={`${base}/reference`} className={`${sub(inReference)} ml-3 gap-1.5`}>
                         <span aria-hidden="true" className="text-ink-faint">└</span> Reference
                       </Link>

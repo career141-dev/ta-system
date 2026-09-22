@@ -281,7 +281,8 @@ export interface Candidate {
 export type Stage =
   | "new_cv"
   | "matched"
-  | "follow_up"
+  | "ai_follow_up"
+  | "ta_follow_up"
   | "director_review"
   | "director_shortlist"
   | "client_shortlist"
@@ -292,7 +293,8 @@ export type Stage =
   | "dropped_out";
 
 export const PIPELINE_STAGES: Stage[] = [
-  "follow_up",
+  "ai_follow_up",
+  "ta_follow_up",
   "director_review",
   "director_shortlist",
   "client_shortlist",
@@ -305,24 +307,21 @@ export const CLOSED_STAGES: Stage[] = ["rejected", "dropped_out"];
 
 /**
  * Before the board: LinkedIn applicants (New CVs) and database matches.
- *
- * "TA shortlist" and "AI call" were stages until 13 September. The desk does
- * not work them as stages — shortlisting sends a person to Follow-up, and the
- * AI call is something that happens *inside* Follow-up — so they were removed,
- * and anybody stored in either is read as Follow-up.
  */
 export const EARLY_STAGES: Stage[] = ["new_cv", "matched"];
 
-/** Stages retired on 13 September, and where their people now live. */
+/** Retired stages, and where their candidates are mapped. */
 export const RETIRED_STAGES: Record<string, Stage> = {
-  ta_shortlist: "follow_up",
-  ai_call: "follow_up",
+  follow_up: "ta_follow_up",
+  ta_shortlist: "ta_follow_up",
+  ai_call: "ai_follow_up",
 };
 
 export const STAGE_LABEL: Record<Stage, string> = {
   new_cv: "New CVs",
   matched: "Database match",
-  follow_up: "Follow-up",
+  ai_follow_up: "AI Follow-up",
+  ta_follow_up: "TA Follow-up",
   director_review: "Director Review",
   director_shortlist: "Director shortlist",
   client_shortlist: "Client shortlist",
@@ -488,6 +487,8 @@ export const ASSIGNMENT_NOTE: Record<AssignmentRole, string> = {
   client_contact: "Sees their shortlist onward — not the sourcing behind it.",
 };
 
+export type WorkingStage = "100%" | "Follow-up" | "Add-on";
+
 export interface Assignment {
   id: Id;
   openingId: Id;
@@ -495,6 +496,8 @@ export interface Assignment {
   role: AssignmentRole;
   assignedAt: number;
   assignedBy: Id | null;
+  /** The TA's current working stage for this job (100% / Follow-up / Add-on). */
+  workingStage?: WorkingStage;
 }
 
 export interface PipelineEvent {
@@ -748,6 +751,19 @@ export interface ResearchFields {
   competitors: string[];
   socialMedia: string;
   companyOverview: string;
+  /** Each competitor searched and read (22 Sep). Absent on reports made before. */
+  competitorProfiles?: CompetitorProfile[];
+}
+
+/** A competitor as the search found it: addresses from the results, text from their pages. */
+export interface CompetitorProfile {
+  name: string;
+  website: string;
+  linkedin: string;
+  whatTheyDo: string;
+  location: string;
+  summary: string;
+  sources: Citation[];
 }
 
 export const EMPTY_RESEARCH: ResearchFields = {

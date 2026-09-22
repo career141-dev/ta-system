@@ -38,6 +38,7 @@ import type {
   ChatMessage,
   Assignment,
   AssignmentRole,
+  WorkingStage,
   Interview,
   IntakeItem,
   IntakeSource,
@@ -646,7 +647,7 @@ const rawRepo = {
    */
   refereesForPipeline(openingId: Id) {
     const db = load();
-    const STAGES: Stage[] = ["follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"];
+    const STAGES: Stage[] = ["ai_follow_up", "ta_follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"];
     const apps = db.applications
       .filter((a) => a.openingId === openingId && STAGES.includes(a.stage))
       .sort((a, b) => STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage));
@@ -797,8 +798,9 @@ const rawRepo = {
 
     const candidate = db.candidates.find((c) => c.id === app.candidateId);
     const from = app.stage;
-    const claimable = from === "new_cv" || from === "matched";
-    const to: Stage = claimable ? "follow_up" : from;
+    // A TA's shortlist is TA Follow-up, from the AI's shortlist too.
+    const claimable = from === "new_cv" || from === "matched" || from === "ai_follow_up";
+    const to: Stage = claimable ? "ta_follow_up" : from;
 
     let setNumber: number | null = app.setNumber;
     mutate((d) => {
@@ -1254,7 +1256,7 @@ const rawRepo = {
       const a = db.applications.find((x) => x.id === appId);
       if (!a) return;
       a.backupForApplicationId = forApplicationId;
-      if (a.stage === "new_cv" || a.stage === "matched") a.stage = "follow_up";
+      if (a.stage === "new_cv" || a.stage === "matched") a.stage = "ta_follow_up";
       a.lastStageChangedAt = Date.now();
     });
   },
@@ -1804,6 +1806,7 @@ const rawRepo = {
       return { ok: true, applicationId: onOpening.id, stage: onOpening.stage };
     }
 
+    const targetStage: Stage = "ta_follow_up";
     const by = db.users.find((u) => u.id === byUserId)?.name ?? "a TA";
     const now = Date.now();
     const applicationId = `app_${Math.random().toString(36).slice(2, 10)}`;
@@ -1843,7 +1846,7 @@ const rawRepo = {
         openingId: e.openingId,
         jobPostId: null,
         candidateId,
-        stage: "follow_up",
+        stage: targetStage,
         answers: {},
         sourcingChannel: e.sourcingChannel,
         ownerTaId: null,
@@ -1869,7 +1872,7 @@ const rawRepo = {
       const row = d.linkVault.find((l) => l.id === entryId);
       if (row) row.candidateId = candidateId;
     });
-    return { ok: true, applicationId: realId(applicationId), stage: "follow_up" };
+    return { ok: true, applicationId: realId(applicationId), stage: targetStage };
   },
 
   /**
@@ -1979,6 +1982,28 @@ const rawRepo = {
         o.directorId = director?.userId ?? o.directorId;
         o.updatedAt = Date.now();
       }
+    });
+  },
+
+  /** The TA's working stage on an opening (100% / Follow-up / Add-on). Defaults to "100%". */
+  workingStage(openingId: Id, userId: Id): WorkingStage {
+    const a = this.assignmentFor(openingId, userId);
+    return a?.workingStage ?? "100%";
+  },
+
+  /** Update the TA's working stage for this opening. Only someone on the job has one. */
+  setWorkingStage(openingId: Id, userId: Id, stage: WorkingStage) {
+    const team = this.assignments(openingId);
+    if (!team.some((x) => x.userId === userId)) return;
+    mutate((db) => {
+      // An older opening's team is derived on read (assignments above) until
+      // one row is stored, and then only stored rows count — so store the
+      // whole team, or the others would drop off it.
+      if (!db.assignments.some((x) => x.openingId === openingId)) {
+        for (const x of team) db.assignments.push({ ...x, id: `as_${Math.random().toString(36).slice(2, 10)}` });
+      }
+      const a = db.assignments.find((x) => x.openingId === openingId && x.userId === userId);
+      if (a) a.workingStage = stage;
     });
   },
 
@@ -2111,7 +2136,7 @@ const rawRepo = {
     /** Where somebody must still be for this round's answer to mean anything. */
     const awaiting: Stage[] =
       round.kind === "director"
-        ? ["director_review", "follow_up", "new_cv", "matched"]
+        ? ["director_review", "ai_follow_up", "ta_follow_up", "follow_up" as Stage, "new_cv", "matched"]
         : ["director_shortlist"];
 
     const already = new Map((round.decisions ?? []).map((d) => [d.applicationId, d]));
@@ -3154,7 +3179,7 @@ const rawRepo = {
     const standard = repo.followUpStandard();
     const out = [];
     for (const a of db.applications) {
-      if (a.stage !== "follow_up") continue;
+      if (a.stage !== "ai_follow_up" && a.stage !== "ta_follow_up" && (a.stage as string) !== "follow_up") continue;
       const candidate = repo.candidate(a.candidateId);
       const opening = db.openings.find((o) => o.id === a.openingId);
       if (!candidate || !opening) continue;

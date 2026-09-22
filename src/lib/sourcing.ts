@@ -921,10 +921,12 @@ export async function benchmarkViaSearch(
 
   let credits = 0;
   const byKey = new Map<string, { url: string; title: string; snippet: string }>();
-  for (const q of queries) {
-    const r = await search(q, 10);
-    credits += r.credits;
-    if (r.error === "spend_cap") return { ...empty, queries, credits, cost, error: "spend_cap" };
+  // All at once, then read in order: one after another took about half a
+  // minute of the run (testing, 22 Sep). The order of the results is kept.
+  const results = await Promise.all(queries.map((q) => search(q, 10)));
+  for (const r of results) credits += r.credits;
+  if (results.some((r) => r.error === "spend_cap")) return { ...empty, queries, credits, cost, error: "spend_cap" };
+  for (const r of results) {
     for (const h of r.hits) {
       const key = canonicalProfile(h.url);
       if (!key || spec.alreadyKnown.includes(key) || byKey.has(key)) continue;

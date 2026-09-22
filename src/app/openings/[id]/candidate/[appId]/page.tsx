@@ -27,6 +27,7 @@ import { extractCareer141BoxFromText, isSystemNote } from "@/lib/pdf";
 import { LiveFollowUp } from "@/components/LiveFollowUp";
 import { AuraCallButton } from "@/components/AuraCallButton";
 import { WebCallResults } from "@/components/WebCallResults";
+import { VerifyReferee } from "@/components/VerifyReferee";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { primeStore } from "@/data/prime";
@@ -276,7 +277,7 @@ export default async function CandidateDrawer({
 
       {/* Everything Director Review asks for, typed in by hand when it came in
           outside the follow-up. Shown until they are past Follow-up. */}
-      {!locked && ["new_cv", "matched", "follow_up"].includes(app.stage) && (
+      {!locked && ["new_cv", "matched", "ai_follow_up", "ta_follow_up", "follow_up"].includes(app.stage) && (
         <ReviewDetailsForm
           applicationId={app.id}
           openingId={id}
@@ -289,7 +290,7 @@ export default async function CandidateDrawer({
       )}
 
       <nav className="mt-4 flex gap-6 border-b border-rule px-1">
-        {TABS.map((t) => {
+        {TABS.filter((t) => t !== "reference" || referees.length > 0).map((t) => {
           // A count on every tab that can have one, so a TA knows whether a tab
           // is worth opening before they open it.
           const n = COUNTS[t];
@@ -348,6 +349,50 @@ export default async function CandidateDrawer({
               )}
             </div>
 
+            {/* References from the CV */}
+            <div className="mt-6 rounded-xl border border-rule bg-paper p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-[13.5px] font-semibold text-ink">References</h3>
+                {referees.length > 0 && (
+                  <span className="text-[12px] text-ink-faint">
+                    {referees.length} named on CV
+                  </span>
+                )}
+              </div>
+              {referees.length === 0 ? (
+                <p className="py-2 text-[12.5px] text-ink-faint">No referees named on this CV.</p>
+              ) : (
+                <div className="divide-y divide-rule">
+                  {referees.map((r) => (
+                    <div key={r.id} className="flex flex-wrap items-start justify-between gap-4 py-3.5 first:pt-0 last:pb-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[13.5px] font-medium text-ink">{r.name}</p>
+                        <p className="mt-0.5 text-[12.5px] text-ink-soft">
+                          {r.title ?? "Role not on the CV"}
+                          {r.company && (
+                            <>
+                              <span className="text-ink-faint"> at </span>
+                              {r.company}
+                            </>
+                          )}
+                          <span className="ml-1.5 text-[11px] text-ink-faint">(from the CV)</span>
+                        </p>
+                        {r.relationship && <p className="mt-1 text-[12px] text-ink-faint">{r.relationship}</p>}
+                      </div>
+                      <div className="shrink-0 text-right text-[12.5px]">
+                        {r.phone ? (
+                          <span className="tabular block font-medium">{r.phone}</span>
+                        ) : (
+                          <span className="block text-ink-faint">No number on file</span>
+                        )}
+                        {r.email && <span className="mt-0.5 block text-[11.5px] text-ink-faint">{r.email}</span>}
+                        <VerifyReferee refereeId={r.id} openingId={id} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </>
         )}
 
@@ -437,8 +482,29 @@ export default async function CandidateDrawer({
             <div className="divide-y divide-rule">
               {referees.map((r) => (
                 <div key={r.id} className="flex flex-wrap items-start justify-between gap-4 py-3.5 first:pt-0 last:pb-0">
-                  <div><p className="text-[13.5px] font-medium">{r.name}</p><p className="text-[12.5px] text-ink-soft">{r.title} at {r.company}</p><p className="mt-0.5 text-[11.5px] text-ink-faint">{r.relationship}</p></div>
-                  <div className="text-right text-[12.5px]">{r.phone ? <span className="tabular block">{r.phone}</span> : <span className="block text-ink-faint">No number</span>}<span className="block text-[11.5px] text-ink-faint">{r.email}</span></div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13.5px] font-medium text-ink">{r.name}</p>
+                    <p className="mt-0.5 text-[12.5px] text-ink-soft">
+                      {r.title ?? "Role not on the CV"}
+                      {r.company && (
+                        <>
+                          <span className="text-ink-faint"> at </span>
+                          {r.company}
+                        </>
+                      )}
+                      <span className="ml-1.5 text-[11px] text-ink-faint">(from the CV)</span>
+                    </p>
+                    {r.relationship && <p className="mt-1 text-[12px] text-ink-faint">{r.relationship}</p>}
+                  </div>
+                  <div className="shrink-0 text-right text-[12.5px]">
+                    {r.phone ? (
+                      <span className="tabular block font-medium">{r.phone}</span>
+                    ) : (
+                      <span className="block text-ink-faint">No number on file</span>
+                    )}
+                    {r.email && <span className="mt-0.5 block text-[11.5px] text-ink-faint">{r.email}</span>}
+                    <VerifyReferee refereeId={r.id} openingId={id} />
+                  </div>
                 </div>
               ))}
             </div>

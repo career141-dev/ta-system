@@ -182,7 +182,7 @@ export default async function OpeningsPage({
 
                   <div className="flex shrink-0 items-start gap-8 text-right">
                     {[
-                      { n: c.follow_up ?? 0, l: "Follow-up" },
+                      { n: (c.ai_follow_up ?? 0) + (c.ta_follow_up ?? 0), l: "Follow-up" },
                       { n: c.director_review ?? 0, l: "Director" },
                       { n: cvsToday, l: "CVs today" },
                       {

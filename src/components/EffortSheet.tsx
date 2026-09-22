@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { EFFORT_NUMBERS, OUTREACH_TYPES, effortColumns, type EffortKey, type EffortRow } from "@/lib/eod-format";
+import { setWorkingStage } from "@/app/actions";
 
 /**
  * The L-sheet, editable before it is sent (plan 6.1–6.3, 21 Sep).
@@ -13,7 +14,17 @@ import { EFFORT_NUMBERS, OUTREACH_TYPES, effortColumns, type EffortKey, type Eff
  * screen. Edits are kept in this browser until sent, so a reload loses
  * nothing; a changed figure is marked, with the record's figure on hover.
  */
-export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; formId: string; draftKey: string }) {
+export function EffortSheet({
+  effort,
+  formId,
+  draftKey,
+  openingId,
+}: {
+  effort: EffortRow;
+  formId: string;
+  draftKey: string;
+  openingId?: string;
+}) {
   type Draft = {
     kind: string;
     values: Partial<Record<EffortKey, string>>;
@@ -29,6 +40,33 @@ export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; f
   const [draft, setDraft] = useState<Draft>(initial);
 
   useEffect(() => {
+    if (effort.hundredOrFollowUp) {
+      setDraft((d) => (d.kind === effort.hundredOrFollowUp ? d : { ...d, kind: effort.hundredOrFollowUp }));
+    }
+  }, [effort.hundredOrFollowUp]);
+
+  useEffect(() => {
+    const handleStageChange = (e: Event) => {
+      const detail = (e as CustomEvent<{ openingId?: string; stage: string }>).detail;
+      if (detail && (!openingId || !detail.openingId || detail.openingId === openingId)) {
+        if (detail.stage && (OUTREACH_TYPES as readonly string[]).includes(detail.stage)) {
+          setDraft((d) => {
+            try {
+              const held = JSON.parse(localStorage.getItem(draftKey) ?? "{}");
+              localStorage.setItem(draftKey, JSON.stringify({ ...held, kind: detail.stage }));
+            } catch {
+              /* storage blocked */
+            }
+            return { ...d, kind: detail.stage };
+          });
+        }
+      }
+    };
+    window.addEventListener("working-stage-changed", handleStageChange);
+    return () => window.removeEventListener("working-stage-changed", handleStageChange);
+  }, [openingId, draftKey]);
+
+  useEffect(() => {
     try {
       const held = JSON.parse(localStorage.getItem(draftKey) ?? "null") as Draft | null;
       // Only what the TA changed is taken back. A kept draft replaced every
@@ -40,7 +78,7 @@ export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; f
           const v = held.values[k];
           if (v !== undefined && held.base && v !== held.base[k]) values[k] = v;
         }
-        setDraft({ ...initial, kind: held.kind || initial.kind, targets: held.targets ?? {}, values });
+        setDraft({ ...initial, kind: effort.hundredOrFollowUp || held.kind || initial.kind, targets: held.targets ?? {}, values });
       }
     } catch {
       /* nothing kept, or storage blocked: the records' figures */
@@ -101,7 +139,21 @@ export function EffortSheet({ effort, formId, draftKey }: { effort: EffortRow; f
                       form={formId}
                       name="effort_kind"
                       value={draft.kind}
-                      onChange={(e) => setDraft({ ...draft, kind: e.target.value })}
+                      onChange={async (e) => {
+                        const val = e.target.value;
+                        setDraft((d) => ({ ...d, kind: val }));
+                        window.dispatchEvent(
+                          new CustomEvent("working-stage-changed", {
+                            detail: { openingId, stage: val },
+                          }),
+                        );
+                        if (openingId) {
+                          const fd = new FormData();
+                          fd.append("openingId", openingId);
+                          fd.append("stage", val);
+                          await setWorkingStage(fd);
+                        }
+                      }}
                       className="w-full rounded border border-rule bg-surface px-1 py-1 text-[12px] outline-none focus:border-brand"
                     >
                       {OUTREACH_TYPES.map((t) => (
