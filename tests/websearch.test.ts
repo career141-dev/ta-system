@@ -1,5 +1,5 @@
 import { keepHit, parseBooleanQuery, searchMatrix, toNaturalSearch } from "@/lib/websearch";
-import type { SearchHit } from "@/lib/serper";
+import { searchProvider, searxngHits, searxngInstances, type SearchHit } from "@/lib/serper";
 
 let passed = 0;
 let failed = 0;
@@ -72,6 +72,44 @@ console.log("\nseveral angles at once");
   const key = (u: string) => u.toLowerCase().match(/linkedin\.com\/in\/([^/?#]+)/)?.[1] ?? null;
   const r = await searchMatrix(["one", "two"], web, { key });
   eq("lk. and www. are the same person", [r.hits.length, r.hits[0].hitCount], [1, 2]);
+}
+
+
+console.log("\nSearXNG: what an instance answered, as hits");
+{
+  const body = {
+    results: [
+      { url: "https://lk.linkedin.com/in/sahan-g", title: "Sahan G — CFO", content: "Chief Financial Officer at Hayleys" },
+      { url: "https://lk.linkedin.com/in/sahan-g", title: "Sahan G", content: "duplicate" },
+      { url: "https://www.topjobs.lk/jobs/cfo", title: "CFO vacancy", content: "Apply now" },
+      { url: "not-an-address", title: "junk", content: "" },
+      { url: "https://www.linkedin.com/in/nimal-p", title: "Nimal P — CFO", content: "" },
+    ],
+  };
+  const hits = searxngHits(body, `site:linkedin.com/in "CFO" -inurl:jobs`, 10);
+  eq("the site operator is enforced on our side", hits.map((h) => h.url), ["https://lk.linkedin.com/in/sahan-g", "https://www.linkedin.com/in/nimal-p"]);
+  eq("content is the snippet", hits[0].snippet, "Chief Financial Officer at Hayleys");
+  eq("only as many as were asked for", searxngHits(body, "cfo", 1).length, 1);
+  eq("nothing at all is no hits, not a crash", searxngHits({}, "cfo", 10), []);
+}
+
+console.log("\nwho answers a search");
+{
+  const env = { ...process.env };
+  const set = (v: Record<string, string | undefined>) => {
+    for (const k of ["SEARXNG_URL", "SERPER_API_KEY", "C141_SEARCH_PROVIDER", "OPENAI_API_KEY"]) delete process.env[k];
+    Object.assign(process.env, v);
+  };
+  set({ SEARXNG_URL: "https://searx.example/ , https://other.example", SERPER_API_KEY: "k" });
+  eq("an instance is named, so SearXNG answers and Serper does not", searchProvider(), "searxng");
+  eq("the instances, trimmed and in order", searxngInstances(), ["https://searx.example", "https://other.example"]);
+  set({ SERPER_API_KEY: "k" });
+  eq("no instance: Serper still answers", searchProvider(), "serper");
+  set({ SEARXNG_URL: "not a url" });
+  eq("an address that is not one is no instance", searchProvider(), null);
+  set({ SEARXNG_URL: "https://searx.example", C141_SEARCH_PROVIDER: "serper", SERPER_API_KEY: "k" });
+  eq("naming Serper still gets Serper", searchProvider(), "serper");
+  process.env = env;
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

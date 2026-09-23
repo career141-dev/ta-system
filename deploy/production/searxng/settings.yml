@@ -1,0 +1,49 @@
+# SearXNG for the TA System — 23 September.
+#
+# Suggestions, Benchmark and Research search through this instead of Serper
+# (src/lib/serper.ts). It is reachable only from the app container, over
+# career141_default; nothing is published to the host, so nothing on the
+# internet can ask it anything.
+#
+# Lives on the server at /opt/ta-prod/searxng/settings.yml. The release
+# pipeline copies only docker-compose.yml, so this file is put there by hand
+# and is not replaced by a deploy — change it here first, then copy it up.
+use_default_settings: true
+
+general:
+  instance_name: "Career141 search"
+  # Nobody browses this; it answers the app.
+  enable_metrics: false
+
+server:
+  # Replaced on first install by the command in the README — never commit a real one.
+  secret_key: "change-me"
+  # The limiter is what makes public instances answer 403 and serve bot checks.
+  # This instance is on a private network with one caller, so it is off: with
+  # it on, Research's thirty searches per opening would be throttled by us.
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  # The JSON API. Off by default, and the reason no public instance could be
+  # used (probed 23 Sep: every one served HTML or 403).
+  formats:
+    - html
+    - json
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "en"
+
+outgoing:
+  request_timeout: 6.0
+  max_request_timeout: 12.0
+  pool_connections: 100
+  pool_maxsize: 20
+  enable_http2: true
+
+# Engines are the default set. Google is the one that matters for `site:` and
+# `-inurl:` — it is also the one most likely to block a data-centre address. If
+# it starts failing, the others still answer and the operators are enforced on
+# our side anyway (src/lib/websearch.ts), so results thin out rather than turn
+# wrong. Watch `docker logs ta-prod-searxng` for "CAPTCHA" from google.
