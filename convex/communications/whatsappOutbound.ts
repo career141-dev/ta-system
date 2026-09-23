@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { sendMetaFreeText } from "./metaDirectSender";
+import { followUpCancelledReason } from "../lib/graphMail";
 
 /**
  * The Meta `phone_number_id` for the line an opening sends from.
@@ -242,26 +243,38 @@ export const sendWhatsApp = internalAction({
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
     body: v.string(),
+    /**
+     * This message answers the candidate rather than chasing them.
+     *
+     * The guard below stops a chase reaching somebody who has moved on. An
+     * answer is the opposite. The assistant collects the last missing detail,
+     * the candidate is advanced to Second Shortlist in the same run, and the
+     * "thank you, your profile is complete" message was then cancelled for
+     * being sent to a candidate no longer in Follow-up — so they heard nothing
+     * back at the exact moment they finished what was asked (23 September).
+     *
+     * Email hit this on 18 September and grew `isReplyToCandidate` then
+     * (`lib/graphMail.ts`); WhatsApp never got the same treatment. Same helper,
+     * so the two channels cannot drift apart again.
+     */
+    isReplyToCandidate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    // Check communication status & stage guard — DO NOT send automated follow-up if candidate moved out of follow_up stage (e.g. to ta_shortlist)
     const commRecord = await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, { communicationId: args.communicationId });
-    if (commRecord?.stoppedSequence || commRecord?.deliveryStatus === "failed") {
-      console.log(`[WhatsApp Outbound] Communication ${args.communicationId} was cancelled/stopped. Skipping delivery.`);
-      return;
-    }
-
-    if (commRecord?.applicationId) {
-      const appRecord = await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: commRecord.applicationId });
-      if (appRecord && appRecord.currentStage !== "follow_up" && appRecord.currentStage !== "ta_shortlist" && appRecord.currentStage !== "matched_candidates") {
-        console.log(`[WhatsApp Outbound] Application ${commRecord.applicationId} is in stage "${appRecord.currentStage}" (not "follow_up", "ta_shortlist", or "matched_candidates"). Aborting WhatsApp follow-up delivery.`);
+    const appRecord = commRecord?.applicationId
+      ? await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: commRecord.applicationId })
+      : null;
+    const cancelled = followUpCancelledReason(commRecord, appRecord, args.isReplyToCandidate === true);
+    if (cancelled) {
+      console.log(`[WhatsApp Outbound] ${cancelled} (communication ${args.communicationId})`);
+      if (commRecord?.deliveryStatus !== "failed") {
         await ctx.runMutation(internal.communications.whatsappOutbound.updateStatus, {
           communicationId: args.communicationId,
           status: "failed",
-          error: `Cancelled: Application is in stage ${appRecord.currentStage}`,
+          error: cancelled,
         });
-        return;
       }
+      return;
     }
 
     // 1. Fetch candidate contact details
