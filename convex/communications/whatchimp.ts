@@ -5,6 +5,7 @@ import { getOpenAI, getModelForTask } from "../lib/llm";
 import { sendMetaFreeText } from "./metaDirectSender";
 import { classifyMessage } from "./messageClassifier";
 import { findCandidateByPhone } from "./whatsappOutbound";
+import { verifyMetaSignature } from "../lib/webhookSecurity";
 
 export function matchJobFromText(jobs: any[], textBody: string): { matchedJob: any | null; matchedKeyword: string; isAmbiguous: boolean } {
   const trimmed = textBody.trim();
@@ -82,8 +83,39 @@ export function matchJobFromText(jobs: any[], textBody: string): { matchedJob: a
 }
 
 
+/**
+ * Every inbound WhatsApp event arrives here — all four routes in `http.ts`
+ * share this handler, so the signature check below covers each of them and a
+ * new route cannot be added that skips it.
+ */
 export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
+  // Meta signs the bytes it sent. Read them once and use the same string for
+  // the HMAC and for JSON.parse — re-serialising the parsed object changes the
+  // signature.
   const bodyText = await request.text();
+
+  /*
+   * Until 23 September this handler ran on anything that reached the URL: the
+   * secret check below was skipped outright for a body shaped
+   * `entry[].changes[]`, and `X-Hub-Signature-256` was never looked at. The
+   * callback URL is visible to everyone who can see the app configuration, and
+   * a forged POST writes an inbound `communications` row, triggers a DeepSeek
+   * reply to a real candidate and patches their application.
+   *
+   * Fails closed: with no `META_APP_SECRET` the webhook refuses everything
+   * rather than falling back to the old behaviour.
+   */
+  const appSecret = process.env.META_APP_SECRET;
+  if (!appSecret) {
+    console.error("[WhatsApp Webhook] META_APP_SECRET is not set — refusing the request.");
+    return new Response("Webhook not configured", { status: 503 });
+  }
+  const signature = request.headers.get("x-hub-signature-256");
+  if (!(await verifyMetaSignature(bodyText, signature, appSecret))) {
+    console.warn("[WhatsApp Webhook] Rejected a request with a missing or invalid X-Hub-Signature-256.");
+    return new Response("Unauthorized", { status: 401 });
+  }
+
   console.log("[WhatChimp Webhook] Raw body received (first 500 chars):", bodyText.substring(0, 500));
 
   let body: any;
@@ -92,17 +124,6 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
   } catch (err: any) {
     console.error("[WhatChimp Webhook] Failed to parse JSON:", err.message);
     return new Response("Invalid JSON", { status: 400 });
-  }
-
-  const webhookSecret = process.env.WHATCHIMP_WEBHOOK_SECRET;
-  const isStandardMetaPayload = Boolean(body?.entry && body?.entry[0]?.changes);
-
-  if (webhookSecret && !isStandardMetaPayload) {
-    const receivedSecret = request.headers.get("x-whatchimp-secret") || request.headers.get("x-webhook-secret") || new URL(request.url).searchParams.get("secret");
-    if (receivedSecret !== webhookSecret) {
-      console.warn("[WhatChimp Webhook] Unauthorized request missing valid secret.");
-      return new Response("Unauthorized", { status: 401 });
-    }
   }
 
   const configuredPhone = process.env.WHATCHIMP_PHONE_NUMBER_ID || "";

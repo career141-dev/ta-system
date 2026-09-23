@@ -11,6 +11,11 @@ MS_GRAPH_TENANT_ID|MS_TENANT_ID
 # WhatsApp templates have no fallback token any more (metaTemplateSender.ts).
 META_ACCESS_TOKEN
 META_PHONE_NUMBER_ID
+# Inbound WhatsApp: without these the webhook refuses every request (503) —
+# it verifies Meta's X-Hub-Signature-256 and the handshake token rather than
+# trusting whatever reaches the URL (convex/lib/webhookSecurity.ts, 23 Sep).
+META_APP_SECRET
+META_VERIFY_TOKEN
 # QDRANT_URL is pinned in production.env. QDRANT_API_KEY belongs here as soon
 # as the live Qdrant has a key — it has none yet (21 Sep), and asking for one
 # would stop every deploy.

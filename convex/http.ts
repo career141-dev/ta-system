@@ -2,7 +2,7 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { handleWhatChimpWebhook } from "./communications/whatchimp";
-import { verifyElevenLabsSignature } from "./lib/webhookSecurity";
+import { verifyElevenLabsSignature, verifyTokenMatches } from "./lib/webhookSecurity";
 import type { Id } from "./_generated/dataModel";
 import {
   isFreshVoiceAgentTimestamp,
@@ -12,23 +12,35 @@ import {
 
 const http = httpRouter();
 
+/**
+ * Meta's webhook verification handshake.
+ *
+ * This used to accept three tokens written into this file
+ * ("career141-secure-key", "whatchimp_secret", "career141") and, when nothing
+ * was configured, anything at all — which is how the Verify token field in the
+ * app configuration could be saved blank. Anyone who read this file, or
+ * guessed, could point the subscription somewhere else (23 September).
+ *
+ * Now: only `META_VERIFY_TOKEN`, and no token configured means the handshake
+ * fails rather than passes. Set it on the deployment *before* changing the
+ * value in Meta — the handshake re-runs the moment that field is saved.
+ */
 const handleMetaVerification = httpAction(async (ctx, request) => {
   const url = new URL(request.url);
   const mode = url.searchParams.get("hub.mode");
   const token = url.searchParams.get("hub.verify_token");
   const challenge = url.searchParams.get("hub.challenge");
 
-  const validTokens = [
-    process.env.META_VERIFY_TOKEN,
-    process.env.WHATCHIMP_WEBHOOK_SECRET,
-    "career141-secure-key",
-    "whatchimp_secret",
-    "career141",
-  ].filter(Boolean);
+  const expected = process.env.META_VERIFY_TOKEN;
+  if (!expected) {
+    console.error("[Meta Verification] META_VERIFY_TOKEN is not set — refusing the handshake.");
+    return new Response("Webhook not configured", { status: 503 });
+  }
 
-  if (mode === "subscribe" && token && (validTokens.includes(token) || validTokens.length === 0)) {
+  if (mode === "subscribe" && verifyTokenMatches(token, expected)) {
     return new Response(challenge ?? "OK", { status: 200 });
   }
+  console.warn("[Meta Verification] Rejected a handshake with a wrong or missing verify token.");
   return new Response("Forbidden", { status: 403 });
 });
 
