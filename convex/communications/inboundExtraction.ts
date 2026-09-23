@@ -2,6 +2,7 @@ import { internalAction, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
+import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
 import { buildStructuredEmailHtml } from "./emailHtml";
 
 export const extractDetailsFromText = internalAction({
@@ -60,7 +61,39 @@ export const extractDetailsFromText = internalAction({
     // Fetch conversation history
     const historyText = await ctx.runQuery(internal.communications.inboundExtraction.getRecentHistoryQuery, {
       candidateId: args.candidateId,
+      // This opening's thread only — see the query's own note.
+      applicationId: activeApp._id,
     });
+
+    /*
+     * What we already hold on this candidate.
+     *
+     * The prompt listed what was MISSING but never what was known, so the model
+     * had no name to use, no idea what the person does, and nothing to stop it
+     * asking again for a figure already on the record — the "don't ask me that,
+     * I told you" complaint (23 September).
+     */
+    const known: string[] = [];
+    if (candidate?.fullName) known.push(`Name: ${candidate.fullName}`);
+    if (candidate?.currentJobTitle) known.push(`Current role: ${candidate.currentJobTitle}`);
+    if (candidate?.currentEmployer) known.push(`Current employer: ${candidate.currentEmployer}`);
+    if (typeof candidate?.totalExperienceYears === "number") known.push(`Experience: ${candidate.totalExperienceYears} years`);
+    const whereabouts = candidate?.locationStructured?.city || candidate?.location;
+    if (whereabouts) known.push(`Location: ${whereabouts}`);
+    if (Array.isArray(candidate?.skills) && candidate.skills.length) {
+      known.push(`Skills: ${candidate.skills.slice(0, 12).join(", ")}`);
+    }
+    if (typeof candidate?.currentSalary === "number") known.push(`Current salary: ${candidate.currentSalary} (ALREADY ON RECORD — do not ask again)`);
+    if (typeof candidate?.expectedSalary === "number") known.push(`Expected salary: ${candidate.expectedSalary} (ALREADY ON RECORD — do not ask again)`);
+    if (typeof candidate?.noticePeriodDays === "number") known.push(`Notice period: ${candidate.noticePeriodDays} days (ALREADY ON RECORD — do not ask again)`);
+    if (hasCV) known.push("CV: received (do not ask for it again)");
+    for (const [question, answer] of Object.entries(answeredCustomQuestions)) {
+      if (answer) known.push(`"${question}" → ${answer} (ALREADY ANSWERED — do not ask again)`);
+    }
+
+    const requirementsText = Array.isArray((job as any).requiredSkills) && (job as any).requiredSkills.length
+      ? (job as any).requiredSkills.slice(0, 12).join(", ")
+      : "Not specified";
 
     const toneMap: Record<string, string> = {
       warm_friendly: "Warm, encouraging, conversational, and helpful with natural emojis. Speak like a friendly talent acquisition colleague.",
@@ -81,15 +114,23 @@ JOB SPECIFICATION CONTEXT:
 - Company/Client: ${job.isConfidential ? `Confidential Search (Do NOT reveal client name; explain politely that this is a confidential hiring process conducted by Career141 for a premier ${job.clientIndustry || "organization"})` : (job.clientName || "Career141")}
 - Location: ${job.location || "Colombo, Sri Lanka"}
 - Workplace Type: ${(job as any).workplaceType || "Hybrid"}
+- Key Requirements: ${requirementsText}
+- Application Stage: ${activeApp.currentStage}
 - Job Description Summary: ${(job.jobDescription || "").substring(0, 400)}
 
 CONVERSATION TONE TO USE:
 ${selectedTone}
 
-Currently, before reading this message, these details are missing from candidate profile:
-MISSING DETAILS BEFORE THIS MESSAGE: ${missingFields.join(", ")}
+WHAT WE ALREADY KNOW ABOUT THIS CANDIDATE (never ask for any of this again):
+${known.length ? known.join("\n") : "Nothing on record yet."}
 
-CONVERSATION HISTORY (most recent first):
+Currently, before reading this message, these details are missing from candidate profile:
+MISSING DETAILS BEFORE THIS MESSAGE: ${missingFields.join(", ") || "None — everything has been collected."}
+
+CONVERSATION HISTORY for THIS opening only (most recent first).
+Every line below is about "${job.title}". The candidate may have applied to
+other openings; those conversations are deliberately not shown and must not be
+referred to:
 ${historyText || "No previous messages."}
 
 To understand the TA's communication style, reference their templates:
@@ -380,7 +421,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         }
 
         if (replyMessage) {
-          const hours = typeof extracted.nextActionTimeHours === "number" && extracted.nextActionTimeHours > 0 ? extracted.nextActionTimeHours : 24;
+          const hours = nudgeHoursWithinWindow(extracted.nextActionTimeHours, args.channel);
 
           // IMPORTANT: Cancel any previously-pending follow-up BEFORE scheduling the new one.
           // Without this, the cron can still fire the old nextFollowUpScheduledAt timestamp
@@ -394,6 +435,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
               applicationId: activeApp._id,
               nextActionTimeHours: hours,
               messageBody: replyMessage,
+              replyChannel: args.channel === "email" ? "email" : "whatsapp",
             });
           }
 
@@ -471,12 +513,15 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
     } catch (err: any) {
       console.warn("[Inbound Extraction] Fail-open: Error during DeepSeek details extraction:", err.message);
       try {
-        const fallbackHours = 24;
+        // Same window rule as the normal path — a fail-open nudge must not
+        // cost a template either.
+        const fallbackHours = nudgeHoursWithinWindow(null, args.channel);
         const fallbackMsg = `Thank you! We've received your update regarding your *${job.title}* application. Please share any remaining details at your earliest convenience.`;
         await ctx.runMutation(internal.communications.followUpMutations.scheduleDynamicFollowUp, {
           applicationId: activeApp._id,
           nextActionTimeHours: fallbackHours,
           messageBody: fallbackMsg,
+          replyChannel: args.channel === "email" ? "email" : "whatsapp",
         });
       } catch (fallbackErr: any) {
         console.error("[Inbound Extraction] Fail-open fallback error:", fallbackErr.message);
@@ -485,14 +530,41 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
   },
 });
 
+/**
+ * The conversation the AI is answering — this opening's, and only this one's.
+ *
+ * It used to read the candidate's five most recent messages across every
+ * application they have. A candidate on two openings therefore had both
+ * conversations handed to the model as one thread, and the reply came back
+ * about whichever opening happened to be talked about most recently — asking a
+ * Finance applicant for a portfolio link, quoting the other role's salary
+ * (23 September).
+ *
+ * Scoped by application. Messages from before the application existed, or
+ * logged without an `applicationId`, are left out rather than guessed at: a
+ * missing line is recoverable, the wrong opening's line is not.
+ */
 export const getRecentHistoryQuery = internalQuery({
-  args: { candidateId: v.id("candidates") },
+  args: {
+    candidateId: v.id("candidates"),
+    applicationId: v.optional(v.id("applications")),
+  },
   handler: async (ctx, args) => {
     const messages = await ctx.db
       .query("communications")
       .withIndex("by_candidate_time", (q) => q.eq("candidateId", args.candidateId))
       .order("desc")
-      .take(5);
-    return messages.map(m => `[${m.direction}] ${m.subject || "Message"}: ${m.body}`).join("\n");
-  }
+      // Read past the cap: the newest five overall may all belong to another
+      // opening, which would leave this one's conversation empty.
+      .take(40);
+
+    const scoped = args.applicationId
+      ? messages.filter((m) => m.applicationId === args.applicationId)
+      : messages;
+
+    return scoped
+      .slice(0, 5)
+      .map((m) => `[${m.direction}] ${m.subject || "Message"}: ${m.body}`)
+      .join("\n");
+  },
 });

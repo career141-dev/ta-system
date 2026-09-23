@@ -66,7 +66,6 @@ import type * as communications_metaDirectSender from "../communications/metaDir
 import type * as communications_metaTemplateSender from "../communications/metaTemplateSender.js";
 import type * as communications_whatchimp from "../communications/whatchimp.js";
 import type * as communications_whatchimpActions from "../communications/whatchimpActions.js";
-import type * as communications_whatsappAgent from "../communications/whatsappAgent.js";
 import type * as communications_whatsappOutbound from "../communications/whatsappOutbound.js";
 import type * as crons from "../crons.js";
 import type * as cvScanner_expandCriteria from "../cvScanner/expandCriteria.js";
@@ -101,6 +100,7 @@ import type * as lib_auth from "../lib/auth.js";
 import type * as lib_currentRoleClassifier from "../lib/currentRoleClassifier.js";
 import type * as lib_firstPost from "../lib/firstPost.js";
 import type * as lib_followUpScope from "../lib/followUpScope.js";
+import type * as lib_followUpWindow from "../lib/followUpWindow.js";
 import type * as lib_gazetteer from "../lib/gazetteer.js";
 import type * as lib_graphClient from "../lib/graphClient.js";
 import type * as lib_graphMail from "../lib/graphMail.js";
@@ -247,7 +247,6 @@ declare const fullApi: ApiFromModules<{
   "communications/metaTemplateSender": typeof communications_metaTemplateSender;
   "communications/whatchimp": typeof communications_whatchimp;
   "communications/whatchimpActions": typeof communications_whatchimpActions;
-  "communications/whatsappAgent": typeof communications_whatsappAgent;
   "communications/whatsappOutbound": typeof communications_whatsappOutbound;
   crons: typeof crons;
   "cvScanner/expandCriteria": typeof cvScanner_expandCriteria;
@@ -282,6 +281,7 @@ declare const fullApi: ApiFromModules<{
   "lib/currentRoleClassifier": typeof lib_currentRoleClassifier;
   "lib/firstPost": typeof lib_firstPost;
   "lib/followUpScope": typeof lib_followUpScope;
+  "lib/followUpWindow": typeof lib_followUpWindow;
   "lib/gazetteer": typeof lib_gazetteer;
   "lib/graphClient": typeof lib_graphClient;
   "lib/graphMail": typeof lib_graphMail;
