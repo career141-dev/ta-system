@@ -2,6 +2,8 @@ import { internalAction, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
+import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
+import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod } from "../lib/answered";
 import { buildStructuredEmailHtml } from "./emailHtml";
 
 export const extractDetailsFromText = internalAction({
@@ -13,6 +15,18 @@ export const extractDetailsFromText = internalAction({
     messageId: v.optional(v.string()),
     /** The From address of the email being answered — a thread reply goes back to it. */
     senderEmail: v.optional(v.string()),
+    /**
+     * The application this reply belongs to, when the caller knows it.
+     *
+     * Without it the application is guessed from the candidate's most recent
+     * OUTBOUND message on ANY channel. A candidate on two openings who was
+     * emailed about one and then replied on WhatsApp about the other had their
+     * answer filed against the emailed opening — details saved to the wrong
+     * application, and the AI answering about the wrong job (23 September).
+     * Both the WhatsApp and the email path know the right one; they just were
+     * not passing it.
+     */
+    applicationId: v.optional(v.id("applications")),
   },
   handler: async (ctx, args) => {
     // Guard: skip extraction if text is empty or trivially short
@@ -23,9 +37,14 @@ export const extractDetailsFromText = internalAction({
 
     console.log(`[Inbound Extraction] Starting extraction for candidate ${args.candidateId} (channel: ${args.channel || "whatsapp"}). Text: "${args.textBody.substring(0, 200)}"`);
 
-    const activeApp = await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, {
-      candidateId: args.candidateId,
-    });
+    const activeApp = args.applicationId
+      ? await ctx.runQuery(internal.communications.inboundExtraction.getApplicationForCandidate, {
+          applicationId: args.applicationId,
+          candidateId: args.candidateId,
+        })
+      : await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, {
+          candidateId: args.candidateId,
+        });
 
     if (!activeApp) {
       console.log(`[Inbound Extraction] Candidate ${args.candidateId} has no active follow-up application. Skipping details update.`);
@@ -42,14 +61,15 @@ export const extractDetailsFromText = internalAction({
 
     const missingFields: string[] = [];
     const hasCV = activeApp.followUpCvReceived === true || !!candidate?.cvUploadId;
-    const hasCurrentSalary = activeApp.followUpCurrentSalary === true || candidate?.currentSalary !== undefined;
-    const hasExpectedSalary = activeApp.followUpExpectedSalary === true || candidate?.expectedSalary !== undefined;
-    const hasNoticePeriod = activeApp.followUpNoticePeriod === true || candidate?.noticePeriodDays !== undefined;
+    // "Negotiable" and "two months" are answers. See lib/answered.ts.
+    const hasCurrentSal = activeApp.followUpCurrentSalary === true || hasCurrentSalary(candidate);
+    const hasExpectedSal = activeApp.followUpExpectedSalary === true || hasExpectedSalary(candidate);
+    const hasNotice = activeApp.followUpNoticePeriod === true || hasNoticePeriod(candidate);
 
     if (!hasCV) missingFields.push("CV Document");
-    if (!hasCurrentSalary) missingFields.push("Current Salary");
-    if (!hasExpectedSalary) missingFields.push("Expected Salary");
-    if (!hasNoticePeriod) missingFields.push("Notice Period");
+    if (!hasCurrentSal) missingFields.push("Current Salary");
+    if (!hasExpectedSal) missingFields.push("Expected Salary");
+    if (!hasNotice) missingFields.push("Notice Period");
 
     const customQuestions = job.customFollowUpQuestions || [];
     const answeredCustomQuestions = activeApp.customFollowUpAnswers || {};
@@ -60,7 +80,42 @@ export const extractDetailsFromText = internalAction({
     // Fetch conversation history
     const historyText = await ctx.runQuery(internal.communications.inboundExtraction.getRecentHistoryQuery, {
       candidateId: args.candidateId,
+      // This opening's thread only — see the query's own note.
+      applicationId: activeApp._id,
     });
+
+    /*
+     * What we already hold on this candidate.
+     *
+     * The prompt listed what was MISSING but never what was known, so the model
+     * had no name to use, no idea what the person does, and nothing to stop it
+     * asking again for a figure already on the record — the "don't ask me that,
+     * I told you" complaint (23 September).
+     */
+    const known: string[] = [];
+    if (candidate?.fullName) known.push(`Name: ${candidate.fullName}`);
+    if (candidate?.currentJobTitle) known.push(`Current role: ${candidate.currentJobTitle}`);
+    if (candidate?.currentEmployer) known.push(`Current employer: ${candidate.currentEmployer}`);
+    if (typeof candidate?.totalExperienceYears === "number") known.push(`Experience: ${candidate.totalExperienceYears} years`);
+    const whereabouts = candidate?.locationStructured?.city || candidate?.location;
+    if (whereabouts) known.push(`Location: ${whereabouts}`);
+    if (Array.isArray(candidate?.skills) && candidate.skills.length) {
+      known.push(`Skills: ${candidate.skills.slice(0, 12).join(", ")}`);
+    }
+    if (typeof candidate?.currentSalary === "number") known.push(`Current salary: ${candidate.currentSalary} (ALREADY ON RECORD — do not ask again)`);
+    if (typeof candidate?.expectedSalary === "number") known.push(`Expected salary: ${candidate.expectedSalary} (ALREADY ON RECORD — do not ask again)`);
+    if (candidate?.currentSalaryNote) known.push(`Current salary — they said: "${candidate.currentSalaryNote}" (ANSWERED — accept it, never ask for a figure)`);
+    if (candidate?.expectedSalaryNote) known.push(`Expected salary — they said: "${candidate.expectedSalaryNote}" (ANSWERED — accept it, never ask for a figure)`);
+    if (typeof candidate?.noticePeriodDays === "number") known.push(`Notice period: ${candidate.noticePeriodDays} days (ALREADY ON RECORD — do not ask again)`);
+    if (candidate?.noticePeriod) known.push(`Notice period — they said: "${candidate.noticePeriod}" (ANSWERED — do not ask again)`);
+    if (hasCV) known.push("CV: received (do not ask for it again)");
+    for (const [question, answer] of Object.entries(answeredCustomQuestions)) {
+      if (answer) known.push(`"${question}" → ${answer} (ALREADY ANSWERED — do not ask again)`);
+    }
+
+    const requirementsText = Array.isArray((job as any).requiredSkills) && (job as any).requiredSkills.length
+      ? (job as any).requiredSkills.slice(0, 12).join(", ")
+      : "Not specified";
 
     const toneMap: Record<string, string> = {
       warm_friendly: "Warm, encouraging, conversational, and helpful with natural emojis. Speak like a friendly talent acquisition colleague.",
@@ -81,15 +136,23 @@ JOB SPECIFICATION CONTEXT:
 - Company/Client: ${job.isConfidential ? `Confidential Search (Do NOT reveal client name; explain politely that this is a confidential hiring process conducted by Career141 for a premier ${job.clientIndustry || "organization"})` : (job.clientName || "Career141")}
 - Location: ${job.location || "Colombo, Sri Lanka"}
 - Workplace Type: ${(job as any).workplaceType || "Hybrid"}
+- Key Requirements: ${requirementsText}
+- Application Stage: ${activeApp.currentStage}
 - Job Description Summary: ${(job.jobDescription || "").substring(0, 400)}
 
 CONVERSATION TONE TO USE:
 ${selectedTone}
 
-Currently, before reading this message, these details are missing from candidate profile:
-MISSING DETAILS BEFORE THIS MESSAGE: ${missingFields.join(", ")}
+WHAT WE ALREADY KNOW ABOUT THIS CANDIDATE (never ask for any of this again):
+${known.length ? known.join("\n") : "Nothing on record yet."}
 
-CONVERSATION HISTORY (most recent first):
+Currently, before reading this message, these details are missing from candidate profile:
+MISSING DETAILS BEFORE THIS MESSAGE: ${missingFields.join(", ") || "None — everything has been collected."}
+
+CONVERSATION HISTORY for THIS opening only (most recent first).
+Every line below is about "${job.title}". The candidate may have applied to
+other openings; those conversations are deliberately not shown and must not be
+referred to:
 ${historyText || "No previous messages."}
 
 To understand the TA's communication style, reference their templates:
@@ -99,12 +162,44 @@ INITIAL OUTREACH TEMPLATE:
 SAMPLE FOLLOW-UP TEMPLATE:
 "${(job.followUpSampleTemplate || 'Just checking in on the missing details. Please provide them at your earliest convenience.').substring(0, 300)}"
 
+HOW TO WRITE (a real candidate read the old replies and said they felt forced):
+- WhatsApp, not email. One or two short sentences. No greeting block, no bullet
+  lists, no sign-off, no "at your earliest convenience".
+- Mirror them. Short message, short reply. Casual, casual. Their English, their
+  register. Never correct their spelling or grammar.
+- Ask for ONE thing at a time — the most important still missing — not a list.
+- Never repeat a request they have already responded to. Look at the
+  CONVERSATION HISTORY: if your last message asked for something and they
+  answered in any way, that question is CLOSED.
+
+A DECLINE IS AN ANSWER. This is the rule that was missing:
+- "Negotiable", "open to discuss", "depends on the role", "rather not say",
+  "we can talk about it" ARE answers to a salary question. Put the words in
+  'currentSalaryNote' / 'expectedSalaryNote', acknowledge briefly, and MOVE ON
+  to something else. Do NOT ask when they will give a figure. Do NOT ask again
+  later. A candidate is allowed to not give a number.
+- Notice period is whatever they say: "30 days", "two months", "3 weeks",
+  "immediate", "not sure yet", "depends". Put their words in 'noticePeriod' and
+  the number of days in 'noticePeriodDays' ONLY when it is unambiguous. "Not
+  sure yet" is still an answer — record it and stop asking.
+- If everything still missing has been declined or answered in words, thank
+  them once and say a consultant will follow up. Ask nothing further.
+
 Your job is to analyze the candidate's LATEST/CURRENT message and output a JSON object.
 Rules:
 1. Extract missing numeric/text details from the CURRENT message if provided (currentSalary, expectedSalary, noticePeriodDays, noticePeriod, customAnswers, candidateSummary).
    - CANDIDATE SUMMARY / BIO: If the candidate introduces themselves, describes their background, career history, skills summary, or experience in their message, extract a clean 1-3 sentence summary into 'candidateSummary'.
    - STUDENTS/INTERNS/UNEMPLOYED SALARY: If a candidate states they are currently a student, undergraduate, intern, or currently unemployed with no work experience, automatically set 'currentSalary' to 0 (do not leave it as null).
    - NO NOTICE PERIOD: If a candidate states they do not have a notice period, are currently free, or can join immediately, set 'noticePeriodDays' to 0 and 'noticePeriod' to "0 Days".
+   - SALARY GIVEN IN WORDS, NOT A FIGURE: when they answer a salary question
+     without a number — "negotiable", "open to discuss", "rather not say",
+     "depends on the package" — copy their words into 'currentSalaryNote' or
+     'expectedSalaryNote' and leave the numeric field null. This CLOSES the
+     question. Never chase the number afterwards.
+   - NOTICE PERIOD IN WORDS: "two months", "3 weeks", "not sure yet", "depends
+     on handover" go in 'noticePeriod' verbatim. Set 'noticePeriodDays' only
+     when the conversion is unambiguous (30 days, 2 months). Never both guess
+     and ask again.
    - CUSTOM ANSWERS KEY MATCHING: For each extracted answer in 'customAnswers', the key MUST EXACTLY MATCH the custom question string listed under MISSING DETAILS BEFORE THIS MESSAGE (e.g. use the exact full question text as the key, do not simplify it to "Portfolio" or "Portfolio Link").
 2. Intent Classification & Writing nextActionMessage:
    - 'provided_all': Candidate provided ALL remaining missing details in this message. Set nextActionMessage to null.
@@ -124,6 +219,8 @@ Schema:
 {
   "currentSalary": number | null,
   "expectedSalary": number | null,
+  "currentSalaryNote": string | null,
+  "expectedSalaryNote": string | null,
   "noticePeriodDays": number | null,
   "noticePeriod": string | null,
   "candidateSummary": string | null,
@@ -201,6 +298,11 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       const updates: Record<string, any> = {};
       if (typeof extracted.currentSalary === "number") updates.currentSalary = extracted.currentSalary;
       if (typeof extracted.expectedSalary === "number") updates.expectedSalary = extracted.expectedSalary;
+      // A decline is an answer: keep the words so the checklist closes and the
+      // chase stops asking (23 September — see lib/answered.ts).
+      const note = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : undefined);
+      if (note(extracted.currentSalaryNote)) updates.currentSalaryNote = note(extracted.currentSalaryNote);
+      if (note(extracted.expectedSalaryNote)) updates.expectedSalaryNote = note(extracted.expectedSalaryNote);
       
       if (typeof extracted.noticePeriodDays === "number") {
         updates.noticePeriodDays = extracted.noticePeriodDays;
@@ -347,7 +449,9 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         // Acknowledge the details that were successfully recorded in this reply
         const recordedDetails: string[] = [];
         if (typeof updates.currentSalary === "number") recordedDetails.push(`Current Salary: ${updates.currentSalary}`);
+        else if (updates.currentSalaryNote) recordedDetails.push(`Current Salary: ${updates.currentSalaryNote}`);
         if (typeof updates.expectedSalary === "number") recordedDetails.push(`Expected Salary: ${updates.expectedSalary}`);
+        else if (updates.expectedSalaryNote) recordedDetails.push(`Expected Salary: ${updates.expectedSalaryNote}`);
         if (updates.noticePeriod) recordedDetails.push(`Notice Period: ${updates.noticePeriod}`);
         else if (typeof updates.noticePeriodDays === "number") recordedDetails.push(`Notice Period: ${updates.noticePeriodDays} days`);
 
@@ -380,7 +484,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         }
 
         if (replyMessage) {
-          const hours = typeof extracted.nextActionTimeHours === "number" && extracted.nextActionTimeHours > 0 ? extracted.nextActionTimeHours : 24;
+          const hours = nudgeHoursWithinWindow(extracted.nextActionTimeHours, args.channel);
 
           // IMPORTANT: Cancel any previously-pending follow-up BEFORE scheduling the new one.
           // Without this, the cron can still fire the old nextFollowUpScheduledAt timestamp
@@ -394,6 +498,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
               applicationId: activeApp._id,
               nextActionTimeHours: hours,
               messageBody: replyMessage,
+              replyChannel: args.channel === "email" ? "email" : "whatsapp",
             });
           }
 
@@ -471,12 +576,15 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
     } catch (err: any) {
       console.warn("[Inbound Extraction] Fail-open: Error during DeepSeek details extraction:", err.message);
       try {
-        const fallbackHours = 24;
+        // Same window rule as the normal path — a fail-open nudge must not
+        // cost a template either.
+        const fallbackHours = nudgeHoursWithinWindow(null, args.channel);
         const fallbackMsg = `Thank you! We've received your update regarding your *${job.title}* application. Please share any remaining details at your earliest convenience.`;
         await ctx.runMutation(internal.communications.followUpMutations.scheduleDynamicFollowUp, {
           applicationId: activeApp._id,
           nextActionTimeHours: fallbackHours,
           messageBody: fallbackMsg,
+          replyChannel: args.channel === "email" ? "email" : "whatsapp",
         });
       } catch (fallbackErr: any) {
         console.error("[Inbound Extraction] Fail-open fallback error:", fallbackErr.message);
@@ -485,14 +593,65 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
   },
 });
 
+/**
+ * The conversation the AI is answering — this opening's, and only this one's.
+ *
+ * It used to read the candidate's five most recent messages across every
+ * application they have. A candidate on two openings therefore had both
+ * conversations handed to the model as one thread, and the reply came back
+ * about whichever opening happened to be talked about most recently — asking a
+ * Finance applicant for a portfolio link, quoting the other role's salary
+ * (23 September).
+ *
+ * Scoped by application. Messages from before the application existed, or
+ * logged without an `applicationId`, are left out rather than guessed at: a
+ * missing line is recoverable, the wrong opening's line is not.
+ */
+/**
+ * The named application, but only if it really is this candidate's.
+ *
+ * The id arrives from a webhook path, so it is checked rather than trusted:
+ * a mismatch falls back to null and the caller stops, instead of writing one
+ * candidate's salary onto another's application.
+ */
+export const getApplicationForCandidate = internalQuery({
+  args: {
+    applicationId: v.id("applications"),
+    candidateId: v.id("candidates"),
+  },
+  handler: async (ctx, args) => {
+    const app = await ctx.db.get(args.applicationId);
+    if (!app || app.candidateId !== args.candidateId) {
+      console.warn(
+        `[Inbound Extraction] Application ${args.applicationId} does not belong to candidate ${args.candidateId}. Ignoring.`,
+      );
+      return null;
+    }
+    return app;
+  },
+});
+
 export const getRecentHistoryQuery = internalQuery({
-  args: { candidateId: v.id("candidates") },
+  args: {
+    candidateId: v.id("candidates"),
+    applicationId: v.optional(v.id("applications")),
+  },
   handler: async (ctx, args) => {
     const messages = await ctx.db
       .query("communications")
       .withIndex("by_candidate_time", (q) => q.eq("candidateId", args.candidateId))
       .order("desc")
-      .take(5);
-    return messages.map(m => `[${m.direction}] ${m.subject || "Message"}: ${m.body}`).join("\n");
-  }
+      // Read past the cap: the newest five overall may all belong to another
+      // opening, which would leave this one's conversation empty.
+      .take(40);
+
+    const scoped = args.applicationId
+      ? messages.filter((m) => m.applicationId === args.applicationId)
+      : messages;
+
+    return scoped
+      .slice(0, 5)
+      .map((m) => `[${m.direction}] ${m.subject || "Message"}: ${m.body}`)
+      .join("\n");
+  },
 });

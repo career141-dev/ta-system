@@ -3,23 +3,46 @@ import { internalAction, internalMutation, internalQuery } from "../_generated/s
 import { api, internal } from "../_generated/api";
 import { sendMetaFreeText } from "./metaDirectSender";
 
-// Internal query to fetch the correct Meta phone_number_id based on the whatsapp number string from the database
+/**
+ * The Meta `phone_number_id` for the line an opening sends from.
+ *
+ * Returns null when the opening's configured number is not registered, so the
+ * caller keeps its own default (`META_PHONE_NUMBER_ID`). It used to return the
+ * hardcoded default instead, which meant an opening pointed at a TA's number
+ * that nobody had added to `whatsappNumbers` sent from the main Career141 line
+ * with nothing in the log to say so — the candidate replied to a number the TA
+ * was not watching (23 September). There is no screen for that table, so the
+ * mismatch is easy to create and was invisible.
+ *
+ * Still a fallback rather than a hard failure: a wrong-but-working sender beats
+ * an opening that cannot message anyone. The warning is what was missing.
+ */
 export const getMetaPhoneNumberId = internalQuery({
   args: { targetWhatsAppNumber: v.string() },
   handler: async (ctx, args) => {
     const cleanDigits = args.targetWhatsAppNumber.replace(/\D/g, "");
-    if (!cleanDigits) return "965783109962872";
+    if (!cleanDigits) return null;
 
     const allNumbers = await ctx.db.query("whatsappNumbers").collect();
-    const dbNumber = allNumbers.find(n => n.phone && n.phone.replace(/\D/g, "").slice(-9) === cleanDigits.slice(-9));
+    // Last nine digits: the same number is written +94 77…, 94 77… and 077….
+    const dbNumber = allNumbers.find(
+      (n) => n.phone && n.phone.replace(/\D/g, "").slice(-9) === cleanDigits.slice(-9),
+    );
 
-    // whatchimpPhoneId stores the Meta phone_number_id
+    // `whatchimpPhoneId` holds the Meta phone_number_id — the column keeps its
+    // old name from before the migration off WhatChimp.
     if (dbNumber && dbNumber.whatchimpPhoneId) {
       return dbNumber.whatchimpPhoneId;
     }
 
-    return "965783109962872";
-  }
+    console.warn(
+      `[WhatsApp Outbound] The opening is set to send from ${args.targetWhatsAppNumber}, ` +
+        `but no row in whatsappNumbers matches it. Falling back to the default sending ` +
+        `number — replies will arrive on the default line, not that one. Add the number ` +
+        `via settings.whatsappNumbers:add to fix.`,
+    );
+    return null;
+  },
 });
 
 export const isCandidatePhone = internalQuery({
@@ -94,128 +117,123 @@ export const getJobOutboundWhatsAppNumber = internalQuery({
   }
 });
 
-async function resolveTestModePhone(ctx: any, senderPhone: string): Promise<string> {
-  const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-  const isTestMode =
-    process.env.WHATSAPP_TEST_MODE === "true" ||
-    process.env.OUTREACH_TEST_MODE === "true" ||
-    process.env.TEST_MODE === "true" ||
-    systemSettings?.testModeEnabled === true;
+/*
+ * `resolveTestModePhone` lived here and is gone (23 September).
+ *
+ * It mapped an inbound message from the configured test phone onto a candidate
+ * — first by looking the number up, then, failing that, by attaching it to
+ * whoever received the most recent outbound WhatsApp. That last fallback is
+ * how a tester's "hi" ended up recorded against a real candidate's
+ * application, and triggered an AI reply about their opening.
+ *
+ * Inbound is matched on the number that actually sent the message, and nothing
+ * else. If the tester wants the conversation to land somewhere, their number
+ * goes on a candidate record — which is also what makes the outbound gate a
+ * no-op rather than a redirect, so the whole round trip is the real path.
+ *
+ * It also read a different set of switches from the outbound side
+ * (WHATSAPP_TEST_MODE / TEST_PHONE_NUMBER / appSettings.testModeEnabled versus
+ * OUTREACH_LIVE / OUTREACH_TEST_PHONE), so the two directions could disagree
+ * about whether test mode was even on.
+ */
 
-  const testRecipient =
-    process.env.WHATSAPP_TEST_RECIPIENT ||
-    process.env.TEST_PHONE_NUMBER ||
-    systemSettings?.testPhoneNumber;
-
-  const cleanNum = (p: string) => p.replace(/[^0-9]/g, "");
-
-  if (isTestMode && testRecipient && cleanNum(senderPhone) === cleanNum(testRecipient)) {
-    // 1. FIRST check if the test sender phone directly matches a candidate in the DB with an active application
-    const directCandidate = await findCandidateByPhone(ctx, senderPhone);
-    if (directCandidate) {
-      const apps = await ctx.db
-        .query("applications")
-        .withIndex("by_candidateId", (q: any) => q.eq("candidateId", directCandidate._id))
-        .collect();
-      const activeApp = apps.find((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
-      if (activeApp) {
-        console.log(`[WhatsApp Test Mode] Direct candidate match found for test sender ${senderPhone}: ${directCandidate.fullName} (${directCandidate._id})`);
-        return senderPhone;
-      }
-    }
-
-    // 2. Fallback to lastOutbound only if test sender is not a candidate themselves
-    const lastOutbound = await ctx.db
-      .query("communications")
-      .withIndex("by_direction_channel_time", (q: any) =>
-        q.eq("direction", "outbound").eq("channel", "whatsapp")
-      )
-      .order("desc")
-      .first();
-
-    if (lastOutbound) {
-      const testCandidate = await ctx.db.get(lastOutbound.candidateId);
-      if (testCandidate && testCandidate.phone) {
-        console.log(`[WhatsApp Test Mode] Mapped test sender ${senderPhone} to last contacted candidate phone: ${testCandidate.phone}`);
-        return testCandidate.phone;
-      }
-    }
-  }
-  return senderPhone;
-}
-
+/**
+ * The candidate an inbound WhatsApp belongs to.
+ *
+ * Why this is not a single lookup: the same person is written `+94 77…`,
+ * `94 77…` and `077…` across CVs, Excel Tables rows and headhunting, so every
+ * form has to be tried. And the same number legitimately appears on more than
+ * one record — a candidate re-added from a different source, or a TA testing.
+ *
+ * It used to take the FIRST row each lookup returned, in lookup order. Meta
+ * sends the number with no plus, so a stale record stored as `94753883167`
+ * was matched ahead of the live one stored as `+94753883167`, and the reply
+ * was filed against a candidate with no open conversation — the candidate got
+ * no answer and the TA saw an empty thread (23 September).
+ *
+ * Now every form is gathered and the one actually in a conversation wins:
+ * an open application first, then the most recently created. A duplicate that
+ * nobody is talking to can no longer swallow a live reply.
+ */
 export async function findCandidateByPhone(ctx: any, targetPhone: string) {
   const cleanDigits = targetPhone.replace(/\D/g, "");
   if (!cleanDigits) return null;
 
-  // 1. Direct search by exact phone (+digits or exact match)
-  let candidate = await ctx.db
-    .query("candidates")
-    .withIndex("by_phone", (q: any) => q.eq("phone", targetPhone))
-    .first();
+  /** Every spelling of this number that might be on a record. */
+  const phones = new Set<string>([targetPhone, `+${cleanDigits}`]);
+  const cleans = new Set<string>([cleanDigits]);
 
-  if (!candidate && targetPhone !== `+${cleanDigits}`) {
-    candidate = await ctx.db
-      .query("candidates")
-      .withIndex("by_phone", (q: any) => q.eq("phone", `+${cleanDigits}`))
-      .first();
+  if (cleanDigits.startsWith("94") && cleanDigits.length === 11) {
+    const local = "0" + cleanDigits.slice(2);
+    phones.add(local);
+    cleans.add(local);
+  } else if (cleanDigits.startsWith("0") && cleanDigits.length === 10) {
+    const intl = "94" + cleanDigits.slice(1);
+    phones.add("+" + intl);
+    phones.add(intl);
+    cleans.add(intl);
   }
 
-  // 2. Search by phoneClean index (exact clean digits)
-  if (!candidate) {
-    candidate = await ctx.db
+  const found = new Map<string, any>();
+  for (const phone of phones) {
+    for (const c of await ctx.db
       .query("candidates")
-      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", cleanDigits))
-      .first();
-  }
-
-  // 3. Alternate format search (convert between Sri Lanka 94... and 0... or vice versa)
-  if (!candidate && cleanDigits.startsWith("94") && cleanDigits.length === 11) {
-    const localPhone = "0" + cleanDigits.slice(2);
-    candidate = await ctx.db
-      .query("candidates")
-      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", localPhone))
-      .first();
-
-    if (!candidate) {
-      candidate = await ctx.db
-        .query("candidates")
-        .withIndex("by_phone", (q: any) => q.eq("phone", localPhone))
-        .first();
+      .withIndex("by_phone", (q: any) => q.eq("phone", phone))
+      .take(20)) {
+      found.set(String(c._id), c);
     }
-  } else if (!candidate && cleanDigits.startsWith("0") && cleanDigits.length === 10) {
-    const intlClean = "94" + cleanDigits.slice(1);
-    const intlPhone = "+" + intlClean;
-    candidate = await ctx.db
+  }
+  for (const clean of cleans) {
+    for (const c of await ctx.db
       .query("candidates")
-      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", intlClean))
-      .first();
-
-    if (!candidate) {
-      candidate = await ctx.db
-        .query("candidates")
-        .withIndex("by_phone", (q: any) => q.eq("phone", intlPhone))
-        .first();
+      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", clean))
+      .take(20)) {
+      found.set(String(c._id), c);
     }
   }
 
-  // 4. Bounded tail-digits matching (top 200 recent candidates only) to avoid mutation timeouts
-  if (!candidate && cleanDigits.length >= 7) {
+  // Last resort, unchanged: the tail nine digits against recent candidates,
+  // bounded so a wide scan cannot time the mutation out.
+  if (found.size === 0 && cleanDigits.length >= 7) {
     const tailDigits = cleanDigits.slice(-9);
-    const recentCandidates = await ctx.db.query("candidates").order("desc").take(200);
-    candidate = recentCandidates.find((c: any) => {
-      if (c.phoneClean && c.phoneClean.length >= 7) {
-        return c.phoneClean.endsWith(tailDigits);
+    for (const c of await ctx.db.query("candidates").order("desc").take(200)) {
+      const digits = c.phoneClean && c.phoneClean.length >= 7
+        ? c.phoneClean
+        : (c.phone ?? "").replace(/\D/g, "");
+      if (digits.length >= 7 && digits.endsWith(tailDigits)) {
+        found.set(String(c._id), c);
+        break;
       }
-      if (c.phone) {
-        const cClean = c.phone.replace(/\D/g, "");
-        return cClean.length >= 7 && cClean.endsWith(tailDigits);
-      }
-      return false;
-    }) ?? null;
+    }
   }
 
-  return candidate;
+  const matches = [...found.values()];
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+
+  // More than one record holds this number. Prefer whoever is mid-conversation.
+  const LIVE = ["follow_up", "ta_shortlist", "matched_candidates"];
+  let best = null;
+  let bestRank = -1;
+  for (const c of matches) {
+    const apps = await ctx.db
+      .query("applications")
+      .withIndex("by_candidateId", (q: any) => q.eq("candidateId", c._id))
+      .collect();
+    const open = apps.filter((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
+    const rank = open.some((a: any) => LIVE.includes(a.currentStage)) ? 2 : open.length > 0 ? 1 : 0;
+    if (rank > bestRank || (rank === bestRank && best && c._creationTime > best._creationTime)) {
+      best = c;
+      bestRank = rank;
+    }
+  }
+
+  console.warn(
+    `[WhatsApp Inbound] ${matches.length} candidate records share the number ${targetPhone}. ` +
+      `Matched ${best?.fullName ?? best?._id} (rank ${bestRank}: 2=in an active follow-up stage, ` +
+      `1=has an open application, 0=none). Merge the duplicates to make this unambiguous.`,
+  );
+  return best;
 }
 
 export const sendWhatsApp = internalAction({
@@ -261,52 +279,30 @@ export const sendWhatsApp = internalAction({
       return;
     }
 
-    // 2. Resolve destination phone number based on test mode
-    const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-    const isTestMode =
-      process.env.WHATSAPP_TEST_MODE === "true" ||
-      process.env.OUTREACH_TEST_MODE === "true" ||
-      process.env.TEST_MODE === "true" ||
-      systemSettings?.testModeEnabled === true;
-
-    const testRecipient =
-      process.env.WHATSAPP_TEST_RECIPIENT ||
-      process.env.TEST_PHONE_NUMBER ||
-      systemSettings?.testPhoneNumber;
-
-    let targetPhone = candidate.phone;
-    let logNote = "";
+    /*
+     * 2. Is the free 24-hour service window open?
+     *
+     * This block used to also run a second test mode of its own — WHATSAPP_TEST_MODE /
+     * OUTREACH_TEST_MODE / TEST_MODE / the appSettings.testModeEnabled row, with its
+     * own recipient list — deciding the destination BEFORE `outreachSafety` ever saw
+     * it. Two gates with different rules, and this one had a hole: `activeInboundSession`
+     * sent to the REAL candidate's number even with test mode on, because "they wrote to
+     * us recently" was treated as consent. On a database restored from production that
+     * is a real person (23 September).
+     *
+     * `resolveRecipient`, inside `sendMetaFreeText`, is now the only thing that decides
+     * who a message reaches. It reads OUTREACH_LIVE / OUTREACH_TEST_PHONE from the
+     * environment only, and it fails closed. The sending number is untouched by any of
+     * this — test mode redirects the recipient, never the sender.
+     */
+    const targetPhone = candidate.phone;
+    const logNote = "";
 
     const activeInboundSession = await ctx.runQuery(internal.communications.whatsappOutbound.hasRecentInboundComm, {
       candidateId: candidate._id,
       withinMs: 24 * 60 * 60 * 1000,
     });
 
-    if (isTestMode) {
-      const candidateDigits = candidate.phone.replace(/\D/g, "");
-      const testDigits = testRecipient ? testRecipient.replace(/\D/g, "") : "";
-
-      const isExactOrTailMatch = testDigits && (candidateDigits === testDigits || candidateDigits.endsWith(testDigits.slice(-9)) || testDigits.endsWith(candidateDigits.slice(-9)));
-
-      if (isExactOrTailMatch || activeInboundSession) {
-        // Candidate IS the test phone OR candidate actively sent an inbound message in last 24h -> send directly
-        targetPhone = candidate.phone;
-        logNote = activeInboundSession ? ` [ACTIVE INBOUND SESSION]` : ` [TEST CANDIDATE]`;
-      } else if (testRecipient) {
-        // Redirect to test recipient number
-        targetPhone = testRecipient;
-        logNote = ` [REDIRECTED TO TEST NUMBER: ${testRecipient}]`;
-      } else {
-        // Real candidate, no test recipient configured -> SUPPRESS OUTREACH
-        console.warn(`[WhatsApp Outbound] Test mode active: Suppressed outreach to real candidate ${candidate.phone}`);
-        await ctx.runMutation(internal.communications.whatsappOutbound.updateStatus, {
-          communicationId: args.communicationId,
-          status: "failed",
-          error: "Test mode is active: Automated WhatsApp outreach to real candidates is suppressed during testing phase.",
-        });
-        return;
-      }
-    }
     // 3. Send message directly via Meta Cloud API
     try {
       const metaAccessToken = process.env.META_ACCESS_TOKEN;
@@ -413,7 +409,7 @@ export const checkAndRecordFollowUpReply = internalMutation({
     textBody: v.string(),
   },
   handler: async (ctx, args) => {
-    const targetPhone = await resolveTestModePhone(ctx, args.senderPhone);
+    const targetPhone = args.senderPhone;
     const candidate = await findCandidateByPhone(ctx, targetPhone);
 
     if (!candidate) {
@@ -492,6 +488,11 @@ export const checkAndRecordFollowUpReply = internalMutation({
       await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
         candidateId: candidate._id,
         textBody: args.textBody,
+        channel: "whatsapp",
+        // The application this reply was matched to, above. Without it the
+        // extraction re-guesses from the last outbound on any channel and can
+        // land on a different opening.
+        applicationId: activeApp._id,
       });
       console.log(`[checkAndRecordFollowUpReply] Dispatched extractDetailsFromText for candidate ${candidate._id} with text: "${args.textBody.substring(0, 100)}"`);
     } else {
@@ -508,7 +509,7 @@ export const processLocalWhatsappInbound = internalMutation({
     textBody: v.string(),
   },
   handler: async (ctx, args) => {
-    const targetPhone = await resolveTestModePhone(ctx, args.senderPhone);
+    const targetPhone = args.senderPhone;
     const candidate = await findCandidateByPhone(ctx, targetPhone);
 
     let activeApp = null;
