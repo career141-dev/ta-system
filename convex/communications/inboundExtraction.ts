@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { api, internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
+import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod } from "../lib/answered";
 import { buildStructuredEmailHtml } from "./emailHtml";
 
 export const extractDetailsFromText = internalAction({
@@ -60,14 +61,15 @@ export const extractDetailsFromText = internalAction({
 
     const missingFields: string[] = [];
     const hasCV = activeApp.followUpCvReceived === true || !!candidate?.cvUploadId;
-    const hasCurrentSalary = activeApp.followUpCurrentSalary === true || candidate?.currentSalary !== undefined;
-    const hasExpectedSalary = activeApp.followUpExpectedSalary === true || candidate?.expectedSalary !== undefined;
-    const hasNoticePeriod = activeApp.followUpNoticePeriod === true || candidate?.noticePeriodDays !== undefined;
+    // "Negotiable" and "two months" are answers. See lib/answered.ts.
+    const hasCurrentSal = activeApp.followUpCurrentSalary === true || hasCurrentSalary(candidate);
+    const hasExpectedSal = activeApp.followUpExpectedSalary === true || hasExpectedSalary(candidate);
+    const hasNotice = activeApp.followUpNoticePeriod === true || hasNoticePeriod(candidate);
 
     if (!hasCV) missingFields.push("CV Document");
-    if (!hasCurrentSalary) missingFields.push("Current Salary");
-    if (!hasExpectedSalary) missingFields.push("Expected Salary");
-    if (!hasNoticePeriod) missingFields.push("Notice Period");
+    if (!hasCurrentSal) missingFields.push("Current Salary");
+    if (!hasExpectedSal) missingFields.push("Expected Salary");
+    if (!hasNotice) missingFields.push("Notice Period");
 
     const customQuestions = job.customFollowUpQuestions || [];
     const answeredCustomQuestions = activeApp.customFollowUpAnswers || {};
@@ -102,7 +104,10 @@ export const extractDetailsFromText = internalAction({
     }
     if (typeof candidate?.currentSalary === "number") known.push(`Current salary: ${candidate.currentSalary} (ALREADY ON RECORD — do not ask again)`);
     if (typeof candidate?.expectedSalary === "number") known.push(`Expected salary: ${candidate.expectedSalary} (ALREADY ON RECORD — do not ask again)`);
+    if (candidate?.currentSalaryNote) known.push(`Current salary — they said: "${candidate.currentSalaryNote}" (ANSWERED — accept it, never ask for a figure)`);
+    if (candidate?.expectedSalaryNote) known.push(`Expected salary — they said: "${candidate.expectedSalaryNote}" (ANSWERED — accept it, never ask for a figure)`);
     if (typeof candidate?.noticePeriodDays === "number") known.push(`Notice period: ${candidate.noticePeriodDays} days (ALREADY ON RECORD — do not ask again)`);
+    if (candidate?.noticePeriod) known.push(`Notice period — they said: "${candidate.noticePeriod}" (ANSWERED — do not ask again)`);
     if (hasCV) known.push("CV: received (do not ask for it again)");
     for (const [question, answer] of Object.entries(answeredCustomQuestions)) {
       if (answer) known.push(`"${question}" → ${answer} (ALREADY ANSWERED — do not ask again)`);
@@ -157,12 +162,44 @@ INITIAL OUTREACH TEMPLATE:
 SAMPLE FOLLOW-UP TEMPLATE:
 "${(job.followUpSampleTemplate || 'Just checking in on the missing details. Please provide them at your earliest convenience.').substring(0, 300)}"
 
+HOW TO WRITE (a real candidate read the old replies and said they felt forced):
+- WhatsApp, not email. One or two short sentences. No greeting block, no bullet
+  lists, no sign-off, no "at your earliest convenience".
+- Mirror them. Short message, short reply. Casual, casual. Their English, their
+  register. Never correct their spelling or grammar.
+- Ask for ONE thing at a time — the most important still missing — not a list.
+- Never repeat a request they have already responded to. Look at the
+  CONVERSATION HISTORY: if your last message asked for something and they
+  answered in any way, that question is CLOSED.
+
+A DECLINE IS AN ANSWER. This is the rule that was missing:
+- "Negotiable", "open to discuss", "depends on the role", "rather not say",
+  "we can talk about it" ARE answers to a salary question. Put the words in
+  'currentSalaryNote' / 'expectedSalaryNote', acknowledge briefly, and MOVE ON
+  to something else. Do NOT ask when they will give a figure. Do NOT ask again
+  later. A candidate is allowed to not give a number.
+- Notice period is whatever they say: "30 days", "two months", "3 weeks",
+  "immediate", "not sure yet", "depends". Put their words in 'noticePeriod' and
+  the number of days in 'noticePeriodDays' ONLY when it is unambiguous. "Not
+  sure yet" is still an answer — record it and stop asking.
+- If everything still missing has been declined or answered in words, thank
+  them once and say a consultant will follow up. Ask nothing further.
+
 Your job is to analyze the candidate's LATEST/CURRENT message and output a JSON object.
 Rules:
 1. Extract missing numeric/text details from the CURRENT message if provided (currentSalary, expectedSalary, noticePeriodDays, noticePeriod, customAnswers, candidateSummary).
    - CANDIDATE SUMMARY / BIO: If the candidate introduces themselves, describes their background, career history, skills summary, or experience in their message, extract a clean 1-3 sentence summary into 'candidateSummary'.
    - STUDENTS/INTERNS/UNEMPLOYED SALARY: If a candidate states they are currently a student, undergraduate, intern, or currently unemployed with no work experience, automatically set 'currentSalary' to 0 (do not leave it as null).
    - NO NOTICE PERIOD: If a candidate states they do not have a notice period, are currently free, or can join immediately, set 'noticePeriodDays' to 0 and 'noticePeriod' to "0 Days".
+   - SALARY GIVEN IN WORDS, NOT A FIGURE: when they answer a salary question
+     without a number — "negotiable", "open to discuss", "rather not say",
+     "depends on the package" — copy their words into 'currentSalaryNote' or
+     'expectedSalaryNote' and leave the numeric field null. This CLOSES the
+     question. Never chase the number afterwards.
+   - NOTICE PERIOD IN WORDS: "two months", "3 weeks", "not sure yet", "depends
+     on handover" go in 'noticePeriod' verbatim. Set 'noticePeriodDays' only
+     when the conversion is unambiguous (30 days, 2 months). Never both guess
+     and ask again.
    - CUSTOM ANSWERS KEY MATCHING: For each extracted answer in 'customAnswers', the key MUST EXACTLY MATCH the custom question string listed under MISSING DETAILS BEFORE THIS MESSAGE (e.g. use the exact full question text as the key, do not simplify it to "Portfolio" or "Portfolio Link").
 2. Intent Classification & Writing nextActionMessage:
    - 'provided_all': Candidate provided ALL remaining missing details in this message. Set nextActionMessage to null.
@@ -182,6 +219,8 @@ Schema:
 {
   "currentSalary": number | null,
   "expectedSalary": number | null,
+  "currentSalaryNote": string | null,
+  "expectedSalaryNote": string | null,
   "noticePeriodDays": number | null,
   "noticePeriod": string | null,
   "candidateSummary": string | null,
@@ -259,6 +298,11 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       const updates: Record<string, any> = {};
       if (typeof extracted.currentSalary === "number") updates.currentSalary = extracted.currentSalary;
       if (typeof extracted.expectedSalary === "number") updates.expectedSalary = extracted.expectedSalary;
+      // A decline is an answer: keep the words so the checklist closes and the
+      // chase stops asking (23 September — see lib/answered.ts).
+      const note = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 200) : undefined);
+      if (note(extracted.currentSalaryNote)) updates.currentSalaryNote = note(extracted.currentSalaryNote);
+      if (note(extracted.expectedSalaryNote)) updates.expectedSalaryNote = note(extracted.expectedSalaryNote);
       
       if (typeof extracted.noticePeriodDays === "number") {
         updates.noticePeriodDays = extracted.noticePeriodDays;
@@ -405,7 +449,9 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         // Acknowledge the details that were successfully recorded in this reply
         const recordedDetails: string[] = [];
         if (typeof updates.currentSalary === "number") recordedDetails.push(`Current Salary: ${updates.currentSalary}`);
+        else if (updates.currentSalaryNote) recordedDetails.push(`Current Salary: ${updates.currentSalaryNote}`);
         if (typeof updates.expectedSalary === "number") recordedDetails.push(`Expected Salary: ${updates.expectedSalary}`);
+        else if (updates.expectedSalaryNote) recordedDetails.push(`Expected Salary: ${updates.expectedSalaryNote}`);
         if (updates.noticePeriod) recordedDetails.push(`Notice Period: ${updates.noticePeriod}`);
         else if (typeof updates.noticePeriodDays === "number") recordedDetails.push(`Notice Period: ${updates.noticePeriodDays} days`);
 

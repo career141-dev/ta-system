@@ -241,6 +241,9 @@ export const updateCandidateDetails = mutation({
     applicationId: v.optional(v.id("applications")),
     currentSalary: v.optional(v.number()),
     expectedSalary: v.optional(v.number()),
+    /** What they said when it was not a figure — "negotiable", "rather not say". */
+    currentSalaryNote: v.optional(v.string()),
+    expectedSalaryNote: v.optional(v.string()),
     noticePeriodDays: v.optional(v.number()),
     noticePeriod: v.optional(v.string()),
     candidateQuestions: v.optional(v.string()),
