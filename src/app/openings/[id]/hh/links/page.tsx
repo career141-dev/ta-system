@@ -2,7 +2,10 @@ import { primeStore } from "@/data/prime";
 import { ProjectHeader } from "../../ProjectHeader";
 import { LinkVaultTable } from "@/components/LinkVaultTable";
 import { CaptureSetup } from "@/components/CaptureSetup";
+import { LiveTableRefresh } from "@/components/LiveTableRefresh";
 import { getCurrentUser } from "@/lib/session";
+
+export const dynamic = "force-dynamic";
 
 export default async function LinksPage({
   params,
@@ -17,6 +20,7 @@ export default async function LinksPage({
   const user = await getCurrentUser();
   return (
     <>
+      <LiveTableRefresh />
       <h1 className="text-[21px] font-semibold tracking-tight">Excel Tables</h1>
       <ProjectHeader openingId={id} />
       <CaptureSetup />

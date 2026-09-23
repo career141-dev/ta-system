@@ -452,7 +452,6 @@ export async function addLink(formData: FormData) {
   }
   const name = String(formData.get("name") ?? "").trim() || guessedName;
   repo.addLink(openingId, url, user.id, name);
-  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
@@ -469,7 +468,6 @@ export async function toggleEyeMark(formData: FormData) {
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const entryId = String(formData.get("entryId"));
   repo.toggleEyeMark(entryId);
-  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
@@ -1147,7 +1145,6 @@ export async function updateLink(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim() || null;
   const company = String(formData.get("company") ?? "").trim() || null;
   repo.updateLink(entryId, { outcome, phoneNumber, phoneSource, name, company });
-  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
@@ -1174,7 +1171,6 @@ export async function logOutreach(formData: FormData) {
   const channel = String(formData.get("channel") ?? "linkedin");
   if (!note) await fail("Write what happened on the approach first.");
   repo.logOutreach(entryId, user.id, channel, note);
-  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
@@ -1599,7 +1595,6 @@ export async function deleteLink(formData: FormData) {
   await primeStore({ openingId });
   await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   repo.deleteLink(String(formData.get("entryId")));
-  markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);

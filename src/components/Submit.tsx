@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import type { ActionResult } from "@/lib/inlineResult";
 
 /**
@@ -125,8 +126,16 @@ export function latest(...results: (ActionResult | null)[]): ActionResult | null
  * the form is left alone and the answer comes back as `result`.
  */
 export function useInline(action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>) {
+  const router = useRouter();
   const [result, dispatch, pending] = useActionState(action, null);
   const run = (formData: FormData) => startTransition(() => dispatch(formData));
+
+  useEffect(() => {
+    if (result && result.tone === "ok") {
+      router.refresh();
+    }
+  }, [result, router]);
+
   return { result, pending, run };
 }
 

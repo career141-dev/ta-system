@@ -3,5 +3,5 @@
 #c141-capture-host {
   all: initial;
   position: fixed;
-  z-index: 2147483000;
+  z-index: 2147483647;
 }
