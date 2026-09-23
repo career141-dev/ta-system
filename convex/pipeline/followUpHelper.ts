@@ -34,10 +34,20 @@ export async function checkAndAdvanceFollowUp(
     const job = await ctx.db.get(app.jobId);
     if (!job) continue;
 
-    const hasCV = app.followUpCvReceived === true || !!candidate.cvUploadId || !!app.cvFileId || candidate.isParsed === true;
-    const hasCurrent = candidate.currentSalary !== undefined && candidate.currentSalary !== null;
-    const hasExpected = candidate.expectedSalary !== undefined && candidate.expectedSalary !== null;
-    const hasNotice = candidate.noticePeriodDays !== undefined && candidate.noticePeriodDays !== null;
+    /*
+     * A CV means a CV file. `|| candidate.isParsed === true` used to be part of
+     * this, and `isParsed` only means the candidate RECORD was processed — a
+     * headhunted profile gets it with no CV anywhere. So every headhunted
+     * candidate was credited with a CV they had never sent, the checklist read
+     * "Everything is in", and they were auto-advanced to Second Shortlist and
+     * offered to Director Review without one (23 September, seen on the first
+     * real conversation; inherited from the CV pipeline in f9f5d46).
+     */
+    const hasCV = app.followUpCvReceived === true || !!candidate.cvUploadId || !!app.cvFileId;
+    // The same rules as updateFollowUpFlags: words count, not only figures.
+    const hasCurrent = hasCurrentSalary(candidate);
+    const hasExpected = hasExpectedSalary(candidate);
+    const hasNotice = hasNoticePeriod(candidate);
 
     // Auto-fix any flags that should be true based on actual candidate data
     const updates: any = {};
