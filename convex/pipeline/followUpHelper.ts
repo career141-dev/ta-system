@@ -1,4 +1,5 @@
 import { Id } from "../_generated/dataModel";
+import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod, noticePeriodToDays } from "../lib/answered";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { internal } from "../_generated/api";
 import { adjustJobStageStat } from "../jobs/stats";
@@ -115,19 +116,35 @@ export async function updateFollowUpFlags(
   const hasCV = !!candidate.cvUploadId || !!app.cvFileId;
   if (hasCV && !app.followUpCvReceived) updates.followUpCvReceived = true;
 
-  if (candidate.currentSalary !== undefined && candidate.currentSalary !== null) {
+  /*
+   * A question is answered when the candidate has answered it — not only when
+   * they gave a number. "Negotiable" and "two months" are answers; treating
+   * them as silence is what made the chase ask the same thing four times
+   * (23 September, see lib/answered.ts).
+   */
+  if (hasCurrentSalary(candidate)) {
     if (!app.followUpCurrentSalary) updates.followUpCurrentSalary = true;
-    if (app.candidateCurrentSalary !== candidate.currentSalary) updates.candidateCurrentSalary = candidate.currentSalary;
+    if (candidate.currentSalary !== undefined && candidate.currentSalary !== null
+        && app.candidateCurrentSalary !== candidate.currentSalary) {
+      updates.candidateCurrentSalary = candidate.currentSalary;
+    }
   }
 
-  if (candidate.expectedSalary !== undefined && candidate.expectedSalary !== null) {
+  if (hasExpectedSalary(candidate)) {
     if (!app.followUpExpectedSalary) updates.followUpExpectedSalary = true;
-    if (app.candidateExpectedSalary !== candidate.expectedSalary) updates.candidateExpectedSalary = candidate.expectedSalary;
+    if (candidate.expectedSalary !== undefined && candidate.expectedSalary !== null
+        && app.candidateExpectedSalary !== candidate.expectedSalary) {
+      updates.candidateExpectedSalary = candidate.expectedSalary;
+    }
   }
 
-  if (candidate.noticePeriodDays !== undefined && candidate.noticePeriodDays !== null) {
+  if (hasNoticePeriod(candidate)) {
     if (!app.followUpNoticePeriod) updates.followUpNoticePeriod = true;
-    if (app.candidateNoticePeriodDays !== candidate.noticePeriodDays) updates.candidateNoticePeriodDays = candidate.noticePeriodDays;
+    // Days when the words carry a number we can trust, so the schedule still works.
+    const days = candidate.noticePeriodDays ?? noticePeriodToDays(candidate.noticePeriod);
+    if (days !== null && days !== undefined && app.candidateNoticePeriodDays !== days) {
+      updates.candidateNoticePeriodDays = days;
+    }
   }
 
   if (Object.keys(updates).length > 0) {

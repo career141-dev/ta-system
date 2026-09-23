@@ -730,6 +730,18 @@ export default defineSchema({
     expectedSalaryCurrency: v.optional(v.string()),
     currentSalary: v.optional(v.number()),
     currentSalaryCurrency: v.optional(v.string()),
+    /*
+     * What the candidate said when it was not a figure.
+     *
+     * "Negotiable", "open to discuss", "I'd rather not say" are answers. With
+     * nowhere to put them the follow-up treated the question as unanswered and
+     * asked again, and again — a real candidate was asked for a number four
+     * times in eleven minutes (23 September). Storing the words lets the
+     * checklist close and the chase stop; a TA reads the note and takes it from
+     * there.
+     */
+    currentSalaryNote: v.optional(v.string()),
+    expectedSalaryNote: v.optional(v.string()),
     noticePeriodDays: v.optional(v.number()),
     availability: v.optional(v.string()),
     firstSourceChannel: v.optional(
