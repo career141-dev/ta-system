@@ -289,8 +289,8 @@ function searchReasonInWords(code: string, detail?: string): string {
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
   // Not a failure: the opening has had its run. Named so nobody hunts for a fault.
-  if (code === "run_spent") return `Research has already been run for this opening${detail ? ` ${detail}` : ""}. It runs once per opening.`;
-  if (code === "benchmark_spent") return `Benchmark has already been run for this opening${detail ? ` on ${detail}` : ""}. It runs once per opening.`;
+  if (code === "run_spent") return `Research has already been run for this opening${detail ? ` ${detail}` : ""}. It runs once per opening — ask a lead if it has to be run again.`;
+  if (code === "benchmark_spent") return `Benchmark has already been run for this opening${detail ? ` on ${detail}` : ""}. It runs once per opening — ask a lead if it has to be run again.`;
   if (code === "nothing_found") return "the search found nothing under the client's name. Check the name on the client record.";
   if (code === "client_not_searchable") return "the client has no searchable name (a code or \"Confidential\"). Put the real name on the client record.";
   return reasonInWords(code);
@@ -2137,7 +2137,7 @@ export async function runResearch(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const res = await researchOpening(openingId, user.id);
+  const res = await researchOpening(openingId, user.id, isDeskWide(user));
   revalidatePath(`/openings/${openingId}/hh/research`);
   if (!res.ok) await fail(`Research did not run — ${searchReasonInWords(res.reason ?? "", res.detail)}`);
   const filled = res.filled ?? 0;
@@ -2164,7 +2164,7 @@ export async function runResearch(formData: FormData) {
 
 export async function runBenchmark(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
   if (!o) await fail("The opening could not be found. Reload the page and try again.");
@@ -2172,9 +2172,10 @@ export async function runBenchmark(formData: FormData) {
   if (!serperConfigured()) await fail(`Benchmark did not run — ${searchReasonInWords("no_serper")}`);
   // Once per opening, like Research (23 Sep). The rows are the record: a
   // senior role researched has already been benchmarked inside that run, so
-  // this button is spent too — it is the same search, asked once.
+  // this button is spent too — it is the same search, asked once. A lead can
+  // run it again, as with Research.
   const already = repo.benchmarks(openingId);
-  if (already.length) {
+  if (already.length && !isDeskWide(user)) {
     const when = dateAt(Math.max(...already.map((b) => b.generatedAt)));
     await fail(`Benchmark did not run — ${searchReasonInWords("benchmark_spent", when)}`);
   }
@@ -2451,6 +2452,8 @@ async function extractJobDetails(openingId: string, c: OpeningContext, briefs: J
 async function researchOpening(
   openingId: string,
   userId: string,
+  /** A lead, director or admin may run it a second time. */
+  canRerun = false,
 ): Promise<{
   ok: boolean;
   reason?: string;
@@ -2469,13 +2472,16 @@ async function researchOpening(
   if (!c || !o) return { ok: false, reason: "no_opening" };
   // One attempt per opening, for the whole desk — 23 September. A run is about
   // thirty web searches and a model pass over everything they returned, and the
-  // same client was being researched again and again. A TA lead is held to it
-  // too: there is no second run to grant.
+  // same client was being researched again and again.
+  //
+  // A lead, director or admin can still run it again, because an opening
+  // created with the client's name misspelt would otherwise never be
+  // researchable by anyone (review, 23 Sep).
   //
   // The report is the record, because it is written only when a run produced
   // one: a search the provider refused costs the opening nothing.
   const already = repo.research(openingId);
-  if (already) {
+  if (already && !canRerun) {
     const who = repo.users().find((u) => u.id === already.generatedBy)?.name;
     return { ok: false, reason: "run_spent", detail: `${who ? `by ${who} ` : ""}on ${dateAt(already.generatedAt)}` };
   }
@@ -2489,15 +2495,21 @@ async function researchOpening(
   });
   if (!res.ok) return { ok: false, reason: res.reason, detail: res.detail };
   if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);
-  // Hand-edited fields used to be carried into a regeneration. There is no
-  // regeneration now — the run above is the opening's only one — so the first
-  // report is written plain and updateResearchField owns it from then on.
+  // A field a TA corrected by hand survives a lead's re-run: the correction is
+  // the better answer, and losing it is what made people stop correcting.
+  const prior = repo.research(openingId);
   const fields = { ...res.fields };
+  for (const k of prior?.editedFields ?? []) {
+    if (k in fields && prior) {
+      (fields as unknown as Record<string, unknown>)[k] =
+        (prior.fields as unknown as Record<string, unknown>)[k];
+    }
+  }
   repo.saveResearch({
     openingId,
     clientId: o.clientId,
     fields,
-    editedFields: [],
+    editedFields: prior?.editedFields ?? [],
     markdown: res.markdown,
     sources: res.sources,
     searches: res.searches,
