@@ -14,6 +14,18 @@ export const extractDetailsFromText = internalAction({
     messageId: v.optional(v.string()),
     /** The From address of the email being answered — a thread reply goes back to it. */
     senderEmail: v.optional(v.string()),
+    /**
+     * The application this reply belongs to, when the caller knows it.
+     *
+     * Without it the application is guessed from the candidate's most recent
+     * OUTBOUND message on ANY channel. A candidate on two openings who was
+     * emailed about one and then replied on WhatsApp about the other had their
+     * answer filed against the emailed opening — details saved to the wrong
+     * application, and the AI answering about the wrong job (23 September).
+     * Both the WhatsApp and the email path know the right one; they just were
+     * not passing it.
+     */
+    applicationId: v.optional(v.id("applications")),
   },
   handler: async (ctx, args) => {
     // Guard: skip extraction if text is empty or trivially short
@@ -24,9 +36,14 @@ export const extractDetailsFromText = internalAction({
 
     console.log(`[Inbound Extraction] Starting extraction for candidate ${args.candidateId} (channel: ${args.channel || "whatsapp"}). Text: "${args.textBody.substring(0, 200)}"`);
 
-    const activeApp = await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, {
-      candidateId: args.candidateId,
-    });
+    const activeApp = args.applicationId
+      ? await ctx.runQuery(internal.communications.inboundExtraction.getApplicationForCandidate, {
+          applicationId: args.applicationId,
+          candidateId: args.candidateId,
+        })
+      : await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, {
+          candidateId: args.candidateId,
+        });
 
     if (!activeApp) {
       console.log(`[Inbound Extraction] Candidate ${args.candidateId} has no active follow-up application. Skipping details update.`);
@@ -544,6 +561,30 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
  * logged without an `applicationId`, are left out rather than guessed at: a
  * missing line is recoverable, the wrong opening's line is not.
  */
+/**
+ * The named application, but only if it really is this candidate's.
+ *
+ * The id arrives from a webhook path, so it is checked rather than trusted:
+ * a mismatch falls back to null and the caller stops, instead of writing one
+ * candidate's salary onto another's application.
+ */
+export const getApplicationForCandidate = internalQuery({
+  args: {
+    applicationId: v.id("applications"),
+    candidateId: v.id("candidates"),
+  },
+  handler: async (ctx, args) => {
+    const app = await ctx.db.get(args.applicationId);
+    if (!app || app.candidateId !== args.candidateId) {
+      console.warn(
+        `[Inbound Extraction] Application ${args.applicationId} does not belong to candidate ${args.candidateId}. Ignoring.`,
+      );
+      return null;
+    }
+    return app;
+  },
+});
+
 export const getRecentHistoryQuery = internalQuery({
   args: {
     candidateId: v.id("candidates"),

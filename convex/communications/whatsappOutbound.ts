@@ -463,6 +463,11 @@ export const checkAndRecordFollowUpReply = internalMutation({
       await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
         candidateId: candidate._id,
         textBody: args.textBody,
+        channel: "whatsapp",
+        // The application this reply was matched to, above. Without it the
+        // extraction re-guesses from the last outbound on any channel and can
+        // land on a different opening.
+        applicationId: activeApp._id,
       });
       console.log(`[checkAndRecordFollowUpReply] Dispatched extractDetailsFromText for candidate ${candidate._id} with text: "${args.textBody.substring(0, 100)}"`);
     } else {
