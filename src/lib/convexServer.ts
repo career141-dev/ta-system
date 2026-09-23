@@ -135,7 +135,8 @@ export function internalUploadUrl(url: string): string {
     const target = new URL(url);
     const inside = new URL(config().url);
     target.protocol = inside.protocol;
-    target.host = inside.host;
+    target.hostname = inside.hostname;
+    target.port = inside.port;
     return target.toString();
   } catch {
     return url;

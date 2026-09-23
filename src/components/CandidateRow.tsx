@@ -72,9 +72,9 @@ export function CandidateRow({
           )}
           {/* Held in Follow-up for want of details: said on the row, so it does
               not look like the move to Director review simply failed (21 Sep). */}
-          {(app.stage === "ta_follow_up" || app.stage === "ai_follow_up" || (app.stage as string) === "follow_up") && directorReviewBlockers(candidate).length > 0 && (
+          {(app.stage === "ta_follow_up" || app.stage === "ai_follow_up" || (app.stage as string) === "follow_up") && directorReviewBlockers(candidate, app).length > 0 && (
             <span className="rounded bg-warn-soft px-1.5 py-[2px] text-[11px] text-warn">
-              Needs {directorReviewBlockers(candidate).join(", ")}
+              Needs {directorReviewBlockers(candidate, app).join(", ")}
             </span>
           )}
           {app.isAddOn && (
@@ -141,6 +141,7 @@ export function CandidateRow({
             openingId={openingId}
             current={app.stage}
             candidate={candidate}
+            app={app}
             isAddOn={app.isAddOn}
             canDecideDirector={canDecideDirector}
             canDecideClient={canDecideClient}
@@ -163,7 +164,7 @@ export function CandidateRow({
         {/* Not on Database CVs: everyone there is a database match. */}
         {app.stage !== "matched" && (
         <div className="rounded-lg border border-rule px-3.5 py-3 text-[12px] leading-[1.8] text-ink-faint">
-          <span className="text-ink-soft">In {STAGE_LABEL[app.stage].toLowerCase()}</span>
+          <span className="text-ink-soft">In {(STAGE_LABEL[app.stage] ?? app.stage ?? "").toLowerCase()}</span>
           <br />
           since {stamp(app.lastStageChangedAt)}
           {app.setNumber && (

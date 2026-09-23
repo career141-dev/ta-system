@@ -280,7 +280,12 @@ export default async function CandidatePage({
               {cvLink?.ok ? (
                 previewsInline(cv) || /pdf/i.test(cvLink.fileType ?? "") ? (
                   <div className="overflow-hidden rounded-lg border border-rule">
-                    <CvFrame src={cvHref} title={`CV — ${c.fullName}`} />
+                    <CvFrame
+                      src={cvHref}
+                      title={`CV — ${c.fullName}`}
+                      fileName={cv?.fileName}
+                      downloadHref={`${cvHref}?download=1`}
+                    />
                   </div>
                 ) : (
                   <p className="text-[12.5px] text-ink-soft">

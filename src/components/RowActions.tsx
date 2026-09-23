@@ -35,6 +35,7 @@ export function RowActions({
   openingId,
   current,
   candidate,
+  app,
   isAddOn = false,
   canDecideDirector = false,
   canDecideClient = false,
@@ -44,13 +45,14 @@ export function RowActions({
   current: Stage;
   /** For the Director Review preview below — what the backend's own gate checks. */
   candidate?: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays">;
+  app?: { cvFileName?: string | null; cvFileId?: string | null } | null;
   isAddOn?: boolean;
   /** Whether this person may record a director decision by hand. The server
    *  checks again; this only decides what the menu offers. */
   canDecideDirector?: boolean;
   canDecideClient?: boolean;
 }) {
-  const missingForDirector = candidate ? directorReviewBlockers(candidate) : [];
+  const missingForDirector = candidate ? directorReviewBlockers(candidate, app) : [];
   const [open, setOpen] = useState<false | "stage" | "reject" | "dropout" | "decline" | "interview">(false);
   const allowed = nextStages(current);
   // Each button answers here, under the buttons — the sheet sits over the

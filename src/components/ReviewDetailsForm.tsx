@@ -90,10 +90,18 @@ export function ReviewDetailsForm({
   const [exp, expAmount] = split(expectedSalary, defaultCurrency);
 
   const fileInput = useRef<HTMLInputElement | null>(null);
-  const [upload, setUpload] = useState<{ progress: number } | null>(null);
+  const [upload, setUpload] = useState<{
+    progress: number;
+    phase: "uploading" | "processing" | "refreshing";
+    fileName?: string;
+  } | null>(null);
   const [uploaded, setUploaded] = useState<ActionResult | null>(null);
   const [cvOnFile, setCvOnFile] = useState(hasCv);
   const [customFields, setCustomFields] = useState<CustomField[]>(() => parseInitialDetails(notes));
+
+  useEffect(() => {
+    setCvOnFile(hasCv);
+  }, [hasCv]);
 
   useEffect(() => {
     if (save.result?.ok) {
@@ -101,8 +109,10 @@ export function ReviewDetailsForm({
     }
   }, [save.result, router]);
 
+  const hasCvNow = Boolean(hasCv || cvOnFile);
+
   const missing = [
-    !cvOnFile && "CV",
+    !hasCvNow && "CV",
     !currentSalary?.trim() && "current salary",
     !expectedSalary?.trim() && "expected salary",
     noticePeriodDays == null && "notice period",
@@ -116,7 +126,16 @@ export function ReviewDetailsForm({
     body.set("file", file);
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/cv/upload");
-    xhr.upload.onprogress = (e) => e.lengthComputable && setUpload({ progress: Math.round((e.loaded / e.total) * 100) });
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        setUpload({
+          progress: percent,
+          phase: percent >= 100 ? "processing" : "uploading",
+          fileName: file.name,
+        });
+      }
+    };
     xhr.onload = () => {
       let r: { ok: boolean; message: string } = { ok: false, message: "The upload did not answer. Try again." };
       try {
@@ -124,11 +143,17 @@ export function ReviewDetailsForm({
       } catch {
         /* keeps the message above */
       }
-      setUpload(null);
-      setUploaded({ ok: r.ok, message: r.message, tone: r.ok ? "ok" : "error", at: Date.now() });
       if (r.ok) {
+        setUpload({ progress: 100, phase: "refreshing", fileName: file.name });
+        setUploaded({ ok: true, message: `${r.message} Updating view…`, tone: "ok", at: Date.now() });
         setCvOnFile(true);
         router.refresh();
+        setTimeout(() => {
+          window.location.reload();
+        }, 500);
+      } else {
+        setUpload(null);
+        setUploaded({ ok: false, message: r.message, tone: "error", at: Date.now() });
       }
     };
     xhr.onerror = () => {
@@ -136,7 +161,7 @@ export function ReviewDetailsForm({
       setUploaded({ ok: false, message: "The upload was interrupted. Check the connection and try again.", tone: "error", at: Date.now() });
     };
     setUploaded(null);
-    setUpload({ progress: 0 });
+    setUpload({ progress: 0, phase: "uploading", fileName: file.name });
     xhr.send(body);
   };
 
@@ -285,13 +310,21 @@ export function ReviewDetailsForm({
             disabled={upload !== null}
             aria-busy={upload !== null}
             onClick={() => fileInput.current?.click()}
-            className="inline-flex items-center gap-2 rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-75"
           >
             {upload && <Spinner tone="dark" />}
-            {upload ? `Uploading… ${upload.progress}%` : cvOnFile ? "Replace CV" : "Upload CV"}
+            {upload
+              ? upload.phase === "refreshing"
+                ? "Refreshing view…"
+                : upload.phase === "processing"
+                ? "Extracting references…"
+                : `Uploading… ${upload.progress}%`
+              : hasCvNow
+              ? "Replace CV"
+              : "Upload CV"}
           </button>
           <span className="text-[11.5px] text-ink-faint">
-            {cvOnFile ? "A CV is on file." : "PDF or Word, up to 10 MB — or drop the file on this card."}
+            {hasCvNow ? "A CV is on file." : "PDF or Word, up to 10 MB — or drop the file on this card."}
           </span>
         </div>
         <SubmitButton
@@ -303,6 +336,36 @@ export function ReviewDetailsForm({
           Save details
         </SubmitButton>
       </div>
+
+      {/* Progress & extraction feedback banner */}
+      {upload && (
+        <div className="mt-3 flex items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft/50 px-4 py-2.5 text-[12.5px]">
+          <Spinner tone="dark" />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-semibold text-ink">
+                {upload.phase === "refreshing"
+                  ? "CV attached! Updating view and references…"
+                  : upload.phase === "processing"
+                  ? "Extracting references from CV & updating database…"
+                  : `Uploading ${upload.fileName ?? "CV"} (${upload.progress}%)…`}
+              </span>
+              <span className="text-[11.5px] font-semibold text-brand">
+                {upload.phase === "refreshing" ? "100%" : upload.phase === "processing" ? "Processing" : `${upload.progress}%`}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-brand/15">
+              <div
+                className="h-full rounded-full bg-brand transition-all duration-300"
+                style={{
+                  width: upload.phase === "refreshing" ? "100%" : upload.phase === "processing" ? "88%" : `${Math.max(8, upload.progress)}%`,
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       <ActionNote result={uploaded} className="mt-3" />
       <ActionNote result={save.result} className="mt-3" />
     </form>

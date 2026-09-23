@@ -7,14 +7,15 @@ import * as backend from "@/data/convex/backend";
 import { repo } from "@/data/store";
 import { allows } from "@/lib/auth";
 import { seatFor } from "@/lib/visibility";
+import { internalUploadUrl } from "@/lib/convexServer";
 
 /**
  * A candidate's CV file.
  *
- * The profile's "View CV" link and its inline preview both point here. The
- * answer is a redirect to a short-lived link — an R2 URL signed for an hour, or
- * the backend's own storage URL — so the file itself never passes through this
- * server and nothing about where it lives is written into the page.
+ * The profile's "View CV" link and its inline preview both point here.
+ * The server streams the file content directly with proper headers, so internal
+ * storage loopback URLs (e.g. 127.0.0.1:3210) and cross-origin iframe issues
+ * never break inline preview or downloads.
  *
  * `?download=1` asks for the file to be saved under its own name rather than
  * opened.
@@ -23,17 +24,14 @@ import { seatFor } from "@/lib/visibility";
  * Access is then the opening's, the same test the tab itself makes, so a client
  * contact who may not search the database still sees the CV of someone on
  * their shortlist.
- *
- * Why not the old app's `/api/r2-file?key=`: it signed whatever key it was
- * handed, so anyone signed in could open any object in the bucket by guessing a
- * path. This takes a candidate id, checks the person may read the database, and
- * looks the key up itself.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ candidateId: string }> }) {
   const { candidateId } = await params;
 
   const appId = req.nextUrl.searchParams.get("app");
-  await primeStore(appId ? { allApplications: true } : undefined);
+  if (!appId || !repo.application(appId)) {
+    await primeStore(appId ? { allApplications: true } : undefined);
+  }
   const user = await currentUser();
   if (!user) return new NextResponse("Sign in to open a CV.", { status: 401 });
   if (appId) {
@@ -63,5 +61,34 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cand
     const status = link.reason === "storage_unavailable" ? 503 : 404;
     return new NextResponse(link.detail, { status, headers: { "content-type": "text/plain; charset=utf-8" } });
   }
-  return NextResponse.redirect(link.url, { status: 302, headers: { "cache-control": "private, no-store" } });
+
+  // Stream file directly to fix "This site can't be reached" when link.url points to internal loopback
+  const fetchUrl = internalUploadUrl(link.url);
+  try {
+    const cvRes = await fetch(fetchUrl);
+    if (cvRes.ok) {
+      const buffer = await cvRes.arrayBuffer();
+      const contentType = cvRes.headers.get("content-type") || link.fileType || "application/pdf";
+      const download = req.nextUrl.searchParams.get("download") === "1";
+      const filename = (link.fileName ?? "cv.pdf").replace(/["\r\n]/g, "");
+      const disposition = download ? `attachment; filename="${filename}"` : `inline; filename="${filename}"`;
+      return new NextResponse(Buffer.from(buffer), {
+        status: 200,
+        headers: {
+          "Content-Type": contentType,
+          "Content-Disposition": disposition,
+          "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
+        },
+      });
+    }
+  } catch (err) {
+    console.warn("[cv proxy]", (err as Error).message);
+  }
+
+  return NextResponse.redirect(link.url, {
+    status: 302,
+    headers: {
+      "Cache-Control": "private, max-age=3600",
+    },
+  });
 }

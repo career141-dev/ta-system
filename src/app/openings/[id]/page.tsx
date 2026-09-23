@@ -205,7 +205,7 @@ export default async function OverviewPage({
                 return (
                   <li key={a.id} className="text-[12.5px] leading-relaxed">
                     <span className="text-ink">{c?.fullName}</span>
-                    <span className="text-ink-soft"> moved to {STAGE_LABEL[a.stage].toLowerCase()}</span>
+                    <span className="text-ink-soft"> moved to {(STAGE_LABEL[a.stage] ?? a.stage ?? "").toLowerCase()}</span>
                     <br />
                     <span className="text-ink-faint">
                       {who?.name} · {relDays(a.lastStageChangedAt)}

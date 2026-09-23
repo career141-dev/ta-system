@@ -1221,7 +1221,7 @@ export async function addLinkToPipeline(formData: FormData) {
   const isFollowUp = (s: string) => s === "ai_follow_up" || s === "ta_follow_up" || s === "follow_up";
   if (made.stage === "rejected" || made.stage === "dropped_out") {
     const r = await reinstate(user, made.applicationId, openingId);
-    if (!r.ok) return fail(`They were ${STAGE_LABEL[made.stage].toLowerCase()} here and could not be brought back: ${r.message}`);
+    if (!r.ok) return fail(`They were ${(STAGE_LABEL[made.stage] ?? made.stage ?? "").toLowerCase()} here and could not be brought back: ${r.message}`);
     made.stage = "ta_follow_up";
   }
   if (made.stage === "matched" || made.stage === "new_cv") made.stage = "ta_follow_up";
