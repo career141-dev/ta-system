@@ -227,6 +227,57 @@ Search: ${toNaturalSearch(parsed)}`,
  */
 const SEARXNG_TIMEOUT_MS = 12_000;
 
+/**
+ * How fast SearXNG may be asked — measured on the server, 23 September.
+ *
+ * Six searches at once: all six answered, 1.5 seconds. Eighteen at once, which
+ * is what Research reaches when it searches six competitors from three angles:
+ * three answered and Google sent a CAPTCHA, after which SearXNG suspended it
+ * and the remaining fifteen got nothing. A suspended engine is suspended for
+ * everybody, so one run firing everything at once takes the desk's search out
+ * from under whoever asks next.
+ *
+ * Google is being scraped from one data-centre address here. It will tolerate a
+ * steady trickle and not a burst, so searches queue: two in flight, a breath
+ * between each. A run of thirty takes something like twenty seconds instead of
+ * two, which is the price of it working at all. Both are tunable without a
+ * deploy, because the number that keeps Google happy is not ours to decide.
+ */
+const SEARXNG_MAX_IN_FLIGHT = Number(process.env.SEARXNG_CONCURRENCY ?? "") || 2;
+const SEARXNG_MIN_GAP_MS = Number(process.env.SEARXNG_MIN_GAP_MS ?? "") || 700;
+
+let inFlight = 0;
+let lastStartedAt = 0;
+const waiting: (() => void)[] = [];
+
+/** Run `fn` when there is room, and never sooner than a gap after the last one. */
+export async function searxngSlot<T>(fn: () => Promise<T>, max = SEARXNG_MAX_IN_FLIGHT, gapMs = SEARXNG_MIN_GAP_MS): Promise<T> {
+  await new Promise<void>((resolve) => {
+    const take = () => {
+      if (inFlight < max) {
+        inFlight++;
+        resolve();
+      } else {
+        waiting.push(take);
+      }
+    };
+    take();
+  });
+  try {
+    // The slot is taken before anything is awaited. Reading the clock and then
+    // waiting let two callers both decide they were first, and fire together —
+    // which is the burst this exists to prevent.
+    const now = Date.now();
+    const startAt = Math.max(now, lastStartedAt + gapMs);
+    lastStartedAt = startAt;
+    if (startAt > now) await new Promise((r) => setTimeout(r, startAt - now));
+    return await fn();
+  } finally {
+    inFlight--;
+    waiting.shift()?.();
+  }
+}
+
 interface SearxngBody {
   results?: { url?: string; title?: string; content?: string }[];
   /** `[["brave", "too many requests"], ["duckduckgo", "timeout"]]`. */
@@ -256,7 +307,11 @@ export function searxngHits(body: SearxngBody, q: string, num: number): SearchHi
   return out.slice(0, num);
 }
 
-async function searchSearxng(q: string, num: number, page: number): Promise<SearchResult> {
+function searchSearxng(q: string, num: number, page: number): Promise<SearchResult> {
+  return searxngSlot(() => askSearxng(q, num, page));
+}
+
+async function askSearxng(q: string, num: number, page: number): Promise<SearchResult> {
   const instances = searxngInstances();
   if (!instances.length) return { hits: [], credits: 0, error: "no_searxng_url" };
   const engines = searxngEngines();

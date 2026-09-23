@@ -26,6 +26,15 @@ server:
   image_proxy: false
 
 search:
+  # A CAPTCHA suspends an engine for a day by default, and Google is the only
+  # engine answering us — one burst would take the desk's search out until
+  # tomorrow. A minute is long enough to stop us hammering it and short enough
+  # that the next Research run works. The app paces its searches so this should
+  # not be reached at all (src/lib/serper.ts, 23 Sep).
+  suspended_times:
+    SearxEngineCaptcha: 60
+    SearxEngineTooManyRequests: 60
+    SearxEngineAccessDenied: 300
   # The JSON API. Off by default, and the reason no public instance could be
   # used (probed 23 Sep: every one served HTML or 403).
   formats:

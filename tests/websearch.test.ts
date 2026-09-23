@@ -1,5 +1,5 @@
 import { keepHit, parseBooleanQuery, searchMatrix, toNaturalSearch } from "@/lib/websearch";
-import { searchProvider, searxngEngines, searxngHits, searxngInstances, searxngRefusals, type SearchHit } from "@/lib/serper";
+import { searchProvider, searxngEngines, searxngHits, searxngInstances, searxngRefusals, searxngSlot, type SearchHit } from "@/lib/serper";
 
 let passed = 0;
 let failed = 0;
@@ -122,6 +122,29 @@ console.log("\nSearXNG: which engines, and what they said");
   if (env === undefined) delete process.env.SEARXNG_ENGINES; else process.env.SEARXNG_ENGINES = env;
   eq("a refusal names the engine and the reason", searxngRefusals([["brave", "too many requests"], ["qwant", "CAPTCHA"]]), "brave: too many requests, qwant: CAPTCHA");
   eq("nothing refused is nothing to say", searxngRefusals(undefined), "");
+}
+
+console.log("\nSearXNG: asked at a pace Google tolerates");
+{
+  // Eighteen at once is what Research reaches, and it is what made Google send
+  // a CAPTCHA on the server (23 Sep). They queue instead.
+  let running = 0;
+  let mostAtOnce = 0;
+  const started: number[] = [];
+  const one = () =>
+    searxngSlot(async () => {
+      running++;
+      mostAtOnce = Math.max(mostAtOnce, running);
+      started.push(Date.now());
+      await new Promise((r) => setTimeout(r, 5));
+      running--;
+      return 1;
+    }, 2, 20);
+  const began = Date.now();
+  const all = await Promise.all(Array.from({ length: 18 }, one));
+  eq("every search still runs", all.length, 18);
+  eq("never more than two at a time", mostAtOnce <= 2, true);
+  eq("and they are spaced out, not fired together", Date.now() - began >= 17 * 20, true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
