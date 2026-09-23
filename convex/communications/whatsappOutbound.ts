@@ -137,78 +137,103 @@ export const getJobOutboundWhatsAppNumber = internalQuery({
  * about whether test mode was even on.
  */
 
+/**
+ * The candidate an inbound WhatsApp belongs to.
+ *
+ * Why this is not a single lookup: the same person is written `+94 77…`,
+ * `94 77…` and `077…` across CVs, Excel Tables rows and headhunting, so every
+ * form has to be tried. And the same number legitimately appears on more than
+ * one record — a candidate re-added from a different source, or a TA testing.
+ *
+ * It used to take the FIRST row each lookup returned, in lookup order. Meta
+ * sends the number with no plus, so a stale record stored as `94753883167`
+ * was matched ahead of the live one stored as `+94753883167`, and the reply
+ * was filed against a candidate with no open conversation — the candidate got
+ * no answer and the TA saw an empty thread (23 September).
+ *
+ * Now every form is gathered and the one actually in a conversation wins:
+ * an open application first, then the most recently created. A duplicate that
+ * nobody is talking to can no longer swallow a live reply.
+ */
 export async function findCandidateByPhone(ctx: any, targetPhone: string) {
   const cleanDigits = targetPhone.replace(/\D/g, "");
   if (!cleanDigits) return null;
 
-  // 1. Direct search by exact phone (+digits or exact match)
-  let candidate = await ctx.db
-    .query("candidates")
-    .withIndex("by_phone", (q: any) => q.eq("phone", targetPhone))
-    .first();
+  /** Every spelling of this number that might be on a record. */
+  const phones = new Set<string>([targetPhone, `+${cleanDigits}`]);
+  const cleans = new Set<string>([cleanDigits]);
 
-  if (!candidate && targetPhone !== `+${cleanDigits}`) {
-    candidate = await ctx.db
-      .query("candidates")
-      .withIndex("by_phone", (q: any) => q.eq("phone", `+${cleanDigits}`))
-      .first();
+  if (cleanDigits.startsWith("94") && cleanDigits.length === 11) {
+    const local = "0" + cleanDigits.slice(2);
+    phones.add(local);
+    cleans.add(local);
+  } else if (cleanDigits.startsWith("0") && cleanDigits.length === 10) {
+    const intl = "94" + cleanDigits.slice(1);
+    phones.add("+" + intl);
+    phones.add(intl);
+    cleans.add(intl);
   }
 
-  // 2. Search by phoneClean index (exact clean digits)
-  if (!candidate) {
-    candidate = await ctx.db
+  const found = new Map<string, any>();
+  for (const phone of phones) {
+    for (const c of await ctx.db
       .query("candidates")
-      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", cleanDigits))
-      .first();
-  }
-
-  // 3. Alternate format search (convert between Sri Lanka 94... and 0... or vice versa)
-  if (!candidate && cleanDigits.startsWith("94") && cleanDigits.length === 11) {
-    const localPhone = "0" + cleanDigits.slice(2);
-    candidate = await ctx.db
-      .query("candidates")
-      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", localPhone))
-      .first();
-
-    if (!candidate) {
-      candidate = await ctx.db
-        .query("candidates")
-        .withIndex("by_phone", (q: any) => q.eq("phone", localPhone))
-        .first();
+      .withIndex("by_phone", (q: any) => q.eq("phone", phone))
+      .take(20)) {
+      found.set(String(c._id), c);
     }
-  } else if (!candidate && cleanDigits.startsWith("0") && cleanDigits.length === 10) {
-    const intlClean = "94" + cleanDigits.slice(1);
-    const intlPhone = "+" + intlClean;
-    candidate = await ctx.db
+  }
+  for (const clean of cleans) {
+    for (const c of await ctx.db
       .query("candidates")
-      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", intlClean))
-      .first();
-
-    if (!candidate) {
-      candidate = await ctx.db
-        .query("candidates")
-        .withIndex("by_phone", (q: any) => q.eq("phone", intlPhone))
-        .first();
+      .withIndex("by_phoneClean", (q: any) => q.eq("phoneClean", clean))
+      .take(20)) {
+      found.set(String(c._id), c);
     }
   }
 
-  // 4. Bounded tail-digits matching (top 200 recent candidates only) to avoid mutation timeouts
-  if (!candidate && cleanDigits.length >= 7) {
+  // Last resort, unchanged: the tail nine digits against recent candidates,
+  // bounded so a wide scan cannot time the mutation out.
+  if (found.size === 0 && cleanDigits.length >= 7) {
     const tailDigits = cleanDigits.slice(-9);
-    const recentCandidates = await ctx.db.query("candidates").order("desc").take(200);
-    candidate = recentCandidates.find((c: any) => {
-      if (c.phoneClean && c.phoneClean.length >= 7) {
-        return c.phoneClean.endsWith(tailDigits);
+    for (const c of await ctx.db.query("candidates").order("desc").take(200)) {
+      const digits = c.phoneClean && c.phoneClean.length >= 7
+        ? c.phoneClean
+        : (c.phone ?? "").replace(/\D/g, "");
+      if (digits.length >= 7 && digits.endsWith(tailDigits)) {
+        found.set(String(c._id), c);
+        break;
       }
-      if (c.phone) {
-        const cClean = c.phone.replace(/\D/g, "");
-        return cClean.length >= 7 && cClean.endsWith(tailDigits);
-      }
-      return false;
-    }) ?? null;
+    }
   }
 
-  return candidate;
+  const matches = [...found.values()];
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+
+  // More than one record holds this number. Prefer whoever is mid-conversation.
+  const LIVE = ["follow_up", "ta_shortlist", "matched_candidates"];
+  let best = null;
+  let bestRank = -1;
+  for (const c of matches) {
+    const apps = await ctx.db
+      .query("applications")
+      .withIndex("by_candidateId", (q: any) => q.eq("candidateId", c._id))
+      .collect();
+    const open = apps.filter((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
+    const rank = open.some((a: any) => LIVE.includes(a.currentStage)) ? 2 : open.length > 0 ? 1 : 0;
+    if (rank > bestRank || (rank === bestRank && best && c._creationTime > best._creationTime)) {
+      best = c;
+      bestRank = rank;
+    }
+  }
+
+  console.warn(
+    `[WhatsApp Inbound] ${matches.length} candidate records share the number ${targetPhone}. ` +
+      `Matched ${best?.fullName ?? best?._id} (rank ${bestRank}: 2=in an active follow-up stage, ` +
+      `1=has an open application, 0=none). Merge the duplicates to make this unambiguous.`,
+  );
+  return best;
 }
 
 export const sendWhatsApp = internalAction({
