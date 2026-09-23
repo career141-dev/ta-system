@@ -14,6 +14,7 @@ Qdrant keep running and are this system's backend.
 | Postgres | `career141-postgres-1`, database `convex_self_hosted` |
 | Qdrant | `career141-qdrant-1`, collection `candidate_vectors` — no API key yet |
 | Voice | staging's LiveKit + agent, over the `ta-staging-voice` network |
+| Web search | container `ta-prod-searxng`, `http://searxng:8080` on `career141_default` — no published port |
 
 ## Releasing
 
@@ -37,6 +38,37 @@ staging exists (its old port is now the live app).
 **The CV-Processing repository must not deploy any more.** Its own workflow
 deploys its `convex/` to the same backend on every push to its main, which would
 remove every `ta/*` function this app runs on.
+
+## Web search (SearXNG)
+
+Suggestions, Benchmark and Research search through our own SearXNG rather than
+Serper (23 Sep). It takes no key and costs nothing. No public instance can be
+used: every one probed served HTML or 403 rather than the JSON API, which is
+off by default and stays off on a public instance by design.
+
+First install, on the server:
+
+    cd /opt/ta-prod
+    mkdir -p searxng
+    # settings.yml from deploy/production/searxng/ in this repository, then:
+    sed -i "s|^  secret_key: .*|  secret_key: \"$(openssl rand -hex 32)\"|" searxng/settings.yml
+    # The container reads this as its own unprivileged user, not as root: a
+    # root-owned 600 file is a PermissionError and a container that restarts
+    # for ever (23 Sep). 644 is right here — the key signs session cookies for
+    # an instance nothing outside this stack can reach, and only root logs in.
+    chmod 755 searxng && chmod 644 searxng/settings.yml
+    TA_APP_IMAGE=$(cat .deploy/app-image) docker compose -p ta-prod --env-file .env.production up -d --no-deps searxng
+
+Then add to `/opt/ta-prod/.env.production` and restart the app:
+
+    SEARXNG_URL=http://searxng:8080
+
+Brought up on 23 September; `docker exec ta-prod-app node -e "fetch('http://searxng:8080/search?q=hayleys+plc&format=json')..."` answered with 43 results.
+
+`settings.yml` is put on the server by hand and is never replaced by a release
+— the pipeline copies only `docker-compose.yml`. The service itself belongs in
+that compose file, because a deploy overwrites it: a service added only on the
+server disappears at the next release.
 
 ## By hand
 

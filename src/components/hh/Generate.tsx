@@ -31,13 +31,13 @@ export function Generate({
   searches?: string;
   hasResult: boolean;
   /** What this feature actually depends on, so the message names the real gap.
-   *  "search": web search through Serper, then a model to sort what was read. */
+   *  "search": web search (SearXNG or Serper), then a model to sort what was read. */
   needs?: "grounded" | "sourcing" | "search";
 }) {
   const st = aiStatus();
   const missing: string[] = [];
   if ((needs === "sourcing" || needs === "search") && !serperConfigured()) {
-    missing.push("a web search key — SERPER_API_KEY, or OPENAI_API_KEY with C141_SEARCH_PROVIDER=openai");
+    missing.push("web search — SEARXNG_URL (a SearXNG instance, no key), or SERPER_API_KEY");
   }
   if (!st.configured) missing.push("OPENROUTER_API_KEY (openrouter.ai/keys)");
   else if (needs === "grounded" && !st.webSearch) {

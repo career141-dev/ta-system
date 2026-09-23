@@ -185,10 +185,16 @@ export async function researchViaSearch(input: ResearchInput, deps: ResearchDeps
   const where = input.where.trim() || "Sri Lanka";
 
   let searches = 0;
+  // A search that fails — a rejected key, a 429, a network error — used to
+  // return nothing and be reported as "the search found nothing under the
+  // client's name", sending the desk to check a client record that was fine
+  // (live, 23 Sep). The first refusal is kept so an empty run can say so.
+  let searchError: string | null = null;
   const run = async (q: string) => {
     const r = await deps.search(q, 10);
     searches += r.credits || (r.error ? 0 : 1);
     if (r.error === "spend_cap") throw new SpendCapHit();
+    if (r.error && !searchError) searchError = r.error;
     return r.hits;
   };
 
@@ -203,7 +209,11 @@ export async function researchViaSearch(input: ResearchInput, deps: ResearchDeps
       run(`"${input.title}" jobs ${where}`),
     ]);
     const clientHits = [...siteHits, ...aboutHits];
-    if (clientHits.length + linkedinHits.length === 0) return { ok: false, reason: "nothing_found" };
+    if (clientHits.length + linkedinHits.length === 0) {
+      return searchError
+        ? { ok: false, reason: "search_failed", detail: searchError }
+        : { ok: false, reason: "nothing_found" };
+    }
 
     const website = pickOfficialSite(clientHits, name);
     const linkedin = pickLinkedInCompany([...linkedinHits, ...siteHits], name);

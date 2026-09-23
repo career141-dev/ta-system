@@ -104,6 +104,20 @@ console.log("\nresearch by search: a whole run, with the web faked");
   );
   eq("model down: the addresses are still kept, with a note", down.ok && [down.fields.websiteLink, down.modelNote], ["https://www.hayleys.com", "rate_limited"]);
   eq("a confidential client is not searched", (await researchViaSearch({ clientName: "Confidential Client", industry: "", where: "", title: "CFO" }, deps)).ok, false);
+
+  // A refused search is not an empty one: the desk was told to check the
+  // client's name when the search key was the problem (live, 23 Sep).
+  const refused = await researchViaSearch(
+    { clientName: "Hayleys PLC", industry: "", where: "", title: "CFO" },
+    { ...deps, search: async () => ({ hits: [], credits: 0, error: "403" }) },
+  );
+  eq("a refused search says so, with what it said", [refused.ok, !refused.ok && refused.reason, !refused.ok && refused.detail], [false, "search_failed", "403"]);
+
+  const empty = await researchViaSearch(
+    { clientName: "Hayleys PLC", industry: "", where: "", title: "CFO" },
+    { ...deps, search: async () => ({ hits: [], credits: 1 }) },
+  );
+  eq("a search that simply found nothing still says nothing_found", !empty.ok && empty.reason, "nothing_found");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

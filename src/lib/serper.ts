@@ -32,13 +32,31 @@ export interface SearchResult {
  * work, so falling back to it turned a missing Serper key into paid web
  * searches nobody had asked for (review of PR #2, 21 Sep).
  */
-export function searchProvider(): "serper" | "openai" | null {
+export function searchProvider(): "serper" | "openai" | "searxng" | null {
   const chosen = (process.env.C141_SEARCH_PROVIDER ?? "").trim().toLowerCase();
   const serper = (process.env.SERPER_API_KEY ?? "").trim().length > 0;
   const openai = (process.env.OPENAI_API_KEY ?? "").trim().length > 0;
   if (chosen === "openai") return openai ? "openai" : null;
   if (chosen === "serper") return serper ? "serper" : null;
+  if (chosen === "searxng") return "searxng";
+  // SearXNG needs no key, so it is preferred once an instance is named: the
+  // desk asked to come off Serper (23 Sep). Serper still answers when it is
+  // the only thing configured, or when it is named outright.
+  if (searxngInstances().length) return "searxng";
   return serper ? "serper" : null;
+}
+
+/**
+ * The SearXNG instances to ask, in order. SEARXNG_URL takes one or several,
+ * comma-separated: public instances rate-limit and go down, so the next one in
+ * the list answers when the first refuses. A self-hosted instance is one entry
+ * and never needs the rest.
+ */
+export function searxngInstances(): string[] {
+  return (process.env.SEARXNG_URL ?? "")
+    .split(",")
+    .map((u) => u.trim().replace(/\/+$/, ""))
+    .filter((u) => /^https?:\/\//.test(u));
 }
 
 /** Whether any search can run. Kept under its old name: callers ask "can we search?". */
@@ -47,7 +65,9 @@ export function serperConfigured(): boolean {
 }
 
 export async function search(q: string, num = 10, page = 1): Promise<SearchResult> {
-  if (searchProvider() === "openai") return searchOpenAI(q, num, page);
+  const provider = searchProvider();
+  if (provider === "searxng") return searchSearxng(q, num, page);
+  if (provider === "openai") return searchOpenAI(q, num, page);
   const key = (process.env.SERPER_API_KEY ?? "").trim();
   if (!key) return { hits: [], credits: 0, error: "no_key" };
   // The test's hard stop. More than ten results costs two credits.
@@ -164,6 +184,112 @@ Search: ${toNaturalSearch(parsed)}`,
     return { hits: [], credits: 0, error: String(e) };
   } finally {
     settle(Number.NaN);
+  }
+}
+
+/**
+ * SearXNG — 23 September. A metasearch front end: it asks Google, Bing,
+ * DuckDuckGo and the rest and hands back their results, with no key and no
+ * bill. The desk moved to it after a Serper refusal was reported at the desk
+ * as "the search found nothing under the client's name".
+ *
+ * Two things about a public instance decide whether this works at all, and
+ * both come back as a plain error rather than an empty page:
+ *  - most instances serve `format=json` only if their settings.yml allows it,
+ *    and answer 403 when it does not;
+ *  - they rate-limit hard, and Research fires about thirty searches per
+ *    opening, so SEARXNG_URL takes several instances and the next one answers
+ *    when the one before it refuses.
+ * Self-hosting removes both, which is where this is going.
+ *
+ * `site:` and `-inurl:` are passed through — the engines behind SearXNG are
+ * the ones that understand them — and then enforced on our side anyway
+ * (websearch.ts), so an instance whose engines ignored an operator returns
+ * fewer results, never the wrong ones.
+ */
+const SEARXNG_TIMEOUT_MS = 12_000;
+
+interface SearxngBody {
+  results?: { url?: string; title?: string; content?: string }[];
+  unresponsive_engines?: unknown[];
+}
+
+/** What one instance answered, as hits. Pure, so the mapping is testable. */
+export function searxngHits(body: SearxngBody, q: string, num: number): SearchHit[] {
+  const parsed = parseBooleanQuery(q);
+  const out: SearchHit[] = [];
+  for (const r of body.results ?? []) {
+    const url = (r.url ?? "").trim();
+    if (!/^https?:\/\//.test(url)) continue;
+    const hit = { url, title: (r.title ?? "").trim(), snippet: (r.content ?? "").trim() };
+    if (!keepHit(hit, parsed)) continue;
+    if (out.some((h) => h.url === hit.url)) continue;
+    out.push(hit);
+  }
+  return out.slice(0, num);
+}
+
+async function searchSearxng(q: string, num: number, page: number): Promise<SearchResult> {
+  const instances = searxngInstances();
+  if (!instances.length) return { hits: [], credits: 0, error: "no_searxng_url" };
+  const engines = (process.env.SEARXNG_ENGINES ?? "").trim();
+  let lastError = "";
+  for (const base of instances) {
+    const params = new URLSearchParams({
+      q,
+      format: "json",
+      language: "en",
+      safesearch: "0",
+      ...(page > 1 ? { pageno: String(page) } : {}),
+      ...(engines ? { engines } : {}),
+    });
+    try {
+      const res = await fetch(`${base}/search?${params}`, {
+        headers: {
+          accept: "application/json",
+          // An instance that sees no browser at all answers 403 on sight.
+          "user-agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(SEARXNG_TIMEOUT_MS),
+      });
+      // 403: JSON is off on this instance. 429: we are being rate-limited.
+      // Either way the next instance in the list gets the same question.
+      if (!res.ok) {
+        lastError = `${hostOf(base)} ${res.status}`;
+        continue;
+      }
+      // A public instance with JSON switched off answers 200 and an HTML page
+      // — its bot check, or the search page itself. Probed 23 Sep: every
+      // public instance tried did one of these. Say which, rather than let
+      // JSON.parse throw somewhere unhelpful.
+      if (!(res.headers.get("content-type") ?? "").includes("json")) {
+        lastError = `${hostOf(base)} served HTML, not JSON (bot check, or JSON is off on that instance)`;
+        continue;
+      }
+      const body = (await res.json()) as SearxngBody;
+      const hits = searxngHits(body, q, num);
+      // No results *and* engines that did not answer is a broken search, not
+      // an empty one — the whole point of the 23 Sep fix upstream.
+      if (!hits.length && (body.unresponsive_engines ?? []).length) {
+        lastError = `${hostOf(base)} engines unavailable`;
+        continue;
+      }
+      // A search happened and cost nothing; it is still counted as one search.
+      return { hits, credits: 1 };
+    } catch (e) {
+      lastError = `${hostOf(base)} ${e instanceof Error && e.name === "TimeoutError" ? "timed out" : String(e)}`;
+    }
+  }
+  return { hits: [], credits: 0, error: lastError || "searxng_unreachable" };
+}
+
+/** An instance's host, for an error a person can act on. */
+function hostOf(base: string): string {
+  try {
+    return new URL(base).hostname;
+  } catch {
+    return base;
   }
 }
 

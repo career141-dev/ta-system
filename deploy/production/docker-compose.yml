@@ -42,6 +42,38 @@ services:
       - career141_default
       - ta-staging-voice
 
+  # Web search for Suggestions, Benchmark and Research (23 Sep). A metasearch
+  # front end: it asks Google, Bing, DuckDuckGo and the rest, with no key and
+  # no bill, and the app reaches it at http://searxng:8080 — SEARXNG_URL in
+  # .env.production. No port is published, so it answers this stack and nothing
+  # else; its settings live on the server in ./searxng/settings.yml, which the
+  # release pipeline does not touch (it copies only this file).
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: ta-prod-searxng
+    restart: unless-stopped
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      SEARXNG_BASE_URL: http://searxng:8080/
+      # Two workers is plenty for one caller; Research fires its searches in
+      # parallel, so the threads matter more than the workers.
+      UWSGI_WORKERS: "2"
+      UWSGI_THREADS: "8"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETGID, SETUID]
+    healthcheck:
+      test: ["CMD", "wget", "-qO", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+    networks:
+      - career141_default
+
 networks:
   career141_default:
     external: true
