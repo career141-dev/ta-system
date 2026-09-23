@@ -2356,6 +2356,9 @@ export default defineSchema({
     model: v.string(),
     generatedBy: v.id("users"),
     generatedAt: v.number(),
+    /** One run each: who has spent theirs on this opening, and when. Optional
+     *  because reports written before 23 September have no log. */
+    runs: v.optional(v.array(v.object({ userId: v.id("users"), at: v.number() }))),
   }).index("by_opening", ["openingId"]),
 
   /** Who holds this role now, who held it before, who holds it at competitors. */

@@ -32,6 +32,8 @@ function redirect(url: string): never {
 import { after } from "next/server";
 import {
   generateJdText,
+  researchRunBy,
+  withResearchRun,
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
@@ -39,7 +41,10 @@ import { FAILURE_MESSAGE, gemini, modelFor } from "@/lib/ai";
 import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
-import { canonicalProfile, displayUrl, serperConfigured } from "@/lib/serper";
+import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
+
+/** Who found the pages, named on the report so the cost is never hidden. */
+const SEARCH_NAME: Record<string, string> = { searxng: "SearXNG", serper: "Serper", openai: "OpenAI web search" };
 import { profileLink } from "@/lib/url";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
@@ -279,6 +284,8 @@ function searchReasonInWords(code: string, detail?: string): string {
   if (code === "search_failed") return `the search provider refused the request${detail ? ` (${detail})` : ""}. Check the search key and its credits.`;
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
+  // Not a failure: they have had their turn. Named so nobody hunts for a fault.
+  if (code === "run_spent") return `you have already run Research on this opening${detail ? ` on ${detail}` : ""}. Everybody on an opening gets one run.`;
   if (code === "nothing_found") return "the search found nothing under the client's name. Check the name on the client record.";
   if (code === "client_not_searchable") return "the client has no searchable name (a code or \"Confidential\"). Put the real name on the client record.";
   return reasonInWords(code);
@@ -2447,6 +2454,11 @@ async function researchOpening(
   const c = contextFor(openingId);
   const o = repo.opening(openingId);
   if (!c || !o) return { ok: false, reason: "no_opening" };
+  // One run each (lib/headhunt, 23 Sep): a run is about thirty web searches and
+  // a model pass over what they returned, so everybody on an opening gets one —
+  // a TA lead has their own, not an exemption.
+  const spent = researchRunBy(repo.research(openingId)?.runs, userId);
+  if (spent !== null) return { ok: false, reason: "run_spent", detail: dateAt(spent) };
   const res = await researchViaSearch({
     clientName: c.clientName,
     industry: c.industry,
@@ -2473,9 +2485,10 @@ async function researchOpening(
     markdown: res.markdown,
     sources: res.sources,
     searches: res.searches,
-    model: `Serper + ${modelFor("plan")}`,
+    model: `${SEARCH_NAME[searchProvider() ?? "serper"]} + ${modelFor("plan")}`,
     generatedBy: userId,
     generatedAt: Date.now(),
+    runs: withResearchRun(prior?.runs, userId, Date.now()),
   });
   // The eight named fields; the competitor profiles are counted on their own.
   const { competitorProfiles, ...named } = fields;

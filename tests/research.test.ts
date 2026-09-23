@@ -1,4 +1,4 @@
-import { parseResearch } from "@/lib/headhunt";
+import { parseResearch, researchRunBy, withResearchRun } from "@/lib/headhunt";
 import { webEngine } from "@/lib/ai";
 import { groundedCompetitors, parseJsonObject, pickLinkedInCompany, pickOfficialSite, researchViaSearch, type ResearchDeps } from "@/lib/researchSearch";
 
@@ -119,6 +119,21 @@ console.log("\nresearch by search: a whole run, with the web faked");
   );
   eq("a search that simply found nothing still says nothing_found", !empty.ok && empty.reason, "nothing_found");
 }
+
+console.log("\none Research run each");
+{
+  const at = Date.UTC(2026, 8, 23);
+  eq("nobody has run it on a report that has no log", researchRunBy(undefined, "u1"), null);
+  const one = withResearchRun(undefined, "u1", at);
+  eq("their run is recorded", one, [{ userId: "u1", at }]);
+  eq("and it is theirs", researchRunBy(one, "u1"), at);
+  eq("somebody else has still not run it", researchRunBy(one, "u2"), null);
+  const two = withResearchRun(one, "u2", at + 1000);
+  eq("a second person spends their own", two.length, 2);
+  eq("a third run by the first changes nothing", withResearchRun(two, "u1", at + 9999), two);
+  eq("and still reads as their first run", researchRunBy(withResearchRun(two, "u1", at + 9999), "u1"), at);
+}
+
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
