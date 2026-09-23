@@ -18,6 +18,7 @@ import type * as admin_cleanCandidateApps from "../admin/cleanCandidateApps.js";
 import type * as admin_cleanupCandidates from "../admin/cleanupCandidates.js";
 import type * as admin_debugWhatsApp from "../admin/debugWhatsApp.js";
 import type * as admin_followUpBacklog from "../admin/followUpBacklog.js";
+import type * as admin_resetFollowUpTest from "../admin/resetFollowUpTest.js";
 import type * as admin_inspectComms from "../admin/inspectComms.js";
 import type * as admin_ioPerformanceMigrations from "../admin/ioPerformanceMigrations.js";
 import type * as admin_migrateCandidates from "../admin/migrateCandidates.js";
@@ -199,6 +200,7 @@ declare const fullApi: ApiFromModules<{
   "admin/cleanupCandidates": typeof admin_cleanupCandidates;
   "admin/debugWhatsApp": typeof admin_debugWhatsApp;
   "admin/followUpBacklog": typeof admin_followUpBacklog;
+  "admin/resetFollowUpTest": typeof admin_resetFollowUpTest;
   "admin/inspectComms": typeof admin_inspectComms;
   "admin/ioPerformanceMigrations": typeof admin_ioPerformanceMigrations;
   "admin/migrateCandidates": typeof admin_migrateCandidates;
