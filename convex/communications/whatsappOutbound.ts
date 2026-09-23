@@ -3,23 +3,46 @@ import { internalAction, internalMutation, internalQuery } from "../_generated/s
 import { api, internal } from "../_generated/api";
 import { sendMetaFreeText } from "./metaDirectSender";
 
-// Internal query to fetch the correct Meta phone_number_id based on the whatsapp number string from the database
+/**
+ * The Meta `phone_number_id` for the line an opening sends from.
+ *
+ * Returns null when the opening's configured number is not registered, so the
+ * caller keeps its own default (`META_PHONE_NUMBER_ID`). It used to return the
+ * hardcoded default instead, which meant an opening pointed at a TA's number
+ * that nobody had added to `whatsappNumbers` sent from the main Career141 line
+ * with nothing in the log to say so — the candidate replied to a number the TA
+ * was not watching (23 September). There is no screen for that table, so the
+ * mismatch is easy to create and was invisible.
+ *
+ * Still a fallback rather than a hard failure: a wrong-but-working sender beats
+ * an opening that cannot message anyone. The warning is what was missing.
+ */
 export const getMetaPhoneNumberId = internalQuery({
   args: { targetWhatsAppNumber: v.string() },
   handler: async (ctx, args) => {
     const cleanDigits = args.targetWhatsAppNumber.replace(/\D/g, "");
-    if (!cleanDigits) return "965783109962872";
+    if (!cleanDigits) return null;
 
     const allNumbers = await ctx.db.query("whatsappNumbers").collect();
-    const dbNumber = allNumbers.find(n => n.phone && n.phone.replace(/\D/g, "").slice(-9) === cleanDigits.slice(-9));
+    // Last nine digits: the same number is written +94 77…, 94 77… and 077….
+    const dbNumber = allNumbers.find(
+      (n) => n.phone && n.phone.replace(/\D/g, "").slice(-9) === cleanDigits.slice(-9),
+    );
 
-    // whatchimpPhoneId stores the Meta phone_number_id
+    // `whatchimpPhoneId` holds the Meta phone_number_id — the column keeps its
+    // old name from before the migration off WhatChimp.
     if (dbNumber && dbNumber.whatchimpPhoneId) {
       return dbNumber.whatchimpPhoneId;
     }
 
-    return "965783109962872";
-  }
+    console.warn(
+      `[WhatsApp Outbound] The opening is set to send from ${args.targetWhatsAppNumber}, ` +
+        `but no row in whatsappNumbers matches it. Falling back to the default sending ` +
+        `number — replies will arrive on the default line, not that one. Add the number ` +
+        `via settings.whatsappNumbers:add to fix.`,
+    );
+    return null;
+  },
 });
 
 export const isCandidatePhone = internalQuery({
@@ -94,55 +117,25 @@ export const getJobOutboundWhatsAppNumber = internalQuery({
   }
 });
 
-async function resolveTestModePhone(ctx: any, senderPhone: string): Promise<string> {
-  const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-  const isTestMode =
-    process.env.WHATSAPP_TEST_MODE === "true" ||
-    process.env.OUTREACH_TEST_MODE === "true" ||
-    process.env.TEST_MODE === "true" ||
-    systemSettings?.testModeEnabled === true;
-
-  const testRecipient =
-    process.env.WHATSAPP_TEST_RECIPIENT ||
-    process.env.TEST_PHONE_NUMBER ||
-    systemSettings?.testPhoneNumber;
-
-  const cleanNum = (p: string) => p.replace(/[^0-9]/g, "");
-
-  if (isTestMode && testRecipient && cleanNum(senderPhone) === cleanNum(testRecipient)) {
-    // 1. FIRST check if the test sender phone directly matches a candidate in the DB with an active application
-    const directCandidate = await findCandidateByPhone(ctx, senderPhone);
-    if (directCandidate) {
-      const apps = await ctx.db
-        .query("applications")
-        .withIndex("by_candidateId", (q: any) => q.eq("candidateId", directCandidate._id))
-        .collect();
-      const activeApp = apps.find((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
-      if (activeApp) {
-        console.log(`[WhatsApp Test Mode] Direct candidate match found for test sender ${senderPhone}: ${directCandidate.fullName} (${directCandidate._id})`);
-        return senderPhone;
-      }
-    }
-
-    // 2. Fallback to lastOutbound only if test sender is not a candidate themselves
-    const lastOutbound = await ctx.db
-      .query("communications")
-      .withIndex("by_direction_channel_time", (q: any) =>
-        q.eq("direction", "outbound").eq("channel", "whatsapp")
-      )
-      .order("desc")
-      .first();
-
-    if (lastOutbound) {
-      const testCandidate = await ctx.db.get(lastOutbound.candidateId);
-      if (testCandidate && testCandidate.phone) {
-        console.log(`[WhatsApp Test Mode] Mapped test sender ${senderPhone} to last contacted candidate phone: ${testCandidate.phone}`);
-        return testCandidate.phone;
-      }
-    }
-  }
-  return senderPhone;
-}
+/*
+ * `resolveTestModePhone` lived here and is gone (23 September).
+ *
+ * It mapped an inbound message from the configured test phone onto a candidate
+ * — first by looking the number up, then, failing that, by attaching it to
+ * whoever received the most recent outbound WhatsApp. That last fallback is
+ * how a tester's "hi" ended up recorded against a real candidate's
+ * application, and triggered an AI reply about their opening.
+ *
+ * Inbound is matched on the number that actually sent the message, and nothing
+ * else. If the tester wants the conversation to land somewhere, their number
+ * goes on a candidate record — which is also what makes the outbound gate a
+ * no-op rather than a redirect, so the whole round trip is the real path.
+ *
+ * It also read a different set of switches from the outbound side
+ * (WHATSAPP_TEST_MODE / TEST_PHONE_NUMBER / appSettings.testModeEnabled versus
+ * OUTREACH_LIVE / OUTREACH_TEST_PHONE), so the two directions could disagree
+ * about whether test mode was even on.
+ */
 
 export async function findCandidateByPhone(ctx: any, targetPhone: string) {
   const cleanDigits = targetPhone.replace(/\D/g, "");
@@ -261,52 +254,30 @@ export const sendWhatsApp = internalAction({
       return;
     }
 
-    // 2. Resolve destination phone number based on test mode
-    const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-    const isTestMode =
-      process.env.WHATSAPP_TEST_MODE === "true" ||
-      process.env.OUTREACH_TEST_MODE === "true" ||
-      process.env.TEST_MODE === "true" ||
-      systemSettings?.testModeEnabled === true;
-
-    const testRecipient =
-      process.env.WHATSAPP_TEST_RECIPIENT ||
-      process.env.TEST_PHONE_NUMBER ||
-      systemSettings?.testPhoneNumber;
-
-    let targetPhone = candidate.phone;
-    let logNote = "";
+    /*
+     * 2. Is the free 24-hour service window open?
+     *
+     * This block used to also run a second test mode of its own — WHATSAPP_TEST_MODE /
+     * OUTREACH_TEST_MODE / TEST_MODE / the appSettings.testModeEnabled row, with its
+     * own recipient list — deciding the destination BEFORE `outreachSafety` ever saw
+     * it. Two gates with different rules, and this one had a hole: `activeInboundSession`
+     * sent to the REAL candidate's number even with test mode on, because "they wrote to
+     * us recently" was treated as consent. On a database restored from production that
+     * is a real person (23 September).
+     *
+     * `resolveRecipient`, inside `sendMetaFreeText`, is now the only thing that decides
+     * who a message reaches. It reads OUTREACH_LIVE / OUTREACH_TEST_PHONE from the
+     * environment only, and it fails closed. The sending number is untouched by any of
+     * this — test mode redirects the recipient, never the sender.
+     */
+    const targetPhone = candidate.phone;
+    const logNote = "";
 
     const activeInboundSession = await ctx.runQuery(internal.communications.whatsappOutbound.hasRecentInboundComm, {
       candidateId: candidate._id,
       withinMs: 24 * 60 * 60 * 1000,
     });
 
-    if (isTestMode) {
-      const candidateDigits = candidate.phone.replace(/\D/g, "");
-      const testDigits = testRecipient ? testRecipient.replace(/\D/g, "") : "";
-
-      const isExactOrTailMatch = testDigits && (candidateDigits === testDigits || candidateDigits.endsWith(testDigits.slice(-9)) || testDigits.endsWith(candidateDigits.slice(-9)));
-
-      if (isExactOrTailMatch || activeInboundSession) {
-        // Candidate IS the test phone OR candidate actively sent an inbound message in last 24h -> send directly
-        targetPhone = candidate.phone;
-        logNote = activeInboundSession ? ` [ACTIVE INBOUND SESSION]` : ` [TEST CANDIDATE]`;
-      } else if (testRecipient) {
-        // Redirect to test recipient number
-        targetPhone = testRecipient;
-        logNote = ` [REDIRECTED TO TEST NUMBER: ${testRecipient}]`;
-      } else {
-        // Real candidate, no test recipient configured -> SUPPRESS OUTREACH
-        console.warn(`[WhatsApp Outbound] Test mode active: Suppressed outreach to real candidate ${candidate.phone}`);
-        await ctx.runMutation(internal.communications.whatsappOutbound.updateStatus, {
-          communicationId: args.communicationId,
-          status: "failed",
-          error: "Test mode is active: Automated WhatsApp outreach to real candidates is suppressed during testing phase.",
-        });
-        return;
-      }
-    }
     // 3. Send message directly via Meta Cloud API
     try {
       const metaAccessToken = process.env.META_ACCESS_TOKEN;
@@ -413,7 +384,7 @@ export const checkAndRecordFollowUpReply = internalMutation({
     textBody: v.string(),
   },
   handler: async (ctx, args) => {
-    const targetPhone = await resolveTestModePhone(ctx, args.senderPhone);
+    const targetPhone = args.senderPhone;
     const candidate = await findCandidateByPhone(ctx, targetPhone);
 
     if (!candidate) {
@@ -508,7 +479,7 @@ export const processLocalWhatsappInbound = internalMutation({
     textBody: v.string(),
   },
   handler: async (ctx, args) => {
-    const targetPhone = await resolveTestModePhone(ctx, args.senderPhone);
+    const targetPhone = args.senderPhone;
     const candidate = await findCandidateByPhone(ctx, targetPhone);
 
     let activeApp = null;
