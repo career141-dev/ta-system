@@ -262,6 +262,9 @@ export function mapApplication(a: BackendApplication): Application {
     offerDeclinedAt: numOrNull(a.offerDeclinedAt),
     offerDeclineReason: typeof a.offerDeclineReason === "string" ? a.offerDeclineReason : null,
 
+    cvFileName: typeof a.cvFileName === "string" ? a.cvFileName : null,
+    cvFileId: typeof a.cvFileId === "string" ? a.cvFileId : null,
+
     createdAt: a.createdAt,
     lastStageChangedAt: a.lastStageChangedAt,
     aiFollowUpNoReply: Boolean(a.aiFollowUpNoReply),

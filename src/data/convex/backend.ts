@@ -367,7 +367,20 @@ export async function candidate(actor: Actor, candidateId: Id): Promise<Candidat
     actorId: actor.id ?? undefined,
     candidateId,
   });
-  return doc ? mapCandidateDoc(doc) : null;
+  if (!doc) return null;
+  const mapped = mapCandidateDoc(doc);
+  if (!mapped.cvFileName) {
+    try {
+      const found = await convexQuery<{ url: string | null; fileName?: string } | null>(
+        "candidates/candidates:getCvUploadUrl",
+        { cvUploadId: candidateId }
+      );
+      if (found && found.url) {
+        mapped.cvFileName = found.fileName || "CV.pdf";
+      }
+    } catch {}
+  }
+  return mapped;
 }
 
 /**
@@ -379,7 +392,43 @@ export async function candidate(actor: Actor, candidateId: Id): Promise<Candidat
  */
 export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, Candidate>> {
   const out = new Map<Id, Candidate>();
-  for (const d of await candidateDocsByIds(actor, ids)) out.set(d._id, mapCandidateDoc(d));
+  const docs = await candidateDocsByIds(actor, ids);
+
+  const missingCvIds = docs.filter((d) => !d.cvFileName).map((d) => d._id);
+  const cvNameMap = new Map<string, string>();
+  if (missingCvIds.length > 0) {
+    const chunkSize = 25;
+    for (let i = 0; i < missingCvIds.length; i += chunkSize) {
+      const chunk = missingCvIds.slice(i, i + chunkSize);
+      const results = await Promise.all(
+        chunk.map(async (id) => {
+          try {
+            const found = await convexQuery<{ url: string | null; fileName?: string } | null>(
+              "candidates/candidates:getCvUploadUrl",
+              { cvUploadId: id }
+            );
+            if (found && found.url) {
+              return { id, fileName: found.fileName || "CV.pdf" };
+            }
+          } catch {}
+          return null;
+        })
+      );
+      for (const r of results) {
+        if (r && r.fileName) {
+          cvNameMap.set(r.id, r.fileName);
+        }
+      }
+    }
+  }
+
+  for (const d of docs) {
+    const cand = mapCandidateDoc(d);
+    if (!cand.cvFileName && cvNameMap.has(d._id)) {
+      cand.cvFileName = cvNameMap.get(d._id)!;
+    }
+    out.set(d._id, cand);
+  }
   return out;
 }
 

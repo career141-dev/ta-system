@@ -23,7 +23,7 @@ async function post(path, body) {
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Platform said ${res.status}`);
+  if (!res.ok) throw new Error(data.message || data.error || `Platform said ${res.status}`);
   return data;
 }
 
@@ -34,7 +34,7 @@ async function get(path) {
     headers: { "X-C141-Token": token },
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Platform said ${res.status}`);
+  if (!res.ok) throw new Error(data.message || data.error || `Platform said ${res.status}`);
   return data;
 }
 

@@ -125,6 +125,9 @@ async function Results({ sp }: { sp: Params }) {
   const forOpening = typeof sp.for === "string" ? sp.for : null;
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
   const candidateId = typeof sp.candidate === "string" ? sp.candidate : null;
+  if (candidateId && isConvex()) {
+    await primeStore({ candidateIds: [candidateId] });
+  }
   const vocab = repo.vocabulary();
 
   // The sentence is parsed once; after that the URL's criteria win, so removing
@@ -360,8 +363,6 @@ async function ResultsView({
     floor,
     belowFloor: showBelow ? undefined : bar - (isMeaningBased() ? BELOW_BAR : 0.04),
   });
-  const shown = results.slice((page - 1) * PAGE, page * PAGE);
-
   /*
    * One score, not two.
    *
@@ -379,7 +380,7 @@ async function ResultsView({
   const target = forOpening ? repo.opening(forOpening) : null;
   const targetClient = target ? repo.client(target.clientId) : null;
   const fit = new Map<string, Score>();
-  const assessment = target ? assess(target.id, shown.map((r) => r.candidate)) : null;
+  const assessment = target ? assess(target.id, results.map((r) => r.candidate)) : null;
   if (assessment?.ok) {
     for (const [id, score] of assessment.scores) fit.set(id, score);
   } else if (engineRanked) {
@@ -393,18 +394,27 @@ async function ResultsView({
      * engine's number appears only when there is no opening to compare
      * against, so the two are never on screen together.
      */
-    for (const r of shown) {
+    for (const r of results) {
       const hit = engineHits.get(r.candidate.id);
       if (hit) fit.set(r.candidate.id, scoreFromEngine(hit));
     }
   } else if (mode === "boolean") {
     // No opening and no engine: score how well each CV carries the terms asked for.
     const terms = booleanTerms(q);
-    for (const r of shown) {
+    for (const r of results) {
       const s = booleanScore(terms, r.candidate);
       if (s) fit.set(r.candidate.id, s);
     }
   }
+
+  // Ensure results are strictly ordered from highest score to lowest score.
+  results.sort((a, b) => {
+    const scoreA = fit.get(a.candidate.id)?.overall ?? (a.score > 1 ? a.score : Math.round(a.score * 100));
+    const scoreB = fit.get(b.candidate.id)?.overall ?? (b.score > 1 ? b.score : Math.round(b.score * 100));
+    return scoreB - scoreA || (b.candidate.totalExperienceYears ?? 0) - (a.candidate.totalExperienceYears ?? 0);
+  });
+
+  const shown = results.slice((page - 1) * PAGE, page * PAGE);
 
   const openings = repo.openings().filter((o) => o.status === "open");
   const clients = repo.clients();
@@ -538,14 +548,20 @@ async function ResultsView({
     const found = await backend
       .cvFile(activeCandidate.id)
       .catch((e) => ({ ok: false as const, detail: `The CV could not be looked up (${(e as Error).message}).`, fileName: null }));
+    const fileName = (found.ok ? found.fileName : null) ?? activeCandidate.cvFileName;
+    const isPdf =
+      found.ok &&
+      (/pdf/i.test(found.fileType ?? "") ||
+        /\.pdf$/i.test(fileName ?? "") ||
+        !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(fileName ?? ""));
     activeCv = found.ok
       ? {
           href: `/api/cv/${encodeURIComponent(activeCandidate.id)}`,
-          fileName: found.fileName,
-          inline: /pdf/i.test(found.fileType ?? "") || /\.pdf$/i.test(found.fileName ?? ""),
+          fileName,
+          inline: isPdf,
           problem: null,
         }
-      : { href: null, fileName: found.fileName, inline: false, problem: found.detail };
+      : { href: null, fileName, inline: false, problem: found.detail };
   }
   const statusLabel =
     activeStatus?.busy && activeStatus.stage

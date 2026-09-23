@@ -62,6 +62,8 @@ export function LinkRow({
   /** Their application on this opening, once they have been added. */
   onPipeline?: Pick<Application, "id" | "stage"> | null;
 }) {
+  const [removed, setRemoved] = useState(false);
+  const [isEyeMarked, setIsEyeMarked] = useState(r.isEyeMarked);
   const [edit, setEdit] = useState(false);
   // Opened from "Add to pipeline" on a row that is not shortlisted yet.
   const [forPipeline, setForPipeline] = useState(false);
@@ -81,6 +83,17 @@ export function LinkRow({
   const del = useInline(deleteLinkInline);
   const busy = eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending;
   const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result);
+
+  useEffect(() => {
+    setIsEyeMarked(r.isEyeMarked);
+  }, [r.isEyeMarked]);
+
+  useEffect(() => {
+    if (del.result && del.result.tone !== "ok") {
+      setRemoved(false);
+    }
+  }, [del.result]);
+
   // The name the row can go to the pipeline under: typed, or read from the link.
   const guessedName = profileLink(r.linkedinUrl)?.guessedName ?? "";
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-9`;
@@ -88,18 +101,26 @@ export function LinkRow({
   const shown = allLog ? log : log.slice(0, 2);
   const outcome = OUTCOMES.find((o) => o.value === r.outcome)?.label ?? r.outcome;
 
+  if (removed || del.result?.tone === "ok") return null;
+
   return (
     <article className="px-6 py-5">
       <div className="flex gap-3.5">
-        <form onSubmit={(e) => eye.run(submitted(e).formData)} className="pt-1">
+        <form
+          onSubmit={(e) => {
+            setIsEyeMarked((prev) => !prev);
+            eye.run(submitted(e).formData);
+          }}
+          className="pt-1"
+        >
           <input type="hidden" name="openingId" value={openingId} />
           <input type="hidden" name="entryId" value={r.id} />
           <button
             disabled={busy}
             aria-busy={eye.pending}
-            title={r.isEyeMarked ? "Eye-marked — a high-conviction profile" : "Eye-mark this profile"}
+            title={isEyeMarked ? "Eye-marked — a high-conviction profile" : "Eye-mark this profile"}
             className={`grid h-[15px] w-[15px] place-items-center rounded-[3px] border text-[10px] leading-none transition-colors ${
-              r.isEyeMarked ? "border-brand bg-brand text-white" : "border-rule-strong text-transparent hover:border-brand"
+              isEyeMarked ? "border-brand bg-brand text-white" : "border-rule-strong text-transparent hover:border-brand"
             }`}
           >
             ✓
@@ -345,6 +366,7 @@ export function LinkRow({
                 onSubmit={(e) => {
                   e.preventDefault();
                   if (!window.confirm("Are you sure you want to remove this link from the table?")) return;
+                  setRemoved(true);
                   const { formData } = submitted(e);
                   del.run(formData);
                 }}

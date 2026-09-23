@@ -231,42 +231,53 @@ export function DbCandidateDrawer({
                 Keyed by candidate so Previous / Next loads the next person's. */}
             {cv && (
               <section className="overflow-hidden rounded-2xl border border-rule bg-surface">
-                <div className="flex flex-wrap items-center gap-3 border-b border-rule px-5 py-3">
-                  <h3 className="text-[13px] font-semibold">CV</h3>
-                  {cv.fileName && <span className="truncate text-[12px] text-ink-faint">{cv.fileName}</span>}
-                  {cv.href && (
-                    <div className="ml-auto flex items-center gap-2">
-                      <a
-                        href={cv.href}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                      >
-                        Open in a new tab
-                      </a>
-                      <a
-                        href={`${cv.href}?download=1`}
-                        className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                      >
-                        Download
-                      </a>
-                    </div>
-                  )}
-                </div>
                 {cv.href && cv.inline ? (
-                  <CvFrame key={c.id} src={cv.href} title={`CV — ${c.fullName}`} height={760} />
-                ) : cv.href ? (
-                  <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
-                    This CV is not a PDF, so the browser cannot show it here.{" "}
-                    <a href={`${cv.href}?download=1`} className="text-brand hover:underline">
-                      Download it
-                    </a>
-                    .
-                  </p>
+                  <CvFrame
+                    key={c.id}
+                    src={cv.href}
+                    title={`CV — ${c.fullName}`}
+                    fileName={cv.fileName ?? `CV — ${c.fullName}`}
+                    downloadHref={`${cv.href}${cv.href.includes("?") ? "&" : "?"}download=1`}
+                    height={760}
+                  />
                 ) : (
-                  <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
-                    {cv.problem ?? "No CV file is on record for this candidate."}
-                  </p>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-3 border-b border-rule px-5 py-3">
+                      <h3 className="text-[13px] font-semibold">CV</h3>
+                      {cv.fileName && <span className="truncate text-[12px] text-ink-faint">{cv.fileName}</span>}
+                      {cv.href && (
+                        <div className="ml-auto flex items-center gap-2">
+                          <a
+                            href={cv.href}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                          >
+                            Open in a new tab
+                          </a>
+                          <a
+                            href={`${cv.href}${cv.href.includes("?") ? "&" : "?"}download=1`}
+                            className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
+                          >
+                            Download
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                    {cv.href ? (
+                      <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
+                        This CV is not a PDF, so the browser cannot show it here.{" "}
+                        <a href={`${cv.href}${cv.href.includes("?") ? "&" : "?"}download=1`} className="text-brand hover:underline">
+                          Download it
+                        </a>
+                        .
+                      </p>
+                    ) : (
+                      <p className="px-5 py-10 text-center text-[12.5px] text-ink-soft">
+                        {cv.problem ?? "No CV file is on record for this candidate."}
+                      </p>
+                    )}
+                  </div>
                 )}
               </section>
             )}

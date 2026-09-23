@@ -13,15 +13,31 @@
 (() => {
   "use strict";
 
+  // Do not run inside iframes (e.g. LinkedIn messaging frame or widgets)
+  if (window !== window.top) return;
+
   // ── reading the page ──────────────────────────────────────────────────────
 
   const clean = (s) => (typeof s === "string" ? s.replace(/\s+/g, " ").trim() : null) || null;
   const txt = (el) => (el ? clean(el.textContent) : null);
 
+  function cleanName(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    let s = raw.replace(/\s+/g, " ").trim();
+    // Remove pronouns e.g. (He/Him), (She/Her), (They/Them)
+    s = s.replace(/\s*\((?:he\/him|she\/her|they\/them|he\/they|she\/they|[a-z/]+)\)/gi, "");
+    // Remove connection degree like "· 1st", "· 2nd", "· 3rd", "· 1st degree connection"
+    s = s.replace(/\s*[·•\-]\s*(?:1st|2nd|3rd|\d+(?:st|nd|rd|th))\s*(?:degree)?(?:\s*connection)?/gi, "");
+    // Remove trailing badge keywords
+    s = s.replace(/\s*(?:verified|open to work|premium|hiring)\s*$/gi, "");
+    // Remove leading/trailing bullets and dashes
+    s = s.replace(/^[·•\-\s,]+|[·•\-\s,]+$/g, "").trim();
+    return s.length >= 2 ? s : null;
+  }
+
   /**
-   * LinkedIn ships a schema.org Person on the profile page. It survives their
-   * class-name churn, which hand-picked selectors do not, so it is tried first
-   * and the DOM is only a fallback.
+   * LinkedIn ships a schema.org Person on the profile page in some views. It
+   * survives class-name churn, so it is tried first.
    */
   function jsonLdPerson() {
     for (const tag of document.querySelectorAll('script[type="application/ld+json"]')) {
@@ -51,8 +67,20 @@
 
   function sectionFor(anchorId) {
     const anchor = document.getElementById(anchorId);
-    if (!anchor) return null;
-    return anchor.closest("section") || anchor.parentElement;
+    if (anchor) return anchor.closest("section") || anchor.parentElement;
+
+    // Check data-section attribute
+    const dataSec = document.querySelector(`section[data-section="${anchorId}"]`);
+    if (dataSec) return dataSec;
+
+    // Search by h2 text header
+    for (const sec of document.querySelectorAll("section")) {
+      const h2 = sec.querySelector("h2");
+      if (h2 && new RegExp(`^\\s*${anchorId}\\s*$`, "i").test(h2.textContent || "")) {
+        return sec;
+      }
+    }
+    return null;
   }
 
   function entriesIn(anchorId) {
@@ -93,7 +121,7 @@
   /** Only present when the TA has the contact-info panel open. Nothing here
    *  opens it — an extension that clicks through a profile is automation. */
   function readContact() {
-    const modal = document.querySelector(".pv-contact-info, [data-test-modal] .pv-profile-section");
+    const modal = document.querySelector(".pv-contact-info, [data-test-modal] .pv-profile-section, .artdeco-modal");
     const scope = modal || document;
     const mail = scope.querySelector('a[href^="mailto:"]');
     const phone = [...scope.querySelectorAll("span, li")]
@@ -106,17 +134,12 @@
   }
 
   function topCard() {
-    return document.querySelector("main section") || document.querySelector("main");
+    return document.querySelector(".pv-top-card, main section, .scaffold-layout__main section, main");
   }
 
   /**
-   * Recruiter (`/talent/…`) renders candidates through an Ember "entity
-   * lockup" component instead of the public profile's schema.org record —
-   * jsonLdPerson() and the `main h1`/`.text-body-*` fallbacks below find
-   * nothing there. These `data-test-*` attributes are LinkedIn's own
-   * internal test hooks; unlike the hashed CSS module classes sitting right
-   * next to them in the DOM, LinkedIn has kept these stable across
-   * redesigns, so they are read in preference to a class name.
+   * Recruiter (`/talent/…`) renders candidates through Ember entity lockup
+   * components.
    */
   function recruiterField(selector) {
     return txt(document.querySelector(selector));
@@ -124,22 +147,144 @@
 
   function recruiterLockup() {
     const nameEl = document.querySelector(
-      '[data-test-row-lockup-full-name] a[data-test-lockup-name-button], a[data-test-lockup-name-button]',
+      '[data-test-row-lockup-full-name] a[data-test-lockup-name-button], a[data-test-lockup-name-button], [data-test-profile-header-name], .artdeco-entity-lockup__title',
     );
     if (!nameEl) return null;
     const degreeText = recruiterField("[data-test-lockup-degree] .artdeco-entity-lockup__degree");
     const degreeMatch = degreeText && degreeText.match(/\b(1st|2nd|3rd)\b/);
     return {
-      fullName: txt(nameEl),
+      fullName: cleanName(txt(nameEl)),
       headline: recruiterField("[data-test-row-lockup-headline]"),
       location: recruiterField("[data-test-row-lockup-location]"),
       connectionDegree: degreeMatch ? degreeMatch[1] : null,
     };
   }
 
-  /** Recruiter's headline is one string, "Title at Company" — the public
-   *  profile gives title and company as separate fields, so this is only
-   *  needed as a fallback when those are missing. */
+  function readFullName(ld, recruiter) {
+    // 1. JSON-LD Person
+    if (ld?.name) {
+      const n = cleanName(clean(ld.name));
+      if (n) return n;
+    }
+
+    // 2. Recruiter lockup
+    if (recruiter?.fullName) {
+      const n = cleanName(recruiter.fullName);
+      if (n) return n;
+    }
+
+    // 3. Known LinkedIn DOM selectors for profile name
+    const selectors = [
+      "main h1",
+      ".pv-top-card h1",
+      ".pv-top-card--list h1",
+      "h1.text-heading-xlarge",
+      "h1.v-align-middle",
+      "h1.inline.t-24",
+      "section.artdeco-card h1",
+      ".scaffold-layout__main h1",
+      '[data-test-row-lockup-full-name] a[data-test-lockup-name-button]',
+      'a[data-test-lockup-name-button]',
+      '[data-test-profile-header-name]',
+      '[data-anonymize="person-name"]',
+      '.artdeco-entity-lockup__title',
+      '.topcard-condensed__title',
+      '.profile-topcard__lead-name',
+      '.profile-topcard-person-entity__name',
+      "main section:first-of-type h1",
+      "h1",
+    ];
+
+    for (const sel of selectors) {
+      for (const el of document.querySelectorAll(sel)) {
+        // If element has aria-hidden span inside, prefer that (avoids screen-reader duplicate text)
+        const ariaSpan = el.querySelector('span[aria-hidden="true"]');
+        const text = txt(ariaSpan) || txt(el);
+        const name = cleanName(text);
+        if (name && !/^(linkedin|feed|notifications|jobs|messaging|my network|search|sign in|join linkedin)$/i.test(name)) {
+          return name;
+        }
+      }
+    }
+
+    // 4. OpenGraph / Twitter meta tags
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute("content");
+    if (ogTitle) {
+      const part = ogTitle.split(/[|\-–—•·]/)[0];
+      const name = cleanName(clean(part));
+      if (name && !/^(linkedin|sign in|join linkedin)$/i.test(name)) return name;
+    }
+
+    // 5. Document title fallback: "(1) First Last | LinkedIn" -> "First Last"
+    if (document.title) {
+      const titleCleaned = document.title.replace(/^\(\d+\)\s*/, "");
+      const part = titleCleaned.split(/[|\-–—•·]/)[0];
+      const name = cleanName(clean(part));
+      if (name && !/^(linkedin|feed|notifications|jobs|messaging|my network|search|sign in|join linkedin)$/i.test(name)) {
+        return name;
+      }
+    }
+
+    // 6. URL slug fallback: https://www.linkedin.com/in/gajani-uruthirananthan-12345/ -> Gajani Uruthirananthan
+    const slugMatch = window.location.pathname.match(/\/in\/([^/]+)/);
+    if (slugMatch && slugMatch[1]) {
+      const slugName = decodeURIComponent(slugMatch[1])
+        .replace(/-[a-f0-9]{6,12}$/i, "")
+        .replace(/[-_.]+/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .trim();
+      if (slugName.length >= 2) return slugName;
+    }
+
+    return null;
+  }
+
+  function readHeadline(ld, recruiter) {
+    if (ld?.description) return clean(ld.description);
+    if (recruiter?.headline) return recruiter.headline;
+    const selectors = [
+      "main .text-body-medium",
+      ".pv-top-card .text-body-medium",
+      "div.text-body-medium",
+      '[data-test-row-lockup-headline]',
+      '[data-anonymize="headline"]',
+      ".topcard-condensed__headline",
+      ".profile-topcard__summary-position",
+    ];
+    for (const sel of selectors) {
+      const val = txt(document.querySelector(sel));
+      if (val) return val;
+    }
+    return null;
+  }
+
+  function readLocation(ld, recruiter) {
+    if (ld?.address) {
+      const loc = clean(
+        [ld.address?.addressLocality, ld.address?.addressRegion, ld.address?.addressCountry]
+          .filter(Boolean)
+          .join(", ")
+      );
+      if (loc) return loc;
+    }
+    if (recruiter?.location) return recruiter.location;
+    const selectors = [
+      "main .text-body-small.inline",
+      ".pv-top-card .text-body-small.inline",
+      "span.text-body-small.inline",
+      '[data-test-row-lockup-location]',
+      '[data-anonymize="location"]',
+      ".topcard-condensed__location",
+      ".profile-topcard__location-data",
+    ];
+    for (const sel of selectors) {
+      const val = txt(document.querySelector(sel));
+      if (val) return val;
+    }
+    return null;
+  }
+
+  /** Recruiter's headline is one string, "Title at Company" */
   function splitHeadline(headline) {
     const m = headline && headline.match(/^(.*?)\s+at\s+(.+)$/i);
     return m ? { title: clean(m[1]), company: clean(m[2]) } : { title: clean(headline), company: null };
@@ -151,25 +296,9 @@
     const card = topCard();
     const cardText = card ? card.innerText || "" : "";
 
-    const fullName =
-      (ld && clean(ld.name)) || recruiter?.fullName || txt(document.querySelector("main h1")) || null;
-
-    const headline =
-      (ld && clean(ld.description)) ||
-      recruiter?.headline ||
-      txt(document.querySelector("main .text-body-medium")) ||
-      null;
-
-    const location =
-      (ld &&
-        clean(
-          [ld.address?.addressLocality, ld.address?.addressRegion, ld.address?.addressCountry]
-            .filter(Boolean)
-            .join(", "),
-        )) ||
-      recruiter?.location ||
-      txt(document.querySelector("main .text-body-small.inline")) ||
-      null;
+    const fullName = readFullName(ld, recruiter);
+    const headline = readHeadline(ld, recruiter);
+    const location = readLocation(ld, recruiter);
 
     const experience = readExperience();
 
@@ -179,7 +308,9 @@
       !worksFor && !jobTitle && recruiter?.headline ? splitHeadline(recruiter.headline) : null;
 
     const about =
-      txt(sectionFor("about")?.querySelector('span[aria-hidden="true"]')) || null;
+      txt(sectionFor("about")?.querySelector('span[aria-hidden="true"]')) ||
+      txt(sectionFor("about")) ||
+      null;
 
     const degreeMatch = cardText.match(/\b(1st|2nd|3rd)\b/);
     const contact = readContact();
@@ -217,7 +348,19 @@
   let busy = false;
 
   function build() {
-    if (host && document.body.contains(host)) return;
+    if (window !== window.top) return;
+    if (!chrome.runtime?.id) {
+      for (const el of document.querySelectorAll("#c141-capture-host")) {
+        el.remove();
+      }
+      return;
+    }
+
+    // Always remove any stale host elements from previous script runs or navigation
+    for (const el of document.querySelectorAll("#c141-capture-host")) {
+      el.remove();
+    }
+
     host = document.createElement("div");
     host.id = "c141-capture-host";
     // A shadow root so LinkedIn's stylesheet cannot reach in and this cannot
@@ -227,27 +370,37 @@
     root.innerHTML = `
       <style>
         .bar {
-          position: fixed; right: 20px; bottom: 20px; z-index: 2147483000;
+          position: fixed; right: 20px; bottom: 20px; z-index: 2147483647;
           display: flex; align-items: center; gap: 10px;
-          padding: 10px 14px; border-radius: 999px;
-          background: #165b42; color: #fff;
-          font: 500 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-          box-shadow: 0 6px 24px rgba(0,0,0,.22); cursor: pointer;
-          border: 0; transition: opacity .15s, transform .15s;
+          padding: 10px 16px; border-radius: 999px;
+          background: #165b42; color: #ffffff;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          font-size: 13px; font-weight: 500; line-height: 1.2;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          text-rendering: optimizeLegibility;
+          box-shadow: 0 6px 24px rgba(0,0,0,.28); cursor: pointer;
+          border: 0;
+          user-select: none;
+          white-space: nowrap;
+          backface-visibility: hidden;
+          transform: translateZ(0);
+          transition: opacity .15s ease, transform .15s ease, background-color .15s ease;
         }
-        .bar:hover { transform: translateY(-1px); }
-        .bar[disabled] { opacity: .65; cursor: default; transform: none; }
+        .bar:hover { transform: translateY(-1px) translateZ(0); }
+        .bar:active { transform: translateY(0) translateZ(0); }
+        .bar[disabled] { opacity: .75; cursor: default; transform: translateZ(0); }
         .bar.ok { background: #14663f; }
         .bar.bad { background: #b3261e; }
-        .to { opacity: .72; font-weight: 400; }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; opacity: .8; }
+        .to { opacity: .75; font-weight: 400; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: #ffffff; opacity: .85; flex-shrink: 0; }
       </style>
       <button class="bar" type="button">
         <span class="dot"></span>
         <span class="label">Add to Career141</span>
         <span class="to"></span>
       </button>`;
-    document.documentElement.appendChild(host);
+    (document.body || document.documentElement).appendChild(host);
     root.querySelector("button").addEventListener("click", capture);
     paintTarget();
   }
@@ -261,12 +414,21 @@
   }
 
   async function paintTarget() {
-    const { openingLabel } = await chrome.storage.sync.get("openingLabel");
-    if (root) root.querySelector(".to").textContent = openingLabel ? `→ ${openingLabel}` : "";
+    try {
+      if (!chrome.runtime?.id) return;
+      const data = await chrome.storage.sync.get("openingLabel").catch(() => null);
+      if (root && data) root.querySelector(".to").textContent = data.openingLabel ? `→ ${data.openingLabel}` : "";
+    } catch {
+      // Ignore if context invalidated or storage unavailable
+    }
   }
 
   async function capture() {
     if (busy) return;
+    if (!chrome.runtime?.id) {
+      setState("Extension reloaded — refresh (F5)", "bad");
+      return;
+    }
     busy = true;
     const bar = root.querySelector(".bar");
     bar.disabled = true;
@@ -276,12 +438,24 @@
       const profile = extractProfile();
       if (!profile.fullName) throw new Error("Could not read a name off this page");
 
-      const res = await chrome.runtime.sendMessage({ type: "capture", profile });
+      let res;
+      try {
+        if (!chrome.runtime?.id) throw new Error("Extension reloaded — please refresh page (F5)");
+        res = await chrome.runtime.sendMessage({ type: "capture", profile });
+      } catch (runtimeErr) {
+        if (/context invalidated/i.test(runtimeErr?.message || "")) {
+          throw new Error("Extension reloaded — please refresh page (F5)");
+        }
+        throw runtimeErr;
+      }
       if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
       setState(res.status === "updated" ? "Updated in the table" : "Shortlisted in the table", "ok");
     } catch (err) {
-      setState(err.message.slice(0, 60), "bad");
+      const msg = /context invalidated/i.test(err?.message || "")
+        ? "Extension reloaded — refresh (F5)"
+        : err.message.slice(0, 60);
+      setState(msg, "bad");
     } finally {
       setTimeout(() => {
         busy = false;
@@ -295,21 +469,34 @@
   // LinkedIn is a single-page app, so the button has to survive a navigation
   // that never reloads the document.
   let seen = location.href;
-  setInterval(() => {
+  const navTimer = setInterval(() => {
+    if (!chrome.runtime?.id) {
+      clearInterval(navTimer);
+      for (const el of document.querySelectorAll("#c141-capture-host")) {
+        el.remove();
+      }
+      return;
+    }
     if (location.href !== seen) {
       seen = location.href;
       build();
     }
   }, 800);
 
-  chrome.storage.onChanged.addListener(paintTarget);
+  if (chrome.storage?.onChanged) {
+    chrome.storage.onChanged.addListener(() => {
+      if (chrome.runtime?.id) paintTarget();
+    });
+  }
 
-  chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
-    if (msg?.type === "read-profile") {
-      respond({ ok: true, profile: extractProfile() });
-    }
-    return true;
-  });
+  if (chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
+      if (msg?.type === "read-profile") {
+        respond({ ok: true, profile: extractProfile() });
+      }
+      return true;
+    });
+  }
 
   build();
 })();

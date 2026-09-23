@@ -103,7 +103,7 @@ $("capture").addEventListener("click", async () => {
   say("Reading the page…");
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!/^https:\/\/[a-z]{2,3}\.linkedin\.com\//i.test(tab?.url || "")) {
+    if (!/^https:\/\/(?:[a-z0-9\-]+\.)?linkedin\.com\//i.test(tab?.url || "")) {
       throw new Error("Open a LinkedIn profile first");
     }
     const read = await chrome.tabs.sendMessage(tab.id, { type: "read-profile" });

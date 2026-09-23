@@ -77,7 +77,21 @@ export default async function CandidateDrawer({
 
   const owner = repo.user(app.ownerTaId ?? "");
   const calls = repo.callFeedback(appId);
-  const referees = repo.referees().filter((r) => r.fromCandidateId === c.id);
+  let referees = repo.referees().filter((r) => r.fromCandidateId === c.id);
+
+  // If memory store doesn't have referees for this candidate, query Convex directly (fast index lookup)
+  if (referees.length === 0 && isConvex()) {
+    try {
+      const { convexQuery } = await import("@/lib/convexServer");
+      const existingRefs = await convexQuery<any[]>("ta/tables:refereesFor", { candidateIds: [c.id] }).catch(() => []);
+      if (existingRefs && existingRefs.length > 0) {
+        referees = existingRefs;
+      }
+    } catch (err) {
+      console.warn("[candidate page] Referee lookup failed:", err);
+    }
+  }
+
   // The most recent interview, whatever state it is in — a finished one still
   // needs its result recording, and only showing pending ones is why there was
   // nowhere to record it.
@@ -121,8 +135,14 @@ export default async function CandidateDrawer({
           fileName: null,
         }))
       : null;
-  const cvHref = `/api/cv/${encodeURIComponent(c.id)}?app=${encodeURIComponent(app.id)}`;
-  const cvIsPdf = !!cvFile?.ok && (/pdf/i.test(cvFile.fileType ?? "") || /\.pdf$/i.test(cvFile.fileName ?? ""));
+  const cvVersion = (cvFile?.ok && cvFile.fileName ? cvFile.fileName : "") || (c.cvFileName ?? "1");
+  const cvHref = `/api/cv/${encodeURIComponent(c.id)}?app=${encodeURIComponent(app.id)}&v=${encodeURIComponent(cvVersion)}`;
+  const cvIsPdf =
+    !!cvFile?.ok &&
+    (/pdf/i.test(cvFile.fileType ?? "") ||
+      /\.pdf$/i.test(cvFile.fileName ?? "") ||
+      /\.pdf$/i.test(c.cvFileName ?? "") ||
+      !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(cvFile.fileName ?? c.cvFileName ?? ""));
 
   const base = `/openings/${id}/candidate/${appId}`;
   const tabHref = (t: string) => (t === "cv" ? `${base}` : `${base}?tab=${t}`);
@@ -227,7 +247,7 @@ export default async function CandidateDrawer({
                   canDecideClient={canDecideClient}
                 />
               )}
-              <span className="text-[12px] text-ink-faint">In {STAGE_LABEL[app.stage].toLowerCase()}{app.setNumber ? ` · set ${app.setNumber}` : ""}</span>
+              <span className="text-[12px] text-ink-faint">In {(STAGE_LABEL[app.stage] ?? app.stage ?? "").toLowerCase()}{app.setNumber ? ` · set ${app.setNumber}` : ""}</span>
             </div>
           </div>
         </div>
@@ -284,7 +304,7 @@ export default async function CandidateDrawer({
           currentSalary={c.currentSalary}
           expectedSalary={c.expectedSalary}
           noticePeriodDays={c.noticePeriodDays}
-          hasCv={Boolean(c.cvFileName)}
+          hasCv={Boolean(c.cvFileName || cvFile?.ok)}
           notes={app.notes?.filter((n) => !isSystemNote(n))}
         />
       )}

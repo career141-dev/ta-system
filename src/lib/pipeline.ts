@@ -120,11 +120,13 @@ export function nextStages(from: Stage): Stage[] {
  */
 export function directorReviewBlockers(
   candidate: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays">,
+  app?: { cvFileName?: string | null; cvFileId?: string | null } | null,
 ): string[] {
   const blockers: string[] = [];
-  if (!candidate.cvFileName) blockers.push("a CV");
-  if (!candidate.currentSalary) blockers.push("current salary");
-  if (!candidate.expectedSalary) blockers.push("expected salary");
+  const hasCv = Boolean(candidate.cvFileName || app?.cvFileName || app?.cvFileId);
+  if (!hasCv) blockers.push("a CV");
+  if (!candidate.currentSalary?.trim()) blockers.push("current salary");
+  if (!candidate.expectedSalary?.trim()) blockers.push("expected salary");
   if (candidate.noticePeriodDays === null || candidate.noticePeriodDays === undefined) blockers.push("notice period");
   return blockers;
 }

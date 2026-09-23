@@ -395,6 +395,8 @@ export interface Application {
   createdAt: number;
   lastStageChangedAt: number;
   aiFollowUpNoReply?: boolean | null;
+  cvFileName?: string | null;
+  cvFileId?: string | null;
 }
 
 // ─── Call feedback (spec §6A) ────────────────────────────────────────────────

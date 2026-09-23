@@ -2,6 +2,7 @@
 
 import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 import type { ActionResult } from "@/lib/inlineResult";
 
 /**
@@ -117,8 +118,6 @@ export function latest(...results: (ActionResult | null)[]): ActionResult | null
   return results.reduce<ActionResult | null>((a, b) => (!b ? a : !a || b.at > a.at ? b : a), null);
 }
 
-import { useRouter } from "next/navigation";
-
 /**
  * An inline action, run from the form's onSubmit.
  *
@@ -146,6 +145,7 @@ export function useInline(
   }, [result, router, options]);
 
   const run = (formData: FormData) => startTransition(() => dispatch(formData));
+
   return { result, pending, run };
 }
 

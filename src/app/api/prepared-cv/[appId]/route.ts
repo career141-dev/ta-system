@@ -7,6 +7,7 @@ import { seatFor } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { storeMode } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
+import { internalUploadUrl } from "@/lib/convexServer";
 
 export async function GET(
   req: Request,
@@ -66,7 +67,7 @@ export async function GET(
     try {
       const link = await backend.cvLink({ id: null }, app.candidateId, false);
       if (link.ok && link.url) {
-        const cvRes = await fetch(link.url);
+        const cvRes = await fetch(internalUploadUrl(link.url));
         if (cvRes.ok) {
           const baseBuffer = await cvRes.arrayBuffer();
           const stampedBytes = await stampPdfWithCareer141Box(

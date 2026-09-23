@@ -133,9 +133,18 @@ export const convexAction = <T>(path: string, args: Record<string, unknown> = {}
 export function internalUploadUrl(url: string): string {
   try {
     const target = new URL(url);
+    // Only rewrite Convex storage URLs, never external Cloudflare R2 or AWS S3 URLs
+    if (
+      target.hostname.includes("r2.cloudflarestorage.com") ||
+      target.hostname.includes(".r2.dev") ||
+      target.hostname.includes("amazonaws.com")
+    ) {
+      return url;
+    }
     const inside = new URL(config().url);
     target.protocol = inside.protocol;
-    target.host = inside.host;
+    target.hostname = inside.hostname;
+    target.port = inside.port;
     return target.toString();
   } catch {
     return url;

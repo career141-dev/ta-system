@@ -61,10 +61,11 @@ export async function POST(req: NextRequest) {
 
   try {
     const url = await convexMutation<string>("ta/cv:uploadUrl", { actorId: user.id });
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
     const put = await fetch(internalUploadUrl(url), {
       method: "POST",
       headers: { "content-type": file.type || "application/octet-stream" },
-      body: Buffer.from(await file.arrayBuffer()),
+      body: fileBuffer,
     });
     if (!put.ok) return answer(false, `The file could not be stored (${put.status}). Try again.`, 502);
     const { storageId } = (await put.json()) as { storageId: string };
@@ -76,10 +77,22 @@ export async function POST(req: NextRequest) {
       fileSize: file.size,
       fileType: file.type || "application/octet-stream",
     });
+
+    // Auto-extract references from the uploaded CV
+    try {
+      const { extractAndSaveReferees } = await import("@/lib/refereeExtractor");
+      await extractAndSaveReferees(app.candidateId, fileBuffer, file.type);
+    } catch (refErr) {
+      console.warn("[cv upload] Referee extraction skipped:", refErr);
+    }
+
     resetStore();
     revalidatePath(`/openings/${app.openingId}`, "layout");
+    revalidatePath(`/openings/${app.openingId}/candidate/${app.id}`);
+    revalidatePath(`/openings/${app.openingId}/reference`);
+    revalidatePath(`/openings/${app.openingId}/pipeline`, "layout");
     revalidatePath(`/candidates/${app.candidateId}`);
-    return answer(true, res.replaced ? `CV replaced with ${file.name}. The earlier one is kept.` : `CV added: ${file.name}.`);
+    return answer(true, res.replaced ? `CV replaced with ${file.name}.` : `CV added: ${file.name}.`);
   } catch (e) {
     console.warn("[cv upload]", (e as Error).message);
     return answer(false, `The CV could not be saved: ${(e as Error).message.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200)}`, 500);
