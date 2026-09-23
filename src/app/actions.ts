@@ -32,8 +32,6 @@ function redirect(url: string): never {
 import { after } from "next/server";
 import {
   generateJdText,
-  researchRunBy,
-  withResearchRun,
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
@@ -42,9 +40,6 @@ import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
-
-/** Who found the pages, named on the report so the cost is never hidden. */
-const SEARCH_NAME: Record<string, string> = { searxng: "SearXNG", serper: "Serper", openai: "OpenAI web search" };
 import { profileLink } from "@/lib/url";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
@@ -277,6 +272,8 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
 }
 
 /** A sourcing or benchmark failure code as a sentence. */
+const SEARCH_NAME: Record<string, string> = { searxng: "SearXNG", serper: "Serper", openai: "OpenAI web search" };
+
 function searchReasonInWords(code: string, detail?: string): string {
   if (code === "no_serper") return "web search is not set up on this system. An admin needs to set SEARXNG_URL (a SearXNG instance) or a search key.";
   // Not the same as finding nothing: the search provider itself refused us —
@@ -284,8 +281,9 @@ function searchReasonInWords(code: string, detail?: string): string {
   if (code === "search_failed") return `the search provider refused the request${detail ? ` (${detail})` : ""}. Check the search key and its credits.`;
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
-  // Not a failure: they have had their turn. Named so nobody hunts for a fault.
-  if (code === "run_spent") return `you have already run Research on this opening${detail ? ` on ${detail}` : ""}. Everybody on an opening gets one run.`;
+  // Not a failure: the opening has had its run. Named so nobody hunts for a fault.
+  if (code === "run_spent") return `Research has already been run for this opening${detail ? ` ${detail}` : ""}. It runs once per opening.`;
+  if (code === "benchmark_spent") return `Benchmark has already been run for this opening${detail ? ` on ${detail}` : ""}. It runs once per opening.`;
   if (code === "nothing_found") return "the search found nothing under the client's name. Check the name on the client record.";
   if (code === "client_not_searchable") return "the client has no searchable name (a code or \"Confidential\"). Put the real name on the client record.";
   return reasonInWords(code);
@@ -2165,6 +2163,14 @@ export async function runBenchmark(formData: FormData) {
   if (!o) await fail("The opening could not be found. Reload the page and try again.");
   const client = repo.client(o!.clientId);
   if (!serperConfigured()) await fail(`Benchmark did not run — ${searchReasonInWords("no_serper")}`);
+  // Once per opening, like Research (23 Sep). The rows are the record: a
+  // senior role researched has already been benchmarked inside that run, so
+  // this button is spent too — it is the same search, asked once.
+  const already = repo.benchmarks(openingId);
+  if (already.length) {
+    const when = dateAt(Math.max(...already.map((b) => b.generatedAt)));
+    await fail(`Benchmark did not run — ${searchReasonInWords("benchmark_spent", when)}`);
+  }
   // Who holds the role now, at the client and at the competitors Research
   // found — their own people pages, then the web (lib/incumbents, 22 Sep).
   // Pressed by hand, it runs for any role; Research runs it only for senior ones.
@@ -2429,7 +2435,7 @@ async function extractJobDetails(openingId: string, c: OpeningContext, briefs: J
 }
 
 /**
- * Market research for an opening, keeping any field a TA corrected by hand.
+ * Market research for an opening. Once per opening, for the whole desk.
  *
  * Search the client, search its competitors, read their pages, then sort what
  * was read into fields (lib/researchSearch, 22 Sep). Replaced one model call
@@ -2454,11 +2460,18 @@ async function researchOpening(
   const c = contextFor(openingId);
   const o = repo.opening(openingId);
   if (!c || !o) return { ok: false, reason: "no_opening" };
-  // One run each (lib/headhunt, 23 Sep): a run is about thirty web searches and
-  // a model pass over what they returned, so everybody on an opening gets one —
-  // a TA lead has their own, not an exemption.
-  const spent = researchRunBy(repo.research(openingId)?.runs, userId);
-  if (spent !== null) return { ok: false, reason: "run_spent", detail: dateAt(spent) };
+  // One attempt per opening, for the whole desk — 23 September. A run is about
+  // thirty web searches and a model pass over everything they returned, and the
+  // same client was being researched again and again. A TA lead is held to it
+  // too: there is no second run to grant.
+  //
+  // The report is the record, because it is written only when a run produced
+  // one: a search the provider refused costs the opening nothing.
+  const already = repo.research(openingId);
+  if (already) {
+    const who = repo.users().find((u) => u.id === already.generatedBy)?.name;
+    return { ok: false, reason: "run_spent", detail: `${who ? `by ${who} ` : ""}on ${dateAt(already.generatedAt)}` };
+  }
   const res = await researchViaSearch({
     clientName: c.clientName,
     industry: c.industry,
@@ -2469,26 +2482,21 @@ async function researchOpening(
   });
   if (!res.ok) return { ok: false, reason: res.reason, detail: res.detail };
   if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);
-  const prior = repo.research(openingId);
+  // Hand-edited fields used to be carried into a regeneration. There is no
+  // regeneration now — the run above is the opening's only one — so the first
+  // report is written plain and updateResearchField owns it from then on.
   const fields = { ...res.fields };
-  for (const k of prior?.editedFields ?? []) {
-    if (k in fields && prior) {
-      (fields as unknown as Record<string, unknown>)[k] =
-        (prior.fields as unknown as Record<string, unknown>)[k];
-    }
-  }
   repo.saveResearch({
     openingId,
     clientId: o.clientId,
     fields,
-    editedFields: prior?.editedFields ?? [],
+    editedFields: [],
     markdown: res.markdown,
     sources: res.sources,
     searches: res.searches,
     model: `${SEARCH_NAME[searchProvider() ?? "serper"]} + ${modelFor("plan")}`,
     generatedBy: userId,
     generatedAt: Date.now(),
-    runs: withResearchRun(prior?.runs, userId, Date.now()),
   });
   // The eight named fields; the competitor profiles are counted on their own.
   const { competitorProfiles, ...named } = fields;

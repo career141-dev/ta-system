@@ -58,33 +58,6 @@ function ctxLines(c: OpeningContext): string {
     .join("\n");
 }
 
-/**
- * One Research run each — 23 September, at the desk's request.
- *
- * Research is the expensive button on the desk: a run is about thirty web
- * searches and a model pass over everything they returned. So each person on an
- * opening may run it once; a TA lead has their own run, not an exemption.
- *
- * The runs are kept on the report itself, appended as they happen, which means
- * a run only counts when it produced something: a search that was refused
- * saves no report and costs nobody their turn.
- */
-export interface ResearchRun {
-  userId: string;
-  at: number;
-}
-
-/** When this person ran Research on this opening, or null if they have not. */
-export function researchRunBy(runs: ResearchRun[] | undefined, userId: string): number | null {
-  return runs?.find((r) => r.userId === userId)?.at ?? null;
-}
-
-/** The run log with this person's run added. Their first run is the one kept. */
-export function withResearchRun(runs: ResearchRun[] | undefined, userId: string, at: number): ResearchRun[] {
-  const kept = runs ?? [];
-  return researchRunBy(kept, userId) === null ? [...kept, { userId, at }] : kept;
-}
-
 export function toCitations(sources: Source[]): Citation[] {
   return sources.map((s) => ({ url: s.url, title: s.title, quote: s.quote }));
 }

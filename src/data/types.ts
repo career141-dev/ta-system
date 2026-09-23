@@ -786,9 +786,6 @@ export interface ResearchReport {
   model: string;
   generatedBy: Id;
   generatedAt: number;
-  /** Who has spent their one run on this opening (lib/headhunt). Absent on a
-   *  report written before 23 September: nobody had spent anything then. */
-  runs?: { userId: Id; at: number }[];
 }
 
 /**
