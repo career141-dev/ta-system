@@ -612,6 +612,8 @@ export const checkAndRecordEmailReply = internalMutation({
       inboxEmail: args.inboxEmail,
       messageId: args.messageId,
       senderEmail: args.senderEmail,
+      // The application this email was matched to, just above.
+      applicationId: activeApp?._id,
     });
 
 
@@ -819,6 +821,10 @@ export const extractAndApplyEmailBodyDetails = internalAction({
     await ctx.runAction(internal.communications.inboundExtraction.extractDetailsFromText, {
       candidateId: candidate._id,
       textBody: args.emailBody,
+      // Without this the extraction defaults to WhatsApp and answers an email
+      // over WhatsApp — a channel the candidate never wrote on (23 September).
+      channel: "email",
+      senderEmail: args.senderEmail,
     });
   },
 });
