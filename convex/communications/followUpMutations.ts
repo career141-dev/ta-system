@@ -107,18 +107,23 @@ export const scheduleDynamicFollowUp = internalMutation({
     applicationId: v.id("applications"),
     nextActionTimeHours: v.number(),
     messageBody: v.string(),
+    /** The channel the candidate actually replied on. Defaults to WhatsApp. */
+    replyChannel: v.optional(v.union(v.literal("whatsapp"), v.literal("email"))),
   },
   handler: async (ctx, args) => {
     const nextTimeMs = Date.now() + (args.nextActionTimeHours * 60 * 60 * 1000);
     const app = await ctx.db.get(args.applicationId);
-    
+
     await ctx.db.patch(args.applicationId, {
       nextFollowUpScheduledAt: nextTimeMs,
       nextFollowUpMessage: args.messageBody,
       followUpState: {
         lastContactDay: app?.followUpState?.lastContactDay ?? 0,
         firstChannelUsed: app?.followUpState?.firstChannelUsed ?? "whatsapp",
-        replyChannel: "whatsapp",
+        // Was hardcoded to "whatsapp": a candidate who replied by email had
+        // their next nudge recorded as a WhatsApp one, so the conversation
+        // moved channel behind their back (23 September).
+        replyChannel: args.replyChannel ?? "whatsapp",
       },
     });
     console.log(`[Follow-Up] Scheduled next AI message for application ${args.applicationId} in ${args.nextActionTimeHours} hours.`);

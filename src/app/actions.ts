@@ -272,8 +272,11 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
 }
 
 /** A sourcing or benchmark failure code as a sentence. */
-function searchReasonInWords(code: string): string {
-  if (code === "no_serper") return "web search is not set up on this system (no search key). An admin needs to add one.";
+function searchReasonInWords(code: string, detail?: string): string {
+  if (code === "no_serper") return "web search is not set up on this system. An admin needs to set SEARXNG_URL (a SearXNG instance) or a search key.";
+  // Not the same as finding nothing: the search provider itself refused us —
+  // usually a key that is wrong or out of credits (live, 23 Sep).
+  if (code === "search_failed") return `the search provider refused the request${detail ? ` (${detail})` : ""}. Check the search key and its credits.`;
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
   if (code === "nothing_found") return "the search found nothing under the client's name. Check the name on the client record.";
@@ -2119,7 +2122,7 @@ export async function runResearch(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const res = await researchOpening(openingId, user.id);
   revalidatePath(`/openings/${openingId}/hh/research`);
-  if (!res.ok) await fail(`Research did not run — ${searchReasonInWords(res.reason ?? "")}`);
+  if (!res.ok) await fail(`Research did not run — ${searchReasonInWords(res.reason ?? "", res.detail)}`);
   const filled = res.filled ?? 0;
   if (filled === 0) {
     await note(
@@ -2426,6 +2429,8 @@ async function researchOpening(
 ): Promise<{
   ok: boolean;
   reason?: string;
+  /** What the search provider said, when it was the search that failed. */
+  detail?: string;
   filled?: number;
   sources?: number;
   competitors?: number;
@@ -2445,7 +2450,7 @@ async function researchOpening(
     // Who holds the role now — only worth finding for a senior or C-level role.
     benchmark: benchmarkByDefault(c.title),
   });
-  if (!res.ok) return { ok: false, reason: res.reason };
+  if (!res.ok) return { ok: false, reason: res.reason, detail: res.detail };
   if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);
   const prior = repo.research(openingId);
   const fields = { ...res.fields };

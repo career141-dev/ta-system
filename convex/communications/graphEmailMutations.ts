@@ -57,6 +57,10 @@ export const recordMatchedEmailReply = internalMutation({
       {
         candidateId: args.candidateId,
         textBody: args.body,
+        channel: "email",
+        // Filed against the application this email belongs to, not whichever
+        // one happened to be contacted most recently.
+        applicationId: args.applicationId,
       }
     );
 
