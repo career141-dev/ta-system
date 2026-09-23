@@ -198,6 +198,31 @@ export async function moveStage(formData: FormData) {
     await fail(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
   }
 
+  // Into TA Follow-up from an unclaimed stage (AI Follow-up, New CVs, Database
+  // matches) is a shortlist: the TA takes the person on, with their set number,
+  // exactly as the Shortlist button does. The plain move left them with no
+  // owner (review of PR #11, 22 September).
+  const from = repo.application(appId)?.stage;
+  if (stage === "ta_follow_up" && (from === "ai_follow_up" || from === "new_cv" || from === "matched")) {
+    if (isConvex()) {
+      let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+      try {
+        r = await backend.shortlist({ id: user.id }, appId);
+      } catch (e) {
+        await fail(backendMessage(e, "They could not be shortlisted."));
+      }
+      await afterBackendWrite(openingId);
+      if (r && !r.ok) {
+        const owner = repo.users().find((u) => u.id === r!.ownerTaId)?.name ?? "another recruiter";
+        await fail(`${owner} has already claimed this candidate.`);
+      }
+      await done("Shortlisted — in TA Follow-up.");
+    }
+    repo.shortlist(appId, user.id);
+    revalidatePath(`/openings/${openingId}`, "layout");
+    await done("Shortlisted — in TA Follow-up.");
+  }
+
   if (isConvex()) {
     // The backend owns the pipeline: its state machine checks the move, stops
     // any running follow-up on the way out, and (by design) sends nothing on
@@ -1255,7 +1280,9 @@ export async function setWorkingStage(formData: FormData) {
       });
       markTablesStale();
     } catch (e) {
-      console.error("Failed to update working stage on Convex:", e);
+      // Swallowed, the menu showed the new value while nothing was saved
+      // (review of PR #11, 22 September).
+      await fail(backendMessage(e, "The working stage could not be saved."));
     }
   } else {
     repo.setWorkingStage(openingId, user.id, stage);
@@ -2255,7 +2282,7 @@ export async function dismissSuggestion(formData: FormData) {
  * it; nothing here approves anything. Used by the button, and automatically the
  * moment an opening is created.
  */
-async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: string } | null> {
+async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boolean; reason?: string } | null> {
   const opening = repo.opening(openingId);
   const c = contextFor(openingId);
   if (!opening || !c) return null;
@@ -2279,21 +2306,34 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
     // The draft is saved in the backend. Nothing is approved here — the TA reads it first.
     // The Job details are read from the same notes at the same time.
     const [res] = await Promise.all([
-      generateJdText(context, briefs, template),
+      generateJdText(context, briefs, template, opening.jdMarkdown ?? ""),
       extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)),
     ]);
-    const actorId = opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
-    if (actorId) {
-      await convexMutation("ta/openings:saveJd", { actorId, openingId, jdMarkdown: res.ok ? res.text : template }).catch(
-        (e) => console.error(`[draftJd ${openingId}]`, e),
-      );
+    // The backend is the only writer here. It stamps the row's updatedAt, so
+    // a second write through the store (repo.updateJd) arrived with an older
+    // updatedAt and the commit read it as somebody else's edit — the
+    // "Someone else changed this record" every regeneration showed, which also
+    // threw away the new draft until the page was reloaded (22 September).
+    const writer = actorId ?? opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
+    const jd = res.ok ? res.text : template;
+    if (!writer) {
+      repo.updateJd(openingId, jd);
+      return res.ok ? { ok: true } : { ok: false, reason: res.reason };
     }
-    repo.updateJd(openingId, res.ok ? res.text : template);
+    try {
+      await convexMutation("ta/openings:saveJd", { actorId: writer, openingId, jdMarkdown: jd });
+    } catch (e) {
+      console.error(`[draftJd ${openingId}]`, e);
+      return { ok: false, reason: "The draft could not be saved. Try again." };
+    }
+    // The loaded copy is now behind the backend; the next read fetches it.
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
     return res.ok ? { ok: true } : { ok: false, reason: res.reason };
   }
 
   repo.applyExtractedToOpening(openingId, extracted);
-  const res = await generateJdText(context, briefs, template);
+  const res = await generateJdText(context, briefs, template, opening.jdMarkdown ?? "");
   // The template is not a failure state — it is what the desk has always had.
   repo.updateJd(openingId, res.ok ? res.text : template);
   return res.ok ? { ok: true } : { ok: false, reason: res.reason };
@@ -2464,7 +2504,7 @@ export async function generateJdWithModel(formData: FormData) {
   // The notes box as it stands when Generate is pressed — typed but not yet
   // saved notes are still the TA's notes, and the draft must include them.
   if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
-  const res = await draftJd(openingId);
+  const res = await draftJd(openingId, user.id);
   if (!res) await fail("The opening could not be found. Reload the page and try again.");
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
@@ -3208,8 +3248,9 @@ export async function sendEod(formData: FormData) {
             openingId,
             stage: effort.hundredOrFollowUp as WorkingStage,
           });
-        } catch {
-          /* ignore */
+        } catch (e) {
+          // The email still goes; the working stage is only a label on it.
+          console.warn("[eod] working stage not saved:", backendMessage(e, "refused"));
         }
       } else {
         repo.setWorkingStage(openingId, user.id, effort.hundredOrFollowUp as WorkingStage);
