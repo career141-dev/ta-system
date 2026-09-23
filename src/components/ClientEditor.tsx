@@ -158,6 +158,9 @@ export function ClientDeleteButton({ clientId, name, openingCount }: { clientId:
   );
 }
 
+import { useRouter } from "next/navigation";
+import { useTransition } from "react";
+
 export function ClientEditor({
   clientId,
   name,
@@ -177,17 +180,39 @@ export function ClientEditor({
   pane: Pane;
   onClose: () => void;
 }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [rows, setRows] = useState<Contact[]>(
     contacts.length ? contacts : [{ name: "", title: "", email: "", isPrimary: true }],
   );
 
   const asDate = (t: number | null) => (t ? new Date(t).toISOString().slice(0, 10) : "");
 
+  const handleUpdateRecord = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    startTransition(async () => {
+      await updateClient(fd);
+      router.refresh();
+      onClose();
+    });
+  };
+
+  const handleSaveContacts = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    startTransition(async () => {
+      await saveContacts(fd);
+      router.refresh();
+      onClose();
+    });
+  };
+
   if (pane === "record") {
     return (
-      <form action={updateClient} onSubmit={onClose} className="flex flex-col gap-3.5 border-t border-rule bg-paper/40 px-7 py-5">
+      <form onSubmit={handleUpdateRecord} className="flex flex-col gap-3.5 border-t border-rule bg-paper/40 px-7 py-5">
         <input type="hidden" name="clientId" value={clientId} />
-        <div className="grid gap-3.5 sm:grid-cols-2">
+        <fieldset disabled={isPending} className="grid gap-3.5 sm:grid-cols-2 disabled:opacity-60">
           <label>
             <span className="mb-1.5 block text-[11.5px] text-ink-soft">Company name</span>
             <input name="name" defaultValue={name} required autoFocus className={inputClass} />
@@ -212,10 +237,12 @@ export function ClientEditor({
               ))}
             </select>
           </label>
-        </div>
+        </fieldset>
         <div className="flex items-center gap-2.5">
-          <button className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white">Save</button>
-          <button type="button" onClick={onClose} className="px-2 text-[12.5px] text-ink-soft hover:text-ink">
+          <button disabled={isPending} className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60">
+            {isPending ? "Saving…" : "Save"}
+          </button>
+          <button type="button" disabled={isPending} onClick={onClose} className="px-2 text-[12.5px] text-ink-soft hover:text-ink disabled:opacity-60">
             Cancel
           </button>
         </div>
@@ -224,47 +251,51 @@ export function ClientEditor({
   }
 
   return (
-    <form action={saveContacts} onSubmit={onClose} className="flex flex-col gap-3 border-t border-rule bg-paper/40 px-7 py-5">
+    <form onSubmit={handleSaveContacts} className="flex flex-col gap-3 border-t border-rule bg-paper/40 px-7 py-5">
       <input type="hidden" name="clientId" value={clientId} />
       <span className="text-[11.5px] text-ink-soft">
         Who you deal with. The one marked main is the name that shows on the client row.
       </span>
 
-      {rows.map((c, i) => (
-        <div key={i} className="grid items-end gap-2.5 sm:grid-cols-[1fr_1fr_1.2fr_auto_auto]">
-          <input name="contactName" defaultValue={c.name} placeholder="Name" className={inputClass} />
-          <input name="contactTitle" defaultValue={c.title} placeholder="Title" className={inputClass} />
-          <input name="contactEmail" defaultValue={c.email} type="email" placeholder="Email" className={inputClass} />
-          <label className="flex items-center gap-1.5 whitespace-nowrap pb-2.5 text-[11.5px] text-ink-soft">
-            <input
-              type="radio"
-              name="primary"
-              value={i}
-              defaultChecked={c.isPrimary || (i === 0 && !rows.some((r) => r.isPrimary))}
-            />
-            Main
-          </label>
-          <button
-            type="button"
-            onClick={() => setRows(rows.filter((_, n) => n !== i))}
-            className="pb-2 text-[12px] text-ink-faint hover:text-danger"
-          >
-            Remove
-          </button>
-        </div>
-      ))}
+      <fieldset disabled={isPending} className="flex flex-col gap-3 disabled:opacity-60">
+        {rows.map((c, i) => (
+          <div key={i} className="grid items-end gap-2.5 sm:grid-cols-[1fr_1fr_1.2fr_auto_auto]">
+            <input name="contactName" defaultValue={c.name} placeholder="Name" className={inputClass} />
+            <input name="contactTitle" defaultValue={c.title} placeholder="Title" className={inputClass} />
+            <input name="contactEmail" defaultValue={c.email} type="email" placeholder="Email" className={inputClass} />
+            <label className="flex items-center gap-1.5 whitespace-nowrap pb-2.5 text-[11.5px] text-ink-soft">
+              <input
+                type="radio"
+                name="primary"
+                value={i}
+                defaultChecked={c.isPrimary || (i === 0 && !rows.some((r) => r.isPrimary))}
+              />
+              Main
+            </label>
+            <button
+              type="button"
+              onClick={() => setRows(rows.filter((_, n) => n !== i))}
+              className="pb-2 text-[12px] text-ink-faint hover:text-danger"
+            >
+              Remove
+            </button>
+          </div>
+        ))}
 
-      <button
-        type="button"
-        onClick={() => setRows([...rows, { name: "", title: "", email: "", isPrimary: false }])}
-        className="self-start text-[12px] font-medium text-brand hover:underline"
-      >
-        + Another contact
-      </button>
+        <button
+          type="button"
+          onClick={() => setRows([...rows, { name: "", title: "", email: "", isPrimary: false }])}
+          className="self-start text-[12px] font-medium text-brand hover:underline"
+        >
+          + Another contact
+        </button>
+      </fieldset>
 
       <div className="flex items-center gap-2.5">
-        <button className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white">Save contacts</button>
-        <button type="button" onClick={onClose} className="px-2 text-[12.5px] text-ink-soft hover:text-ink">
+        <button disabled={isPending} className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60">
+          {isPending ? "Saving…" : "Save contacts"}
+        </button>
+        <button type="button" disabled={isPending} onClick={onClose} className="px-2 text-[12.5px] text-ink-soft hover:text-ink disabled:opacity-60">
           Cancel
         </button>
       </div>

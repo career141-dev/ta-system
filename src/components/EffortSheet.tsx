@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { EFFORT_NUMBERS, OUTREACH_TYPES, effortColumns, type EffortKey, type EffortRow } from "@/lib/eod-format";
 import { setWorkingStage } from "@/app/actions";
 
@@ -25,6 +26,8 @@ export function EffortSheet({
   draftKey: string;
   openingId?: string;
 }) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
   type Draft = {
     kind: string;
     values: Partial<Record<EffortKey, string>>;
@@ -139,7 +142,7 @@ export function EffortSheet({
                       form={formId}
                       name="effort_kind"
                       value={draft.kind}
-                      onChange={async (e) => {
+                      onChange={(e) => {
                         const val = e.target.value;
                         setDraft((d) => ({ ...d, kind: val }));
                         window.dispatchEvent(
@@ -148,10 +151,13 @@ export function EffortSheet({
                           }),
                         );
                         if (openingId) {
-                          const fd = new FormData();
-                          fd.append("openingId", openingId);
-                          fd.append("stage", val);
-                          await setWorkingStage(fd);
+                          startTransition(async () => {
+                            const fd = new FormData();
+                            fd.append("openingId", openingId);
+                            fd.append("stage", val);
+                            await setWorkingStage(fd);
+                            router.refresh();
+                          });
                         }
                       }}
                       className="w-full rounded border border-rule bg-surface px-1 py-1 text-[12px] outline-none focus:border-brand"

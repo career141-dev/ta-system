@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { setWorkingStage } from "@/app/actions";
 import type { WorkingStage } from "@/data/types";
 
@@ -33,6 +34,7 @@ export function WorkingStageMenu({
   stage?: WorkingStage;
   size?: "normal" | "small";
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState<WorkingStage>(stage);
   const [, startTransition] = useTransition();
@@ -111,10 +113,13 @@ export function WorkingStageMenu({
                 window.dispatchEvent(
                   new CustomEvent("working-stage-changed", { detail: { openingId, stage: s } }),
                 );
-                const fd = new FormData();
-                fd.append("openingId", openingId);
-                fd.append("stage", s);
-                await setWorkingStage(fd);
+                startTransition(async () => {
+                  const fd = new FormData();
+                  fd.append("openingId", openingId);
+                  fd.append("stage", s);
+                  await setWorkingStage(fd);
+                  router.refresh();
+                });
               }}
               className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12px] transition-colors ${
                 s === current

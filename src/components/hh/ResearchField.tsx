@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { editResearchField } from "@/app/actions";
 
 /**
@@ -28,22 +29,44 @@ export function ResearchField({
   multiline?: boolean;
   edited?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
-  const text = Array.isArray(value) ? value.join("; ") : value;
+  const [isPending, startTransition] = useTransition();
+  const [currentValue, setCurrentValue] = useState(value);
+
+  useEffect(() => {
+    setCurrentValue(value);
+  }, [value]);
+
+  const text = Array.isArray(currentValue) ? currentValue.join("; ") : currentValue;
   const empty = text.trim().length === 0;
+
+  const handleSave = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    const typed = String(fd.get("value") ?? "");
+    const next = list ? typed.split("\n").map((x) => x.trim()).filter(Boolean) : typed;
+    setCurrentValue(next);
+    setOpen(false);
+    startTransition(async () => {
+      await editResearchField(fd);
+      router.refresh();
+    });
+  };
 
   if (open) {
     return (
-      <form action={editResearchField} onSubmit={() => setOpen(false)}>
+      <form onSubmit={handleSave}>
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="field" value={name} />
         <span className="mb-1.5 block text-[11.5px] text-ink-soft">{label}</span>
         {multiline || list ? (
           <textarea
             name="value"
-            defaultValue={Array.isArray(value) ? value.join("\n") : text}
+            defaultValue={Array.isArray(currentValue) ? currentValue.join("\n") : text}
             rows={multiline ? 8 : 4}
             autoFocus
+            disabled={isPending}
             className="w-full rounded-lg border border-brand bg-surface px-3.5 py-2.5 text-[13px] leading-relaxed outline-none"
           />
         ) : (
@@ -51,11 +74,14 @@ export function ResearchField({
             name="value"
             defaultValue={text}
             autoFocus
+            disabled={isPending}
             className="w-full rounded-lg border border-brand bg-surface px-3.5 py-2.5 text-[13px] outline-none"
           />
         )}
         <div className="mt-2 flex items-center gap-2">
-          <button className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white">Save</button>
+          <button disabled={isPending} className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-60">
+            {isPending ? "Saving…" : "Save"}
+          </button>
           <button type="button" onClick={() => setOpen(false)} className="px-1.5 text-[12px] text-ink-soft hover:text-ink">
             Cancel
           </button>

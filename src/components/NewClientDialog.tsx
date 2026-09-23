@@ -4,6 +4,7 @@ import { INDUSTRIES } from "../../convex/lib/jobRequirements";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClientInline } from "@/app/actions";
 import { CaptureForm } from "./CaptureForm";
 import { inputClass } from "./form";
@@ -49,6 +50,7 @@ export function NewClientDialog({
   isLead?: boolean;
   onClientCreated?: (client: NewClient) => void;
 }) {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("client");
   const [client, setClient] = useState<NewClient | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
@@ -93,6 +95,7 @@ export function NewClientDialog({
       }
       setClient(r.client);
       onClientCreated?.(r.client);
+      router.refresh();
       // The short version hands the client back and is finished.
       if (!withOpening) return onClose();
       setStep(next === "opening" ? "opening" : "client_done");

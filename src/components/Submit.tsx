@@ -117,15 +117,34 @@ export function latest(...results: (ActionResult | null)[]): ActionResult | null
   return results.reduce<ActionResult | null>((a, b) => (!b ? a : !a || b.at > a.at ? b : a), null);
 }
 
+import { useRouter } from "next/navigation";
+
 /**
  * An inline action, run from the form's onSubmit.
  *
  * Not `<form action>`: React 19 resets an uncontrolled form once its action
  * finishes, so a refused save would wipe everything the person had typed. Here
  * the form is left alone and the answer comes back as `result`.
+ *
+ * Automatically triggers `router.refresh()` on successful results so the Server
+ * Component tree updates immediately without requiring a manual page refresh.
  */
-export function useInline(action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>) {
+export function useInline(
+  action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>,
+  options?: { refreshOnOk?: boolean; onOk?: (res: ActionResult) => void },
+) {
+  const router = useRouter();
   const [result, dispatch, pending] = useActionState(action, null);
+
+  useEffect(() => {
+    if (result && result.ok) {
+      if (options?.refreshOnOk !== false) {
+        router.refresh();
+      }
+      options?.onOk?.(result);
+    }
+  }, [result, router, options]);
+
   const run = (formData: FormData) => startTransition(() => dispatch(formData));
   return { result, pending, run };
 }
