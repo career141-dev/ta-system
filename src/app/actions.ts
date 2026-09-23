@@ -276,9 +276,16 @@ const SEARCH_NAME: Record<string, string> = { searxng: "SearXNG", serper: "Serpe
 
 function searchReasonInWords(code: string, detail?: string): string {
   if (code === "no_serper") return "web search is not set up on this system. An admin needs to set SEARXNG_URL (a SearXNG instance) or a search key.";
-  // Not the same as finding nothing: the search provider itself refused us —
-  // usually a key that is wrong or out of credits (live, 23 Sep).
-  if (code === "search_failed") return `the search provider refused the request${detail ? ` (${detail})` : ""}. Check the search key and its credits.`;
+  // Not the same as finding nothing: the search itself failed. What to do
+  // about it depends on who was asked — our own SearXNG has no key to check,
+  // and telling the desk to check one sent them looking for something that
+  // does not exist (live, 23 Sep).
+  if (code === "search_failed") {
+    const what = detail ? ` (${detail})` : "";
+    return searchProvider() === "searxng"
+      ? `the search service could not answer${what}. Nothing is wrong with the client record — an admin needs to look at the search service.`
+      : `the search provider refused the request${what}. Check the search key and its credits.`;
+  }
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
   // Not a failure: the opening has had its run. Named so nobody hunts for a fault.

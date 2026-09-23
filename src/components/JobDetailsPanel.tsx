@@ -94,6 +94,7 @@ export function JobDetailsPanel({
       </div>
 
       <form
+        key={`${r.extractedAt ?? ""}-${r.editedAt ?? ""}-${r.status}`}
         onSubmit={(e) => {
           const { formData, pressed } = submitted(e);
           (pressed === "reextract" ? reextract : save).run(formData);
