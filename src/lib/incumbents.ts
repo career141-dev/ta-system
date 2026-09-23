@@ -153,9 +153,7 @@ async function gather(
   deps: IncumbentDeps,
   count: (credits: number) => void,
 ): Promise<{ company: string; items: Omit<Evidence, "id">[]; profiles: SearchHit[]; errors: string[] }> {
-  const t = quoted(variants);
-  const queries = [`"${c.name}" ${t}`, `site:linkedin.com/in "${c.name}" ${t}`];
-  if (c.isClient) queries.push(`"${c.name}" ${t} appointed OR former OR previously`);
+  const queries = benchmarkQueries(c, variants);
   const pages = c.website ? PEOPLE_PAGES.map((p) => `${c.website}${p}`) : [];
   const [matrix, read] = await Promise.all([
     // One person is one piece of evidence: LinkedIn serves the same profile
@@ -190,7 +188,7 @@ async function gather(
     company: c.name,
     items,
     profiles: hits.filter((h) => canonicalProfile(h.url)),
-    errors: results.map((r) => r.error).filter((e): e is string => Boolean(e)),
+    errors: matrix.errors,
   };
 }
 
