@@ -979,6 +979,7 @@ export default defineSchema({
     rejectReason: v.optional(v.string()),
     placedAt: v.optional(v.number()),
     placedBy: v.optional(v.id("users")),
+    aiFollowUpNoReply: v.optional(v.boolean()),
 
     // ── TA platform ───────────────────────────────────────────────────────
     // `currentStage` above stays the one stored stage, so the follow-up cron,

@@ -2,6 +2,7 @@ import { search as serperSearch, readPage as fetchPage, serperConfigured, type S
 import { write as askModel, type AiResult } from "./ai";
 import type { Citation, CompetitorProfile, ResearchFields } from "@/data/types";
 import { findIncumbents, type IncumbentRow } from "./incumbents";
+import { searchMatrix } from "./websearch";
 
 /**
  * Research by search, then reading — rebuilt 22 Sep at the desk's request:
@@ -227,12 +228,26 @@ export async function researchViaSearch(input: ResearchInput, deps: ResearchDeps
     }
 
     // ── 4. Search and read each competitor, in parallel. ─────────────────────
+    // Three angles each, not one (23 Sep): what they do, their LinkedIn page,
+    // and where they are and how big — the last is what made competitor rows
+    // read as bare names before. The angles run together and a page two of
+    // them found is offered to the model first, as in Benchmark.
     const compFound = await Promise.all(
       competitors.map(async (c) => {
-        const hits = await run(`"${c}" ${industry}`.trim());
+        const matrix = await searchMatrix(
+          [`"${c}" ${industry}`.trim(), `"${c}" site:linkedin.com/company`, `"${c}" ${where} headquarters OR "head office" OR employees`],
+          deps.search,
+          { num: 10 },
+        );
+        searches += matrix.credits;
+        if (matrix.errors.includes("spend_cap")) throw new SpendCapHit();
+        const hits = matrix.hits;
         const site = pickOfficialSite(hits, c);
-        const page = site ? await deps.readPage(site, 1200) : null;
-        return { name: c, hits: hits.slice(0, 3), site, linkedin: pickLinkedInCompany(hits, c), page };
+        // Their own words about themselves: the front page and the about page.
+        const [page, about] = site
+          ? await Promise.all([deps.readPage(site, 1200), deps.readPage(`${site}/about`, 1200)])
+          : [null, null];
+        return { name: c, hits: hits.slice(0, 4), site, linkedin: pickLinkedInCompany(hits, c), page, about };
       }),
     );
 
@@ -257,7 +272,11 @@ export async function researchViaSearch(input: ResearchInput, deps: ResearchDeps
       ),
     ].filter(Boolean);
     const compIds = compFound.map((c) =>
-      [c.page && c.site ? add(c.site, `${c.name} — website`, c.page) : "", ...c.hits.map((h) => add(h.url, h.title, h.snippet))].filter(Boolean),
+      [
+        c.page && c.site ? add(c.site, `${c.name} — website`, c.page) : "",
+        c.about && c.site ? add(`${c.site}/about`, `${c.name} — about`, c.about) : "",
+        ...c.hits.map((h) => add(h.url, h.title, h.snippet)),
+      ].filter(Boolean),
     );
     const ids = new Set(evidence.map((e) => e.id));
     const blockOf = (wanted: string[]) =>
@@ -333,7 +352,7 @@ Evidence:
 ${blockOf(compIds.flat())}
 
 ${CITE}
-{"competitors": [{"name": "exactly as listed above", "whatTheyDo": {"value": "", "source": ""}, "location": {"value": "", "source": ""}, "summary": {"value": "one or two sentences", "source": ""}}]}`,
+{"competitors": [{"name": "exactly as listed above", "whatTheyDo": {"value": "what this company sells or does, in a few words", "source": ""}, "location": {"value": "city or area of the head office", "source": ""}, "summary": {"value": "two or three sentences: size or staff numbers, where they operate, how they compete with ${name}, anything recent", "source": ""}}]}`,
             1500,
           )
         : Promise.resolve(null),

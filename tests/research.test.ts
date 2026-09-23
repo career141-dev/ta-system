@@ -89,7 +89,7 @@ console.log("\nresearch by search: a whole run, with the web faked");
     eq("website and LinkedIn are the addresses the search returned", [r.fields.websiteLink, r.fields.socialMedia], ["https://www.hayleys.com", "https://www.linkedin.com/company/hayleys-plc"]);
     eq("the client's own site is read", read.includes("https://www.hayleys.com"), true);
     eq("a competitor the search never named is dropped", r.fields.competitors, ["John Keells Holdings", "Aitken Spence"]);
-    eq("each competitor is searched", queries.filter((q) => /John Keells|Aitken Spence/.test(q)).length, 2);
+    eq("each competitor is searched from three angles", queries.filter((q) => /John Keells|Aitken Spence/.test(q)).length, 6);
     eq("cited fields are kept", [r.fields.country, r.fields.location, r.fields.servicesProvider], ["Sri Lanka", "Colombo", ["Plantations", "Leisure"]]);
     eq("a field citing evidence that does not exist is empty", r.fields.similarDesignation, "");
     eq("several sources cited at once still count", r.fields.companyOverview, "A diversified conglomerate.");

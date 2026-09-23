@@ -264,6 +264,7 @@ export function mapApplication(a: BackendApplication): Application {
 
     createdAt: a.createdAt,
     lastStageChangedAt: a.lastStageChangedAt,
+    aiFollowUpNoReply: Boolean(a.aiFollowUpNoReply),
   };
 }
 

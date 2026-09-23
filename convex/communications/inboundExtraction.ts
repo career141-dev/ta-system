@@ -313,6 +313,15 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           });
         }
 
+        // On reply, candidate in AI Follow-up (ta_shortlist) moves to TA Follow-up with given details
+        if (activeApp.currentStage === "ta_shortlist") {
+          await ctx.runMutation(internal.communications.followUpMutations.transitionAiFollowUpToTaFollowUp, {
+            applicationId: activeApp._id,
+            reason: "Candidate replied to AI follow-up with details. Moved to TA Follow-up.",
+            noReply: false,
+          });
+        }
+
         // Re-fetch updated application and candidate data post-update
         const updatedCandidate = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
         const updatedApp = await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, { candidateId: args.candidateId });

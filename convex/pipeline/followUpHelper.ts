@@ -306,6 +306,40 @@ export async function initiateFollowUpOutreach(
   const deliverable =
     (isWhatsAppEnabled && resolveRecipient("whatsapp", candidate.phone ?? "").ok) ||
     (isEmailEnabled && resolveRecipient("email", candidate.email ?? "").ok);
+
+  if (!isManual && app.currentStage === "ta_shortlist" && !deliverable) {
+    console.log(`[Follow-up Outreach] Candidate ${candidate.fullName} has no deliverable contact channels. Transferring to TA Follow-up.`);
+    const now = Date.now();
+    await ctx.db.patch(applicationId, {
+      currentStage: "follow_up",
+      lastStageChangedAt: now,
+      aiFollowUpNoReply: true,
+      stageHistory: [
+        ...(app.stageHistory ?? []),
+        {
+          stage: "follow_up",
+          enteredAt: new Date().toISOString(),
+          changedBy: "system" as any,
+          note: "Transferred to TA Follow-up: No deliverable phone or email for AI follow-up.",
+        },
+      ],
+    });
+    await ctx.db.insert("pipelineEvents", {
+      applicationId,
+      candidateId: app.candidateId,
+      jobId: app.jobId,
+      eventType: "ai_followup_no_contact_to_ta",
+      fromStage: "ta_shortlist",
+      toStage: "follow_up",
+      actorType: "system",
+      notes: "No deliverable phone or email for AI follow-up. Transferred to TA Follow-up.",
+      createdAt: now,
+    });
+    await adjustJobStageStat(ctx, app.jobId, "ta_shortlist", "follow_up");
+    await syncCandidateOverallStatus(ctx, app.candidateId);
+    return;
+  }
+
   if (options?.report) {
     options.report.sent = true;
     options.report.kind = isNudge ? "reminder" : "initial";

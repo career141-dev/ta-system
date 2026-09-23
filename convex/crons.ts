@@ -121,6 +121,57 @@ export const evaluateFollowUpStage = internalMutation({
       // (ta/applications.ts). If it never went — no phone, no email, a provider
       // error — the sweep sends it rather than leaving the candidate waiting.
 
+      // For AI Follow-up (ta_shortlist): Move to TA Follow-up within 1 day if candidate did not reply,
+      // or if candidate has no contact channel.
+      const enteredAt = app.followUpEnteredAt || app.lastStageChangedAt || app._creationTime;
+      const timeInStage = now - enteredAt;
+      const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+      const hasPhone = !!(candidate.phone ?? "").replace(/\D/g, "");
+      const hasEmail = !!candidate.email;
+
+      if (app.currentStage === "ta_shortlist") {
+        const noContact = !hasPhone && !hasEmail;
+        const oneDayExpiredNoReply = timeInStage >= ONE_DAY_MS && !app.lastCandidateReplyAt;
+
+        if (noContact || oneDayExpiredNoReply) {
+          console.log(`[Follow-Up Cron] AI Follow-up ${app._id} ${noContact ? "has no contact info" : "did not reply within 1 day"}. Moving to TA Follow-up.`);
+          await ctx.db.patch(app._id, {
+            currentStage: "follow_up",
+            lastStageChangedAt: now,
+            aiFollowUpNoReply: true,
+            nextFollowUpScheduledAt: undefined,
+            nextFollowUpMessage: undefined,
+            stageHistory: [
+              ...(app.stageHistory ?? []),
+              {
+                stage: "follow_up",
+                enteredAt: new Date().toISOString(),
+                changedBy: "system" as any,
+                note: noContact
+                  ? "Moved to TA Follow-up: No phone or email available for AI follow-up."
+                  : "Moved to TA Follow-up: Candidate did not reply to AI follow-up within 1 day.",
+              },
+            ],
+          });
+          await ctx.db.insert("pipelineEvents", {
+            applicationId: app._id,
+            candidateId: app.candidateId,
+            jobId: app.jobId,
+            eventType: "ai_followup_no_reply_to_ta",
+            fromStage: "ta_shortlist",
+            toStage: "follow_up",
+            actorType: "system",
+            notes: noContact
+              ? "No phone or email available for AI follow-up. Transferred to TA Follow-up."
+              : "Candidate did not reply to AI follow-up within 1 day. Transferred to TA Follow-up.",
+            createdAt: now,
+          });
+          await adjustJobStageStat(ctx, app.jobId, "ta_shortlist", "follow_up");
+          await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+          continue;
+        }
+      }
+
       // 3. Enforce Max Attempt Ceiling (Terminal Stop Condition)
       const maxAttempts = job.maxFollowUpAttempts ?? 3;
       const currentAttempts = app.followUpAttemptCount || 0;
@@ -130,6 +181,38 @@ export const evaluateFollowUpStage = internalMutation({
         job.followUpStartsOnSend === true && !!app.nextFollowUpScheduledAt && now < app.nextFollowUpScheduledAt;
 
       if (currentAttempts >= maxAttempts && !lastReminderStillOpen) {
+        if (app.currentStage === "ta_shortlist") {
+          console.log(`[Follow-Up Cron] Max attempts (${maxAttempts}) reached for AI follow-up ${app._id}. Moving to TA Follow-up.`);
+          await ctx.db.patch(app._id, {
+            currentStage: "follow_up",
+            lastStageChangedAt: now,
+            aiFollowUpNoReply: true,
+            nextFollowUpScheduledAt: undefined,
+            stageHistory: [
+              ...(app.stageHistory ?? []),
+              {
+                stage: "follow_up",
+                enteredAt: new Date().toISOString(),
+                changedBy: "system" as any,
+                note: `Moved to TA Follow-up: Candidate did not reply after ${maxAttempts} AI follow-up attempts.`,
+              },
+            ],
+          });
+          await ctx.db.insert("pipelineEvents", {
+            applicationId: app._id,
+            candidateId: app.candidateId,
+            jobId: app.jobId,
+            eventType: "ai_followup_no_reply_to_ta",
+            fromStage: "ta_shortlist",
+            toStage: "follow_up",
+            actorType: "system",
+            notes: `Candidate did not reply after ${maxAttempts} AI follow-up attempts. Transferred to TA Follow-up.`,
+            createdAt: now,
+          });
+          await adjustJobStageStat(ctx, app.jobId, "ta_shortlist", "follow_up");
+          await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+          continue;
+        }
         console.log(`[Follow-Up Cron] Max attempts (${maxAttempts}) reached for application ${app._id}. Moving to unresponsive.`);
         await ctx.db.patch(app._id, {
           currentStage: "unresponsive",
@@ -217,9 +300,6 @@ export const evaluateFollowUpStage = internalMutation({
         continue;
       }
 
-      // Fallback to lastStageChangedAt or _creationTime if followUpEnteredAt is not set
-      const enteredAt = app.followUpEnteredAt || app.lastStageChangedAt || app._creationTime;
-      const timeInStage = now - enteredAt;
       const daysInStage = Math.floor(timeInStage / (24 * 60 * 60 * 1000));
 
       // 1. Check expiration if maxFollowUpDays is set

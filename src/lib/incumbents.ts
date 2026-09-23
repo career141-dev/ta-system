@@ -1,4 +1,5 @@
 import { canonicalProfile, displayUrl, type SearchHit } from "./serper";
+import { searchMatrix } from "./websearch";
 import type { AiResult } from "./ai";
 import type { BenchmarkEntry } from "@/data/types";
 
@@ -119,8 +120,32 @@ export function aroundMentions(text: string, variants: string[], span = 350): st
 const quoted = (variants: string[]) => (variants.length > 1 ? `(${variants.map((v) => `"${v}"`).join(" OR ")})` : `"${variants[0]}"`);
 
 /**
- * Everything that could name the person, for one company: its people pages
- * and two or three searches. Returned as numbered evidence.
+ * The angles one company is searched from — the scraper's query matrix
+ * (SCRAPPER, ported 23 Sep), cut to what benchmarking a single post needs:
+ * the title at the company, the person's own profile, and how an appointment
+ * is usually written up. The client is the answer the desk actually wants, so
+ * it gets the leadership-page angle and the one that turns up a predecessor;
+ * competitors get three, because each extra angle is another paid search.
+ */
+export function benchmarkQueries(c: IncumbentCompany, variants: string[]): string[] {
+  const t = quoted(variants);
+  const qs = [
+    `"${c.name}" ${t}`,
+    `site:linkedin.com/in "${c.name}" ${t} -inurl:jobs -inurl:dir`,
+    `"${c.name}" ${t} appointed OR named OR "has joined"`,
+  ];
+  if (c.isClient) {
+    qs.push(`"${c.name}" leadership OR "management team" ${t}`);
+    qs.push(`"${c.name}" ${t} former OR previously OR succeeded`);
+  }
+  return qs;
+}
+
+/**
+ * Everything that could name the person, for one company: its people pages and
+ * the angles above, fired together. A page several angles turned up is the
+ * likelier answer, so the matrix's hitCount decides what the model reads first
+ * — the cross-query verification the scraper ranks candidates by.
  */
 async function gather(
   c: IncumbentCompany,
@@ -132,11 +157,16 @@ async function gather(
   const queries = [`"${c.name}" ${t}`, `site:linkedin.com/in "${c.name}" ${t}`];
   if (c.isClient) queries.push(`"${c.name}" ${t} appointed OR former OR previously`);
   const pages = c.website ? PEOPLE_PAGES.map((p) => `${c.website}${p}`) : [];
-  const [results, read] = await Promise.all([
-    Promise.all(queries.map((q) => deps.search(q, 10))),
+  const [matrix, read] = await Promise.all([
+    // One person is one piece of evidence: LinkedIn serves the same profile
+    // from lk. and www., and both turn up across the angles.
+    searchMatrix(queries, deps.search, {
+      num: 10,
+      key: (u) => canonicalProfile(u) ?? u.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase(),
+    }),
     Promise.all(pages.map(async (u) => ({ url: u, text: await deps.readPage(u, 20000) }))),
   ]);
-  for (const r of results) count(r.credits || (r.error ? 0 : 1));
+  count(matrix.credits);
 
   const items: Omit<Evidence, "id">[] = [];
   const seen = new Set<string>();
@@ -147,12 +177,14 @@ async function gather(
     seen.add(bit.slice(0, 120));
     items.push({ company: c.name, url: p.url, title: `${c.name} — ${p.url.replace(/^https?:\/\/[^/]+/, "")}`, text: bit.slice(0, 1500) });
   }
-  const hits = results.flatMap((r) => r.hits);
+  const hits = matrix.hits;
   for (const h of hits.slice(0, 12)) {
-    const text = `${h.title} — ${h.snippet}`;
     if (seen.has(h.url)) continue;
     seen.add(h.url);
-    items.push({ company: c.name, url: h.url, title: h.title, text });
+    // How many angles found it is said out loud, so the model can weigh a page
+    // three searches agree on above one that surfaced once.
+    const verified = h.hitCount > 1 ? ` (found by ${h.hitCount} searches)` : "";
+    items.push({ company: c.name, url: h.url, title: h.title, text: `${h.title}${verified} — ${h.snippet}` });
   }
   return {
     company: c.name,

@@ -81,7 +81,9 @@ console.log("\nwho holds it, with the web faked");
   eq("source is the leadership page it was cited from", r.rows[0].sourceUrl, "https://www.hayleys.com/leadership");
   eq("LinkedIn from a search result carrying the name", r.rows[0].linkedinUrl, "https://www.linkedin.com/in/ruwan-perera-123");
   eq("no LinkedIn result, no LinkedIn", r.rows[2].linkedinUrl, null);
-  eq("the client gets the extra 'former' search; competitors two each", queries.length, 5);
+  eq("five angles on the client, three on each competitor", queries.length, 8);
+  eq("the client is asked who was there before", queries.some((q) => q.includes("Hayleys") && q.includes("former")), true);
+  eq("no competitor is asked for a predecessor", queries.filter((q) => q.includes("John Keells")).length, 3);
   eq("both ways of writing the title are searched", queries[0].includes('"CFO" OR "Chief Financial Officer"'), true);
 
   const down = await findIncumbents(
