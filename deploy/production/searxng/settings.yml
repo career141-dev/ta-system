@@ -42,8 +42,15 @@ outgoing:
   pool_maxsize: 20
   enable_http2: true
 
-# Engines are the default set. Google is the one that matters for `site:` and
-# `-inurl:` — it is also the one most likely to block a data-centre address. If
-# it starts failing, the others still answer and the operators are enforced on
-# our side anyway (src/lib/websearch.ts), so results thin out rather than turn
-# wrong. Watch `docker logs ta-prod-searxng` for "CAPTCHA" from google.
+# Engines are the default set here, but the app asks Google alone
+# (SEARXNG_ENGINES, src/lib/serper.ts). Measured from this server on 23 Sep:
+# Google answered with ten results and nothing failed; Brave and Google CSE
+# refused the address as "too many requests", DuckDuckGo timed out and Qwant
+# sent a CAPTCHA. Waiting on those four cost six seconds on every search, and a
+# query where enough of them failed came back empty — which the desk was shown
+# as a broken search.
+#
+# So Google is carrying this on its own. Watch `docker logs ta-prod-searxng`
+# for "CAPTCHA" or "Suspended" against google: that is the sign the address has
+# been throttled, and the answer then is fewer searches at a time, not more
+# engines — the others are already refusing us.

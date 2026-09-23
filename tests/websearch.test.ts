@@ -1,5 +1,5 @@
 import { keepHit, parseBooleanQuery, searchMatrix, toNaturalSearch } from "@/lib/websearch";
-import { searchProvider, searxngHits, searxngInstances, type SearchHit } from "@/lib/serper";
+import { searchProvider, searxngEngines, searxngHits, searxngInstances, searxngRefusals, type SearchHit } from "@/lib/serper";
 
 let passed = 0;
 let failed = 0;
@@ -110,6 +110,18 @@ console.log("\nwho answers a search");
   set({ SEARXNG_URL: "https://searx.example", C141_SEARCH_PROVIDER: "serper", SERPER_API_KEY: "k" });
   eq("naming Serper still gets Serper", searchProvider(), "serper");
   process.env = env;
+}
+
+console.log("\nSearXNG: which engines, and what they said");
+{
+  const env = process.env.SEARXNG_ENGINES;
+  delete process.env.SEARXNG_ENGINES;
+  eq("Google alone unless we are told otherwise", searxngEngines(), "google");
+  process.env.SEARXNG_ENGINES = " mojeek,google ";
+  eq("and whatever we are told, as given", searxngEngines(), "mojeek,google");
+  if (env === undefined) delete process.env.SEARXNG_ENGINES; else process.env.SEARXNG_ENGINES = env;
+  eq("a refusal names the engine and the reason", searxngRefusals([["brave", "too many requests"], ["qwant", "CAPTCHA"]]), "brave: too many requests, qwant: CAPTCHA");
+  eq("nothing refused is nothing to say", searxngRefusals(undefined), "");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

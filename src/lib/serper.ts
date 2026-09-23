@@ -59,6 +59,24 @@ export function searxngInstances(): string[] {
     .filter((u) => /^https?:\/\//.test(u));
 }
 
+/**
+ * Which engines SearXNG asks. Google alone unless SEARXNG_ENGINES says
+ * otherwise — measured on the server, 23 September:
+ *
+ *   google      10 results, nothing failed
+ *   duckduckgo  suspended: timeout      brave  suspended: too many requests
+ *   qwant       CAPTCHA                 google cse  suspended: too many requests
+ *
+ * The refusals are what made a search take six seconds: SearXNG waited for
+ * engines that were never going to answer, and a query where enough of them
+ * failed came back empty and was reported to the desk as a broken search.
+ * Google is also the only one of them that honours `site:` and `-inurl:`,
+ * which is what Research and Benchmark are written in.
+ */
+export function searxngEngines(): string {
+  return (process.env.SEARXNG_ENGINES ?? "").trim() || "google";
+}
+
 /** Whether any search can run. Kept under its old name: callers ask "can we search?". */
 export function serperConfigured(): boolean {
   return searchProvider() !== null;
@@ -211,7 +229,16 @@ const SEARXNG_TIMEOUT_MS = 12_000;
 
 interface SearxngBody {
   results?: { url?: string; title?: string; content?: string }[];
+  /** `[["brave", "too many requests"], ["duckduckgo", "timeout"]]`. */
   unresponsive_engines?: unknown[];
+}
+
+/** The engines that did not answer, as "brave: too many requests". */
+export function searxngRefusals(unresponsive: unknown[] | undefined): string {
+  return (unresponsive ?? [])
+    .map((e) => (Array.isArray(e) ? e.filter((x) => typeof x === "string").join(": ") : String(e)))
+    .filter(Boolean)
+    .join(", ");
 }
 
 /** What one instance answered, as hits. Pure, so the mapping is testable. */
@@ -232,7 +259,7 @@ export function searxngHits(body: SearxngBody, q: string, num: number): SearchHi
 async function searchSearxng(q: string, num: number, page: number): Promise<SearchResult> {
   const instances = searxngInstances();
   if (!instances.length) return { hits: [], credits: 0, error: "no_searxng_url" };
-  const engines = (process.env.SEARXNG_ENGINES ?? "").trim();
+  const engines = searxngEngines();
   let lastError = "";
   for (const base of instances) {
     const params = new URLSearchParams({
@@ -272,7 +299,9 @@ async function searchSearxng(q: string, num: number, page: number): Promise<Sear
       // No results *and* engines that did not answer is a broken search, not
       // an empty one — the whole point of the 23 Sep fix upstream.
       if (!hits.length && (body.unresponsive_engines ?? []).length) {
-        lastError = `${hostOf(base)} engines unavailable`;
+        // Which engine, and what it said: "engines unavailable" on its own sent
+        // the desk hunting through logs for something the answer already held.
+        lastError = `${hostOf(base)} — ${searxngRefusals(body.unresponsive_engines)}`;
         continue;
       }
       // A search happened and cost nothing; it is still counted as one search.
