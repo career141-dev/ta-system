@@ -137,7 +137,12 @@ export default async function CandidateDrawer({
       : null;
   const cvVersion = (cvFile?.ok && cvFile.fileName ? cvFile.fileName : "") || (c.cvFileName ?? "1");
   const cvHref = `/api/cv/${encodeURIComponent(c.id)}?app=${encodeURIComponent(app.id)}&v=${encodeURIComponent(cvVersion)}`;
-  const cvIsPdf = !!cvFile?.ok && (/pdf/i.test(cvFile.fileType ?? "") || /\.pdf$/i.test(cvFile.fileName ?? ""));
+  const cvIsPdf =
+    !!cvFile?.ok &&
+    (/pdf/i.test(cvFile.fileType ?? "") ||
+      /\.pdf$/i.test(cvFile.fileName ?? "") ||
+      /\.pdf$/i.test(c.cvFileName ?? "") ||
+      !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(cvFile.fileName ?? c.cvFileName ?? ""));
 
   const base = `/openings/${id}/candidate/${appId}`;
   const tabHref = (t: string) => (t === "cv" ? `${base}` : `${base}?tab=${t}`);

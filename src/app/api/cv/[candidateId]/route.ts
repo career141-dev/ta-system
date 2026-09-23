@@ -68,16 +68,21 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cand
     const cvRes = await fetch(fetchUrl);
     if (cvRes.ok) {
       const buffer = await cvRes.arrayBuffer();
-      const contentType = cvRes.headers.get("content-type") || link.fileType || "application/pdf";
+      const rawType = cvRes.headers.get("content-type") || link.fileType || "application/pdf";
+      const isPdf =
+        /pdf/i.test(rawType) ||
+        /\.pdf$/i.test(link.fileName ?? "") ||
+        !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(link.fileName ?? "");
+      const contentType = isPdf ? "application/pdf" : rawType;
       const download = req.nextUrl.searchParams.get("download") === "1";
-      const filename = (link.fileName ?? "cv.pdf").replace(/["\r\n]/g, "");
+      const filename = (link.fileName ?? (isPdf ? "cv.pdf" : "cv")).replace(/["\r\n]/g, "");
       const disposition = download ? `attachment; filename="${filename}"` : `inline; filename="${filename}"`;
       return new NextResponse(Buffer.from(buffer), {
         status: 200,
         headers: {
           "Content-Type": contentType,
           "Content-Disposition": disposition,
-          "Cache-Control": "private, max-age=3600, stale-while-revalidate=86400",
+          "Cache-Control": "public, max-age=3600, stale-while-revalidate=86400",
         },
       });
     }

@@ -30,6 +30,9 @@ export function CvFrame({
 
   useEffect(() => {
     setLoading(true);
+    // PDF plugin inside iframe might not always dispatch standard DOM onLoad event
+    const timer = setTimeout(() => setLoading(false), 1200);
+    return () => clearTimeout(timer);
   }, [src]);
 
   useEffect(() => {
@@ -52,7 +55,7 @@ export function CvFrame({
     }
   };
 
-  const url = `${src.split("#")[0]}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`;
+  const url = `${src.split("#")[0]}#toolbar=0&navpanes=0&view=FitH`;
 
   return (
     <div
@@ -113,15 +116,15 @@ export function CvFrame({
         </div>
       </div>
 
-      {/* CV Iframe with internal scrollbar clipped cleanly */}
+      {/* CV Iframe with clean scroll and responsive viewport */}
       <div
-        className={`w-full overflow-hidden bg-paper ${
+        className={`w-full bg-paper ${
           isFull ? "mx-auto max-w-5xl flex-1 rounded-xl shadow-2xl" : ""
         }`}
       >
-        <div className="relative w-full overflow-hidden" style={{ width: "100%" }}>
+        <div className="relative w-full" style={{ width: "100%" }}>
           {loading && (
-            <div className="absolute inset-0 z-10 flex min-h-[300px] flex-col items-center justify-center bg-paper/90 py-16 text-center backdrop-blur-xs">
+            <div className="pointer-events-none absolute inset-0 z-10 flex min-h-[300px] flex-col items-center justify-center bg-paper/90 py-16 text-center backdrop-blur-xs transition-opacity duration-300">
               <div className="flex items-center gap-2 rounded-full border border-rule bg-surface px-4 py-2 text-[12.5px] font-medium text-ink shadow-xs">
                 <svg className="h-4 w-4 animate-spin text-brand" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -136,13 +139,10 @@ export function CvFrame({
             src={url}
             title={title}
             onLoad={() => setLoading(false)}
-            className="border-0 bg-paper"
-            scrolling="no"
+            className="w-full border-0 bg-paper"
             style={{
-              width: "calc(100% + 24px)",
-              marginRight: "-24px",
               height: isFull ? "calc(100vh - 80px)" : typeof height === "number" ? `${height}px` : height,
-              minHeight: isFull ? "calc(100vh - 80px)" : "2200px",
+              minHeight: isFull ? "calc(100vh - 80px)" : "760px",
             }}
           />
         </div>
