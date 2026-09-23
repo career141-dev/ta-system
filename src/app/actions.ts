@@ -2282,7 +2282,7 @@ export async function dismissSuggestion(formData: FormData) {
  * it; nothing here approves anything. Used by the button, and automatically the
  * moment an opening is created.
  */
-async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: string } | null> {
+async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boolean; reason?: string } | null> {
   const opening = repo.opening(openingId);
   const c = contextFor(openingId);
   if (!opening || !c) return null;
@@ -2306,21 +2306,34 @@ async function draftJd(openingId: string): Promise<{ ok: boolean; reason?: strin
     // The draft is saved in the backend. Nothing is approved here — the TA reads it first.
     // The Job details are read from the same notes at the same time.
     const [res] = await Promise.all([
-      generateJdText(context, briefs, template),
+      generateJdText(context, briefs, template, opening.jdMarkdown ?? ""),
       extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)),
     ]);
-    const actorId = opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
-    if (actorId) {
-      await convexMutation("ta/openings:saveJd", { actorId, openingId, jdMarkdown: res.ok ? res.text : template }).catch(
-        (e) => console.error(`[draftJd ${openingId}]`, e),
-      );
+    // The backend is the only writer here. It stamps the row's updatedAt, so
+    // a second write through the store (repo.updateJd) arrived with an older
+    // updatedAt and the commit read it as somebody else's edit — the
+    // "Someone else changed this record" every regeneration showed, which also
+    // threw away the new draft until the page was reloaded (22 September).
+    const writer = actorId ?? opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
+    const jd = res.ok ? res.text : template;
+    if (!writer) {
+      repo.updateJd(openingId, jd);
+      return res.ok ? { ok: true } : { ok: false, reason: res.reason };
     }
-    repo.updateJd(openingId, res.ok ? res.text : template);
+    try {
+      await convexMutation("ta/openings:saveJd", { actorId: writer, openingId, jdMarkdown: jd });
+    } catch (e) {
+      console.error(`[draftJd ${openingId}]`, e);
+      return { ok: false, reason: "The draft could not be saved. Try again." };
+    }
+    // The loaded copy is now behind the backend; the next read fetches it.
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
     return res.ok ? { ok: true } : { ok: false, reason: res.reason };
   }
 
   repo.applyExtractedToOpening(openingId, extracted);
-  const res = await generateJdText(context, briefs, template);
+  const res = await generateJdText(context, briefs, template, opening.jdMarkdown ?? "");
   // The template is not a failure state — it is what the desk has always had.
   repo.updateJd(openingId, res.ok ? res.text : template);
   return res.ok ? { ok: true } : { ok: false, reason: res.reason };
@@ -2491,7 +2504,7 @@ export async function generateJdWithModel(formData: FormData) {
   // The notes box as it stands when Generate is pressed — typed but not yet
   // saved notes are still the TA's notes, and the draft must include them.
   if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
-  const res = await draftJd(openingId);
+  const res = await draftJd(openingId, user.id);
   if (!res) await fail("The opening could not be found. Reload the page and try again.");
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
