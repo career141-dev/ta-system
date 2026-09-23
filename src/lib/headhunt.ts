@@ -226,6 +226,7 @@ export async function generateJdText(
   c: OpeningContext,
   briefs: JdBrief[],
   houseTemplate: string,
+  currentJd = "",
 ): Promise<AiResult> {
   const given = briefs.filter((b) => b.notes.trim());
   const sections = given.length
@@ -237,25 +238,42 @@ export async function generateJdText(
     `${HOUSE_RULES}
 
 You are writing a job description that goes out under Career141's name to candidates in Sri Lanka.`,
-    `Write the job description for this role, working only from the details below. Do not invent requirements, benefits, or facts about the client that are not here.
+    `Write the full job description for this role.
 
 The opening, as it was set up:
 ${ctxLines(c)}
 
 ${sections}
-
-For reference, the desk's current template output for this role — match its structure and headings, improve the writing:
+${currentJd.trim() ? `\nThe job description on file now — keep everything in it that still holds, and improve the rest:\n"""\n${currentJd.trim().slice(0, 6000)}\n"""\n` : ""}
+The desk's own short template for this role, for the facts it carries:
 """
 ${houseTemplate}
 """
 
+Write it in Markdown under these headings, in this order, and leave out only a heading you truly have nothing for:
+
+## <role title>
+**Client** · **Location** · **Package** · **Nationality** · **Headcount** — one line each, only where known.
+### About the role — two or three sentences: what the job is and where it sits.
+### Responsibilities — 5 to 8 bullets.
+### Requirements — the must-haves: years, industry, background.
+### Qualifications — degrees, professional qualifications.
+### Skills — the skills the role is worked with, as bullets.
+### Experience — how many years of what.
+### Package — salary, allowances and benefits.
+### Other — anything left: notice period, travel, shift, reporting line, headcount.
+
+Two kinds of thing go in it, and they are not treated the same:
+
+FACTS about this role and this client — salary, allowances, benefits, location, nationality, headcount, notice period, the client's name and industry, must-haves, anything the notes say. Only from the material above. Never invent one, and never write filler like "competitive salary" or "attractive benefits". A fact nobody gave you is left out, and its line with it.
+
+THE ORDINARY WORK of the job titled "${c.title}" — responsibilities, the skills it is done with, the usual qualifications. A short note ("we need a finance manager, 10 years, CIMA") is a brief, not a job description: write out what this role does day to day, the way a recruiter who has filled it would, and keep it recognisable for Sri Lanka. Never contradict the notes, and never dress an assumption up as the client's requirement — anything essential comes from the notes.
+
 Rules:
-- Use everything above: the opening's details, the TA lead's brief and the TA's notes together. Nothing either of them wrote is to be dropped.
-- Where they disagree, follow the TA's notes — they were written later, usually after speaking to the client again.
-- Markdown, with the same headings as the template.
-- Anything the brief does not cover, leave out. Do not write "competitive salary" or similar filler to fill a gap.
-- If the brief is too thin to write a section, omit the section rather than padding it.
-- No hype. A Sri Lankan candidate reading this should learn what the job is.`,
+- Use everything above together. Nothing the lead or the TA wrote is dropped.
+- Where they disagree, follow the TA's notes — written later, usually after speaking to the client again.
+- No hype, no marketing. A Sri Lankan candidate reading this should learn what the job is and whether they qualify.
+- Plain Markdown. No preamble, no closing note, no "here is the job description".`,
     2500,
   );
 }

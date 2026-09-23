@@ -129,7 +129,10 @@ const TASK_ENV: Record<Task, string> = {
  * nothing — the Copilot's 17 Sep failure, and Suggestions' plan step's on
  * 21 Sep ("The model returned something unusable"). They need no reasoning.
  */
-const NO_REASONING: ReadonlySet<Task> = new Set<Task>(["assist", "plan", "rank", "parse", "research"]);
+// "jd" writes from material it is given under fixed headings; the thinking
+// pass added most of a minute to every Regenerate and nothing to the draft
+// (22 September).
+const NO_REASONING: ReadonlySet<Task> = new Set<Task>(["assist", "plan", "rank", "parse", "research", "jd"]);
 
 /** Whose search the web plugin uses: the model's own where it has one, else Exa. */
 export function webEngine(model: string): "native" | "exa" {
