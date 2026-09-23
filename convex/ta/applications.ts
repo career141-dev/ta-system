@@ -138,7 +138,11 @@ export const shortlist = internalMutation({
         actorId: user._id,
         reason: "Shortlisted into AI Follow-up",
         bypassRoleCheck: true,
-        skipAutoOutreach: false,
+        // Unless the opening's follow-up switch is off: a switch that says off
+        // has to mean off, and entering AI Follow-up now starts the outreach
+        // too (pipelineStateMachine, 23 September). Every message still passes
+        // the outreach gate (convex/lib/outreachSafety.ts).
+        skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
       });
     }
 
