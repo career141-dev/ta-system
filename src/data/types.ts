@@ -394,6 +394,7 @@ export interface Application {
 
   createdAt: number;
   lastStageChangedAt: number;
+  aiFollowUpNoReply?: boolean | null;
 }
 
 // ─── Call feedback (spec §6A) ────────────────────────────────────────────────

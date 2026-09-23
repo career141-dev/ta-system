@@ -65,6 +65,11 @@ export function CandidateRow({
           </Link>
           <span className="text-[11.5px] text-ink-faint">· 2nd</span>
           <span className="rounded bg-tag px-1.5 py-[2px] text-[11px] text-ink-soft">{tag}</span>
+          {app.aiFollowUpNoReply && (
+            <span className="rounded bg-warn-soft px-1.5 py-[2px] text-[11px] font-medium text-warn">
+              Didn’t reply
+            </span>
+          )}
           {/* Held in Follow-up for want of details: said on the row, so it does
               not look like the move to Director review simply failed (21 Sep). */}
           {(app.stage === "ta_follow_up" || app.stage === "ai_follow_up" || (app.stage as string) === "follow_up") && directorReviewBlockers(candidate).length > 0 && (

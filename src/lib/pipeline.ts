@@ -22,10 +22,8 @@ import type { Candidate, Stage } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 
 export const ALLOWED_TRANSITIONS: Record<Stage, Stage[]> = {
-  // AI Follow-up is filled by the AI's own shortlist, never by hand (22 Sep):
-  // a TA moves people on from it into TA Follow-up, not back into it.
-  new_cv: ["ta_follow_up", "rejected", "dropped_out"],
-  matched: ["ta_follow_up", "rejected", "dropped_out"],
+  new_cv: ["ai_follow_up", "ta_follow_up", "rejected", "dropped_out"],
+  matched: ["ai_follow_up", "ta_follow_up", "rejected", "dropped_out"],
   ai_follow_up: ["ta_follow_up", "director_review", "rejected", "dropped_out"],
   ta_follow_up: ["director_review", "rejected", "dropped_out"],
   // The director sending it back for more detail is a real outcome, not a rejection.

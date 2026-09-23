@@ -28,20 +28,27 @@ try { repo.users(); } catch { threw = true; }
 eq("the read fails loudly", threw, true);
 eq("the damaged copy is kept", fs.readdirSync(path.join(tmp, ".data")).some((f) => f.startsWith("db.damaged-")), true);
 
-console.log("\nshortlisting: owner, set, Follow-up, history");
+console.log("\nshortlisting: owner, set, AI Follow-up, history");
 fresh();
 const ta = repo.users().find((u) => u.role === "ta")!;
 const opening = repo.openings().find((o) => repo.applications(o.id).some((a) => a.stage === "new_cv" && !a.ownerTaId))!;
 const fresh1 = repo.applications(opening.id).filter((a) => a.stage === "new_cv" && !a.ownerTaId);
 const r = repo.shortlist(fresh1[0].id, ta.id);
 const after = repo.application(fresh1[0].id)!;
-eq("goes to Follow-up", after.stage, "ta_follow_up");
+eq("goes to AI Follow-up", after.stage, "ai_follow_up");
 eq("gets a set number", after.setNumber !== null, true);
 eq("writes a history event", repo.events(after.id).some((e) => e.eventType === "shortlisted"), true);
 const stamp = after.shortlistedAt;
 repo.shortlist(fresh1[0].id, ta.id);
 eq("shortlisting twice changes nothing", repo.application(fresh1[0].id)!.shortlistedAt, stamp);
-eq("returns the stage", r.ok && r.stage, "ta_follow_up");
+eq("returns the stage", r.ok && r.stage, "ai_follow_up");
+
+const matchedOpening = repo.openings().find((o) => repo.applications(o.id).some((a) => a.stage === "matched" && !a.ownerTaId));
+if (matchedOpening) {
+  const matchedApp = repo.applications(matchedOpening.id).find((a) => a.stage === "matched" && !a.ownerTaId)!;
+  const rm = repo.shortlist(matchedApp.id, ta.id);
+  eq("matched candidate moves to AI Follow-up", rm.ok && rm.stage, "ai_follow_up");
+}
 
 console.log("\nsets: the day rule, per TA");
 fresh();

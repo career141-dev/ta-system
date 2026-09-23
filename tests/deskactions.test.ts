@@ -74,7 +74,7 @@ const tampered = tok.replace(/^(.)/, (c) => (c === "e" ? "f" : "e"));
 eq("a changed token is refused", execute(nuha, tampered).ok, false);
 eq("an old one is refused", execute(nuha, tok, Date.now() + 11 * 60_000).ok, false);
 const done = execute(nuha, tok);
-eq("the owner confirms and it runs", [done.ok, repo.application(fresh.id)!.stage, repo.application(fresh.id)!.ownerTaId], [true, "ta_follow_up", nuha.id]);
+eq("the owner confirms and it runs", [done.ok, repo.application(fresh.id)!.stage, repo.application(fresh.id)!.ownerTaId], [true, "ai_follow_up", nuha.id]);
 eq("and it runs only once", execute(nuha, tok).ok, false);
 
 console.log("\nchecked again when it runs");

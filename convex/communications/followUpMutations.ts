@@ -268,3 +268,45 @@ export const updateCandidateEta = internalMutation({
     console.log(`[Follow-Up] Set ETA for application ${args.applicationId} to ${args.candidateEtaText} (at ${args.candidateEtaMs})`);
   },
 });
+
+export const transitionAiFollowUpToTaFollowUp = internalMutation({
+  args: {
+    applicationId: v.id("applications"),
+    reason: v.string(),
+    noReply: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const app = await ctx.db.get(args.applicationId);
+    if (!app || app.currentStage !== "ta_shortlist") return;
+    const now = Date.now();
+    await ctx.db.patch(args.applicationId, {
+      currentStage: "follow_up",
+      lastStageChangedAt: now,
+      aiFollowUpNoReply: args.noReply === true,
+      nextFollowUpScheduledAt: undefined,
+      nextFollowUpMessage: undefined,
+      stageHistory: [
+        ...(app.stageHistory ?? []),
+        {
+          stage: "follow_up",
+          enteredAt: new Date().toISOString(),
+          changedBy: "system",
+          note: args.reason,
+        },
+      ],
+    });
+    await ctx.db.insert("pipelineEvents", {
+      applicationId: args.applicationId,
+      candidateId: app.candidateId,
+      jobId: app.jobId,
+      eventType: args.noReply ? "ai_followup_no_reply_to_ta" : "ai_followup_replied_to_ta",
+      fromStage: "ta_shortlist",
+      toStage: "follow_up",
+      actorType: "system",
+      notes: args.reason,
+      createdAt: now,
+    });
+    await adjustJobStageStat(ctx, app.jobId, "ta_shortlist", "follow_up");
+    await syncCandidateOverallStatus(ctx, app.candidateId);
+  },
+});

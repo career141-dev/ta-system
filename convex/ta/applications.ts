@@ -129,17 +129,16 @@ export const shortlist = internalMutation({
     const now = Date.now();
     await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
 
-    // Shortlisting is what sends somebody to Follow-up on this desk.
-    // A TA's shortlist is TA Follow-up, including someone the AI shortlisted
-    // first: the TA taking them on is what starts the outreach.
-    if (toTaStage(app.currentStage) !== "ta_follow_up") {
+    // Shortlisting database candidates / matches moves them to AI Follow-up (ta_shortlist).
+    const currentTaStage = toTaStage(app.currentStage);
+    if (currentTaStage !== "ai_follow_up" && currentTaStage !== "ta_follow_up") {
       await executeStageTransition(ctx, {
         applicationId: appId,
-        targetStage: "follow_up" as PipelineStage,
+        targetStage: "ta_shortlist" as PipelineStage,
         actorId: user._id,
-        reason: "Shortlisted by a TA",
+        reason: "Shortlisted into AI Follow-up",
         bypassRoleCheck: true,
-        skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
+        skipAutoOutreach: false,
       });
     }
 

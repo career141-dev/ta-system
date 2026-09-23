@@ -58,10 +58,10 @@ export function AddToOpening({
 
   const next = landed ? (
     <Link
-      href={add.result!.tone === "ok" ? `/openings/${sentTo}/pipeline/follow_up` : `/openings/${sentTo}/database`}
+      href={add.result!.tone === "ok" ? `/openings/${sentTo}/pipeline/ai_follow_up` : `/openings/${sentTo}/database`}
       className="text-[12px] font-medium text-accent hover:underline"
     >
-      {add.result!.tone === "ok" ? "Open Follow-up →" : "Open Database CVs →"}
+      {add.result!.tone === "ok" ? "Open AI Follow-up →" : "Open Database CVs →"}
     </Link>
   ) : null;
 
@@ -135,7 +135,7 @@ export function AddToOpening({
     <form onSubmit={onSubmit} className="rounded-2xl border border-rule bg-surface px-5 py-4">
       <input type="hidden" name="candidateId" value={candidateId} />
       <h3 className="text-[13px] font-semibold">Add to an opening</h3>
-      <p className="mt-1 text-[12px] text-ink-faint">Goes straight into Follow-up, claimed by you.</p>
+      <p className="mt-1 text-[12px] text-ink-faint">Goes straight into AI Follow-up, claimed by you.</p>
       {offered.length > 0 ? (
         <>
           {picker(

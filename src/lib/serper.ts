@@ -8,6 +8,7 @@
  * is ever asked to produce a URL.
  */
 import { reserve, serperMaxCost, SpendCapError } from "./spend";
+import { keepHit, parseBooleanQuery, toNaturalSearch } from "./websearch";
 
 export interface SearchHit {
   url: string;
@@ -89,6 +90,10 @@ export async function search(q: string, num = 10, page = 1): Promise<SearchResul
  * is asked for one result per line and only addresses it actually cited are
  * kept — a URL the model wrote but did not fetch is dropped, which keeps the
  * rule above: no model in the pipeline produces a profile address.
+ *
+ * Every caller writes Google Boolean (`site:`, `-inurl:`), which this tool
+ * does not understand, so the operators are stripped before the search and
+ * applied to the results afterwards — see websearch.ts (23 Sep).
  */
 /**
  * What one OpenAI web search may cost: the tool call (about 2.5 cents) and a
@@ -108,6 +113,7 @@ async function searchOpenAI(q: string, num: number, page: number): Promise<Searc
     throw e;
   }
   // A failed call may still have been charged, so the reservation is recorded as spent.
+  const parsed = parseBooleanQuery(q);
   try {
     const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
@@ -119,9 +125,11 @@ async function searchOpenAI(q: string, num: number, page: number): Promise<Searc
         max_output_tokens: 1500,
         input: `Run this web search and list what it returns${page > 1 ? ` (results ${10 * (page - 1) + 1} onwards)` : ""}, up to ${num} results, one per line, exactly as:
 URL | page title | one-sentence snippet from the page
-No other text.
+No other text.${parsed.sites.length ? `\nList only pages on ${parsed.sites.join(" or ")}.` : ""}${
+          parsed.phrases.length ? `\nEvery page must mention: ${parsed.phrases.join("; ")}.` : ""
+        }
 
-Search: ${q}`,
+Search: ${toNaturalSearch(parsed)}`,
       }),
     });
     if (!res.ok) return { hits: [], credits: 0, error: `${res.status}` };
@@ -142,10 +150,15 @@ Search: ${q}`,
       const [u, title, snippet] = line.split("|").map((x) => x?.trim() ?? "");
       const url = clean(u.replace(/^[-*\d.)\s]+/, "").replace(/^\[?([^\]]*)\]?\(?(https?:[^)\s]+)\)?$/, "$2"));
       if (!/^https?:\/\//.test(url) || !cited.has(url)) continue;
-      if (!hits.some((h) => h.url === url)) hits.push({ url, title: title || cited.get(url) || "", snippet: snippet ?? "" });
+      const hit = { url, title: title || cited.get(url) || "", snippet: snippet ?? "" };
+      if (!keepHit(hit, parsed)) continue;
+      if (!hits.some((h) => h.url === url)) hits.push(hit);
     }
     // Anything cited but not listed still counts as a result.
-    for (const [url, title] of cited) if (!hits.some((h) => h.url === url)) hits.push({ url, title, snippet: "" });
+    for (const [url, title] of cited) {
+      const hit = { url, title, snippet: "" };
+      if (keepHit(hit, parsed) && !hits.some((h) => h.url === url)) hits.push(hit);
+    }
     return { hits: hits.slice(0, num), credits: 1 };
   } catch (e) {
     return { hits: [], credits: 0, error: String(e) };
