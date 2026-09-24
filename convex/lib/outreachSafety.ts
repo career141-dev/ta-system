@@ -52,8 +52,15 @@ export function internationalPhone(raw: string): string {
 }
 const emailNorm = (s: string) => s.trim().toLowerCase();
 
-function testRecipient(channel: OutreachChannel): string {
-  const raw = channel === "email" ? process.env.OUTREACH_TEST_EMAIL : process.env.OUTREACH_TEST_PHONE;
+/**
+ * `testInbox` names a separate test mailbox for one kind of email. The
+ * end-of-day email uses EOD_TEST_EMAIL, so the Director's shortlist can be
+ * checked in a different inbox from the candidate follow-ups (24 Sep). Unset,
+ * it falls back to OUTREACH_TEST_EMAIL.
+ */
+function testRecipient(channel: OutreachChannel, testInbox?: string): string {
+  const own = channel === "email" && testInbox ? (process.env[testInbox] ?? "").trim() : "";
+  const raw = own || (channel === "email" ? process.env.OUTREACH_TEST_EMAIL : process.env.OUTREACH_TEST_PHONE);
   const value = (raw ?? "").trim();
   if (!value) return "";
   return channel === "email" ? emailNorm(value) : internationalPhone(value);
@@ -77,13 +84,13 @@ export function deliveryMode(channel: OutreachChannel): "live" | "test" | "off" 
  * redirected to the test recipient (and says so in `note`); with no test
  * recipient configured it is refused.
  */
-export function resolveRecipient(channel: OutreachChannel, intended: string): RecipientDecision {
+export function resolveRecipient(channel: OutreachChannel, intended: string, testInbox?: string): RecipientDecision {
   const want = channel === "email" ? emailNorm(intended ?? "") : internationalPhone(intended ?? "");
   if (outreachLive()) {
     if (!want) return { ok: false, reason: `No ${channel === "email" ? "email address" : "phone number"} to send to.` };
     return { ok: true, to: want, redirected: false, note: "" };
   }
-  const test = testRecipient(channel);
+  const test = testRecipient(channel, testInbox);
   if (!test) {
     return {
       ok: false,

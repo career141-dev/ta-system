@@ -50,6 +50,8 @@ export interface FollowUpMail {
   /** Written as `x-c141-candidatejobid`, so a reply can be tied to its application. */
   candidateJobId?: string;
   attachments?: MailAttachment[];
+  /** In test mode, the env var naming this email's own test mailbox (e.g. EOD_TEST_EMAIL). */
+  testInbox?: string;
 }
 
 export type MailResult =
@@ -106,7 +108,7 @@ export async function sendFollowUpMail(
   getToken: () => Promise<string | null>,
   fetchImpl: FetchLike = fetch as unknown as FetchLike,
 ): Promise<MailResult> {
-  const decision = resolveRecipient("email", mail.to);
+  const decision = resolveRecipient("email", mail.to, mail.testInbox);
   if (!decision.ok) return { ok: false, error: decision.reason, blocked: true };
   if (!emailAllowed(decision.to)) return { ok: false, error: suppressed("email", decision.to), blocked: true };
 
