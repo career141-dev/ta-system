@@ -26,13 +26,13 @@ server:
   image_proxy: false
 
 search:
-  # A CAPTCHA suspends an engine for a day by default, and Google is the only
-  # engine answering us — one burst would take the desk's search out until
-  # tomorrow. A minute is long enough to stop us hammering it and short enough
-  # that the next Research run works. The app paces its searches so this should
-  # not be reached at all (src/lib/serper.ts, 23 Sep).
+  # A CAPTCHA suspends an engine for a day by default. It was a minute while
+  # Google answered alone, so the next Research run would work — but on 24 Sep
+  # Google had flagged the address itself, and asking again every minute only
+  # earned another CAPTCHA. Bing and Yahoo carry the search now, so Google rests
+  # for an hour before it is tried again.
   suspended_times:
-    SearxEngineCaptcha: 60
+    SearxEngineCaptcha: 3600
     SearxEngineTooManyRequests: 60
     SearxEngineAccessDenied: 300
   # The JSON API. Off by default, and the reason no public instance could be
@@ -51,15 +51,15 @@ outgoing:
   pool_maxsize: 20
   enable_http2: true
 
-# Engines are the default set here, but the app asks Google alone
-# (SEARXNG_ENGINES, src/lib/serper.ts). Measured from this server on 23 Sep:
+# Engines are the default set here, but the app asks Google, Bing and Yahoo
+# (SEARXNG_ENGINES, src/lib/serper.ts). Google alone, below, held until 24 Sep,
+# when Google sent a CAPTCHA and Research had nothing else to ask. Measured from this server on 23 Sep:
 # Google answered with ten results and nothing failed; Brave and Google CSE
 # refused the address as "too many requests", DuckDuckGo timed out and Qwant
 # sent a CAPTCHA. Waiting on those four cost six seconds on every search, and a
 # query where enough of them failed came back empty — which the desk was shown
 # as a broken search.
 #
-# So Google is carrying this on its own. Watch `docker logs ta-prod-searxng`
-# for "CAPTCHA" or "Suspended" against google: that is the sign the address has
-# been throttled, and the answer then is fewer searches at a time, not more
-# engines — the others are already refusing us.
+# Watch `docker logs ta-prod-searxng` for "CAPTCHA" or "Suspended": if Bing and
+# Yahoo start refusing too, the address itself is blocked and SearXNG cannot
+# fix it — the next step is a paid source (Serper) or a proxy.

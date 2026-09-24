@@ -60,8 +60,20 @@ export function searxngInstances(): string[] {
 }
 
 /**
- * Which engines SearXNG asks. Google alone unless SEARXNG_ENGINES says
- * otherwise — measured on the server, 23 September:
+ * Which engines SearXNG asks: Google, Bing and Yahoo unless SEARXNG_ENGINES
+ * says otherwise.
+ *
+ * Google alone was the setting from 23 September, and it held for a day:
+ * on 24 September Google answered the server with a CAPTCHA, SearXNG suspended
+ * it, and Research stopped dead ("google: Suspended: CAPTCHA") with nothing
+ * else to ask. Pacing (searxngSlot) was already live — Google had flagged the
+ * address itself, not a burst. Bing and Yahoo (Bing's index, scraped
+ * differently) now answer when Google will not; a suspended engine is skipped
+ * at once, so the ones left carry the search rather than fail it. Mojeek and
+ * Startpage are not offered: current SearXNG ships them switched off behind a
+ * proof-of-work CAPTCHA.
+ *
+ * What was measured on the server, 23 September:
  *
  *   google      10 results, nothing failed
  *   duckduckgo  suspended: timeout      brave  suspended: too many requests
@@ -70,11 +82,11 @@ export function searxngInstances(): string[] {
  * The refusals are what made a search take six seconds: SearXNG waited for
  * engines that were never going to answer, and a query where enough of them
  * failed came back empty and was reported to the desk as a broken search.
- * Google is also the only one of them that honours `site:` and `-inurl:`,
- * which is what Research and Benchmark are written in.
+ * Bing honours `site:` but not `-inurl:`; websearch.ts enforces both on our
+ * side, so a Bing result that breaks an operator is dropped, never shown.
  */
 export function searxngEngines(): string {
-  return (process.env.SEARXNG_ENGINES ?? "").trim() || "google";
+  return (process.env.SEARXNG_ENGINES ?? "").trim() || "google,bing,yahoo";
 }
 
 /** Whether any search can run. Kept under its old name: callers ask "can we search?". */
