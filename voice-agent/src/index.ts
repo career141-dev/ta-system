@@ -14,9 +14,8 @@
 //
 // Run locally:  cd voice-agent && npm install && npm run dev
 
-import { type JobContext, type JobProcess, type VAD, ServerOptions, cli, defineAgent, voice } from "@livekit/agents";
+import { type JobContext, ServerOptions, cli, defineAgent, voice } from "@livekit/agents";
 import * as openai from "@livekit/agents-plugin-openai";
-import * as silero from "@livekit/agents-plugin-silero";
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -59,33 +58,35 @@ const num = (name: string, fallback: number) => {
 };
 
 /**
- * Turn-taking runs here, on a local Silero VAD, not on OpenAI's server.
+ * How Aura takes turns.
  *
- * 24 Sep: testers heard Aura drop half a sentence and speak the other half.
- * With OpenAI's server VAD, LiveKit hard-cancels Aura's reply the instant the
- * server hears any sound — a cough, an "mm-hmm", room noise, her own voice
- * echoing back — and the model then starts a fresh reply. LiveKit refuses to
- * soften that ("allowInterruptions cannot be false" with server-side turn
- * detection) and says to use VAD on the session instead. Locally:
- *  - a sound must last AURA_INTERRUPT_MS before it interrupts Aura at all;
- *  - an interruption with no words after it is false, and Aura resumes from
- *    where she paused instead of starting over;
- *  - the end of the candidate's turn is heard here, AURA_SILENCE_MS after they
- *    stop, without a round trip to OpenAI first.
- * All three are config, not a rebuild.
+ * 24 Sep, first: with OpenAI's server VAD, LiveKit hard-cancelled Aura's reply
+ * the instant the server heard any sound — a cough, an "mm-hmm", her own voice
+ * echoing back — and the model started a fresh one, so testers heard half a
+ * sentence. Moving turn-taking to a local Silero VAD fixed that but made it
+ * worse: Silero hears the raw line, before any noise reduction, so hiss or
+ * echo kept it sure the candidate was still talking. Aura kept listening and
+ * answered late or not at all.
+ *
+ * So OpenAI's server VAD decides turns again (it hears noise-reduced audio,
+ * and was quick), and nothing may cut Aura off: interrupt_response is off on
+ * the server and interruptions are off in the session. While she speaks, the
+ * line is not sent on at all (LiveKit drops audio during speech that cannot
+ * be interrupted), so her own echo cannot become a "reply" either. Her
+ * sentences are one or two short lines, so the candidate never waits long.
+ * If she starts talking over pauses, raise AURA_SILENCE_MS; if room noise
+ * starts turns, raise AURA_VAD_THRESHOLD.
  */
-const SILENCE_MS = num("AURA_SILENCE_MS", 350);
-const TURN_HANDLING = {
-  turnDetection: "vad" as const,
-  endpointing: { minDelay: SILENCE_MS, maxDelay: 2500 },
-  interruption: {
-    enabled: true,
-    mode: "vad" as const,
-    minDuration: num("AURA_INTERRUPT_MS", 600),
-    falseInterruptionTimeout: 1000,
-    resumeFalseInterruption: true,
-  },
-};
+const SILENCE_MS = num("AURA_SILENCE_MS", 400);
+const TURN_DETECTION = {
+  type: "server_vad",
+  threshold: num("AURA_VAD_THRESHOLD", 0.5),
+  // Keeps the first syllable of an answer.
+  prefix_padding_ms: 300,
+  silence_duration_ms: SILENCE_MS,
+  create_response: true,
+  interrupt_response: false,
+} as const;
 
 /**
  * A provider hiccup must not end the call.
@@ -104,23 +105,8 @@ function textOf(item: any): string {
   return content.filter((c: unknown) => typeof c === "string").join(" ");
 }
 
-type UserData = { vad?: VAD };
-
-export default defineAgent<UserData>({
-  // Loaded once per worker process, so a call does not wait for the model.
-  prewarm: async (proc: JobProcess<UserData>) => {
-    proc.userData.vad = await silero.VAD.load({
-      minSilenceDuration: 250,
-      minSpeechDuration: 100,
-      // Keeps the first syllable of an answer.
-      prefixPaddingDuration: 300,
-      activationThreshold: num("AURA_VAD_THRESHOLD", 0.5),
-    });
-  },
-
-  entry: async (ctx: JobContext<UserData>) => {
-    const vad = ctx.proc.userData.vad;
-    if (!vad) throw new Error("[Aura] VAD did not load");
+export default defineAgent({
+  entry: async (ctx: JobContext) => {
     await ctx.connect();
 
     const brief = readBrief(ctx.room.metadata);
@@ -128,26 +114,27 @@ export default defineAgent<UserData>({
       `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}] [silence=${SILENCE_MS}ms]`,
     );
 
-    // turnDetection null: OpenAI's server no longer decides turns or cancels
-    // replies; the session's VAD does (TURN_HANDLING above). Minimal reasoning
-    // keeps the first word fast. Candidate speech is transcribed by OpenAI too,
-    // for the call transcript; noise reduction keeps room noise out of it.
+    // OpenAI decides when the candidate has finished (TURN_DETECTION above);
+    // minimal reasoning keeps the first word fast. Candidate speech is
+    // transcribed by OpenAI too, for the call transcript. Noise reduction is
+    // applied before OpenAI's VAD, so room noise does not hold a turn open.
     const llm = new openai.realtime.RealtimeModel({
       apiKey: OPENAI_API_KEY,
       model: REALTIME_MODEL,
       voice: REALTIME_VOICE,
       reasoning: { effort: "minimal" },
-      turnDetection: null,
+      turnDetection: TURN_DETECTION,
       inputAudioNoiseReduction: { type: "near_field" },
     });
 
     const session = new voice.AgentSession({
       llm,
-      vad,
       // The browser already cancels its own echo; three seconds of warm-up only
       // stopped the candidate interrupting at the start of every answer.
       aecWarmupDuration: 0,
-      turnHandling: TURN_HANDLING,
+      // LiveKit logs a startup warning that interruptions "cannot be false"
+      // with server-side turn detection; here that is the point (see above).
+      turnHandling: { turnDetection: "realtime_llm", interruption: { enabled: false } },
     });
 
     // Each finished line goes to the call window, which keeps the transcript.
@@ -178,11 +165,6 @@ export default defineAgent<UserData>({
       const m = e?.metrics;
       if (m?.type === "realtime_model_metrics" && m.ttftMs >= 0) console.info(`[Aura] reply first audio in ${Math.round(m.ttftMs)} ms`);
     });
-    // A sound that paused Aura but carried no words. If these are frequent, the
-    // room is noisy or her voice is echoing back: raise AURA_INTERRUPT_MS.
-    session.on(voice.AgentSessionEventTypes.AgentFalseInterruption, (e: any) =>
-      console.info(`[Aura] false interruption, resumed=${e?.resumed}`),
-    );
     session.on(voice.AgentSessionEventTypes.AgentStateChanged, (e: any) => console.info(`[Aura] agent ${e?.state}`));
     session.on(voice.AgentSessionEventTypes.UserStateChanged, (e: any) => console.info(`[Aura] candidate ${e?.state}`));
 
