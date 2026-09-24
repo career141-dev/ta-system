@@ -18,27 +18,51 @@ const PAGE_SIZE = 20;
 export default async function ClientsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ held?: string; q?: string; page?: string }>;
+  searchParams: Promise<{
+    held?: string;
+    q?: string;
+    page?: string;
+    industry?: string;
+  }>;
 }) {
   const sp = await searchParams;
-  const { held, q = "" } = sp;
+  const { held, q = "", industry } = sp;
   await primeStore({ allApplications: true });
   const user = await pageUser("database.read");
   const openings = repo.openings();
   const users = repo.users();
-  // The page's own search (ClientsToolbar) searches clients: the name, the industry,
-  // a contact, or an opening filed under the client.
-  const matching = repo.clients().filter((c) =>
-    matchesQuery(
+  const allClients = repo.clients();
+
+  // Extract all unique industries present in clients for filter dropdown
+  const industryOptions = Array.from(
+    new Set(allClients.map((c) => c.industry?.trim()).filter(Boolean))
+  ).sort() as string[];
+
+  // Filter clients by search query and industry
+  const matching = allClients.filter((c) => {
+    const mine = openings.filter((o) => o.clientId === c.id);
+
+    // Search query matches client name, industry, contacts, or associated openings
+    const matchesSearch = matchesQuery(
       q,
       c.name,
       c.industry,
       ...c.contacts.flatMap((x) => [x.name, x.email, x.title]),
-      ...openings.filter((o) => o.clientId === c.id).map((o) => o.title),
-    ),
-  );
+      ...mine.map((o) => o.title),
+    );
+    if (!matchesSearch) return false;
+
+    // Industry filter
+    if (industry && industry !== "all" && c.industry?.toLowerCase() !== industry.toLowerCase()) {
+      return false;
+    }
+
+    return true;
+  });
+
   const page = pageFrom(sp, matching.length, PAGE_SIZE);
   const clients = slicePage(matching, page, PAGE_SIZE);
+  const hasActiveFilters = Boolean(industry || q);
 
   return (
     <main className="mx-auto max-w-[1180px] px-8 py-9">
@@ -61,7 +85,11 @@ export default async function ClientsPage({
       </div>
 
       <Suspense fallback={<div className="mb-6 h-[38px]" />}>
-        <ClientsToolbar initialQuery={q} />
+        <ClientsToolbar
+          initialQuery={q}
+          industry={industry}
+          industryOptions={industryOptions}
+        />
       </Suspense>
 
       {/* A refused delete says why rather than looking like a dead button. */}
@@ -73,9 +101,21 @@ export default async function ClientsPage({
         </p>
       )}
 
-      {q && matching.length === 0 && (
+      {matching.length === 0 && (
         <div className="rounded-xl border border-rule bg-surface px-8 py-20 text-center">
-          <p className="text-[13.5px] text-ink-soft">No client matches that search.</p>
+          <p className="text-[13.5px] text-ink-soft">
+            {hasActiveFilters
+              ? "No clients match the selected industry or search."
+              : "No clients found."}
+          </p>
+          {hasActiveFilters && (
+            <Link
+              href="/clients"
+              className="mt-3 inline-block text-[13px] font-medium text-brand hover:underline"
+            >
+              Reset search and filters
+            </Link>
+          )}
         </div>
       )}
 

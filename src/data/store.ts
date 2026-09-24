@@ -798,9 +798,10 @@ const rawRepo = {
 
     const candidate = db.candidates.find((c) => c.id === app.candidateId);
     const from = app.stage;
-    // Shortlisted database and incoming candidates move to AI Follow-up
-    const claimable = from === "new_cv" || from === "matched";
-    const to: Stage = claimable ? "ai_follow_up" : from;
+    // A TA's shortlist is TA Follow-up — database matches, new CVs, and the
+    // AI's own shortlist too. Only the AI's pass-mark shortlist is AI Follow-up.
+    const claimable = from === "new_cv" || from === "matched" || from === "ai_follow_up";
+    const to: Stage = claimable ? "ta_follow_up" : from;
 
     let setNumber: number | null = app.setNumber;
     mutate((d) => {
@@ -1625,6 +1626,7 @@ const rawRepo = {
     createdBy?: Id,
     liveOnLinkedIn = false,
     channel: JobPost["channel"] = "linkedin",
+    externalUrl?: string | null,
   ): { ok: true } | { ok: false; message: string } {
     const opening = load().openings.find((x) => x.id === openingId);
     if (!opening) return { ok: false, message: "That opening no longer exists." };
@@ -1677,7 +1679,7 @@ const rawRepo = {
             : o.assignedTaIds.length === 1
               ? o.assignedTaIds[0]
               : createdBy ?? o.assignedTaIds[0] ?? null,
-        externalUrl: null,
+        externalUrl: externalUrl ?? null,
         // Whether the advert is up decides two things: whether applications to
         // this TA's inbox get filed against it, and whether it is chased for
         // going quiet. Both are meaningless for an advert nobody can apply to.

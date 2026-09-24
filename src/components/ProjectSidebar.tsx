@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
-import { addJobPost } from "@/app/actions";
+import { addJobPost, deleteJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
 import { RAIL_TOP } from "@/lib/chrome";
 
@@ -260,6 +260,12 @@ export function ProjectSidebar({
                       autoFocus
                       className="w-full rounded border border-rule bg-paper px-2 py-1 text-[12px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand"
                     />
+                    <input
+                      name="externalUrl"
+                      type="url"
+                      placeholder="Job link (e.g. LinkedIn URL)..."
+                      className="w-full rounded border border-rule bg-paper px-2 py-1 text-[12px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand"
+                    />
                     <div className="flex items-center justify-end gap-1.5">
                       <button
                         type="button"
@@ -284,20 +290,72 @@ export function ProjectSidebar({
                   <span className="px-2.5 py-[7px] text-[12px] text-ink-faint">No posts yet</span>
                 )}
                 {posts.map((p) => (
-                  <Link
+                  <div
                     key={p.id}
-                    href={`${jobBase}?post=${p.id}`}
-                    className={sub(activePost === p.id)}
-                    title={p.title}
+                    className={`group flex items-center justify-between gap-1.5 rounded-md px-2.5 py-[6px] text-[12.5px] transition-colors ${
+                      activePost === p.id
+                        ? "bg-rule/40 font-semibold text-ink"
+                        : "text-ink-soft hover:bg-rule/20 hover:text-ink"
+                    }`}
                   >
-                    <span
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        p.status === "live" ? "bg-brand" : p.status === "paused" ? "bg-warn" : "bg-rule-strong"
-                      }`}
-                    />
-                    <span className="min-w-0 truncate">{p.title}</span>
-                    <span className="tabular ml-auto shrink-0 text-[11.5px] text-ink-faint">{p.count}</span>
-                  </Link>
+                    <Link
+                      href={`${jobBase}?post=${p.id}`}
+                      className="flex min-w-0 flex-1 items-center gap-2"
+                      title={p.title}
+                    >
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                          p.status === "live"
+                            ? "bg-brand"
+                            : p.status === "paused"
+                              ? "bg-warn"
+                              : "bg-rule-strong"
+                        }`}
+                      />
+                      <span className="min-w-0 truncate">{p.title}</span>
+                    </Link>
+
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <span className="tabular text-[11.5px] text-ink-faint group-hover:hidden">
+                        {p.count}
+                      </span>
+                      <form
+                        action={async (formData) => {
+                          await deleteJobPost(formData);
+                        }}
+                        onSubmit={(e) => {
+                          if (!window.confirm(`Delete job post "${p.title}"?`)) {
+                            e.preventDefault();
+                          }
+                        }}
+                        className="hidden group-hover:block"
+                      >
+                        <input type="hidden" name="openingId" value={openingId} />
+                        <input type="hidden" name="postId" value={p.id} />
+                        <button
+                          type="submit"
+                          title={`Delete post "${p.title}"`}
+                          aria-label={`Delete post "${p.title}"`}
+                          className="rounded p-0.5 text-danger transition-colors hover:bg-danger-soft hover:opacity-80"
+                        >
+                          <svg
+                            width={13}
+                            height={13}
+                            viewBox="0 0 16 16"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.5"
+                          >
+                            <path
+                              d="M3 4.5h10M5.5 4.5V3a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1.5M6 7.5v5M10 7.5v5M4 4.5l.8 9.2a1 1 0 0 0 1 .8h4.4a1 1 0 0 0 1-.8l.8-9.2"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            />
+                          </svg>
+                        </button>
+                      </form>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}

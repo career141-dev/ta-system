@@ -29,7 +29,7 @@ search:
   # A CAPTCHA suspends an engine for a day by default. It was a minute while
   # Google answered alone, so the next Research run would work — but on 24 Sep
   # Google had flagged the address itself, and asking again every minute only
-  # earned another CAPTCHA. Bing and Yahoo carry the search now, so Google rests
+  # earned another CAPTCHA. The other engines carry the search now, so Google rests
   # for an hour before it is tried again.
   suspended_times:
     SearxEngineCaptcha: 3600
@@ -51,15 +51,17 @@ outgoing:
   pool_maxsize: 20
   enable_http2: true
 
-# Engines are the default set here, but the app asks Google, Bing and Yahoo
-# (SEARXNG_ENGINES, src/lib/serper.ts). Google alone, below, held until 24 Sep,
-# when Google sent a CAPTCHA and Research had nothing else to ask. Measured from this server on 23 Sep:
-# Google answered with ten results and nothing failed; Brave and Google CSE
-# refused the address as "too many requests", DuckDuckGo timed out and Qwant
-# sent a CAPTCHA. Waiting on those four cost six seconds on every search, and a
-# query where enough of them failed came back empty — which the desk was shown
-# as a broken search.
+# Engines are the default set here. The app asks Google, Bing, Yahoo,
+# DuckDuckGo and Brave (SEARXNG_ENGINES, src/lib/serper.ts), one engine per
+# request, and merges what they return. Google alone held until 24 Sep, when
+# Google sent a CAPTCHA and Research had nothing else to ask.
 #
-# Watch `docker logs ta-prod-searxng` for "CAPTCHA" or "Suspended": if Bing and
-# Yahoo start refusing too, the address itself is blocked and SearXNG cannot
-# fix it — the next step is a paid source (Serper) or a proxy.
+# Measured from this server on 23 Sep, all engines in one request: Google
+# answered with ten results; Brave and Google CSE refused the address as "too
+# many requests", DuckDuckGo timed out and Qwant sent a CAPTCHA. Waiting on
+# those cost six seconds on every search. One engine per request removes that:
+# a refusing or suspended engine answers at once and costs only its own part.
+#
+# Watch `docker logs ta-prod-searxng` for "CAPTCHA" or "Suspended": if every
+# engine is refusing, the address itself is blocked and SearXNG cannot fix it —
+# the next step is a paid source (Serper) or a proxy.
