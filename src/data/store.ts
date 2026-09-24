@@ -647,7 +647,7 @@ const rawRepo = {
    */
   refereesForPipeline(openingId: Id) {
     const db = load();
-    const STAGES: Stage[] = ["ai_follow_up", "ta_follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"];
+    const STAGES: Stage[] = ["ta_follow_up", "ai_follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer"];
     const apps = db.applications
       .filter((a) => a.openingId === openingId && STAGES.includes(a.stage))
       .sort((a, b) => STAGES.indexOf(a.stage) - STAGES.indexOf(b.stage));

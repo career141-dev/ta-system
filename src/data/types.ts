@@ -281,8 +281,8 @@ export interface Candidate {
 export type Stage =
   | "new_cv"
   | "matched"
-  | "ai_follow_up"
   | "ta_follow_up"
+  | "ai_follow_up"
   | "director_review"
   | "director_shortlist"
   | "client_shortlist"
@@ -293,8 +293,8 @@ export type Stage =
   | "dropped_out";
 
 export const PIPELINE_STAGES: Stage[] = [
-  "ai_follow_up",
   "ta_follow_up",
+  "ai_follow_up",
   "director_review",
   "director_shortlist",
   "client_shortlist",

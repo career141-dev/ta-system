@@ -177,7 +177,7 @@ export function ProjectSidebar({
                     </Link>
                     {/* Under the last Follow-up stage, as it sat under Follow-up
                         before the split (22 Sep) — nothing else links to it. */}
-                    {s === "ta_follow_up" && canSeeSourcing && (
+                    {s === "ai_follow_up" && canSeeSourcing && (
                       <Link href={`${base}/reference`} className={`${sub(inReference)} ml-3 gap-1.5`}>
                         <span aria-hidden="true" className="text-ink-faint">└</span> Reference
                       </Link>
