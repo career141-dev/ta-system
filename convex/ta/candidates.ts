@@ -160,6 +160,83 @@ export const applicationsFor = internalQuery({
 });
 
 /**
+ * People in the database who work at a given company (e.g. candidate's present employer).
+ * Scans candidates by currentEmployer or jobHistory, and referees by company.
+ */
+export const peopleAtCompany = internalQuery({
+  args: {
+    actorId: v.optional(v.string()),
+    company: v.string(),
+    excludeCandidateId: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await optionalActor(ctx, args.actorId);
+    const needle = args.company.trim().toLowerCase();
+    if (!needle) return { candidates: [], referees: [] };
+    const limit = Math.min(args.limit ?? 50, 100);
+
+    const candidates: {
+      id: string;
+      fullName: string;
+      currentTitle: string;
+      currentEmployer: string;
+      phone: string | null;
+      email: string | null;
+    }[] = [];
+
+    const candDocs = await ctx.db.query("candidates").order("desc").take(500);
+    for (const cand of candDocs) {
+      if (cand.mergedInto) continue;
+      if (args.excludeCandidateId && cand._id === args.excludeCandidateId) continue;
+      const emp = (cand.currentEmployer ?? "").toLowerCase();
+      const hist = (cand.jobHistory ?? []).some((h) => (h.company ?? "").toLowerCase().includes(needle));
+      if (emp.includes(needle) || hist) {
+        candidates.push({
+          id: cand._id as string,
+          fullName: cand.fullName ?? "Unnamed Candidate",
+          currentTitle: cand.currentJobTitle ?? cand.currentTitle ?? "",
+          currentEmployer: cand.currentEmployer ?? (cand.jobHistory?.find((h) => (h.company ?? "").toLowerCase().includes(needle))?.company ?? ""),
+          phone: cand.phone ?? null,
+          email: cand.email ?? null,
+        });
+        if (candidates.length >= limit) break;
+      }
+    }
+
+    const referees: {
+      id: string;
+      name: string;
+      title: string | null;
+      company: string | null;
+      phone: string | null;
+      email: string | null;
+      relationship: string | null;
+      fromCandidateId: string;
+    }[] = [];
+
+    const refDocs = await ctx.db.query("referees").take(500);
+    for (const r of refDocs) {
+      if (r.company && r.company.toLowerCase().includes(needle)) {
+        referees.push({
+          id: r._id as string,
+          name: r.name,
+          title: r.designation ?? null,
+          company: r.company ?? null,
+          phone: r.contactNo ?? null,
+          email: r.email ?? null,
+          relationship: r.relationship ?? null,
+          fromCandidateId: r.candidateId as string,
+        });
+        if (referees.length >= limit) break;
+      }
+    }
+
+    return { candidates, referees };
+  },
+});
+
+/**
  * The CV text for a set of candidates, and where it came from.
  *
  * `source` is the useful part: "db" means the text is here, "r2" means it
