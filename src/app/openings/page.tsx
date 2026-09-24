@@ -25,18 +25,19 @@ const BUCKETS = [
   { key: "closed", label: "Closed" },
 ];
 
+// Whole words only (review of PR #31): "male" is inside "Female", "uk" inside "Sukkur".
 function toCountry(loc: string): string {
   const l = loc.trim().toLowerCase();
-  if (/colombo|kandy|galle|jaffna|sri lanka/i.test(l)) return "Sri Lanka";
-  if (/karachi|lahore|islamabad|rawalpindi|pakistan/i.test(l)) return "Pakistan";
-  if (/dhaka|chittagong|bangladesh/i.test(l)) return "Bangladesh";
-  if (/dubai|abu dhabi|sharjah|uae|emirates/i.test(l)) return "UAE";
-  if (/doha|qatar/i.test(l)) return "Qatar";
-  if (/riyadh|jeddah|dammam|saudi/i.test(l)) return "Saudi Arabia";
-  if (/male|maldives/i.test(l)) return "Maldives";
-  if (/mumbai|delhi|bangalore|india/i.test(l)) return "India";
-  if (/singapore/i.test(l)) return "Singapore";
-  if (/london|uk|united kingdom/i.test(l)) return "UK";
+  if (/\b(colombo|kandy|galle|jaffna|sri lanka)\b/i.test(l)) return "Sri Lanka";
+  if (/\b(karachi|lahore|islamabad|rawalpindi|pakistan)\b/i.test(l)) return "Pakistan";
+  if (/\b(dhaka|chittagong|bangladesh)\b/i.test(l)) return "Bangladesh";
+  if (/\b(dubai|abu dhabi|sharjah|uae|emirates)\b/i.test(l)) return "UAE";
+  if (/\b(doha|qatar)\b/i.test(l)) return "Qatar";
+  if (/\b(riyadh|jeddah|dammam|saudi)\b/i.test(l)) return "Saudi Arabia";
+  if (/\b(male|maldives)\b/i.test(l)) return "Maldives";
+  if (/\b(mumbai|delhi|bangalore|india)\b/i.test(l)) return "India";
+  if (/\b(singapore)\b/i.test(l)) return "Singapore";
+  if (/\b(london|uk|united kingdom)\b/i.test(l)) return "UK";
   return loc.trim();
 }
 

@@ -1007,6 +1007,16 @@ export async function addJobPost(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
   const externalUrl = String(formData.get("externalUrl") ?? formData.get("jobLink") ?? "").trim() || null;
+  // The same check as editing a post (updatePost): a link without a job or
+  // project number is saved but never routes a CV (review of PR #31, 24 Sep).
+  if (externalUrl) {
+    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
+    if (!linkedinJobId(externalUrl) && !linkedinProjectId(externalUrl)) {
+      await fail(
+        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+      );
+    }
+  }
   const where = String(formData.get("channel") ?? "linkedin");
   const channel = (["linkedin", "facebook", "email_campaign"] as const).find((c) => c === where) ?? "linkedin";
   const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel, externalUrl);
