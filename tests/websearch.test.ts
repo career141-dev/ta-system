@@ -116,7 +116,7 @@ console.log("\nSearXNG: which engines, and what they said");
 {
   const env = process.env.SEARXNG_ENGINES;
   delete process.env.SEARXNG_ENGINES;
-  eq("Google alone unless we are told otherwise", searxngEngines(), "google");
+  eq("Google, Bing and Yahoo unless we are told otherwise", searxngEngines(), "google,bing,yahoo");
   process.env.SEARXNG_ENGINES = " mojeek,google ";
   eq("and whatever we are told, as given", searxngEngines(), "mojeek,google");
   if (env === undefined) delete process.env.SEARXNG_ENGINES; else process.env.SEARXNG_ENGINES = env;
