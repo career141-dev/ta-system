@@ -333,11 +333,11 @@ export async function claimCandidate(formData: FormData) {
     if (owner) await fail(`${owner} already claimed this candidate.`);
     // It used to succeed in silence — the row simply moved away, which read
     // as the button having done nothing (21 September).
-    await back(`Shortlisted${r?.ok && r.setNumber ? ` as set ${r.setNumber}` : ""} — moved to AI Follow-up.`);
+    await back(`Shortlisted${r?.ok && r.setNumber ? ` as set ${r.setNumber}` : ""} — moved to TA Follow-up.`);
   }
   repo.shortlist(appId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Shortlisted — moved to AI Follow-up.");
+  await back("Shortlisted — moved to TA Follow-up.");
 }
 
 /**
@@ -1006,9 +1006,20 @@ export async function addJobPost(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
+  const externalUrl = String(formData.get("externalUrl") ?? formData.get("jobLink") ?? "").trim() || null;
+  // The same check as editing a post (updatePost): a link without a job or
+  // project number is saved but never routes a CV (review of PR #31, 24 Sep).
+  if (externalUrl) {
+    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
+    if (!linkedinJobId(externalUrl) && !linkedinProjectId(externalUrl)) {
+      await fail(
+        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+      );
+    }
+  }
   const where = String(formData.get("channel") ?? "linkedin");
   const channel = (["linkedin", "facebook", "email_campaign"] as const).find((c) => c === where) ?? "linkedin";
-  const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel);
+  const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel, externalUrl);
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
   await back(`Job post "${title}" added.`);
@@ -2097,15 +2108,15 @@ export async function addToOpening(formData: FormData) {
     const owner = r && !r.ok ? repo.users().find((u) => u.id === r.ownerTaId)?.name ?? "another recruiter" : null;
     await afterBackendWrite(openingId);
     refresh();
-    if (problem) await note(`Added to ${title} under Database CVs, but not moved to AI Follow-up: ${problem}`);
+    if (problem) await note(`Added to ${title} under Database CVs, but not moved to TA Follow-up: ${problem}`);
     if (owner) await fail(`${owner} has already claimed this candidate on ${title}.`);
-    await done(`Added to ${title} in AI Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
+    await done(`Added to ${title} in TA Follow-up${r?.ok && r.setNumber ? `, set ${r.setNumber}` : ""}.`);
   }
 
   const claimed = repo.shortlist(appId!, user.id);
   refresh();
   if (!claimed.ok) await fail("Somebody else claimed this candidate first.");
-  await done(`Added to ${title} in AI Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
+  await done(`Added to ${title} in TA Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
 }
 
 // ─── Headhunting intelligence (spec §8A) ─────────────────────────────────────
