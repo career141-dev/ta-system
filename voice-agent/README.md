@@ -12,8 +12,12 @@ transcript is sent back and the answers are read into the candidate's record
 ## Run locally
 
 It reads the TA System's `.env.local`: `LIVEKIT_URL`, `LIVEKIT_API_KEY`,
-`LIVEKIT_API_SECRET`, `DEEPGRAM_API_KEY`, and `OPENAI_API_KEY` or
-`OPENROUTER_API_KEY`.
+`LIVEKIT_API_SECRET` and `OPENAI_API_KEY`. The whole call — hearing, thinking
+and speaking — runs on one OpenAI Realtime model; there is no Deepgram key.
+
+Optional: `AURA_REALTIME_MODEL` (default `gpt-realtime-2.1-mini`) and
+`AURA_REALTIME_VOICE` (default `marin`; also `cedar`, `alloy`, `coral`, `sage`,
+`verse`…).
 
 ```bash
 cd voice-agent && npm install && npm run dev
