@@ -4,6 +4,7 @@ import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { isDeskWide } from "@/lib/auth";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
+import { WorkingStageMenu } from "@/components/WorkingStageMenu";
 import { OpeningMenu } from "@/components/OpeningMenu";
 import { OpeningsToolbar } from "@/components/OpeningsToolbar";
 import { assignableTas } from "@/lib/assignable";
@@ -214,6 +215,12 @@ export default async function OpeningsPage({
             const target = PRIORITY_TARGET[o.priorityTier].days;
             const urgent = liveAlerts.filter((a) => a.openingId === o.id && a.urgent).length;
 
+            // The TA's own stage on this job (100% / Follow-up / Add-on), next
+            // to the status so it can be changed without opening the job. It is
+            // what the end-of-day L-sheet reports; a lead not on the job has none.
+            const onJob = !!repo.assignmentFor(o.id, user.id);
+            const workingStage = repo.workingStage(o.id, user.id);
+
             return (
               // The row stays clickable through a stretched link rather than
               // wrapping everything, so the status control inside it is a real
@@ -238,6 +245,11 @@ export default async function OpeningsPage({
                       <span className="pointer-events-auto relative z-10">
                         <StatusMenu openingId={o.id} status={o.status as OpeningStatus} size="small" />
                       </span>
+                      {onJob && (
+                        <span className="pointer-events-auto relative z-10">
+                          <WorkingStageMenu openingId={o.id} stage={workingStage} size="small" />
+                        </span>
+                      )}
                       {o.targetNationalities.length > 0 && (
                         <span className="text-[11.5px] text-ink-faint">
                           {o.targetNationalities.join(", ")} only
