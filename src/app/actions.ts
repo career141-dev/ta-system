@@ -2508,7 +2508,9 @@ async function researchOpening(
     markdown: res.markdown,
     sources: res.sources,
     searches: res.searches,
-    model: `${SEARCH_NAME[searchProvider() ?? "serper"]} + ${modelFor("plan")}`,
+    // Who actually answered, not who was configured: with Claude in front,
+    // a fallback to OpenRouter would otherwise be recorded as Claude (24 Sep).
+    model: `${SEARCH_NAME[searchProvider() ?? "serper"]} + ${res.answeredBy ?? modelFor("plan")}`,
     generatedBy: userId,
     generatedAt: Date.now(),
   });

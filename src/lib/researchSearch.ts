@@ -42,6 +42,8 @@ export type ResearchRun =
       markdown: string;
       /** Set when the pages were found but the model could not sort them. */
       modelNote?: string;
+      /** The model that sorted the client's pages — Claude, or OpenRouter when Claude could not. */
+      answeredBy?: string;
       /** Who holds the role now; absent when Benchmark was not asked for. */
       benchmarks?: IncumbentRow[];
       benchmarkNote?: string;
@@ -414,7 +416,7 @@ ${CITE}
     ]
       .filter(Boolean)
       .join("\n\n");
-    return { ok: true, fields, sources, searches, markdown, modelNote, benchmarks: bench?.rows, benchmarkNote: bench?.modelNote };
+    return { ok: true, fields, sources, searches, markdown, modelNote, answeredBy: clientAnswer.ok ? clientAnswer.provider : undefined, benchmarks: bench?.rows, benchmarkNote: bench?.modelNote };
   } catch (e) {
     if (e instanceof SpendCapHit) return { ok: false, reason: "spend_cap" };
     throw e;

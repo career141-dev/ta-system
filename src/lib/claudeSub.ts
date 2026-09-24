@@ -21,11 +21,12 @@ import type { AiResult, Task } from "./ai";
  * whatever the setting says, so a candidate's details never reach a personal
  * account.
  */
-const SAFE: ReadonlySet<Task> = new Set<Task>(["plan", "research", "jd"]);
+// Shared with lib/claudeApi: the same tasks, and only these, may go to Claude.
+export const CLAUDE_TASKS: ReadonlySet<Task> = new Set<Task>(["plan", "research", "jd"]);
 const TIMEOUT_MS = 120_000;
 
 export function viaSubscription(task: Task): boolean {
-  if (!SAFE.has(task)) return false;
+  if (!CLAUDE_TASKS.has(task)) return false;
   if (!(process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim()) return false;
   const wanted = (process.env.C141_CLAUDE_SUB_TASKS ?? "").split(",").map((t) => t.trim());
   return wanted.includes(task);
