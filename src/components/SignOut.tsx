@@ -1,20 +1,29 @@
 "use client";
 
-import { SignOutButton } from "@clerk/nextjs";
+import { useClerk } from "@clerk/nextjs";
 import { devSignOut } from "@/app/actions";
 
-/** Sign out: through Clerk normally, or by clearing the development sign-in in UI-only mode (lib/uiOnly.ts). */
+/** Sign out: clears both Clerk session and local dev session cookies. */
 export function SignOut({ className }: { className: string }) {
-  if (process.env.NEXT_PUBLIC_C141_UI_ONLY === "on" && process.env.NODE_ENV !== "production") {
-    return (
-      <form action={devSignOut}>
-        <button className={className}>Sign out</button>
-      </form>
-    );
+  const clerk = useClerk();
+
+  async function handleSignOut(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      if (clerk && clerk.loaded) {
+        await clerk.signOut({ redirectUrl: "/signin" });
+      }
+    } catch {
+      // ignore if Clerk wasn't loaded or not signed in through Clerk
+    }
+    await devSignOut();
   }
+
   return (
-    <SignOutButton redirectUrl="/signin">
-      <button className={className}>Sign out</button>
-    </SignOutButton>
+    <form onSubmit={handleSignOut} action={devSignOut}>
+      <button type="submit" className={className}>
+        Sign out
+      </button>
+    </form>
   );
 }

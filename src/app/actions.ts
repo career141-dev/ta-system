@@ -3768,7 +3768,10 @@ export async function devSignInAs(formData: FormData) {
 export async function devSignOut() {
   const { DEV_SESSION_COOKIE } = await import("@/lib/devSignin");
   const { cookies } = await import("next/headers");
-  (await cookies()).delete(DEV_SESSION_COOKIE);
+  const c = await cookies();
+  c.delete(DEV_SESSION_COOKIE);
+  c.delete("__session");
+  c.delete("__client_uat");
   redirect("/signin");
 }
 

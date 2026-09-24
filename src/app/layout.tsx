@@ -68,12 +68,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </>
         ) : (
         <ClerkProvider signInUrl="/signin" signUpUrl="/signup" afterSignOutUrl="/signin">
-          {/* Hidden the moment Clerk signs out, even before this layout re-renders. */}
-          {user ? (
-            <Show when="signed-in">
-              <TopNav user={user} alertCount={alertCount} />
-            </Show>
-          ) : null}
+          {user ? <TopNav user={user} alertCount={alertCount} /> : null}
           <Suspense fallback={null}>
             <NavigationProgress />
           </Suspense>
@@ -81,11 +76,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Flash />
           </Suspense>
           {children}
-          {user ? (
-            <Show when="signed-in">
-              <DeskAssistant />
-            </Show>
-          ) : null}
+          {user ? <DeskAssistant /> : null}
         </ClerkProvider>
         )}
       </body>

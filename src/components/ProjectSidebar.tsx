@@ -56,10 +56,7 @@ export function ProjectSidebar({
   const base = `/openings/${openingId}`;
   const jobBase = `${base}/linkedin-job`;
   const inHeadhunting = path.startsWith(`${base}/hh`);
-  // Reference lives under Follow-up (testing, 21 Sep): referees are checked
-  // for the people being followed up, so it opens the Pipeline group too.
-  const inReference = path === `${base}/reference`;
-  const inPipeline = path.startsWith(`${base}/pipeline`) || inReference;
+  const inPipeline = path.startsWith(`${base}/pipeline`);
   const inJob = path.startsWith(jobBase);
   const activePost = inJob ? search.get("post") : null;
 
@@ -171,18 +168,9 @@ export function ProjectSidebar({
             {pipeOpen && (
               <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                 {PIPELINE_STAGES.map((s) => (
-                  <Fragment key={s}>
-                    <Link href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
-                      {STAGE_LABEL[s]}
-                    </Link>
-                    {/* Under the last Follow-up stage, as it sat under Follow-up
-                        before the split (22 Sep) — nothing else links to it. */}
-                    {s === "ta_follow_up" && canSeeSourcing && (
-                      <Link href={`${base}/reference`} className={`${sub(inReference)} ml-3 gap-1.5`}>
-                        <span aria-hidden="true" className="text-ink-faint">└</span> Reference
-                      </Link>
-                    )}
-                  </Fragment>
+                  <Link key={s} href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
+                    {STAGE_LABEL[s]}
+                  </Link>
                 ))}
                 <div className="my-1.5 border-t border-rule" />
                 {CLOSED_STAGES.map((s) => (
