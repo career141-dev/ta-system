@@ -209,9 +209,11 @@ services:
       LIVEKIT_URL: ws://livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
-      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY:?set in .env.staging}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Aura runs entirely on OpenAI Realtime (24 Sep); no Deepgram key.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?set in .env.staging}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AURA_REALTIME_MODEL: ${AURA_REALTIME_MODEL:-}
+      AURA_REALTIME_VOICE: ${AURA_REALTIME_VOICE:-}
       AURA_AGENT_NAME: ${AURA_AGENT_NAME:-career141-aura}
       AURA_HEALTH_PORT: "8082"
     command: ["node", "dist/index.js", "start"]

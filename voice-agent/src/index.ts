@@ -1,9 +1,9 @@
 // voice-agent/src/index.ts
 //
-// Aura, the TA System's screening call agent — a LiveKit Agents worker,
-// modelled on the CV pipeline's Aura agent (cv-processing-recruitment-pipeline-
-// system/agent/src/index.ts): Silero VAD, Deepgram Nova speech-to-text,
-// GPT-4o-mini, Deepgram Aura voice.
+// Aura, the TA System's screening call agent — a LiveKit Agents worker on one
+// OpenAI Realtime model (gpt-realtime-2.1-mini) that hears, thinks and speaks.
+// 24 Sep: replaced the Deepgram Nova → GPT-4o-mini → Deepgram Aura chain, so
+// the whole call runs on the one OPENAI_API_KEY and there is no Deepgram key.
 //
 // It registers under an agent name, so it joins only rooms the TA System
 // dispatches it to (src/app/voiceActions.ts), never every room on the server.
@@ -14,18 +14,8 @@
 //
 // Run locally:  cd voice-agent && npm install && npm run dev
 
-import {
-  type JobContext,
-  type JobProcess,
-  type VAD,
-  ServerOptions,
-  cli,
-  defineAgent,
-  voice,
-} from "@livekit/agents";
-import * as deepgram from "@livekit/agents-plugin-deepgram";
+import { type JobContext, ServerOptions, cli, defineAgent, voice } from "@livekit/agents";
 import * as openai from "@livekit/agents-plugin-openai";
-import * as silero from "@livekit/agents-plugin-silero";
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,12 +43,14 @@ process.env.LIVEKIT_URL = (process.env.LIVEKIT_URL ?? process.env.NEXT_PUBLIC_LI
 need("LIVEKIT_URL");
 need("LIVEKIT_API_KEY");
 need("LIVEKIT_API_SECRET");
-const DEEPGRAM_API_KEY = need("DEEPGRAM_API_KEY");
 // OpenAI directly, as the CV platform's agent does. There is no OpenRouter
 // fallback on purpose: that account serves only deepseek-v4-flash, so falling
 // back to `openai/gpt-4o-mini` there would turn a key problem into a call where
 // Aura never speaks.
 const OPENAI_API_KEY = need("OPENAI_API_KEY");
+// Overridable so a renamed model or a new voice is a config change, not a rebuild.
+const REALTIME_MODEL = (process.env.AURA_REALTIME_MODEL ?? "").trim() || "gpt-realtime-2.1-mini";
+const REALTIME_VOICE = (process.env.AURA_REALTIME_VOICE ?? "").trim() || "marin";
 
 /**
  * A provider hiccup must not end the call.
@@ -70,36 +62,6 @@ const OPENAI_API_KEY = need("OPENAI_API_KEY");
 process.on("uncaughtException", (err) => console.error("[Aura] Uncaught exception:", err));
 process.on("unhandledRejection", (reason) => console.warn("[Aura] Unhandled promise rejection:", reason));
 
-/**
- * How Aura decides the candidate has finished speaking — the CV platform's
- * settings, which are the difference between a reply in a second and one in
- * seventeen (17 September, a caller said "Yes" three times and hung up).
- *
- * `stt` turn detection ends a turn on Deepgram's own endpoint rather than
- * waiting for silence; preemptive TTS starts speaking while the answer is
- * still being written; `minWords: 2` stops a cough or a "mm" cutting Aura off
- * mid-sentence.
- */
-/**
- * 21 Sep: testers still heard long pauses. Three waits were stacked — Deepgram
- * endpointing, VAD silence and the turn's minimum delay, 300 ms each, up to
- * 1.5 s when a final transcript was late. Each is shorter now, and each can
- * be set from the environment (AURA_*) so a call that starts cutting people
- * off is a config change, not a rebuild.
- */
-const ms = (name: string, fallback: number) => {
-  const n = Number(process.env[name]);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
-};
-const TURN_HANDLING = {
-  turnDetection: "stt" as const,
-  endpointing: { minDelay: ms("AURA_MIN_ENDPOINT_MS", 150), maxDelay: ms("AURA_MAX_ENDPOINT_MS", 1000) },
-  interruption: { enabled: true, mode: "adaptive" as const, minWords: 2, falseInterruptionTimeout: 500 },
-  preemptiveGeneration: { enabled: true, preemptiveTts: true },
-};
-
-type UserData = { vad?: VAD };
-
 function textOf(item: any): string {
   if (!item) return "";
   if (typeof item.textContent === "string") return item.textContent;
@@ -107,52 +69,33 @@ function textOf(item: any): string {
   return content.filter((c: unknown) => typeof c === "string").join(" ");
 }
 
-export default defineAgent<UserData>({
-  prewarm: async (proc: JobProcess<UserData>) => {
-    proc.userData.vad = await silero.VAD.load({
-      minSilenceDuration: ms("AURA_VAD_SILENCE_MS", 200),
-      minSpeechDuration: 100,
-      // Keeps the first syllable of an answer, which endpointing otherwise clips.
-      prefixPaddingDuration: 300,
-    });
-  },
-
-  entry: async (ctx: JobContext<UserData>) => {
-    const vad = ctx.proc.userData.vad;
-    if (!vad) throw new Error("[Aura] VAD did not load");
+export default defineAgent({
+  entry: async (ctx: JobContext) => {
     await ctx.connect();
 
     const brief = readBrief(ctx.room.metadata);
-    console.info(`[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}]`);
+    console.info(
+      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}]`,
+    );
 
-    const stt = new deepgram.STT({
-      apiKey: DEEPGRAM_API_KEY,
-      // nova-3: Deepgram's faster, more accurate model for live calls.
-      model: (process.env.AURA_STT_MODEL ?? "nova-3") as never,
-      language: "en",
-      endpointing: ms("AURA_STT_ENDPOINTING_MS", 200),
-      // Formatting waits on the final transcript; the model reads words, not
-      // formatted numbers, so it only added delay.
-      smartFormat: false,
-      interimResults: true,
-      mipOptOut: true,
+    // OpenAI decides when the candidate has finished (semantic VAD) — no local
+    // VAD or endpointing to tune. "high" eagerness answers as soon as a short
+    // reply like "yes" is complete; minimal reasoning keeps the first word fast.
+    // Candidate speech is transcribed by OpenAI too, for the call transcript.
+    const llm = new openai.realtime.RealtimeModel({
+      apiKey: OPENAI_API_KEY,
+      model: REALTIME_MODEL,
+      voice: REALTIME_VOICE,
+      reasoning: { effort: "minimal" },
+      turnDetection: { type: "semantic_vad", eagerness: "high" },
     });
-    // A screening question is one or two sentences. Uncapped, the model wrote
-    // paragraphs and the candidate waited through all of them.
-    const llm = new openai.LLM({ apiKey: OPENAI_API_KEY, model: "gpt-4o-mini", temperature: 0.2, maxCompletionTokens: 120 });
-    const tts = new deepgram.TTS({ apiKey: DEEPGRAM_API_KEY, model: "aura-2-asteria-en", sampleRate: 24_000, mipOptOut: true });
 
     const session = new voice.AgentSession({
-      vad,
-      stt,
       llm,
-      tts,
       // The browser already cancels its own echo; three seconds of warm-up only
       // stopped the candidate interrupting at the start of every answer.
       aecWarmupDuration: 0,
-      ttsReadIdleTimeout: 10_000,
-      forwardAudioIdleTimeout: 10_000,
-      turnHandling: TURN_HANDLING,
+      turnHandling: { turnDetection: "realtime_llm", interruption: { enabled: true } },
     });
 
     // Each finished line goes to the call window, which keeps the transcript.
@@ -196,14 +139,18 @@ export default defineAgent<UserData>({
 
     await ctx.waitForParticipant();
     await session.start({
-      agent: new voice.Agent({ instructions: systemPrompt(brief), turnHandling: TURN_HANDLING, llm, stt, tts, vad }),
+      agent: new voice.Agent({ instructions: systemPrompt(brief), llm }),
       room: ctx.room,
       record: false,
     });
 
     const cap = setTimeout(() => {
       console.warn(`[Aura] Call cap reached [room=${ctx.room.name}]`);
-      session.say("We're out of time for this call, so I'll let you go. Thank you, and the Career141 team will be in touch.");
+      // There is no separate TTS for session.say(); the realtime model speaks it.
+      session.generateReply({
+        instructions:
+          'Say exactly this and nothing else: "We\'re out of time for this call, so I\'ll let you go. Thank you, and the Career141 team will be in touch."',
+      });
       setTimeout(() => void ctx.deleteRoom().finally(() => ctx.shutdown("call_cap")), 8000);
     }, MAX_CALL_MS);
     ctx.addShutdownCallback(async () => {

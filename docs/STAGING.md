@@ -116,8 +116,8 @@ Settings in `.env.staging`:
 | `LIVEKIT_BROWSER_URL` | `wss://ta-system-voice.career141.com` — what the browser dials |
 | `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | the call server's own key pair |
 | `STAGING_VOICE_REDIS_PASSWORD` | LiveKit's Redis |
-| `DEEPGRAM_API_KEY` | the agent's speech-to-text and voice |
-| `OPENAI_API_KEY` | what the agent thinks with |
+| `OPENAI_API_KEY` | the agent hears, thinks and speaks with it (OpenAI Realtime) |
+| `AURA_REALTIME_MODEL` / `AURA_REALTIME_VOICE` | optional — default `gpt-realtime-2.1-mini` / `marin` |
 
 One-off setup: add the site in `deploy/staging/caddy-voice.conf` to
 `/etc/caddy/Caddyfile` (`caddy validate` then `systemctl reload caddy`), and
