@@ -1,4 +1,5 @@
 import { gemini } from "./ai";
+import { claudeHeadhunt, claudeSourcingOn } from "./claudeSourcing";
 import { canonicalProfile, displayUrl, readPage, search, serperConfigured } from "./serper";
 import type { BenchmarkEntry, ProfileSuggestion } from "@/data/types";
 
@@ -661,6 +662,15 @@ export function profileFacts(c: { title: string; snippets: string[] }): { compan
 export async function runSourcing(spec: SourcingSpec, round: number): Promise<SourcingRun> {
   const empty: SourcingRun = { suggestions: [], plan: null, queries: [], credits: 0, scanned: 0, cost: 0 };
   if (!serperConfigured()) return { ...empty, error: "no_serper" };
+
+  // Claude does the headhunting when its search is on (lib/claudeSourcing,
+  // 24 Sep). When it finds nobody or cannot answer, the stages below run as
+  // before, so Suggestions never comes back empty because Claude could not.
+  if (claudeSourcingOn()) {
+    const byClaude = await claudeHeadhunt(spec, countryOf(spec.locations.join(" ")) ?? "Sri Lanka", round);
+    if (byClaude.suggestions.length) return byClaude;
+    console.warn(`[suggestions] Claude found nobody (${byClaude.error ?? "no one fit"}${byClaude.note ? `: ${byClaude.note}` : ""}) — searching the old way`);
+  }
 
   // Stage 0 — plan.
   const planRes = await gemini("plan", PLAN_PROMPT(spec), { maxTokens: 2000 });
