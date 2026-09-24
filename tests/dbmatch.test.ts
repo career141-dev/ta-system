@@ -110,5 +110,18 @@ eq("no JD, no matching", (await findDatabaseMatches("op_hobo", "manual")).reason
 eq("an opening on hold is not matched", (await findDatabaseMatches("op_mktexe", "nightly")).reason, "not_open");
 eq("vectors are kept beside the database", fs.existsSync(path.join(tmp, ".data", "vectors.json")), true);
 
+console.log("\na folder it cannot write does not stop matching");
+// Production: /app is root's and the app runs as node, so mkdir failed and
+// every run threw (24 September). A file in the folder's place fails the same way.
+const blocked = path.join(tmp, "not-a-folder");
+fs.writeFileSync(blocked, "");
+process.env.C141_DATA_DIR = blocked;
+_resetVectorCache();
+const { ensureVectors, openingVector } = await import("@/lib/embed");
+const saved = await ensureVectors("openings", [{ id: "op_unwritable", text: "Brand Manager, FMCG" }]);
+eq("the vector is still made", saved.ok, true);
+eq("and is used from memory", openingVector("op_unwritable") !== null, true);
+delete process.env.C141_DATA_DIR;
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

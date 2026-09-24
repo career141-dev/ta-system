@@ -692,6 +692,21 @@ export async function mailIntakeStatus(): Promise<MailIntakeStatus> {
   return convexQuery<MailIntakeStatus>("mailIntake/model:status", { limit: 50 });
 }
 
+export interface UnmatchedCv {
+  candidateId: string;
+  name: string | null;
+  subject: string | null;
+  note: string | null;
+  source: string;
+  from: string | null;
+  receivedAt: number;
+}
+
+/** Mailbox CVs that matched no job post and are on no opening yet (convex/ta/unmatched.ts). */
+export async function unmatchedCvs(days = 14): Promise<UnmatchedCv[]> {
+  return convexQuery<UnmatchedCv[]>("ta/unmatched:list", { days });
+}
+
 export async function setMailboxEnabled(mailbox: string, enabled: boolean) {
   return convexMutation<{ ok: boolean }>("mailIntake/model:setEnabled", { mailbox, enabled });
 }

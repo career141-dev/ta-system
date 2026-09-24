@@ -182,7 +182,11 @@ export function PostManager({
                       </a>
                     ) : (
                       p.channel === "linkedin" && (
-                        <span className="text-[11.5px] text-ink-faint">No LinkedIn link — filed by title only</span>
+                        // Loud on purpose: without the link a CV is filed by title alone, and
+                        // the same title on two openings files it to both (24 September).
+                        <span className="rounded-md bg-warn-soft px-2 py-[3px] text-[11.5px] font-medium text-warn">
+                          No LinkedIn link — paste the View applicant link, or CVs may go to the wrong job
+                        </span>
                       )
                     )}
                   </div>
