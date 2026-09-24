@@ -52,6 +52,32 @@ const OPENAI_API_KEY = need("OPENAI_API_KEY");
 const REALTIME_MODEL = (process.env.AURA_REALTIME_MODEL ?? "").trim() || "gpt-realtime-2.1-mini";
 const REALTIME_VOICE = (process.env.AURA_REALTIME_VOICE ?? "").trim() || "marin";
 
+const num = (name: string, fallback: number) => {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+};
+
+/**
+ * How OpenAI decides the candidate has finished speaking.
+ *
+ * 24 Sep: testers found Aura laggy on semantic VAD. Even at "high" eagerness it
+ * holds the turn open when an answer sounds unfinished — "my current salary
+ * is… 80k" — and that wait is the pause before every reply. Plain silence
+ * detection answers a fixed AURA_SILENCE_MS after the candidate stops.
+ * If it starts cutting people off, raise AURA_SILENCE_MS, or set
+ * AURA_TURN_DETECTION=semantic to go back — config, not a rebuild.
+ */
+const TURN_DETECTION =
+  (process.env.AURA_TURN_DETECTION ?? "").trim() === "semantic"
+    ? ({ type: "semantic_vad", eagerness: "high" } as const)
+    : ({
+        type: "server_vad",
+        threshold: num("AURA_VAD_THRESHOLD", 0.5),
+        // Keeps the first syllable of an answer.
+        prefix_padding_ms: 300,
+        silence_duration_ms: num("AURA_SILENCE_MS", 350),
+      } as const);
+
 /**
  * A provider hiccup must not end the call.
  *
@@ -75,19 +101,21 @@ export default defineAgent({
 
     const brief = readBrief(ctx.room.metadata);
     console.info(
-      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}]`,
+      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}] [turn=${TURN_DETECTION.type}]`,
     );
 
-    // OpenAI decides when the candidate has finished (semantic VAD) — no local
-    // VAD or endpointing to tune. "high" eagerness answers as soon as a short
-    // reply like "yes" is complete; minimal reasoning keeps the first word fast.
-    // Candidate speech is transcribed by OpenAI too, for the call transcript.
+    // OpenAI decides when the candidate has finished (TURN_DETECTION above);
+    // minimal reasoning keeps the first word fast. Candidate speech is
+    // transcribed by OpenAI too, for the call transcript. Noise reduction keeps
+    // room noise from reading as speech, which silence detection is quicker to
+    // mistake for the candidate still talking.
     const llm = new openai.realtime.RealtimeModel({
       apiKey: OPENAI_API_KEY,
       model: REALTIME_MODEL,
       voice: REALTIME_VOICE,
       reasoning: { effort: "minimal" },
-      turnDetection: { type: "semantic_vad", eagerness: "high" },
+      turnDetection: TURN_DETECTION,
+      inputAudioNoiseReduction: { type: "near_field" },
     });
 
     const session = new voice.AgentSession({
@@ -119,6 +147,12 @@ export default defineAgent({
     });
     session.on(voice.AgentSessionEventTypes.SpeechCreated, (event: any) => {
       if (event?.text?.trim()) console.info(`[Aura] speaking: "${event.text.trim()}"`);
+    });
+    // How long each reply took to start sounding — the number to watch when a
+    // call feels laggy.
+    session.on(voice.AgentSessionEventTypes.MetricsCollected, (e: any) => {
+      const m = e?.metrics;
+      if (m?.type === "realtime_model_metrics" && m.ttftMs >= 0) console.info(`[Aura] reply first audio in ${Math.round(m.ttftMs)} ms`);
     });
     session.on(voice.AgentSessionEventTypes.AgentStateChanged, (e: any) => console.info(`[Aura] agent ${e?.state}`));
     session.on(voice.AgentSessionEventTypes.UserStateChanged, (e: any) => console.info(`[Aura] candidate ${e?.state}`));
