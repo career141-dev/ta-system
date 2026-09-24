@@ -129,19 +129,23 @@ export const shortlist = internalMutation({
     const now = Date.now();
     await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
 
-    // Shortlisting database candidates / matches moves them to AI Follow-up (ta_shortlist).
-    const currentTaStage = toTaStage(app.currentStage);
-    if (currentTaStage !== "ai_follow_up" && currentTaStage !== "ta_follow_up") {
+    // Shortlisting is what sends somebody to Follow-up on this desk.
+    // A TA's shortlist is TA Follow-up — a database match or a new CV the TA
+    // picks, and someone the AI shortlisted first: the TA taking them on is
+    // what starts the outreach. AI Follow-up is only the AI's own shortlist,
+    // a CV scored at or above the pass mark (cvs/cvScoringActions.ts). For
+    // two days on 23–24 September a TA's shortlist went to AI Follow-up by
+    // mistake; the owner asked for it back (24 September).
+    if (toTaStage(app.currentStage) !== "ta_follow_up") {
       await executeStageTransition(ctx, {
         applicationId: appId,
-        targetStage: "ta_shortlist" as PipelineStage,
+        targetStage: "follow_up" as PipelineStage,
         actorId: user._id,
-        reason: "Shortlisted into AI Follow-up",
+        reason: "Shortlisted by a TA",
         bypassRoleCheck: true,
         // Unless the opening's follow-up switch is off: a switch that says off
-        // has to mean off, and entering AI Follow-up now starts the outreach
-        // too (pipelineStateMachine, 23 September). Every message still passes
-        // the outreach gate (convex/lib/outreachSafety.ts).
+        // has to mean off. Every message still passes the outreach gate
+        // (convex/lib/outreachSafety.ts).
         skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
       });
     }
