@@ -82,6 +82,13 @@ const prompt = systemPrompt(brief);
 for (const d of details) has(`prompt carries: ${d.slice(0, 40)}`, prompt, d);
 has("prompt carries the job brief", prompt, "Lead finance.");
 has("prompt asks for all items before closing", prompt, "Only when every item has been asked");
+has("opening asks if now is a good time", openingInstruction(brief), "good time");
+has("prompt waits for a yes before anything else", prompt, "Do not describe the role or ask anything else before they say yes");
+has("after a yes, the role is described before the questions", prompt, "first give a brief description of the role");
+eq("the role is described before the first checklist item",
+  prompt.indexOf("brief description of the role") < prompt.indexOf("Then ask the first checklist item"), true);
+has("an empty brief still gets a one-line role mention",
+  systemPrompt(readBrief(JSON.stringify({ jobTitle: "Driver" }))), "just say it is for the Driver role");
 eq("bad metadata falls back safely", readBrief("{not json").companyName, "Career141");
 eq("no checklist falls back to the standard four", readBrief("{}").detailsToCollect.length, 4);
 
