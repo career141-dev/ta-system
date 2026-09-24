@@ -1006,9 +1006,10 @@ export async function addJobPost(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
+  const externalUrl = String(formData.get("externalUrl") ?? formData.get("jobLink") ?? "").trim() || null;
   const where = String(formData.get("channel") ?? "linkedin");
   const channel = (["linkedin", "facebook", "email_campaign"] as const).find((c) => c === where) ?? "linkedin";
-  const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel);
+  const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel, externalUrl);
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
   await back(`Job post "${title}" added.`);
