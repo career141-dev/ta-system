@@ -16,7 +16,6 @@
  *      thing could not be verified, the page says so.
  */
 
-import { askClaudeApi, claudeApiModel, viaClaudeApi } from "./claudeApi";
 import { askSubscription, viaSubscription } from "./claudeSub";
 import { capActive, maxModelCost, modelCost, reserve, SpendCapError } from "./spend";
 
@@ -186,16 +185,10 @@ async function callOpenRouter(
   prompt: string,
   opts: { maxTokens?: number; temperature?: number; search?: boolean } = {},
 ): Promise<AiResult & { usage?: Usage }> {
-  // Research and Benchmark ask Claude first when it is set up: through the
-  // company's API key (lib/claudeApi, 24 Sep), else the owner's subscription
-  // (lib/claudeSub). Whatever neither could answer — a rate limit, a lapsed
-  // token — comes here to OpenRouter as it always did.
-  // The capped test meters only OpenRouter, so it skips Claude altogether.
-  if (viaClaudeApi(task) && !capActive()) {
-    const api = await askClaudeApi(task, prompt, opts.maxTokens);
-    if (api.ok) return api;
-    logAiFailure(task, claudeApiModel(), api);
-  } else if (viaSubscription(task)) {
+  // Research and suggestions ask the owner's Claude subscription first when it
+  // is set up (lib/claudeSub, 24 Sep). Whatever it could not answer — a usage
+  // limit, a lapsed token — comes here to OpenRouter as it always did.
+  if (viaSubscription(task)) {
     const sub = await askSubscription(task, prompt);
     if (sub.ok) return sub;
     logAiFailure(task, "claude-subscription", sub);

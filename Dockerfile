@@ -41,7 +41,11 @@ COPY --from=build /app/public ./public
 # The Claude Code CLI, for research and suggestions on the owner's Claude
 # subscription (src/lib/claudeSub.ts). Idle unless CLAUDE_CODE_OAUTH_TOKEN and
 # C141_CLAUDE_SUB_TASKS are set; the app falls back to OpenRouter without it.
-RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
+# Pinned (24 Sep): the app passes flags (--tools, --no-session-persistence) a
+# later release could rename, and an unpinned build would then quietly send
+# every call to OpenRouter. Raise it on purpose, and test Research after.
+ARG CLAUDE_CODE_VERSION=2.1.281
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} && npm cache clean --force
 USER node
 EXPOSE 3100
 # Next writes its own server.js into the standalone output.
