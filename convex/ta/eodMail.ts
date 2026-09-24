@@ -40,6 +40,7 @@ export const send = internalAction({
         subject: args.subject,
         html: args.html,
         attachments: args.attachments,
+        testInbox: "EOD_TEST_EMAIL",
       },
       getGraphToken,
     );

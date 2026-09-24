@@ -8,7 +8,7 @@ const eq = (l: string, got: unknown, want: unknown) => {
 };
 
 const env = (vars: Record<string, string | undefined>) => {
-  for (const k of ["OUTREACH_LIVE", "OUTREACH_TEST_EMAIL", "OUTREACH_TEST_PHONE"]) delete process.env[k];
+  for (const k of ["OUTREACH_LIVE", "OUTREACH_TEST_EMAIL", "OUTREACH_TEST_PHONE", "EOD_TEST_EMAIL"]) delete process.env[k];
   for (const [k, v] of Object.entries(vars)) if (v !== undefined) process.env[k] = v;
 };
 
@@ -38,6 +38,16 @@ eq("the test phone itself is not a redirect", r.ok && r.redirected, false);
 eq("reply to real candidate blocked", mayReplyTo("email", "real@candidate.com").ok, false);
 eq("reply to unknown sender blocked", mayReplyTo("email", undefined).ok, false);
 eq("reply to test mailbox allowed", mayReplyTo("email", "me@career141.com").ok, true);
+
+// ── End of day has its own test mailbox; follow-ups keep theirs ─────────────
+env({ OUTREACH_TEST_EMAIL: "followup@test.com", EOD_TEST_EMAIL: "eod@test.com" });
+r = resolveRecipient("email", "director@career141.com", "EOD_TEST_EMAIL");
+eq("end of day goes to EOD_TEST_EMAIL", r.ok && r.to, "eod@test.com");
+r = resolveRecipient("email", "real@candidate.com");
+eq("follow-up still goes to OUTREACH_TEST_EMAIL", r.ok && r.to, "followup@test.com");
+env({ OUTREACH_TEST_EMAIL: "followup@test.com" });
+r = resolveRecipient("email", "director@career141.com", "EOD_TEST_EMAIL");
+eq("no EOD_TEST_EMAIL → falls back to OUTREACH_TEST_EMAIL", r.ok && r.to, "followup@test.com");
 
 // ── Live → the intended person ──────────────────────────────────────────────
 env({ OUTREACH_LIVE: "true" });
