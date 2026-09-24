@@ -185,13 +185,20 @@ export const peopleAtCompany = internalQuery({
       email: string | null;
     }[] = [];
 
-    const candDocs = await ctx.db.query("candidates").order("desc").take(500);
+    // By the employer search index, across the whole database. The newest 500
+    // alone missed most of 78,000 candidates and said "nobody" when there were
+    // people (review of PR #40, 24 Sep). Past employers are not indexed, so
+    // this finds people who work there now.
+    const candDocs = await ctx.db
+      .query("candidates")
+      .withSearchIndex("search_employer", (q) => q.search("currentEmployer", args.company.trim()))
+      .take(limit * 3);
     for (const cand of candDocs) {
       if (cand.mergedInto) continue;
       if (args.excludeCandidateId && cand._id === args.excludeCandidateId) continue;
+      // The index matches words; keep only employers that contain the name.
       const emp = (cand.currentEmployer ?? "").toLowerCase();
-      const hist = (cand.jobHistory ?? []).some((h) => (h.company ?? "").toLowerCase().includes(needle));
-      if (emp.includes(needle) || hist) {
+      if (emp.includes(needle)) {
         candidates.push({
           id: cand._id as string,
           fullName: cand.fullName ?? "Unnamed Candidate",
