@@ -1626,6 +1626,7 @@ const rawRepo = {
     createdBy?: Id,
     liveOnLinkedIn = false,
     channel: JobPost["channel"] = "linkedin",
+    externalUrl?: string | null,
   ): { ok: true } | { ok: false; message: string } {
     const opening = load().openings.find((x) => x.id === openingId);
     if (!opening) return { ok: false, message: "That opening no longer exists." };
@@ -1678,7 +1679,7 @@ const rawRepo = {
             : o.assignedTaIds.length === 1
               ? o.assignedTaIds[0]
               : createdBy ?? o.assignedTaIds[0] ?? null,
-        externalUrl: null,
+        externalUrl: externalUrl ?? null,
         // Whether the advert is up decides two things: whether applications to
         // this TA's inbox get filed against it, and whether it is chased for
         // going quiet. Both are meaningless for an advert nobody can apply to.

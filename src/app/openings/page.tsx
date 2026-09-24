@@ -1,13 +1,15 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { isDeskWide } from "@/lib/auth";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
 import { OpeningMenu } from "@/components/OpeningMenu";
+import { OpeningsToolbar } from "@/components/OpeningsToolbar";
+import { assignableTas } from "@/lib/assignable";
 import { PRIORITY_TARGET } from "@/data/types";
 import { computeAlerts } from "@/lib/sla";
 import { relDays } from "@/lib/format";
-import { SearchIcon } from "@/components/icons";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
@@ -23,13 +25,37 @@ const BUCKETS = [
   { key: "closed", label: "Closed" },
 ];
 
+function toCountry(loc: string): string {
+  const l = loc.trim().toLowerCase();
+  if (/colombo|kandy|galle|jaffna|sri lanka/i.test(l)) return "Sri Lanka";
+  if (/karachi|lahore|islamabad|rawalpindi|pakistan/i.test(l)) return "Pakistan";
+  if (/dhaka|chittagong|bangladesh/i.test(l)) return "Bangladesh";
+  if (/dubai|abu dhabi|sharjah|uae|emirates/i.test(l)) return "UAE";
+  if (/doha|qatar/i.test(l)) return "Qatar";
+  if (/riyadh|jeddah|dammam|saudi/i.test(l)) return "Saudi Arabia";
+  if (/male|maldives/i.test(l)) return "Maldives";
+  if (/mumbai|delhi|bangalore|india/i.test(l)) return "India";
+  if (/singapore/i.test(l)) return "Singapore";
+  if (/london|uk|united kingdom/i.test(l)) return "UK";
+  return loc.trim();
+}
+
 export default async function OpeningsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ bucket?: string; q?: string; page?: string }>;
+  searchParams: Promise<{
+    bucket?: string;
+    q?: string;
+    page?: string;
+    location?: string;
+    country?: string;
+    industry?: string;
+    clientId?: string;
+    taId?: string;
+  }>;
 }) {
   const sp = await searchParams;
-  const { bucket = "mine", q = "" } = sp;
+  const { bucket = "mine", q = "", country, location = country, industry, clientId, taId } = sp;
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const clients = repo.clients();
@@ -39,6 +65,22 @@ export default async function OpeningsPage({
   // list for anyone else — a list of roles they cannot open is no use to them.
   const all = isDeskWide(user) ? repo.openings() : mine;
   const liveAlerts = computeAlerts();
+  const showTaFilter = isDeskWide(user);
+
+  // Extract dynamic clean country options for filters
+  const locationOptions = Array.from(
+    new Set(all.flatMap((o) => o.locations).map(toCountry).filter(Boolean))
+  ).sort();
+
+  const industryOptions = Array.from(
+    new Set(clients.map((c) => c.industry?.trim()).filter(Boolean))
+  ).sort() as string[];
+
+  const clientOptions = clients
+    .map((c) => ({ id: c.id, name: c.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const taOptions = assignableTas(users).map((u) => ({ id: u.id, name: u.name }));
 
   let list =
     bucket === "mine"
@@ -51,12 +93,44 @@ export default async function OpeningsPage({
           ? all.filter((o) => ["closed", "filled"].includes(o.status))
           : all.filter((o) => o.status === "open");
 
+  // Country filter
+  if (location && location !== "all") {
+    list = list.filter((o) =>
+      o.locations.some(
+        (l) =>
+          toCountry(l).toLowerCase() === location.toLowerCase() ||
+          l.toLowerCase() === location.toLowerCase() ||
+          l.toLowerCase().includes(location.toLowerCase())
+      )
+    );
+  }
+
+  // Industry filter
+  if (industry && industry !== "all") {
+    list = list.filter((o) => {
+      const c = clients.find((client) => client.id === o.clientId);
+      return c?.industry?.toLowerCase() === industry.toLowerCase();
+    });
+  }
+
+  // Client filter
+  if (clientId && clientId !== "all") {
+    list = list.filter((o) => o.clientId === clientId);
+  }
+
+  // TA Name filter (for TA Lead, Admin, Director, Ops)
+  if (showTaFilter && taId && taId !== "all") {
+    list = list.filter((o) => o.assignedTaIds.includes(taId));
+  }
+
+  // Search query filter
   if (q) {
     list = list.filter((o) => {
       const client = clients.find((c) => c.id === o.clientId);
       return matchesQuery(q, o.title, client?.name, o.locations.join(" "));
     });
   }
+
   const total = list.length;
   const page = pageFrom(sp, total, PAGE_SIZE);
   list = slicePage(list, page, PAGE_SIZE);
@@ -68,6 +142,14 @@ export default async function OpeningsPage({
     hold: all.filter((o) => o.status === "on_hold").length,
     closed: all.filter((o) => ["closed", "filled"].includes(o.status)).length,
   } as Record<string, number>;
+
+  const bucketItems = BUCKETS.map((b) => ({
+    key: b.key,
+    label: b.label,
+    count: counts[b.key] ?? 0,
+  }));
+
+  const hasActiveFilters = Boolean(location || industry || clientId || (showTaFilter && taId) || q);
 
   return (
     <main className="mx-auto max-w-[1180px] px-8 py-9">
@@ -86,42 +168,33 @@ export default async function OpeningsPage({
         </Link>
       </div>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <div className="flex gap-1.5">
-          {BUCKETS.map((b) => (
-            <Link
-              key={b.key}
-              href={`/openings?bucket=${b.key}`}
-              className={`rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors ${
-                b.key === bucket
-                  ? "border-navactive bg-navactive text-white"
-                  : "border-rule bg-surface text-ink-soft hover:border-rule-strong hover:text-ink"
-              }`}
-            >
-              {b.label}
-              <span className={`tabular ml-1.5 ${b.key === bucket ? "text-white/60" : "text-ink-faint"}`}>
-                {counts[b.key]}
-              </span>
-            </Link>
-          ))}
-        </div>
-        <form method="GET" action="/openings" className="relative ml-auto">
-          <input type="hidden" name="bucket" value={bucket} />
-          <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint"><SearchIcon /></span>
-          <input
-            name="q"
-            defaultValue={q}
-            placeholder="Search openings"
-            className="w-[260px] rounded-full border border-rule bg-surface py-2 pl-9 pr-4 text-[13px] outline-none placeholder:text-ink-faint focus:border-brand-line"
-          />
-        </form>
-      </div>
+      <Suspense fallback={<div className="mb-6 h-[42px]" />}>
+        <OpeningsToolbar
+          initialQuery={q}
+          currentBucket={bucket}
+          buckets={bucketItems}
+          filters={{ location, industry, clientId, taId }}
+          locationOptions={locationOptions}
+          industryOptions={industryOptions}
+          clientOptions={clientOptions}
+          taOptions={taOptions}
+          showTaFilter={showTaFilter}
+        />
+      </Suspense>
 
       {list.length === 0 ? (
         <div className="rounded-xl border border-rule bg-surface px-8 py-20 text-center">
-          <p className="text-[13.5px] text-ink-soft">Nothing in this bucket.</p>
+          <p className="text-[13.5px] text-ink-soft">
+            {hasActiveFilters ? "No opening matches the selected filters or search." : "Nothing in this bucket."}
+          </p>
           <p className="mt-1.5 text-[12.5px] text-ink-faint">
-            {q ? "No opening matches that search." : "Openings appear here once a TA is assigned."}
+            {hasActiveFilters ? (
+              <Link href={`/openings?bucket=${bucket}`} className="font-medium text-brand hover:underline">
+                Reset filters
+              </Link>
+            ) : (
+              "Openings appear here once a TA is assigned."
+            )}
           </p>
         </div>
       ) : (

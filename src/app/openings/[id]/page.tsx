@@ -11,9 +11,7 @@ import { JobDetailsSummary } from "@/components/JobDetailsSummary";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
-import { setOpeningAutoFollowUp, setOpeningQuestions } from "@/app/actions";
 import { primeStore } from "@/data/prime";
-import { SubmitButton } from "@/components/SubmitButton";
 
 /**
  * Modelled on Recruiter's project overview: a short state line, a few suggested
@@ -250,66 +248,6 @@ export default async function OverviewPage({
                 </div>
               )}
             </dl>
-
-            {/* Automatic follow-up: reminders after the TA's first Send. */}
-            <div className="mt-4 rounded-lg border border-rule bg-paper px-3.5 py-2.5">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-[12px] font-medium text-ink">
-                  Automatic follow-up
-                  <span className={`ml-1.5 font-normal ${o.autoFollowUp ? "text-brand" : "text-ink-faint"}`}>
-                    · {o.autoFollowUp ? "on" : "off"}
-                  </span>
-                </span>
-                {allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null }) && (
-                  <form action={setOpeningAutoFollowUp}>
-                    <input type="hidden" name="openingId" value={id} />
-                    <input type="hidden" name="enabled" value={o.autoFollowUp ? "off" : "on"} />
-                    <button className="rounded-full border border-rule px-3 py-1 text-[11.5px] font-medium hover:bg-tag">
-                      {o.autoFollowUp ? "Turn off" : "Turn on"}
-                    </button>
-                  </form>
-                )}
-              </div>
-              <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
-                {o.autoFollowUp
-                  ? "After you send a candidate the first follow-up, WhatsApp and email reminders go out every 24 hours until the details are in or the reminders run out."
-                  : "Follow-ups go out only when you press Send on a candidate."}
-              </p>
-            </div>
-
-            {/* The TA's own follow-up questions for this job. */}
-            <details className="mt-4 rounded-xl border border-rule bg-surface px-4 py-3">
-              <summary className="cursor-pointer text-[12.5px] font-medium">
-                Follow-up questions
-                <span className="font-normal text-ink-faint">
-                  {" "}· {repo.followUpStandard().filter((q) => q.enabled).length} standard
-                  {o.followUpQuestions.length > 0 && ` + ${o.followUpQuestions.length} for this job`}
-                </span>
-              </summary>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                Always asked: {repo.followUpStandard().filter((q) => q.enabled).map((q) => q.label.toLowerCase()).join(", ")}.
-                Add anything else this job needs, one per line.
-              </p>
-              {allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null }) ? (
-                <form action={setOpeningQuestions} className="mt-2 grid gap-2">
-                  <input type="hidden" name="openingId" value={id} />
-                  <textarea
-                    name="questions"
-                    rows={3}
-                    defaultValue={o.followUpQuestions.map((q) => q.label).join("\n")}
-                    placeholder={"Valid driving licence?\nWilling to travel to Bangladesh?"}
-                    className="w-full rounded border border-rule bg-paper px-2.5 py-2 text-[12.5px]"
-                  />
-                  <div>
-                    <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
-                  </div>
-                </form>
-              ) : (
-                <ul className="mt-2 list-disc pl-5 text-[12px] text-ink-soft">
-                  {o.followUpQuestions.map((q) => <li key={q.id}>{q.label}</li>)}
-                </ul>
-              )}
-            </details>
 
             <div className="mt-4">
               <OpeningAdmin
