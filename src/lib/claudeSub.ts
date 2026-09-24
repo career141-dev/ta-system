@@ -43,7 +43,7 @@ function hasToken(): boolean {
 }
 
 /** Run the CLI once: the prompt on stdin, whatever it printed back. */
-async function runClaude(args: string[], prompt: string, timeoutMs: number): Promise<{ code: number | null; out: string; err: string; timedOut: boolean }> {
+export async function runClaude(args: string[], prompt: string, timeoutMs: number): Promise<{ code: number | null; out: string; err: string; timedOut: boolean }> {
   // An empty folder to run in, so the CLI has nothing of the app's to read.
   const cwd = await mkdtemp(join(tmpdir(), "c141-claude-"));
   try {
@@ -164,7 +164,7 @@ Then answer with only a JSON array — no other text — of up to ${num} of the 
 Only addresses the search returned. If it returned nothing, answer [].`;
 }
 
-interface StreamEvent {
+export interface StreamEvent {
   type?: string;
   subtype?: string;
   is_error?: boolean;
@@ -181,30 +181,9 @@ interface StreamEvent {
  * enforced here as for every other engine (websearch.ts).
  */
 export function parseClaudeSearch(stream: string, q: string, num: number): SearchResult & { ungrounded: number } {
-  const events: StreamEvent[] = [];
-  for (const line of stream.split("\n")) {
-    const t = line.trim();
-    if (!t.startsWith("{")) continue;
-    try {
-      events.push(JSON.parse(t) as StreamEvent);
-    } catch {
-      // A line cut short by a kill; the rest still counts.
-    }
-  }
-
-  const final = events.find((e) => e.type === "result");
+  const { final, found } = readStream(stream);
   if (final?.is_error || (final?.subtype && final.subtype !== "success")) {
     return { hits: [], credits: 0, error: `claude: ${(final.result ?? final.subtype ?? "error").slice(0, 200)}`, ungrounded: 0 };
-  }
-
-  // Every address the search tool itself returned, with its title.
-  const found = new Map<string, string>();
-  for (const e of events) {
-    if (e.type !== "user" || !Array.isArray(e.message?.content)) continue;
-    for (const block of e.message!.content as { type?: string; content?: unknown }[]) {
-      if (block?.type !== "tool_result") continue;
-      for (const { url, title } of linksIn(textOf(block.content))) if (!found.has(url)) found.set(url, title);
-    }
   }
   // A finished run whose search found nothing is an empty search, not a
   // failed one: SearXNG is asked the same query, and Claude is not rested.
@@ -230,6 +209,36 @@ export function parseClaudeSearch(stream: string, q: string, num: number): Searc
   }
   // A search happened and cost nothing billable; it is still counted as one.
   return { hits: hits.slice(0, num), credits: 1, ungrounded };
+}
+
+/**
+ * A `claude -p --output-format stream-json` run, read: its final answer, and
+ * every address its WebSearch tool returned (with the page's title). The
+ * addresses are the grounding — anything the answer names that is not among
+ * them was written by the model, not found.
+ */
+export function readStream(stream: string): { final: StreamEvent | undefined; found: Map<string, string> } {
+  const events: StreamEvent[] = [];
+  for (const line of stream.split("\n")) {
+    const t = line.trim();
+    if (!t.startsWith("{")) continue;
+    try {
+      events.push(JSON.parse(t) as StreamEvent);
+    } catch {
+      // A line cut short by a kill; the rest still counts.
+    }
+  }
+
+  const final = events.find((e) => e.type === "result");
+  const found = new Map<string, string>();
+  for (const e of events) {
+    if (e.type !== "user" || !Array.isArray(e.message?.content)) continue;
+    for (const block of e.message!.content as { type?: string; content?: unknown }[]) {
+      if (block?.type !== "tool_result") continue;
+      for (const { url, title } of linksIn(textOf(block.content))) if (!found.has(url)) found.set(url, title);
+    }
+  }
+  return { final, found };
 }
 
 /** A tool result's text, whether it came as a string or as content blocks. */
@@ -263,7 +272,7 @@ function linksIn(text: string): { url: string; title: string }[] {
 }
 
 /** The first JSON array in a reply, tolerating a code fence or words around it. */
-function jsonArrayIn(text: string): { url?: unknown; snippet?: unknown }[] {
+export function jsonArrayIn(text: string): Record<string, unknown>[] {
   const start = text.indexOf("[");
   const end = text.lastIndexOf("]");
   if (start < 0 || end <= start) return [];

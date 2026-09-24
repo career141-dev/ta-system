@@ -96,7 +96,7 @@ function Body({
               bare
               steps={SOURCING_STEPS}
               heading="Finding profiles to headhunt"
-              note="usually a minute or two — keep this page open"
+              note="usually two to five minutes — keep this page open"
             />
           ) : (
             <LoadingProgress
