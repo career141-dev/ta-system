@@ -28,7 +28,7 @@ export interface ResearchInput {
 }
 
 export interface ResearchDeps {
-  search: (q: string, num?: number) => Promise<{ hits: SearchHit[]; credits: number; error?: string }>;
+  search: (q: string, num?: number) => Promise<{ hits: SearchHit[]; credits: number; error?: string; provider?: string }>;
   readPage: (url: string, maxChars?: number) => Promise<string | null>;
   model: (system: string, prompt: string, maxTokens?: number) => Promise<AiResult>;
 }
@@ -45,6 +45,8 @@ export type ResearchRun =
       /** Who holds the role now; absent when Benchmark was not asked for. */
       benchmarks?: IncumbentRow[];
       benchmarkNote?: string;
+      /** Who actually answered: searches per engine, and answers per model. */
+      answeredBy: { search: Record<string, number>; model: Record<string, number> };
     }
   | { ok: false; reason: string; detail?: string };
 
@@ -54,6 +56,22 @@ export const DEFAULT_DEPS: ResearchDeps = {
   readPage: fetchPage,
   model: (s, p, max) => askModel(s, p, max, "plan"),
 };
+
+/**
+ * The first six searches of every Research run, in this order: the client,
+ * its LinkedIn page, where it is, its competitors, its market, and the role.
+ * Shared with the search benchmark so it measures the searches Research makes.
+ */
+export function clientQueries(name: string, industry: string, where: string, title: string): string[] {
+  return [
+    `"${name}" ${industry}`.trim(),
+    `"${name}" site:linkedin.com/company`,
+    `"${name}" about head office ${where}`,
+    `"${name}" competitors`,
+    `top ${industry || "companies"} companies in ${where}`,
+    `"${title}" jobs ${where}`,
+  ];
+}
 
 /** How many competitors are searched and read. Six is enough to benchmark against. */
 export const MAX_COMPETITORS = 6;
@@ -177,8 +195,25 @@ Use ONLY that evidence. Never add anything you know from elsewhere. Never write 
 Every field you fill names the evidence id it came from, e.g. "S3". If the evidence does not say it, leave the value empty.
 Reply with JSON only.`;
 
-export async function researchViaSearch(input: ResearchInput, deps: ResearchDeps = DEFAULT_DEPS): Promise<ResearchRun> {
-  if (deps === DEFAULT_DEPS && !serperConfigured()) return { ok: false, reason: "no_serper" };
+export async function researchViaSearch(input: ResearchInput, given: ResearchDeps = DEFAULT_DEPS): Promise<ResearchRun> {
+  if (given === DEFAULT_DEPS && !serperConfigured()) return { ok: false, reason: "no_serper" };
+  // Counted as it happens, because the report used to name the configured
+  // model even when a fallback had answered (24 Sep): now it says who did.
+  const answeredBy = { search: {} as Record<string, number>, model: {} as Record<string, number> };
+  const tally = (into: Record<string, number>, who: string) => (into[who] = (into[who] ?? 0) + 1);
+  const deps: ResearchDeps = {
+    ...given,
+    search: async (q, num) => {
+      const r = await given.search(q, num);
+      tally(answeredBy.search, r.provider ?? "search");
+      return r;
+    },
+    model: async (system, prompt, max) => {
+      const r = await given.model(system, prompt, max);
+      if (r.ok) tally(answeredBy.model, r.provider);
+      return r;
+    },
+  };
   const name = input.clientName.trim();
   if (!name || /^(the client|confidential|unknown|internal)\b/i.test(name)) return { ok: false, reason: "client_not_searchable" };
   const industry = input.industry.trim();
@@ -200,14 +235,9 @@ export async function researchViaSearch(input: ResearchInput, deps: ResearchDeps
 
   try {
     // ── 1. The client, and who competes with them — all at once. ─────────────
-    const [siteHits, linkedinHits, aboutHits, compHits, marketHits, titleHits] = await Promise.all([
-      run(`"${name}" ${industry}`.trim()),
-      run(`"${name}" site:linkedin.com/company`),
-      run(`"${name}" about head office ${where}`),
-      run(`"${name}" competitors`),
-      run(`top ${industry || "companies"} companies in ${where}`),
-      run(`"${input.title}" jobs ${where}`),
-    ]);
+    const [siteHits, linkedinHits, aboutHits, compHits, marketHits, titleHits] = await Promise.all(
+      clientQueries(name, industry, where, input.title).map(run),
+    );
     const clientHits = [...siteHits, ...aboutHits];
     if (clientHits.length + linkedinHits.length === 0) {
       return searchError
@@ -414,7 +444,7 @@ ${CITE}
     ]
       .filter(Boolean)
       .join("\n\n");
-    return { ok: true, fields, sources, searches, markdown, modelNote, benchmarks: bench?.rows, benchmarkNote: bench?.modelNote };
+    return { ok: true, fields, sources, searches, markdown, modelNote, benchmarks: bench?.rows, benchmarkNote: bench?.modelNote, answeredBy };
   } catch (e) {
     if (e instanceof SpendCapHit) return { ok: false, reason: "spend_cap" };
     throw e;

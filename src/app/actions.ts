@@ -272,7 +272,19 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
 }
 
 /** A sourcing or benchmark failure code as a sentence. */
-const SEARCH_NAME: Record<string, string> = { searxng: "SearXNG", serper: "Serper", openai: "OpenAI web search" };
+const SEARCH_NAME: Record<string, string> = { claude: "Claude web search", searxng: "SearXNG", serper: "Serper", openai: "OpenAI web search" };
+
+/**
+ * Who did a Research run, from what actually answered: "Claude web search ×21,
+ * SearXNG ×3 + Claude". Named from the settings, it said DeepSeek even when
+ * the subscription had answered (24 Sep).
+ */
+function answeredByLabel(by: { search: Record<string, number>; model: Record<string, number> }): string {
+  const list = (m: Record<string, number>, name: (k: string) => string) =>
+    Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${name(k)} ×${n}`).join(", ");
+  const model = (k: string) => (k.startsWith("claude-subscription") ? "Claude" : k);
+  return [list(by.search, (k) => SEARCH_NAME[k] ?? k), list(by.model, model)].filter(Boolean).join(" + ");
+}
 
 function searchReasonInWords(code: string, detail?: string): string {
   if (code === "no_serper") return "web search is not set up on this system. An admin needs to set SEARXNG_URL (a SearXNG instance) or a search key.";
@@ -2519,7 +2531,7 @@ async function researchOpening(
     markdown: res.markdown,
     sources: res.sources,
     searches: res.searches,
-    model: `${SEARCH_NAME[searchProvider() ?? "serper"]} + ${modelFor("plan")}`,
+    model: answeredByLabel(res.answeredBy),
     generatedBy: userId,
     generatedAt: Date.now(),
   });
