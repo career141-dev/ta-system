@@ -225,9 +225,11 @@ export default async function OpeningsPage({
               // The row stays clickable through a stretched link rather than
               // wrapping everything, so the status control inside it is a real
               // control and not a button nested in an anchor — finding 07.
+              // A row with a menu open is lifted over the rows below it, or the
+              // next job's status and stage buttons showed through the menu.
               <div
                 key={o.id}
-                className="relative rounded-xl border border-rule bg-surface px-7 py-5 transition-colors hover:border-rule-strong"
+                className="relative rounded-xl border border-rule bg-surface px-7 py-5 transition-colors hover:border-rule-strong has-[[aria-expanded=true]]:z-20"
               >
                 <Link
                   href={`/openings/${o.id}`}
