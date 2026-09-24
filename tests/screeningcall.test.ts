@@ -10,7 +10,7 @@ import {
   standardFieldOf,
   transcriptText,
 } from "../convex/lib/screeningCall";
-import { firstName, openingInstruction, readBrief, systemPrompt } from "../voice-agent/src/prompt";
+import { firstName, openingInstruction, openingLine, readBrief, systemPrompt } from "../voice-agent/src/prompt";
 import { ROUND_WINDOW_MS, sameRoundAs } from "../convex/lib/followUpScope";
 
 let pass = 0, fail = 0;
@@ -75,20 +75,26 @@ const brief = readBrief(
 );
 eq("first name only", firstName(brief.candidateName), "Nimal");
 eq("a name in capitals is said normally", firstName("RANJITHA SILVA"), "Ranjitha");
-has("opening says hi by name", openingInstruction(brief), "say hi to Nimal");
-has("opening says Aura from Career141", openingInstruction(brief), "Aura calling from Career141");
-has("opening names the role", openingInstruction(brief), "Head of Finance role");
+const opening = openingLine(brief);
+eq("opening is the fixed line, in order: name, AI, Career141, role, good time", opening,
+  "Hi Nimal, this is Aura, an AI voice assistant calling on behalf of Career141 about the Head of Finance role. Is now a good time for a quick two-minute chat?");
+has("opening is said word for word", openingInstruction(brief), `Say exactly this, word for word, and nothing else: "${opening}"`);
+eq("opening never names the client", openingInstruction(brief).includes("Hayleys"), false);
 const prompt = systemPrompt(brief);
 for (const d of details) has(`prompt carries: ${d.slice(0, 40)}`, prompt, d);
 has("prompt carries the job brief", prompt, "Lead finance.");
-has("prompt asks for all items before closing", prompt, "Only when every item has been asked");
-has("opening asks if now is a good time", openingInstruction(brief), "good time");
-has("prompt waits for a yes before anything else", prompt, "Do not describe the role or ask anything else before they say yes");
-has("after a yes, the role is described before the questions", prompt, "first give a brief description of the role");
-eq("the role is described before the first checklist item",
-  prompt.indexOf("brief description of the role") < prompt.indexOf("Then ask the first checklist item"), true);
-has("an empty brief still gets a one-line role mention",
-  systemPrompt(readBrief(JSON.stringify({ jobTitle: "Driver" }))), "just say it is for the Driver role");
+has("prompt says Aura is an AI", prompt, "You are Aura, an AI voice assistant");
+has("prompt asks for all items before closing", prompt, "only when every item has been asked");
+has("prompt waits for a clear yes before anything else", prompt, "Say nothing about the role and ask nothing else until they clearly say yes");
+has("after a yes, they hear they are shortlisted", prompt, "their profile has been shortlisted for the Head of Finance role");
+has("never 'selected' or an offer", prompt, 'Say "shortlisted", never "selected", "hired" or "offered"');
+has("after a yes, the role is described", prompt, "describe the role in two or three short spoken sentences");
+const [s2, s3, s4] = ["Step 2,", "Step 3,", "Step 4,"].map((s) => prompt.indexOf(s));
+eq("steps run good time → shortlisted + role → questions", s2 > 0 && s2 < s3 && s3 < s4, true);
+has("the good-time yes answers no checklist item", prompt, "it does not answer any checklist item");
+has("a yes is not a currency", prompt, 'A "yes" does not tell you the currency');
+has("an empty brief still gets a role mention",
+  systemPrompt(readBrief(JSON.stringify({ jobTitle: "Driver" }))), "say the recruiter will share the details of the Driver role");
 eq("bad metadata falls back safely", readBrief("{not json").companyName, "Career141");
 eq("no checklist falls back to the standard four", readBrief("{}").detailsToCollect.length, 4);
 
