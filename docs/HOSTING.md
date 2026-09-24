@@ -112,14 +112,21 @@ Check `https://ta.career141.com` loads the sign-in page over HTTPS.
 
 ## 5 · The nightly job
 
-Database matching for every open job runs when something calls it. On the host:
+Database matching for every open job runs when something calls it. The route
+answers 404 until `C141_CRON_SECRET` is set in `/opt/ta-prod/.env.production`.
+On the host, call the container on loopback — production's app is
+`ta-prod-app` on `127.0.0.1:3110` (deploy/production/README.md). Not the public
+URL: nginx cuts a request off at 120 s and the run takes far longer.
 
 ```bash
 sudo crontab -e
 # 02:30 every day, Colombo time
-30 2 * * * curl -fsS -X POST https://ta.career141.com/api/cron/nightly \
+30 2 * * * curl -fsS -m 3000 -X POST http://127.0.0.1:3110/api/cron/nightly \
   -H "Authorization: Bearer <C141_CRON_SECRET>" >> /var/log/ta-nightly.log 2>&1
 ```
+
+Until 24 September nothing called it, and every run would have crashed anyway
+(`EACCES mkdir /app/.data` — the vector cache now falls back to memory).
 
 ## 6 · Updating later
 

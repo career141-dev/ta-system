@@ -300,15 +300,28 @@ function loadFile(): VectorFile {
   return file;
 }
 
+let saveWarned = false;
+
+/**
+ * Best effort. The production container cannot write under /app, and a failed
+ * save threw `EACCES: mkdir '/app/.data'` out of every "Find matches" and the
+ * nightly run (24 September). The vectors are already in `cache`, so the run
+ * carries on; without the file they are only remade on the next restart.
+ */
 function saveFile(file: VectorFile, kind: "candidates" | "openings") {
   const target = kind === "candidates" ? FILE() : JOB_FILE();
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(
-    tmp,
-    JSON.stringify(kind === "candidates" ? { model: file.model, candidates: file.candidates, openings: {} } : { model: file.model, openings: file.openings }),
-  );
-  fs.renameSync(tmp, target);
+  try {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.tmp`;
+    fs.writeFileSync(
+      tmp,
+      JSON.stringify(kind === "candidates" ? { model: file.model, candidates: file.candidates, openings: {} } : { model: file.model, openings: file.openings }),
+    );
+    fs.renameSync(tmp, target);
+  } catch (e) {
+    if (!saveWarned) console.warn(`[embed] vectors kept in memory only — could not write ${target}: ${(e as Error).message}`);
+    saveWarned = true;
+  }
 }
 
 function get(kind: "candidates" | "openings", id: string): Float32Array | null {
