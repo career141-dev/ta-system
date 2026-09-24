@@ -9,6 +9,7 @@
  */
 import { reserve, serperMaxCost, SpendCapError } from "./spend";
 import { keepHit, parseBooleanQuery, toNaturalSearch } from "./websearch";
+import { claudeSearchEnabled, claudeSearchPaused, claudeWebSearch } from "./claudeSub";
 
 export interface SearchHit {
   url: string;
@@ -20,6 +21,10 @@ export interface SearchResult {
   hits: SearchHit[];
   credits: number;
   error?: string;
+  /** Who answered: "claude", "searxng", "serper" or "openai" — for the report and the benchmark. */
+  provider?: string;
+  /** Claude only: addresses its reply named that its search had not returned, dropped. */
+  ungrounded?: number;
 }
 
 /**
@@ -94,10 +99,40 @@ export function searxngEngines(): string {
 
 /** Whether any search can run. Kept under its old name: callers ask "can we search?". */
 export function serperConfigured(): boolean {
-  return searchProvider() !== null;
+  return claudeSearchEnabled() || searchProvider() !== null;
 }
 
+/**
+ * Every search the desk makes — Research, Suggestions, Benchmark — comes here.
+ *
+ * Claude's own web search answers first when it is switched on
+ * (C141_CLAUDE_SEARCH=on, 24 Sep). When it fails, finds nothing, or is
+ * resting after a failure, the engine below it answers the same query —
+ * SearXNG on this server — so a search never comes back empty because Claude
+ * could not answer. Page two and beyond are the engine's: Claude's search has
+ * no pages.
+ */
 export async function search(q: string, num = 10, page = 1): Promise<SearchResult> {
+  if (page === 1 && claudeSearchEnabled()) {
+    const resting = claudeSearchPaused();
+    if (!resting) {
+      const r = await searxngSlot(() => claudeWebSearch(q, num), CLAUDE_MAX_IN_FLIGHT, 0, "claude");
+      if (r.hits.length) return r;
+      console.warn(`[search] claude ${r.error ?? "found nothing"} — asking ${searchProvider() ?? "no engine"}: ${q.slice(0, 120)}`);
+    }
+  }
+  const r = await searchEngine(q, num, page);
+  return { ...r, provider: r.provider ?? searchProvider() ?? undefined };
+}
+
+/**
+ * How many Claude searches run at once. Each is a CLI process in the app's
+ * own container, so this is a memory ceiling as much as a speed one.
+ */
+const CLAUDE_MAX_IN_FLIGHT = Number(process.env.C141_CLAUDE_SEARCH_CONCURRENCY ?? "") || 3;
+
+/** The search engine behind Claude: SearXNG, Serper or OpenAI, whichever is set up. */
+export async function searchEngine(q: string, num = 10, page = 1): Promise<SearchResult> {
   const provider = searchProvider();
   if (provider === "searxng") return searchSearxng(q, num, page);
   if (provider === "openai") return searchOpenAI(q, num, page);
