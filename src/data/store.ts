@@ -798,9 +798,10 @@ const rawRepo = {
 
     const candidate = db.candidates.find((c) => c.id === app.candidateId);
     const from = app.stage;
-    // Shortlisted database and incoming candidates move to AI Follow-up
-    const claimable = from === "new_cv" || from === "matched";
-    const to: Stage = claimable ? "ai_follow_up" : from;
+    // A TA's shortlist is TA Follow-up — database matches, new CVs, and the
+    // AI's own shortlist too. Only the AI's pass-mark shortlist is AI Follow-up.
+    const claimable = from === "new_cv" || from === "matched" || from === "ai_follow_up";
+    const to: Stage = claimable ? "ta_follow_up" : from;
 
     let setNumber: number | null = app.setNumber;
     mutate((d) => {
