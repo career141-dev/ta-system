@@ -1,5 +1,5 @@
 import { keepHit, parseBooleanQuery, searchMatrix, toNaturalSearch } from "@/lib/websearch";
-import { searchProvider, searxngEngines, searxngHits, searxngInstances, searxngRefusals, searxngSlot, type SearchHit } from "@/lib/serper";
+import { mergeEngineHits, search, searchProvider, searxngEngines, searxngHits, searxngInstances, searxngRefusals, searxngSlot, type SearchHit } from "@/lib/serper";
 
 let passed = 0;
 let failed = 0;
@@ -116,7 +116,7 @@ console.log("\nSearXNG: which engines, and what they said");
 {
   const env = process.env.SEARXNG_ENGINES;
   delete process.env.SEARXNG_ENGINES;
-  eq("Google, Bing and Yahoo unless we are told otherwise", searxngEngines(), "google,bing,yahoo");
+  eq("five engines unless we are told otherwise", searxngEngines(), "google,bing,yahoo,duckduckgo,brave");
   process.env.SEARXNG_ENGINES = " mojeek,google ";
   eq("and whatever we are told, as given", searxngEngines(), "mojeek,google");
   if (env === undefined) delete process.env.SEARXNG_ENGINES; else process.env.SEARXNG_ENGINES = env;
@@ -145,6 +145,74 @@ console.log("\nSearXNG: asked at a pace Google tolerates");
   eq("every search still runs", all.length, 18);
   eq("never more than two at a time", mostAtOnce <= 2, true);
   eq("and they are spaced out, not fired together", Date.now() - began >= 17 * 20, true);
+}
+
+console.log("\nSearXNG: each engine paced on its own");
+{
+  // Google being held back must not hold Bing back (24 Sep).
+  const started: Record<string, number> = {};
+  const began = Date.now();
+  await Promise.all(
+    ["google", "google", "bing"].map((engine, i) =>
+      searxngSlot(async () => { started[`${engine}${i}`] = Date.now() - began; }, 1, 60, `lane-test-${engine}`),
+    ),
+  );
+  eq("the second Google search waits for the gap", started.google1 >= 55, true);
+  eq("Bing does not wait behind Google", started.bing2 < 40, true);
+}
+
+console.log("\nSearXNG: the engines' answers, as one list");
+{
+  const answers = [
+    { engine: "google", hits: [hit("https://a.com/x", "A", "short"), hit("https://b.com/y", "B", "b")] },
+    { engine: "bing", hits: [hit("https://c.com/z", "C", "c"), hit("https://A.com/x/", "", "a much longer description of A")] },
+    { engine: "brave", hits: [], error: "brave: too many requests" },
+  ];
+  const merged = mergeEngineHits(answers, "anything", 10);
+  eq("the same page from two engines is one result, and first", merged.map((h) => h.url), ["https://a.com/x", "https://c.com/z", "https://b.com/y"]);
+  eq("the fullest description wins", merged[0].snippet, "a much longer description of A");
+  eq("the title is kept from whichever engine had one", merged[0].title, "A");
+  eq("only as many as were asked for", mergeEngineHits(answers, "anything", 2).length, 2);
+  const ops = mergeEngineHits(
+    [{ engine: "bing", hits: [hit("https://www.linkedin.com/in/ruwan"), hit("https://www.linkedin.com/jobs/view/1"), hit("https://rocketreach.co/ruwan")] }],
+    `site:linkedin.com "CFO" -inurl:jobs`,
+    10,
+  );
+  eq("operators Bing ignored are enforced on our side", ops.map((h) => h.url), ["https://www.linkedin.com/in/ruwan"]);
+}
+
+console.log("\nSearXNG: one request per engine, and a refusal is one engine's answer");
+{
+  const env = { ...process.env };
+  for (const k of ["C141_SEARCH_PROVIDER", "SERPER_API_KEY"]) delete process.env[k];
+  process.env.SEARXNG_URL = "http://searxng:8080";
+  process.env.SEARXNG_ENGINES = "google,bing";
+  const real = globalThis.fetch;
+  const asked: string[] = [];
+  let reply: (engine: string) => unknown = () => ({});
+  globalThis.fetch = (async (url: string) => {
+    const engine = new URL(url).searchParams.get("engines") ?? "";
+    asked.push(engine);
+    return new Response(JSON.stringify(reply(engine)), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    reply = (e) =>
+      e === "google"
+        ? { results: [], unresponsive_engines: [["google", "Suspended: CAPTCHA"]] }
+        : { results: [{ url: "https://www.hayleys.com", title: "Hayleys", content: "Hayleys PLC" }] };
+    const r = await search(`"Hayleys" conglomerate`, 10);
+    eq("every engine is asked, one to a request", [...asked].sort(), ["bing", "google"]);
+    eq("Google's CAPTCHA does not stop Bing's answer", [r.hits.map((h) => h.url), r.error ?? null], [["https://www.hayleys.com"], null]);
+    reply = (e) => ({ results: [], unresponsive_engines: [[e, e === "google" ? "Suspended: CAPTCHA" : "too many requests"]] });
+    const none = await search(`"Hayleys" conglomerate`, 10);
+    eq("when every engine refuses, each refusal is named", none.error, "google: Suspended: CAPTCHA, bing: too many requests");
+    reply = () => ({ results: [] });
+    const empty = await search(`"Nobody Ltd" xyzzy`, 10);
+    eq("nothing found and nothing refused is an empty search, not a broken one", [empty.hits.length, empty.error ?? null, empty.credits], [0, null, 1]);
+  } finally {
+    globalThis.fetch = real;
+    process.env = env;
+  }
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -62,7 +62,7 @@ First install, on the server:
 Then add to `/opt/ta-prod/.env.production` and restart the app:
 
     SEARXNG_URL=http://searxng:8080
-    SEARXNG_ENGINES=google,bing,yahoo
+    SEARXNG_ENGINES=google,bing,yahoo,duckduckgo,brave
 
 Brought up on 23 September; `docker exec ta-prod-app node -e "fetch('http://searxng:8080/search?q=hayleys+plc&format=json')..."` answered with 43 results.
 

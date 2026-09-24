@@ -60,18 +60,18 @@ export function searxngInstances(): string[] {
 }
 
 /**
- * Which engines SearXNG asks: Google, Bing and Yahoo unless SEARXNG_ENGINES
- * says otherwise.
+ * Which engines SearXNG asks: Google, Bing, Yahoo, DuckDuckGo and Brave unless
+ * SEARXNG_ENGINES says otherwise. Each one is asked on its own, in its own
+ * request (searchSearxng below), and what they return is merged.
  *
  * Google alone was the setting from 23 September, and it held for a day:
  * on 24 September Google answered the server with a CAPTCHA, SearXNG suspended
  * it, and Research stopped dead ("google: Suspended: CAPTCHA") with nothing
  * else to ask. Pacing (searxngSlot) was already live — Google had flagged the
  * address itself, not a burst. Bing and Yahoo (Bing's index, scraped
- * differently) now answer when Google will not; a suspended engine is skipped
- * at once, so the ones left carry the search rather than fail it. Mojeek and
- * Startpage are not offered: current SearXNG ships them switched off behind a
- * proof-of-work CAPTCHA.
+ * differently) now answer when Google will not. Mojeek and Startpage are not
+ * offered: current SearXNG ships them switched off behind a proof-of-work
+ * CAPTCHA.
  *
  * What was measured on the server, 23 September:
  *
@@ -79,14 +79,17 @@ export function searxngInstances(): string[] {
  *   duckduckgo  suspended: timeout      brave  suspended: too many requests
  *   qwant       CAPTCHA                 google cse  suspended: too many requests
  *
- * The refusals are what made a search take six seconds: SearXNG waited for
- * engines that were never going to answer, and a query where enough of them
- * failed came back empty and was reported to the desk as a broken search.
+ * Asked together in one request, those refusals made every search take six
+ * seconds — SearXNG waited for engines that were never going to answer — and
+ * a query where enough of them failed came back empty and was reported to the
+ * desk as a broken search. That is why DuckDuckGo and Brave were dropped on
+ * 23 Sep, and why they are back now that each engine is its own request: one
+ * that refuses or times out costs only its own answer, never the others'.
  * Bing honours `site:` but not `-inurl:`; websearch.ts enforces both on our
  * side, so a Bing result that breaks an operator is dropped, never shown.
  */
 export function searxngEngines(): string {
-  return (process.env.SEARXNG_ENGINES ?? "").trim() || "google,bing,yahoo";
+  return (process.env.SEARXNG_ENGINES ?? "").trim() || "google,bing,yahoo,duckduckgo,brave";
 }
 
 /** Whether any search can run. Kept under its old name: callers ask "can we search?". */
@@ -254,23 +257,36 @@ const SEARXNG_TIMEOUT_MS = 12_000;
  * between each. A run of thirty takes something like twenty seconds instead of
  * two, which is the price of it working at all. Both are tunable without a
  * deploy, because the number that keeps Google happy is not ours to decide.
+ *
+ * Each engine has its own queue (24 Sep): the pace is what one engine
+ * tolerates, and holding Bing back because Google is busy protects nobody.
+ * Five engines side by side keep a run about as long as Google alone made it.
  */
 const SEARXNG_MAX_IN_FLIGHT = Number(process.env.SEARXNG_CONCURRENCY ?? "") || 2;
 const SEARXNG_MIN_GAP_MS = Number(process.env.SEARXNG_MIN_GAP_MS ?? "") || 700;
 
-let inFlight = 0;
-let lastStartedAt = 0;
-const waiting: (() => void)[] = [];
+interface Lane {
+  inFlight: number;
+  lastStartedAt: number;
+  waiting: (() => void)[];
+}
+const lanes = new Map<string, Lane>();
 
-/** Run `fn` when there is room, and never sooner than a gap after the last one. */
-export async function searxngSlot<T>(fn: () => Promise<T>, max = SEARXNG_MAX_IN_FLIGHT, gapMs = SEARXNG_MIN_GAP_MS): Promise<T> {
+/**
+ * Run `fn` when there is room, and never sooner than a gap after the last one.
+ * `key` names the queue: one per engine, so each is paced on its own.
+ */
+export async function searxngSlot<T>(fn: () => Promise<T>, max = SEARXNG_MAX_IN_FLIGHT, gapMs = SEARXNG_MIN_GAP_MS, key = ""): Promise<T> {
+  let lane = lanes.get(key);
+  if (!lane) lanes.set(key, (lane = { inFlight: 0, lastStartedAt: 0, waiting: [] }));
+  const l = lane;
   await new Promise<void>((resolve) => {
     const take = () => {
-      if (inFlight < max) {
-        inFlight++;
+      if (l.inFlight < max) {
+        l.inFlight++;
         resolve();
       } else {
-        waiting.push(take);
+        l.waiting.push(take);
       }
     };
     take();
@@ -280,13 +296,13 @@ export async function searxngSlot<T>(fn: () => Promise<T>, max = SEARXNG_MAX_IN_
     // waiting let two callers both decide they were first, and fire together —
     // which is the burst this exists to prevent.
     const now = Date.now();
-    const startAt = Math.max(now, lastStartedAt + gapMs);
-    lastStartedAt = startAt;
+    const startAt = Math.max(now, l.lastStartedAt + gapMs);
+    l.lastStartedAt = startAt;
     if (startAt > now) await new Promise((r) => setTimeout(r, startAt - now));
     return await fn();
   } finally {
-    inFlight--;
-    waiting.shift()?.();
+    l.inFlight--;
+    l.waiting.shift()?.();
   }
 }
 
@@ -319,14 +335,72 @@ export function searxngHits(body: SearxngBody, q: string, num: number): SearchHi
   return out.slice(0, num);
 }
 
-function searchSearxng(q: string, num: number, page: number): Promise<SearchResult> {
-  return searxngSlot(() => askSearxng(q, num, page));
+/** What one engine answered for one search. */
+export interface EngineAnswer {
+  engine: string;
+  hits: SearchHit[];
+  error?: string;
 }
 
-async function askSearxng(q: string, num: number, page: number): Promise<SearchResult> {
+/**
+ * The engines' answers to one search, as one list — 24 Sep. The same page from
+ * two engines is one result, and a page more engines agree on comes first,
+ * then the one an engine ranked highest: searchMatrix's cross-query check,
+ * applied across engines. The operators are enforced again here, because Bing
+ * ignores `-inurl:`.
+ */
+export function mergeEngineHits(answers: EngineAnswer[], q: string, num: number): SearchHit[] {
+  const parsed = parseBooleanQuery(q);
+  const key = (u: string) => u.replace(/[?#].*$/, "").replace(/\/+$/, "").toLowerCase();
+  const found = new Map<string, { hit: SearchHit; engines: number; best: number }>();
+  for (const a of answers) {
+    a.hits.forEach((h, rank) => {
+      if (!keepHit(h, parsed)) return;
+      const k = key(h.url);
+      const had = found.get(k);
+      if (!had) {
+        found.set(k, { hit: { ...h }, engines: 1, best: rank });
+        return;
+      }
+      had.engines++;
+      had.best = Math.min(had.best, rank);
+      if (h.snippet.length > had.hit.snippet.length) had.hit.snippet = h.snippet;
+      if (!had.hit.title && h.title) had.hit.title = h.title;
+    });
+  }
+  return [...found.values()]
+    .sort((a, b) => b.engines - a.engines || a.best - b.best)
+    .slice(0, num)
+    .map((f) => f.hit);
+}
+
+/**
+ * One search, put to every engine separately and merged — 24 Sep. Asked in one
+ * request, a Google CAPTCHA came back as the whole answer; asked one by one,
+ * it is one engine's answer and the rest still count. It is a failure only
+ * when nothing came back and something refused, and then every refusal is
+ * named, so the desk's message says what the search service said.
+ */
+async function searchSearxng(q: string, num: number, page: number): Promise<SearchResult> {
+  if (!searxngInstances().length) return { hits: [], credits: 0, error: "no_searxng_url" };
+  const engines = searxngEngines()
+    .split(",")
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const answers = await Promise.all(
+    engines.map((engine) => searxngSlot(() => askSearxng(q, num, page, engine), SEARXNG_MAX_IN_FLIGHT, SEARXNG_MIN_GAP_MS, engine)),
+  );
+  const hits = mergeEngineHits(answers, q, num);
+  // A search happened and cost nothing; it is still counted as one search.
+  if (hits.length) return { hits, credits: 1 };
+  const refused = answers.filter((a) => a.error).map((a) => a.error!);
+  if (refused.length) return { hits: [], credits: 0, error: refused.join(", ") };
+  return { hits: [], credits: 1 };
+}
+
+/** One engine's answer, from the first instance that gives one. */
+async function askSearxng(q: string, num: number, page: number, engine: string): Promise<EngineAnswer> {
   const instances = searxngInstances();
-  if (!instances.length) return { hits: [], credits: 0, error: "no_searxng_url" };
-  const engines = searxngEngines();
   let lastError = "";
   for (const base of instances) {
     const params = new URLSearchParams({
@@ -335,7 +409,7 @@ async function askSearxng(q: string, num: number, page: number): Promise<SearchR
       language: "en",
       safesearch: "0",
       ...(page > 1 ? { pageno: String(page) } : {}),
-      ...(engines ? { engines } : {}),
+      engines: engine,
     });
     try {
       const res = await fetch(`${base}/search?${params}`, {
@@ -350,7 +424,7 @@ async function askSearxng(q: string, num: number, page: number): Promise<SearchR
       // 403: JSON is off on this instance. 429: we are being rate-limited.
       // Either way the next instance in the list gets the same question.
       if (!res.ok) {
-        lastError = `${hostOf(base)} ${res.status}`;
+        lastError = `${engine}: ${hostOf(base)} ${res.status}`;
         continue;
       }
       // A public instance with JSON switched off answers 200 and an HTML page
@@ -358,7 +432,7 @@ async function askSearxng(q: string, num: number, page: number): Promise<SearchR
       // public instance tried did one of these. Say which, rather than let
       // JSON.parse throw somewhere unhelpful.
       if (!(res.headers.get("content-type") ?? "").includes("json")) {
-        lastError = `${hostOf(base)} served HTML, not JSON (bot check, or JSON is off on that instance)`;
+        lastError = `${engine}: ${hostOf(base)} served HTML, not JSON (bot check, or JSON is off on that instance)`;
         continue;
       }
       const body = (await res.json()) as SearxngBody;
@@ -368,16 +442,15 @@ async function askSearxng(q: string, num: number, page: number): Promise<SearchR
       if (!hits.length && (body.unresponsive_engines ?? []).length) {
         // Which engine, and what it said: "engines unavailable" on its own sent
         // the desk hunting through logs for something the answer already held.
-        lastError = `${hostOf(base)} — ${searxngRefusals(body.unresponsive_engines)}`;
+        lastError = searxngRefusals(body.unresponsive_engines);
         continue;
       }
-      // A search happened and cost nothing; it is still counted as one search.
-      return { hits, credits: 1 };
+      return { engine, hits };
     } catch (e) {
-      lastError = `${hostOf(base)} ${e instanceof Error && e.name === "TimeoutError" ? "timed out" : String(e)}`;
+      lastError = `${engine}: ${hostOf(base)} ${e instanceof Error && e.name === "TimeoutError" ? "timed out" : String(e)}`;
     }
   }
-  return { hits: [], credits: 0, error: lastError || "searxng_unreachable" };
+  return { engine, hits: [], error: lastError || `${engine}: searxng_unreachable` };
 }
 
 /** An instance's host, for an error a person can act on. */
