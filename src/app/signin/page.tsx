@@ -1,4 +1,4 @@
-import { Show, SignIn, SignOutButton } from "@clerk/nextjs";
+import { Show, SignIn } from "@clerk/nextjs";
 import { clerkEmails, currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
@@ -7,6 +7,7 @@ import { devSignInAs } from "@/app/actions";
 import { ReloadWhenSignedIn } from "@/components/ReloadWhenSignedIn";
 import { uiOnly } from "@/lib/uiOnly";
 import { AppVersion } from "@/components/AppVersion";
+import { SignOut } from "@/components/SignOut";
 
 /**
  * The sign-in screen.
@@ -68,11 +69,7 @@ export default async function SignInPage() {
           <p className="mt-2 text-[12px] leading-relaxed text-ink-soft">
             Ask an admin to add you on the People page, or sign in with a different account.
           </p>
-          <SignOutButton redirectUrl="/signin">
-            <button className="mt-4 rounded-lg border border-rule px-3 py-1.5 text-[12.5px] hover:bg-paper">
-              Sign out
-            </button>
-          </SignOutButton>
+          <SignOut className="mt-4 rounded-lg border border-rule px-3 py-1.5 text-[12.5px] hover:bg-paper" />
         </div>
       )}
       <AppVersion className="mt-6 block text-center" />
