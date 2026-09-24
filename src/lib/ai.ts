@@ -16,6 +16,7 @@
  *      thing could not be verified, the page says so.
  */
 
+import { askSubscription, viaSubscription } from "./claudeSub";
 import { capActive, maxModelCost, modelCost, reserve, SpendCapError } from "./spend";
 
 export type AiFailure =
@@ -184,6 +185,14 @@ async function callOpenRouter(
   prompt: string,
   opts: { maxTokens?: number; temperature?: number; search?: boolean } = {},
 ): Promise<AiResult & { usage?: Usage }> {
+  // Research and suggestions ask the owner's Claude subscription first when it
+  // is set up (lib/claudeSub, 24 Sep). Whatever it could not answer — a usage
+  // limit, a lapsed token — comes here to OpenRouter as it always did.
+  if (viaSubscription(task)) {
+    const sub = await askSubscription(task, prompt);
+    if (sub.ok) return sub;
+    logAiFailure(task, "claude-subscription", sub);
+  }
   const key = openrouterKey();
   if (!key) return { ok: false, reason: "no_key" };
   const model = modelFor(task);
