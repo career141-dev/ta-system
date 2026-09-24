@@ -300,6 +300,8 @@ function searchReasonInWords(code: string, detail?: string): string {
   }
   if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
   if (code === "no_opening") return "the opening could not be found. Reload the page.";
+  // Not a failure: the run that started when the job was created is still going.
+  if (code === "running") return "it is already running for this opening — it starts by itself when the job is created. The results appear here when it finishes, usually within a few minutes.";
   // Not a failure: the opening has had its run. Named so nobody hunts for a fault.
   if (code === "run_spent") return `Research has already been run for this opening${detail ? ` ${detail}` : ""}. It runs once per opening — ask a lead if it has to be run again.`;
   if (code === "benchmark_spent") return `Benchmark has already been run for this opening${detail ? ` on ${detail}` : ""}. It runs once per opening — ask a lead if it has to be run again.`;
@@ -705,20 +707,45 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   }
 
   // The groundwork starts the moment the job exists, not when somebody finds
-  // the button (13 September): the JD draft for the TA to approve, the market
-  // research, and the first sourcing round, so there are people waiting when
-  // the team opens it. It runs after the response is sent, so creating the
-  // opening is not held up by three model calls.
-  // Research no longer runs by itself, and sourcing waits for the approved JD
-  // (13 September): a round run on an unapproved draft searched with the wrong
-  // words, and then ran again on approval whenever it had found nobody.
+  // the button: the JD draft for the TA to approve, then the market research
+  // and the first round of Suggestions, so there is something waiting when the
+  // team opens it. All of it after the response is sent, so creating the
+  // opening is not held up.
+  //
+  // Research and Suggestions came off this list on 13 September, when a round
+  // run before there was any JD searched with the wrong words. They are back
+  // at the owner's request (24 Sep), and now run after the draft, so they
+  // search with its words. A first round that finds nobody is run again when
+  // the JD is approved (approveJd), as before. Research's run is the opening's
+  // one run; a lead can still run it again.
+  //
+  // The Suggestions round belongs to the TA the opening is on, not to whoever
+  // created it — a lead creating it must not end up owning the list.
+  const owner = assigned[0] ?? user.id;
   after(async () => {
-    try {
-      if (isConvex()) await primeStore({ openingId });
-      await draftJd(openingId);
-    } catch (err) {
-      console.error(`[prepare ${openingId}]`, err);
-    }
+    const step = async (what: string, work: () => Promise<unknown>) => {
+      try {
+        await work();
+      } catch (err) {
+        console.error(`[prepare ${openingId}] ${what}`, err);
+      }
+    };
+    if (isConvex()) await step("load", () => primeStore({ openingId }));
+    await step("JD draft", () => draftJd(openingId));
+    // The draft is saved through the backend and the loaded copy dropped
+    // (draftJd), so it is read again before anything searches with it.
+    if (isConvex()) await step("reload", () => primeStore({ openingId }));
+    revalidatePath(`/openings/${openingId}`, "layout");
+    await Promise.all([
+      step("research", async () => {
+        const r = await researchOpening(openingId, user.id);
+        if (!r.ok) console.warn(`[prepare ${openingId}] research did not run: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`);
+      }),
+      step("suggestions", async () => {
+        const r = await sourceFor(openingId, owner);
+        if (r.error) console.warn(`[prepare ${openingId}] suggestions did not run: ${r.error}`);
+      }),
+    ]);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
 
@@ -2235,7 +2262,13 @@ export async function pickBenchmark(formData: FormData) {
  * The sourcing run itself, callable from the action or straight after the JD is
  * approved. Returns rather than redirects so the caller decides what happens.
  */
-async function sourceFor(openingId: string, forUserId?: string): Promise<{ found: number; scanned: number; queries: number; cost: number; rejected?: number; note?: string; error?: string }> {
+type SourceRun = { found: number; scanned: number; queries: number; cost: number; rejected?: number; note?: string; error?: string };
+
+async function sourceFor(openingId: string, forUserId?: string): Promise<SourceRun> {
+  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId));
+}
+
+async function sourceForNow(openingId: string, forUserId?: string): Promise<SourceRun> {
   const o = repo.opening(openingId);
   if (!o) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "no_opening" };
   const client = repo.client(o.clientId);
@@ -2467,7 +2500,29 @@ async function extractJobDetails(openingId: string, c: OpeningContext, briefs: J
  * was read into fields (lib/researchSearch, 22 Sep). Replaced one model call
  * that searched by itself and never opened the client's or a competitor's site.
  */
-async function researchOpening(
+/**
+ * Research or Suggestions already running for an opening, in this server.
+ * Both start by themselves when a job is created (24 Sep); a TA pressing the
+ * button while that run is still going would start a second one — twice the
+ * searches, and two rounds numbered the same. The second press is told to wait.
+ */
+const runningNow = new Set<string>();
+
+async function alone<T>(key: string, busy: T, work: () => Promise<T>): Promise<T> {
+  if (runningNow.has(key)) return busy;
+  runningNow.add(key);
+  try {
+    return await work();
+  } finally {
+    runningNow.delete(key);
+  }
+}
+
+async function researchOpening(openingId: string, userId: string, canRerun = false): ReturnType<typeof researchOpeningNow> {
+  return alone(`research:${openingId}`, { ok: false, reason: "running" }, () => researchOpeningNow(openingId, userId, canRerun));
+}
+
+async function researchOpeningNow(
   openingId: string,
   userId: string,
   /** A lead, director or admin may run it a second time. */
