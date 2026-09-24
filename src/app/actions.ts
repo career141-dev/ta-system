@@ -1348,6 +1348,8 @@ export async function setWorkingStage(formData: FormData) {
   } else {
     repo.setWorkingStage(openingId, user.id, stage);
   }
+  // The openings list shows the stage on every row too (24 Sep).
+  revalidatePath("/openings");
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/eod`);
 }
