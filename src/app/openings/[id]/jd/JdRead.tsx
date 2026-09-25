@@ -5,6 +5,7 @@ import { amendJd } from "@/app/actions";
 import { JdDocument } from "@/components/JdDocument";
 import { JdEditor } from "@/components/JdEditor";
 import { SubmitButton } from "@/components/Submit";
+import { JdChat, type JdChatTurn } from "@/components/JdChat";
 
 /**
  * The approved JD — finding 01.
@@ -20,12 +21,15 @@ export function JdRead({
   approvedBy,
   approvedAt,
   canAmend,
+  chat,
 }: {
   openingId: string;
   jd: string;
   approvedBy: string | null;
   approvedAt: string | null;
   canAmend: boolean;
+  /** The JD chat, which stays open after approval (25 Sep). */
+  chat: JdChatTurn[];
 }) {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -95,6 +99,11 @@ export function JdRead({
         </form>
       ) : (
         <JdDocument markdown={jd} className="px-6 py-5" />
+      )}
+      {canAmend && !editing && (
+        <div className="border-t border-rule px-6 py-5">
+          <JdChat openingId={openingId} turns={chat} currentJd={jd} approved />
+        </div>
       )}
     </section>
   );

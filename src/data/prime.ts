@@ -323,7 +323,7 @@ async function refresh(scope: PrimeScope): Promise<void> {
 /** Tables loaded whole, through ta/tables:page — the TA System's own records. */
 const WHOLE_TABLES = [
   "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
-  "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "intake",
+  "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "jdChat", "intake",
   "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
   "matchExclusions", "callFeedback", "interviews",
 ] as const;

@@ -884,6 +884,26 @@ export interface ChatMessage {
 }
 
 /**
+ * The TA's conversation with the AI about an opening's JD (25 Sep): the TA
+ * asks for a change, the AI rewrites the JD and says what it changed, until
+ * the TA approves it. Each answer keeps the JD it produced, so an earlier
+ * version can be put back.
+ */
+export interface JdChatMessage {
+  id: Id;
+  openingId: Id;
+  role: "user" | "assistant";
+  /** The TA's request, or what the AI changed. */
+  body: string;
+  /** The JD this answer produced. Only on an assistant turn that worked. */
+  jdMarkdown: string | null;
+  byUserId: Id | null;
+  at: number;
+  /** The AI did not answer; the JD was left as it was. */
+  failed?: boolean;
+}
+
+/**
  * Where a CV came in from — spec §4, and the four the desk actually uses.
  *
  * `upload` is a TA dropping a file in themselves; the other three arrive
@@ -1278,6 +1298,7 @@ export interface Database {
   benchmarks: BenchmarkEntry[];
   suggestions: ProfileSuggestion[];
   chat: ChatMessage[];
+  jdChat: JdChatMessage[];
   intake: IntakeItem[];
   outreach: OutreachMessage[];
   offers: Offer[];
