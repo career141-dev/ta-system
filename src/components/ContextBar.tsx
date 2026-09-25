@@ -5,7 +5,7 @@ import { StatusMenu, type OpeningStatus } from "./StatusMenu";
 import { WorkingStageMenu } from "./WorkingStageMenu";
 import { OpeningMenu } from "./OpeningMenu";
 import { getCurrentUser } from "@/lib/session";
-import { isDeskWide } from "@/lib/auth";
+import { allows, isDeskWide } from "@/lib/auth";
 
 /**
  * The persistent identity band: client, position, the TAs on it. It stays put
@@ -29,8 +29,9 @@ export async function ContextBar({
   if (!o || !client) return null;
   const tas = o.assignedTaIds.map((t) => repo.user(t)).filter(Boolean);
   const user = await getCurrentUser().catch(() => null);
-  // Only someone on the job has a working stage; a lead looking in does not.
-  const onJob = user ? !!repo.assignmentFor(openingId, user.id) : false;
+  // Everyone who works the job has a working stage — admins, directors and
+  // leads as well as its TAs (25 Sep). A client seat or a viewer does not.
+  const canStage = user ? allows(user, "opening.act", { assignment: repo.assignmentFor(openingId, user.id) }) : false;
   const workingStage = user ? repo.workingStage(openingId, user.id) : "100%";
 
   return (
@@ -49,7 +50,7 @@ export async function ContextBar({
       {/* Findings 05-07 — reachable from every screen of the opening, by
           whoever is working it. */}
       <StatusMenu openingId={openingId} status={o.status as OpeningStatus} size="small" />
-      {onJob && <WorkingStageMenu openingId={openingId} stage={workingStage} size="small" />}
+      {canStage && <WorkingStageMenu openingId={openingId} stage={workingStage} size="small" />}
 
       {crumbs.map((c) => (
         <span key={c} className="flex shrink-0 items-center gap-2.5 text-[12.5px]">
