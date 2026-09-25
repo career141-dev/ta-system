@@ -32,10 +32,13 @@ import type {
   Client,
   Database,
   Id,
+  LeadNote,
   LinkVaultEntry,
   LinkOutcome,
+  Role,
   BenchmarkEntry,
   ChatMessage,
+  JdChatMessage,
   Assignment,
   AssignmentRole,
   WorkingStage,
@@ -80,6 +83,7 @@ import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
 import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
+import { WORKING_STAGES, workingStageKey } from "@/lib/workingStage";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -165,7 +169,7 @@ function backfill(db: Partial<Database>): Database {
     users: [], briefs: [], clients: [], openings: [], jobPosts: [], candidates: [],
     referees: [], applications: [], callFeedback: [], interviews: [], linkVault: [],
     assignments: [], pipelineEvents: [], reviewRounds: [],
-    alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [],
+    alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
     matchRuns: [], matchExclusions: [], liveMirror: [],
   } satisfies Database;
@@ -1381,6 +1385,7 @@ const rawRepo = {
       db.benchmarks = db.benchmarks.filter((b) => b.openingId !== id);
       db.researchReports = db.researchReports.filter((r) => r.openingId !== id);
       db.chat = db.chat.filter((c) => c.openingId !== id);
+      db.jdChat = db.jdChat.filter((c) => c.openingId !== id);
       db.callFeedback = db.callFeedback.filter((f) => !gone(f.applicationId));
       db.interviews = db.interviews.filter((i) => !gone(i.applicationId));
       db.alerts = db.alerts.filter((a) => a.subjectId !== id && !gone(a.subjectId));
@@ -1755,6 +1760,32 @@ const rawRepo = {
     });
   },
 
+  /**
+   * A lead's note for the TA on this row. Deliberately not an approach: it
+   * leaves the outcome and the approach log alone (25 Sep).
+   */
+  addLeadNote(entryId: Id, by: Id, byRole: Role, note: string): Id | null {
+    const id = `ln_${Math.random().toString(36).slice(2, 10)}`;
+    let found = false;
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (!e) return;
+      found = true;
+      const added: LeadNote = { id, at: Date.now(), note, by, byRole };
+      // A new array rather than a push, so the row that had none compares as changed.
+      e.leadNotes = [...(e.leadNotes ?? []), added];
+    });
+    return found ? id : null;
+  },
+
+  removeLeadNote(entryId: Id, noteId: Id) {
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (!e?.leadNotes) return;
+      e.leadNotes = e.leadNotes.filter((n) => n.id !== noteId);
+    });
+  },
+
   toggleEyeMark(entryId: Id) {
     mutate((db) => {
       const e = db.linkVault.find((l) => l.id === entryId);
@@ -1987,16 +2018,27 @@ const rawRepo = {
     });
   },
 
-  /** The TA's working stage on an opening (100% / Follow-up / Add-on). Defaults to "100%". */
+  /**
+   * Someone's working stage on an opening (100% / Follow-up / Add-on).
+   * Defaults to "100%". A person on the team keeps it on their assignment;
+   * anyone else — an admin, director or lead working the job without being
+   * on its team — keeps it in the settings, so changing it never puts them
+   * on the team (25 Sep: it was shown to TAs only).
+   */
   workingStage(openingId: Id, userId: Id): WorkingStage {
     const a = this.assignmentFor(openingId, userId);
-    return a?.workingStage ?? "100%";
+    if (a) return a.workingStage ?? "100%";
+    const held = this.setting(workingStageKey(openingId, userId), "");
+    return (WORKING_STAGES as string[]).includes(held) ? (held as WorkingStage) : "100%";
   },
 
-  /** Update the TA's working stage for this opening. Only someone on the job has one. */
+  /** Update someone's working stage for this opening. */
   setWorkingStage(openingId: Id, userId: Id, stage: WorkingStage) {
     const team = this.assignments(openingId);
-    if (!team.some((x) => x.userId === userId)) return;
+    if (!team.some((x) => x.userId === userId)) {
+      this.setSetting(workingStageKey(openingId, userId), stage);
+      return;
+    }
     mutate((db) => {
       // An older opening's team is derived on read (assignments above) until
       // one row is stored, and then only stored rows count — so store the
@@ -2393,6 +2435,20 @@ const rawRepo = {
   addChat(m: Omit<ChatMessage, "id">): Id {
     const id = `cm_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => db.chat.push({ ...m, id }));
+    return id;
+  },
+
+  /** The TA's conversation with the AI about this opening's JD, oldest first. */
+  jdChat(openingId: Id): JdChatMessage[] {
+    return (load().jdChat ?? []).filter((m) => m.openingId === openingId).sort((a, b) => a.at - b.at);
+  },
+
+  addJdChat(m: Omit<JdChatMessage, "id">): Id {
+    const id = `jc_${Math.random().toString(36).slice(2, 10)}`;
+    mutate((db) => {
+      db.jdChat ??= [];
+      db.jdChat.push({ ...m, id });
+    });
     return id;
   },
 

@@ -5,6 +5,7 @@ import { setOpeningTeam, updateOpening } from "@/app/actions";
 import { inputClass } from "@/components/form";
 import { ASSIGNMENT_LABEL, ASSIGNMENT_NOTE, type AssignmentRole } from "@/data/types";
 import { Confirm } from "@/components/Confirm";
+import { SubmitButton } from "@/components/Submit";
 import { PRIORITY_TARGET, type PriorityTier } from "@/data/types";
 
 /**
@@ -64,7 +65,7 @@ export function OpeningAdmin({
   return (
     <div className="flex flex-col gap-3 border-t border-rule pt-4">
       {pane === "record" ? (
-        <form action={updateOpening} onSubmit={() => setPane(null)} className="flex flex-col gap-3">
+        <form action={updateOpening} className="flex flex-col gap-3">
           <input type="hidden" name="openingId" value={openingId} />
           {field("Position", <input name="title" defaultValue={title} required className={inputClass} />)}
 
@@ -92,7 +93,13 @@ export function OpeningAdmin({
           </div>
 
           <div className="flex items-center gap-2">
-            <button className="rounded-full bg-brand px-4 py-1.5 text-[12px] font-medium text-white">Save</button>
+            <SubmitButton
+              pendingLabel="Saving…"
+              onDone={() => setPane(null)}
+              className="rounded-full bg-brand px-4 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+            >
+              Save
+            </SubmitButton>
             <button type="button" onClick={() => setPane(null)} className="px-2 text-[12px] text-ink-soft hover:text-ink">
               Cancel
             </button>
@@ -152,7 +159,7 @@ function TeamEditor({
   );
 
   return (
-    <form action={setOpeningTeam} onSubmit={onClose} className="flex flex-col gap-3">
+    <form action={setOpeningTeam} className="flex flex-col gap-3">
       <input type="hidden" name="openingId" value={openingId} />
       <span className="text-[11.5px] text-ink-faint">
         Somebody has to be recruiting it — a team of reviewers alone is refused.
@@ -213,9 +220,13 @@ function TeamEditor({
       </button>
 
       <div className="flex gap-2">
-        <button className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white">
+        <SubmitButton
+          pendingLabel="Saving…"
+          onDone={onClose}
+          className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-60"
+        >
           Save team
-        </button>
+        </SubmitButton>
         <button type="button" onClick={onClose} className="px-2 text-[12px] text-ink-soft hover:text-ink">
           Cancel
         </button>

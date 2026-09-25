@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { isDeskWide } from "@/lib/auth";
+import { allows, isDeskWide } from "@/lib/auth";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
 import { WorkingStageMenu } from "@/components/WorkingStageMenu";
 import { OpeningMenu } from "@/components/OpeningMenu";
@@ -14,6 +14,8 @@ import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { BulkBar, BulkConfirm, RowCheck } from "@/components/BulkSelect";
+import { deleteOpenings } from "@/app/actions";
 
 const PAGE_SIZE = 20;
 
@@ -201,6 +203,16 @@ export default async function OpeningsPage({
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* Deleting is a desk decision, so only desk-wide people tick. */}
+          {isDeskWide(user) && (
+            <BulkBar form="bulk-openings" noun={["opening", "openings"]} action={deleteOpenings}>
+              <BulkConfirm
+                label="Delete"
+                noun={["opening", "openings"]}
+                warning="Each goes with its posts, pipeline, calls, messages and offers. Their candidates stay in the database. This cannot be undone."
+              />
+            </BulkBar>
+          )}
           {list.map((o) => {
             const client = clients.find((c) => c.id === o.clientId);
             const c = stageCounts(o.id);
@@ -215,10 +227,11 @@ export default async function OpeningsPage({
             const target = PRIORITY_TARGET[o.priorityTier].days;
             const urgent = liveAlerts.filter((a) => a.openingId === o.id && a.urgent).length;
 
-            // The TA's own stage on this job (100% / Follow-up / Add-on), next
-            // to the status so it can be changed without opening the job. It is
-            // what the end-of-day L-sheet reports; a lead not on the job has none.
-            const onJob = !!repo.assignmentFor(o.id, user.id);
+            // The reader's own stage on this job (100% / Follow-up / Add-on),
+            // next to the status so it can be changed without opening the job.
+            // It is what the end-of-day L-sheet reports. Everyone who works
+            // the job has one, not only its TAs (25 Sep).
+            const canStage = allows(user, "opening.act", { assignment: repo.assignmentFor(o.id, user.id) });
             const workingStage = repo.workingStage(o.id, user.id);
 
             return (
@@ -237,6 +250,12 @@ export default async function OpeningsPage({
                   className="absolute inset-0 z-0 rounded-xl"
                 />
                 <div className="pointer-events-none relative flex flex-wrap items-start justify-between gap-5">
+                  <div className="flex min-w-0 items-start gap-3.5">
+                  {isDeskWide(user) && (
+                    <span className="pointer-events-auto relative z-10 pt-1">
+                      <RowCheck form="bulk-openings" name="openingId" value={o.id} label={o.title} />
+                    </span>
+                  )}
                   <div className="min-w-0">
                     <p className="text-[12px] text-ink-faint">{client?.name}</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-2.5">
@@ -247,7 +266,7 @@ export default async function OpeningsPage({
                       <span className="pointer-events-auto relative z-10">
                         <StatusMenu openingId={o.id} status={o.status as OpeningStatus} size="small" />
                       </span>
-                      {onJob && (
+                      {canStage && (
                         <span className="pointer-events-auto relative z-10">
                           <WorkingStageMenu openingId={o.id} stage={workingStage} size="small" />
                         </span>
@@ -266,6 +285,7 @@ export default async function OpeningsPage({
                         <span className="rounded bg-warn-soft px-1.5 py-px text-warn">Unassigned</span>
                       )}
                     </p>
+                  </div>
                   </div>
 
                   <div className="flex shrink-0 items-start gap-8 text-right">

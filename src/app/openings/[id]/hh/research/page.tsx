@@ -4,6 +4,7 @@ import { repo } from "@/data/store";
 import { ProjectHeader } from "../../ProjectHeader";
 import { Generate, Sources } from "@/components/hh/Generate";
 import { runResearchInline, pickBenchmark } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import { BenchmarkButton } from "@/components/hh/BenchmarkButton";
 import { ResearchField } from "@/components/hh/ResearchField";
 import { timeAt } from "@/lib/format";
@@ -193,14 +194,15 @@ export default async function Page({
                   <form action={pickBenchmark} className="pt-0.5">
                     <input type="hidden" name="openingId" value={id} />
                     <input type="hidden" name="entryId" value={b.id} />
-                    <button
+                    <SubmitButton
+                      tone={b.isSelected ? "light" : "dark"}
                       title={b.isSelected ? "Remove from benchmark" : "Benchmark against this"}
-                      className={`grid h-[18px] w-[18px] place-items-center rounded border text-[11px] leading-none transition-colors ${
+                      className={`h-[18px] w-[18px] rounded border text-[11px] leading-none transition-colors disabled:opacity-60 ${
                         b.isSelected ? "border-brand bg-brand text-white" : "border-rule-strong text-transparent hover:border-brand"
                       }`}
                     >
                       ✓
-                    </button>
+                    </SubmitButton>
                   </form>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">

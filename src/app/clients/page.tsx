@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { BulkBar, BulkConfirm } from "@/components/BulkSelect";
+import { deleteClients } from "@/app/actions";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { PRIORITY_TARGET } from "@/data/types";
 import { relDays } from "@/lib/format";
@@ -120,6 +122,15 @@ export default async function ClientsPage({
       )}
 
       <div className="flex flex-col gap-6">
+        {can(user, "client.manage").ok && (
+          <BulkBar form="bulk-clients" noun={["client", "clients"]} action={deleteClients}>
+            <BulkConfirm
+              label="Delete"
+              noun={["client", "clients"]}
+              warning="A client with openings filed under it is kept, and named."
+            />
+          </BulkBar>
+        )}
         {clients.map((c) => {
           const mine = openings.filter((o) => o.clientId === c.id);
           const open = mine.filter((o) => o.status === "open");
@@ -135,6 +146,7 @@ export default async function ClientsPage({
               esaSignedAt={c.esaSignedAt}
               contacts={c.contacts}
               canDelete={can(user, "client.manage").ok}
+              selectForm={can(user, "client.manage").ok ? "bulk-clients" : undefined}
               industry={c.industry}
               contactTitle={contact?.title ?? null}
               openCount={open.length}

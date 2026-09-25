@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { approveJd, generateJdWithModel } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 
 /**
  * The TA's JD step, in the order the desk actually works:
@@ -93,14 +94,21 @@ export function JdApproval({
           />
           {canApprove ? (
             <div className="mt-5 flex flex-wrap items-center gap-4">
-              <button className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+              <SubmitButton
+                pendingLabel="Approving…"
+                className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
                 Approve
-              </button>
+              </SubmitButton>
               <form action={generateJdWithModel}>
                 <input type="hidden" name="openingId" value={openingId} />
-                <button className="text-[12.5px] text-ink-soft transition-colors hover:text-ink">
+                <SubmitButton
+                  tone="dark"
+                  pendingLabel="Regenerating…"
+                  className="text-[12.5px] text-ink-soft transition-colors hover:text-ink disabled:opacity-60"
+                >
                   Regenerate from the brief
-                </button>
+                </SubmitButton>
               </form>
               <span className="text-[12.5px] text-ink-faint">
                 Your edits are saved with the approval.

@@ -637,6 +637,19 @@ export interface LinkVaultEntry {
   createdAt: number;
   /** Present when the row came from, or was enriched by, the extension. */
   capture?: ProfileCapture | null;
+  /** Feedback for the TA from a lead, director, admin or ops. Absent on rows
+   *  nobody has left a note on. */
+  leadNotes?: LeadNote[];
+}
+
+/** A note left on an Excel Tables row for the TA working it. */
+export interface LeadNote {
+  id: Id;
+  at: number;
+  note: string;
+  by: Id;
+  /** The author's role when they wrote it — the note says who it came from. */
+  byRole: Role;
 }
 
 // ─── Alerts (spec §12) ───────────────────────────────────────────────────────
@@ -883,6 +896,26 @@ export interface ChatMessage {
   sources: Citation[];
   byUserId: Id | null;
   at: number;
+}
+
+/**
+ * The TA's conversation with the AI about an opening's JD (25 Sep): the TA
+ * asks for a change, the AI rewrites the JD and says what it changed, until
+ * the TA approves it. Each answer keeps the JD it produced, so an earlier
+ * version can be put back.
+ */
+export interface JdChatMessage {
+  id: Id;
+  openingId: Id;
+  role: "user" | "assistant";
+  /** The TA's request, or what the AI changed. */
+  body: string;
+  /** The JD this answer produced. Only on an assistant turn that worked. */
+  jdMarkdown: string | null;
+  byUserId: Id | null;
+  at: number;
+  /** The AI did not answer; the JD was left as it was. */
+  failed?: boolean;
 }
 
 /**
@@ -1280,6 +1313,7 @@ export interface Database {
   benchmarks: BenchmarkEntry[];
   suggestions: ProfileSuggestion[];
   chat: ChatMessage[];
+  jdChat: JdChatMessage[];
   intake: IntakeItem[];
   outreach: OutreachMessage[];
   offers: Offer[];

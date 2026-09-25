@@ -6,6 +6,9 @@ import { STAGE_LABEL } from "@/data/types";
 import { RowActions } from "./RowActions";
 import { directorReviewBlockers } from "@/lib/pipeline";
 import { claimCandidate } from "@/app/actions";
+import { SubmitButton } from "./Submit";
+import { RowCheck } from "./BulkSelect";
+import { ContactLinks } from "./ContactLinks";
 import { FitMark, FitReason } from "./FitBadge";
 import type { Score } from "@/lib/scoring";
 import { FollowUpActions } from "./FollowUpActions";
@@ -23,6 +26,7 @@ export function CandidateRow({
   rank,
   canDecideDirector = false,
   canDecideClient = false,
+  selectForm,
 }: {
   app: Application;
   candidate: Candidate;
@@ -36,6 +40,8 @@ export function CandidateRow({
   rank?: number;
   canDecideDirector?: boolean;
   canDecideClient?: boolean;
+  /** The list's bulk bar (components/BulkSelect), when rows can be ticked. */
+  selectForm?: string;
 }) {
   const stamp = (t: number) =>
     dateAt(t);
@@ -51,6 +57,11 @@ export function CandidateRow({
 
   return (
     <article className="flex gap-6 px-8 py-7">
+      {selectForm && (
+        <span className="pt-1">
+          <RowCheck form={selectForm} name="appId" value={app.id} label={candidate.fullName} />
+        </span>
+      )}
       {/* The score leads the row, so the list reads top to bottom as a ranking
           rather than as a column of cards bolted to the right. */}
       {score && <FitMark score={score} rank={rank} />}
@@ -88,6 +99,13 @@ export function CandidateRow({
         <p className="mt-0.5 text-[12px] text-ink-faint">
           {[candidate.location, candidate.currentEmployer].filter(Boolean).join(" · ")}
         </p>
+        <ContactLinks
+          phone={candidate.phone}
+          email={candidate.email}
+          linkedinUrl={candidate.linkedinUrl}
+          cvHref={candidate.cvFileName || app.cvFileName ? `/api/cv/${candidate.id}?app=${app.id}` : null}
+          className="mt-1.5"
+        />
 
         {score && <FitReason score={score} />}
 
@@ -131,9 +149,14 @@ export function CandidateRow({
           <form action={claimCandidate}>
             <input type="hidden" name="appId" value={app.id} />
             <input type="hidden" name="openingId" value={openingId} />
-            <button className="rounded-full bg-brand px-4 py-[7px] text-[12.5px] font-medium text-white hover:opacity-90">
+            {/* Busy from the first press, so it is never pressed twice; the
+                answer is the banner at the top, and the row moves on (25 Sep). */}
+            <SubmitButton
+              pendingLabel="Shortlisting…"
+              className="rounded-full bg-brand px-4 py-[7px] text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-70"
+            >
               Shortlist
-            </button>
+            </SubmitButton>
           </form>
         ) : (
           <RowActions

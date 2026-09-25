@@ -21,7 +21,7 @@ export function blank(): Database {
     users: [], briefs: [], clients: [], openings: [], jobPosts: [], candidates: [],
     referees: [], applications: [], callFeedback: [], interviews: [], assignments: [],
     pipelineEvents: [], reviewRounds: [], linkVault: [], alerts: [], savedSearches: [],
-    savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [],
+    savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [],
     settings: [], matchRuns: [], matchExclusions: [], liveMirror: [],
   };

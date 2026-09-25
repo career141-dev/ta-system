@@ -126,5 +126,22 @@ const okHtml = cleanHtml === "shortlist the 1st one";
 okHtml ? pass++ : fail++;
 console.log(`${okHtml ? "  ok  " : "  FAIL"} extractReplyText HTML: "${cleanHtml}"`);
 
+console.log("\na number inside other words is not a pick (review of #56)");
+eq("1, 3", "Y-Y--");
+eq("busy with 2 interviews this week, will reply tomorrow", "-----");
+eq("I have 3 concerns about this set", "-----");
+
+console.log("\neveryone not picked is marked not selected — only when the whole reply was read");
+const { withUnpickedRejected } = await import("@/lib/reviewReply");
+const ids5 = ["a1", "a2", "a3", "a4", "a5"];
+const picked = withUnpickedRejected({ decisions: [{ applicationId: "a2", outcome: "shortlisted", note: null }], method: "numbers", unmatched: [] }, ids5);
+const okAll = picked.length === 5 && picked.filter((d) => d.outcome === "rejected").length === 4;
+okAll ? pass++ : fail++;
+console.log(`${okAll ? "  ok  " : "  FAIL"} one picked, four not selected`);
+const unsure = withUnpickedRejected({ decisions: [{ applicationId: "a2", outcome: "shortlisted", note: null }], method: "numbers", unmatched: ["what about the others?"] }, ids5);
+const okUnsure = unsure.length === 1;
+okUnsure ? pass++ : fail++;
+console.log(`${okUnsure ? "  ok  " : "  FAIL"} a clause it could not read: nobody else is marked`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

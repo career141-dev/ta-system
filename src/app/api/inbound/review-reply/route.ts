@@ -2,11 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { matchReviewReply } from "@/lib/routing";
-import { parseReply, extractReplyText } from "@/lib/reviewReply";
+import { parseReply, extractReplyText, withUnpickedRejected } from "@/lib/reviewReply";
 import { revalidatePath } from "next/cache";
-import { isConvex } from "@/data/mode";
-import * as backend from "@/data/convex/backend";
-import { resetStore } from "@/data/prime";
+import { createHash, timingSafeEqual } from "node:crypto";
+
+/**
+ * Only a caller holding C141_INBOUND_REVIEW_SECRET may post here, in the
+ * `x-c141-secret` header. Without it anybody could post "shortlist 1" as the
+ * Director and move real candidates (review of PR #56, 25 Sep). Unset, the
+ * endpoint is off.
+ */
+function allowed(req: NextRequest): boolean {
+  const secret = process.env.C141_INBOUND_REVIEW_SECRET ?? "";
+  if (secret.length < 16) return false;
+  const given = req.headers.get("x-c141-secret") ?? "";
+  const h = (x: string) => createHash("sha256").update(x).digest();
+  return timingSafeEqual(h(given), h(secret));
+}
 
 /**
  * Inbound webhook / API endpoint to receive email replies for EOD Review Rounds automatically.
@@ -22,6 +34,7 @@ import { resetStore } from "@/data/prime";
  * }
  */
 export async function POST(req: NextRequest) {
+  if (!allowed(req)) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
   try {
     await primeStore({ allApplications: true });
 
@@ -112,20 +125,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // When director selects candidate(s) from the batch, unmentioned ones in the batch are passed over
-    const decidedIds = new Set(parsed.decisions.map((d) => d.applicationId));
-    const fullDecisions = [...parsed.decisions];
-    for (const appId of round.applicationIds) {
-      if (!decidedIds.has(appId)) {
-        fullDecisions.push({
-          applicationId: appId,
-          outcome: "rejected",
-          note: "Not selected from this set",
-        });
-      }
-    }
-
-    // Apply the decisions (moves candidates to director_shortlist / client_shortlist or rejected)
+    // Everyone in the email the reply did not pick is marked not selected
+    // (owner, 25 Sep). The store's write reaches the backend itself.
+    const fullDecisions = withUnpickedRejected(parsed, round.applicationIds);
     const res = repo.applyReviewDecisions(
       round.id,
       fullDecisions.map((d) => ({ ...d, confirmed: false })),
@@ -133,23 +135,6 @@ export async function POST(req: NextRequest) {
     );
 
     const opening = repo.opening(openingId);
-
-    if (isConvex()) {
-      const shortlistStage = round.kind === "director" ? "director_shortlist" : "client_shortlist";
-      const actorId = round.sentBy || opening?.taLeadId || null;
-      for (const d of fullDecisions) {
-        if (d.outcome === "shortlisted") {
-          await backend
-            .moveStage({ id: actorId }, d.applicationId, shortlistStage, `Shortlisted by ${round.kind === "director" ? "Director" : "Client"}`)
-            .catch((e) => console.warn(`[route-reply] moveStage error:`, e));
-        } else if (d.outcome === "rejected") {
-          await backend
-            .moveStage({ id: actorId }, d.applicationId, "rejected", d.note || "Not selected from review set")
-            .catch((e) => console.warn(`[route-reply] moveStage error:`, e));
-        }
-      }
-      resetStore();
-    }
 
     revalidatePath(`/openings/${openingId}`, "layout");
     revalidatePath(`/openings/${openingId}/eod`, "page");

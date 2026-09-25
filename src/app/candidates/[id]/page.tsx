@@ -14,6 +14,7 @@ import { FIT_BANDS } from "@/lib/scoring";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { fileSize, previewsInline, type CandidateProfile } from "@/lib/candidateProfile";
+import { isWordFile } from "@/lib/wordToPdf";
 
 /**
  * A person, on their own — not through an opening.
@@ -278,10 +279,10 @@ export default async function CandidatePage({
                 )}
               </div>
               {cvLink?.ok ? (
-                previewsInline(cv) || /pdf/i.test(cvLink.fileType ?? "") ? (
+                previewsInline(cv) || /pdf/i.test(cvLink.fileType ?? "") || isWordFile(cv?.fileName ?? cvLink.fileName) ? (
                   <div className="overflow-hidden rounded-lg border border-rule">
                     <CvFrame
-                      src={cvHref}
+                      src={isWordFile(cv?.fileName ?? cvLink.fileName) ? `${cvHref}?view=pdf` : cvHref}
                       title={`CV — ${c.fullName}`}
                       fileName={cv?.fileName}
                       downloadHref={`${cvHref}?download=1`}

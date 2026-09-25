@@ -122,7 +122,7 @@ export function EodComposer({
             {rows.length === 0 ? (
               <p className="rounded-xl border border-dashed border-rule px-5 py-8 text-center text-[12.5px] text-ink-faint">
                 {kind === "director"
-                  ? "Nobody is in Director Review yet — move candidates to Director Review on the pipeline to include them in today's submission."
+                  ? "Nobody is ready to go yet — a candidate is ready once their follow-up questions are all answered, or they are in Director Review."
                   : "Nobody is in Client Review yet — move candidates to Client Review to include them in the submission."}
               </p>
             ) : (

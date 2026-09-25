@@ -8,6 +8,9 @@ import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { JobDetailsPanel } from "@/components/JobDetailsPanel";
 import { allows } from "@/lib/auth";
+import { MatchingStatus } from "@/components/MatchingStatus";
+import { detailsFollowNotes } from "@/lib/jdChat";
+import type { JdChatTurn } from "@/components/JdChat";
 
 export default async function JdPage({
   params,
@@ -58,10 +61,30 @@ export default async function JdPage({
 
   const approved = o.jdStatus === "approved";
 
+  // The JD chat, with the asker's name on each request.
+  const thread = repo.jdChat(id);
+  const chat: JdChatTurn[] = thread.map((m) => ({
+    id: m.id,
+    role: m.role,
+    body: m.body,
+    at: m.at,
+    author: m.role === "user" ? repo.user(m.byUserId ?? "")?.name ?? null : null,
+    hasVersion: !!m.jdMarkdown,
+    failed: !!m.failed,
+  }));
+  // Once the chat has begun, the Job details wait for the approved JD (25 Sep).
+  const detailsWait = !approved && !detailsFollowNotes(thread);
+
   // Moved here from the Overview: the fields are read from this JD, so they
   // are checked beside it (testing, 21 Sep).
   const details = o.requirements ? (
     <div id="job-details" className="mt-8 scroll-mt-24">
+      {detailsWait && (
+        <p className="mb-3 rounded-lg border border-rule bg-paper/60 px-4 py-2.5 text-[12.5px] text-ink-soft">
+          Job details will be updated from the JD when you approve it. Until then they stay as they were
+          read from the notes.
+        </p>
+      )}
       <JobDetailsPanel
         openingId={id}
         title={o.title}
@@ -84,7 +107,9 @@ export default async function JdPage({
           approvedBy={repo.user(o.jdApprovedBy ?? "")?.name ?? null}
           approvedAt={o.jdApprovedAt ? dateAt(o.jdApprovedAt) : null}
           canAmend={canWrite}
+          chat={chat}
         />
+        <MatchingStatus openingId={id} />
         {details}
       </>
     );
@@ -111,6 +136,7 @@ export default async function JdPage({
           otherBriefs={others}
           jd={o.jdMarkdown}
           extractedSummary={summary}
+          chat={chat}
         />
       ) : (
         <div className="rounded-2xl border border-rule bg-surface px-7 py-14 text-center">

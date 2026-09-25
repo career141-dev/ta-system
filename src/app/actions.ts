@@ -9,6 +9,7 @@ import type { FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
+import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
 import { invalidateCandidate, markTablesStale, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
@@ -32,6 +33,7 @@ function redirect(url: string): never {
 import { after } from "next/server";
 import {
   generateJdText,
+  reviseJdText,
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
@@ -46,6 +48,7 @@ import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
+import { clearMatching, markMatching, matchFailureText } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
@@ -474,21 +477,81 @@ export async function addLink(formData: FormData) {
     await fail("That is not a LinkedIn profile link. It should look like linkedin.com/in/their-name.");
   }
   const { url, key, guessedName } = profile!;
+  // A note for the TA, typed alongside the link by a lead (25 Sep). Checked
+  // before anything is saved, so a refused note does not leave half a row.
+  const leadNote = String(formData.get("note") ?? "").trim();
+  if (leadNote) await checkLeadNote(user, leadNote);
   const already = repo.findLinkByUrl(openingId, key);
   if (already) {
     const who = repo.users().find((u) => u.id === already.addedBy)?.name;
-    await note(`${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`);
+    const said = `${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`;
+    if (!leadNote) await note(said);
+    // The note was the point of the paste; it goes on the row that is there.
+    repo.addLeadNote(already.id, user.id, user.role, leadNote);
+    revalidateLinks(openingId);
+    await note(`${said} Your note was added to that row.`);
   }
   const name = String(formData.get("name") ?? "").trim() || guessedName;
-  repo.addLink(openingId, url, user.id, name);
+  const id = repo.addLink(openingId, url, user.id, name);
+  if (leadNote) repo.addLeadNote(id, user.id, user.role, leadNote);
+  revalidateLinks(openingId);
+  await done(
+    (name
+      ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
+      : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.") +
+      (leadNote ? " Your note is on the row." : ""),
+  );
+}
+
+/** Longest note a lead can leave: feedback, not a document. */
+const LEAD_NOTE_MAX = 2000;
+
+async function checkLeadNote(user: User, text: string) {
+  const may = can(user, "link.note");
+  if (!may.ok) await fail(may.message);
+  if (text.length > LEAD_NOTE_MAX) {
+    await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
+  }
+}
+
+function revalidateLinks(openingId: string) {
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
-  await done(
-    name
-      ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
-      : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.",
-  );
+}
+
+/**
+ * A note for the TA on an Excel Tables row, from a lead, director, admin or
+ * ops. The TA reads it on the row as "TA Lead · <name> sent this note".
+ */
+export async function addLeadNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "link.note", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const text = String(formData.get("note") ?? "").trim();
+  if (!text) await fail("Write the note first.");
+  await checkLeadNote(user, text);
+  if (!repo.addLeadNote(entryId, user.id, user.role, text)) {
+    await fail("That row no longer exists — it may have been removed.");
+  }
+  revalidateLinks(openingId);
+  await done("Note sent.");
+}
+
+export async function removeLeadNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "link.note", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const noteId = String(formData.get("noteId") ?? "");
+  const row = repo.linkVault(openingId).find((l) => l.id === entryId);
+  const target = row?.leadNotes?.find((n) => n.id === noteId);
+  if (!target) await fail("That note is already gone.");
+  if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
+  repo.removeLeadNote(entryId, noteId);
+  revalidateLinks(openingId);
+  await done("Note removed.");
 }
 
 export async function toggleEyeMark(formData: FormData) {
@@ -707,21 +770,13 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   }
 
   // The groundwork starts the moment the job exists, not when somebody finds
-  // the button: the JD draft for the TA to approve, then the market research
-  // and the first round of Suggestions, so there is something waiting when the
-  // team opens it. All of it after the response is sent, so creating the
-  // opening is not held up.
+  // the button: the JD draft for the TA to read, after the response is sent so
+  // creating the opening is not held up.
   //
-  // Research and Suggestions came off this list on 13 September, when a round
-  // run before there was any JD searched with the wrong words. They are back
-  // at the owner's request (24 Sep), and now run after the draft, so they
-  // search with its words. A first round that finds nobody is run again when
-  // the JD is approved (approveJd), as before. Research's run is the opening's
-  // one run; a lead can still run it again.
-  //
-  // The Suggestions round belongs to the TA the opening is on, not to whoever
-  // created it — a lead creating it must not end up owning the list.
-  const owner = assigned[0] ?? user.id;
+  // Research and the first round of Suggestions ran here too from 24 Sep, on
+  // the first draft. Since 25 Sep the TA works the JD out with the AI in the
+  // JD chat, so they wait for the approved JD and start from approveJd,
+  // searching with the words the TA agreed.
   after(async () => {
     const step = async (what: string, work: () => Promise<unknown>) => {
       try {
@@ -732,20 +787,6 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
     };
     if (isConvex()) await step("load", () => primeStore({ openingId }));
     await step("JD draft", () => draftJd(openingId));
-    // The draft is saved through the backend and the loaded copy dropped
-    // (draftJd), so it is read again before anything searches with it.
-    if (isConvex()) await step("reload", () => primeStore({ openingId }));
-    revalidatePath(`/openings/${openingId}`, "layout");
-    await Promise.all([
-      step("research", async () => {
-        const r = await researchOpening(openingId, user.id);
-        if (!r.ok) console.warn(`[prepare ${openingId}] research did not run: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`);
-      }),
-      step("suggestions", async () => {
-        const r = await sourceFor(openingId, owner);
-        if (r.error) console.warn(`[prepare ${openingId}] suggestions did not run: ${r.error}`);
-      }),
-    ]);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
 
@@ -837,13 +878,22 @@ export async function approveJd(formData: FormData) {
     // Matching waits for that, so it scores against the real requirements.
     const suggestionsBefore = repo.suggestions(openingId).length;
     const owner = repo.opening(openingId)?.assignedTaIds[0];
+    const researched = !!repo.research(openingId);
+    const fromChat = !detailsFollowNotes(repo.jdChat(openingId));
     try {
-      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined);
+      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined, fromChat);
     } catch (e) {
       await fail(backendMessage(e, "The JD could not be approved."));
     }
+    markMatching(openingId);
+    // Research and the first Suggestions round wait for the approved JD, so
+    // they search with the words the TA agreed (25 Sep). Before that they ran
+    // on the first draft, the moment the opening was created.
     after(async () => {
-      await rematchWhenRequirementsSettle(openingId, user.id);
+      await Promise.all([
+        rematchWhenRequirementsSettle(openingId, user.id),
+        researched ? null : researchOpening(openingId, user.id).catch(() => undefined),
+      ]);
       if (suggestionsBefore === 0) await sourceFor(openingId, owner).catch(() => undefined);
       revalidatePath(`/openings/${openingId}`, "layout");
     });
@@ -866,6 +916,12 @@ export async function approveJd(formData: FormData) {
     await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
+  if (!repo.research(openingId)) {
+    after(async () => {
+      await researchOpening(openingId, user.id).catch(() => undefined);
+      revalidatePath(`/openings/${openingId}`, "layout");
+    });
+  }
 
   if (repo.suggestions(openingId).length === 0) {
     // The auto-run belongs to the TA the opening is on, not to whoever
@@ -901,21 +957,122 @@ export async function amendJd(formData: FormData) {
   if (!o.assignedTaIds.includes(user.id) && user.role === "ta") return;
   const jd = String(formData.get("jdMarkdown") ?? "");
   if (isConvex()) {
+    let r: { reextracting: boolean } | null = null;
     if (jd.trim()) {
-      let r: { reextracting: boolean } | null = null;
       try {
         r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
       } catch (e) {
         await fail(backendMessage(e, "The JD could not be saved."));
       }
-      if (r?.reextracting) after(() => rematchWhenRequirementsSettle(openingId, user.id));
+      if (r?.reextracting) {
+        markMatching(openingId);
+        after(() => rematchWhenRequirementsSettle(openingId, user.id));
+      }
     }
     await afterBackendWrite(openingId);
-    redirect(`/openings/${openingId}/jd`);
+    // It used to come back with no word at all, so a save looked like nothing
+    // had happened (25 Sep).
+    redirect(amendedJd(openingId, r?.reextracting ? "JD saved. The job details are read again, then matching re-runs." : "JD saved."));
   }
   if (jd.trim()) repo.updateJd(openingId, jd);
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}/jd`);
+  redirect(amendedJd(openingId, "JD saved."));
+}
+
+function amendedJd(openingId: string, message: string) {
+  return `/openings/${openingId}/jd?msg=${encodeURIComponent(message)}&tone=ok`;
+}
+
+// ─── The JD chat (25 Sep) ────────────────────────────────────────────────────
+
+/**
+ * Save a JD the chat produced. Before approval it is a draft like any other;
+ * after approval it stays approved and the Job details follow it at once
+ * (keeping what a person corrected), because the TA's request is the change.
+ */
+async function saveChatJd(openingId: string, userId: string, jd: string): Promise<void> {
+  const o = repo.opening(openingId);
+  if (isConvex()) {
+    const r = await convexMutation<{ reextracting: boolean }>("ta/openings:saveJd", {
+      actorId: userId,
+      openingId,
+      jdMarkdown: jd,
+      ...(o?.jdStatus === "approved" ? { detailsFromJd: true } : {}),
+    });
+    if (r?.reextracting) {
+      markMatching(openingId);
+      after(() => rematchWhenRequirementsSettle(openingId, userId));
+    }
+    return;
+  }
+  repo.updateJd(openingId, jd);
+}
+
+/**
+ * The TA tells the AI what to change in the JD, and it rewrites it — as many
+ * times as it takes, until the TA approves it. Each answer keeps the JD it
+ * produced, so an earlier one can be put back (restoreJdVersion).
+ */
+export async function reviseJd(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const request = String(formData.get("request") ?? "").trim();
+  if (!request) await fail("Write what should change in the JD first.");
+  if (request.length > JD_REQUEST_MAX) await fail(`That is too long — keep it under ${JD_REQUEST_MAX} characters.`);
+  const opening = repo.opening(openingId);
+  const c = contextFor(openingId);
+  if (!opening || !c) await fail("The opening could not be found. Reload the page and try again.");
+  // The editor as it stands, so hand edits not yet saved are revised, not lost.
+  const currentJd = String(formData.get("currentJd") ?? "").trim() || opening!.jdMarkdown || "";
+  if (!currentJd.trim()) await fail("There is no JD to revise yet. Generate one first.");
+
+  const history = chatHistory(repo.jdChat(openingId));
+  repo.addJdChat({ openingId, role: "user", body: request, jdMarkdown: null, byUserId: user.id, at: Date.now() });
+
+  const res = await reviseJdText(c!, jdBriefsFor(openingId), currentJd, request, history);
+  if (!res.ok || !res.text.trim()) {
+    repo.addJdChat({
+      openingId, role: "assistant", jdMarkdown: null, byUserId: null, at: Date.now(), failed: true,
+      body: `Could not revise the JD — ${res.ok ? "the AI sent back nothing." : reasonInWords(res.reason)} The JD is as it was. Try again.`,
+    });
+    revalidatePath(`/openings/${openingId}/jd`);
+    await fail("Could not revise the JD. The JD is as it was — try again.");
+  }
+  const jd = res.ok ? res.text : currentJd;
+  const changes = (res.ok && res.changes) || "Revised the JD.";
+
+  repo.addJdChat({ openingId, role: "assistant", body: changes, jdMarkdown: jd, byUserId: null, at: Date.now() });
+  try {
+    await saveChatJd(openingId, user.id, jd);
+  } catch (e) {
+    await fail(backendMessage(e, "The revised JD could not be saved. Try again."));
+  }
+  if (isConvex()) await afterBackendWrite(openingId);
+  else revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Revised: ${changes}`);
+}
+
+/** Put back the JD an earlier answer in the JD chat produced. */
+export async function restoreJdVersion(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const turn = repo.jdChat(openingId).find((m) => m.id === String(formData.get("messageId") ?? ""));
+  if (!turn?.jdMarkdown) await fail("That version could not be found. Reload the page and try again.");
+  const when = new Date(turn!.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Colombo" });
+  repo.addJdChat({
+    openingId, role: "assistant", body: `Put back the version from ${when}.`,
+    jdMarkdown: turn!.jdMarkdown, byUserId: user.id, at: Date.now(),
+  });
+  try {
+    await saveChatJd(openingId, user.id, turn!.jdMarkdown!);
+  } catch (e) {
+    await fail(backendMessage(e, "That version could not be put back. Try again."));
+  }
+  if (isConvex()) await afterBackendWrite(openingId);
+  else revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Put back the version from ${when}.`);
 }
 
 // ─── Job details: requirements extracted from the approved JD ────────────────
@@ -956,18 +1113,26 @@ function salaryNoteOf(o: import("@/data/types").Opening): string {
  * approval), then run matching against the result. Bounded: if extraction is
  * slow or failed, matching still runs on what the opening has.
  */
-async function rematchWhenRequirementsSettle(openingId: string, actorId: string) {
-  for (let i = 0; i < 30; i++) {
-    const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
-    const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
-    if (status !== "extracting") break;
-    await new Promise((res) => setTimeout(res, 3_000));
+async function rematchWhenRequirementsSettle(openingId: string, actorId: string, trigger: "jd_approved" | "manual" = "jd_approved") {
+  // Marked before the response by the caller (lib/matchingNow); cleared here
+  // however the run ends, so the page never says "running" for a dead run.
+  let failure: string | null = null;
+  try {
+    for (let i = 0; i < 30; i++) {
+      const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
+      const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
+      if (status !== "extracting") break;
+      await new Promise((res) => setTimeout(res, 3_000));
+    }
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+    await primeStore({ openingId });
+    const r = await findDatabaseMatches(openingId, trigger).catch((e: unknown) => ({ ok: false as const, reason: (e as Error).message }));
+    if (!r.ok) failure = matchFailureText(r.reason);
+  } finally {
+    clearMatching(openingId, failure);
+    revalidatePath(`/openings/${openingId}`, "layout");
   }
-  const { resetStore } = await import("@/data/prime");
-  resetStore();
-  await primeStore({ openingId });
-  await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
-  revalidatePath(`/openings/${openingId}`, "layout");
 }
 
 // Split the same way the backend does, so a comma inside brackets
@@ -1019,6 +1184,7 @@ export async function saveJobDetails(formData: FormData) {
   } catch (e) {
     await fail(backendMessage(e, "The job details could not be saved."));
   }
+  markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
   await done("Job details saved. Matching is re-running against them.");
@@ -1034,6 +1200,7 @@ export async function reextractJobDetails(formData: FormData) {
   } catch (e) {
     await fail(backendMessage(e, "Could not start the extraction."));
   }
+  markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
   await done("Reading the JD again — the details update in a few seconds.");
@@ -1690,6 +1857,122 @@ export async function removeApplication(formData: FormData) {
     revalidatePath(`/openings/${openingId}`, "layout");
   }
   await done("Removed from the opening — they are under Dropped out, and can be brought back from there.");
+}
+
+/**
+ * Several at once, from the list's tick boxes (components/BulkSelect, 25 Sep).
+ *
+ * Each one runs the single action exactly as its own button would — its
+ * permission check, its lock, its message — and the answers are counted
+ * instead of shown one by one. ponytail: sequential, each re-reading the
+ * store; fine for a page of 25, batch it if people tick hundreds.
+ */
+async function eachInline(ids: string[], run: (id: string) => Promise<unknown>) {
+  const results: ActionResult[] = [];
+  for (const id of ids) results.push(await inline(() => run(id)));
+  const ok = results.filter((r) => r.tone === "ok").length;
+  const problems = [...new Set(results.filter((r) => r.tone !== "ok").map((r) => r.message))];
+  return { ok, notOk: results.length - ok, problems };
+}
+
+function bulkSummary(r: { ok: number; notOk: number; problems: string[] }, did: string) {
+  const first = `${r.ok} ${did}.`;
+  if (!r.notOk) return first;
+  return `${first} ${r.notOk} not: ${r.problems.slice(0, 2).join(" ")}${r.problems.length > 2 ? " …" : ""}`;
+}
+
+function one(formData: FormData, fields: Record<string, string>) {
+  const fd = new FormData();
+  for (const [k, v] of formData.entries()) if (typeof v === "string") fd.append(k, v);
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+}
+
+export async function removeApplications(formData: FormData) {
+  const ids = formData.getAll("appId").map(String);
+  if (ids.length === 0) await fail("Tick at least one candidate.");
+  const r = await eachInline(ids, (appId) => removeApplication(one(formData, { appId })));
+  await (r.ok ? (r.notOk ? note : done) : fail)(
+    bulkSummary(r, "removed from the opening — they are under Dropped out"),
+  );
+}
+
+export async function addManyToOpening(formData: FormData) {
+  const ids = formData.getAll("candidateId").map(String);
+  if (ids.length === 0) await fail("Tick at least one candidate.");
+  if (!String(formData.get("openingId") ?? "")) await fail("Pick an opening.");
+  const r = await eachInline(ids, (candidateId) => addToOpening(one(formData, { candidateId })));
+  await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, "added to the opening in TA Follow-up"));
+}
+
+export async function deleteOpenings(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  // The same rule as the one-at-a-time delete: a desk decision.
+  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
+  const ids = formData.getAll("openingId").map(String);
+  if (ids.length === 0) await fail("Tick at least one opening.");
+  let deleted = 0;
+  const problems: string[] = [];
+  for (const openingId of ids) {
+    const title = repo.opening(openingId)?.title ?? "An opening";
+    const allowed = can(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
+    if (!allowed.ok) {
+      problems.push(`${title}: ${allowed.message}`);
+      continue;
+    }
+    if (isConvex()) {
+      try {
+        await convexMutation("ta/openingDelete:start", { actorId: user.id, openingId });
+        deleted++;
+      } catch (e) {
+        problems.push(`${title}: ${backendMessage(e, "could not be deleted")}`);
+      }
+    } else {
+      const r = repo.deleteOpening(openingId);
+      if (r.ok) deleted++;
+      else problems.push(`${title}: ${r.message}`);
+    }
+  }
+  if (isConvex()) {
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  }
+  revalidatePath("/", "layout");
+  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} deleted. Their candidates are still in the database.`;
+  await (deleted ? (problems.length ? note : done) : fail)(problems.length ? `${said} Not deleted — ${problems.join("; ")}` : said);
+}
+
+export async function deleteClients(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "client.manage");
+  const ids = formData.getAll("clientId").map(String);
+  if (ids.length === 0) await fail("Tick at least one client.");
+  const actor = isConvex() ? await (await import("@/lib/convexServer")).convexActorForEmail(user.email) : null;
+  let deleted = 0;
+  const kept: string[] = [];
+  for (const clientId of ids) {
+    const name = repo.client(clientId)?.name ?? "A client";
+    let res: { ok: boolean; openings?: number };
+    try {
+      res = isConvex()
+        ? await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", { actorId: actor?._id, clientId })
+        : repo.deleteClient(clientId);
+    } catch (e) {
+      kept.push(`${name} (${backendMessage(e, "could not be deleted")})`);
+      continue;
+    }
+    if (res.ok) deleted++;
+    else kept.push(`${name} (${res.openings ?? "has"} ${res.openings === 1 ? "opening" : "openings"})`);
+  }
+  if (isConvex()) markTablesStale();
+  revalidatePath("/clients");
+  revalidatePath("/openings/new");
+  // A client with work filed under it is kept, as the single delete does.
+  const said = `${deleted} ${deleted === 1 ? "client" : "clients"} deleted.`;
+  await (deleted ? (kept.length ? note : done) : fail)(
+    kept.length ? `${said} Kept — they still have openings: ${kept.join(", ")}.` : said,
+  );
 }
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
@@ -2406,12 +2689,16 @@ async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boole
   const template = buildJd(extracted, client?.name ?? "the client");
   const context = { ...c, mustHaves: extracted.mustHaves?.length ? extracted.mustHaves : c.mustHaves };
 
+  // Once the TA has started asking the AI for changes, the Job details stay
+  // as they were until the JD is approved, and are then read from it (25 Sep).
+  const followNotes = detailsFollowNotes(repo.jdChat(openingId));
+
   if (isConvex()) {
     // The draft is saved in the backend. Nothing is approved here — the TA reads it first.
     // The Job details are read from the same notes at the same time.
     const [res] = await Promise.all([
       generateJdText(context, briefs, template, opening.jdMarkdown ?? ""),
-      extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)),
+      followNotes ? extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)) : null,
     ]);
     // The backend is the only writer here. It stamps the row's updatedAt, so
     // a second write through the store (repo.updateJd) arrived with an older
@@ -2436,7 +2723,7 @@ async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boole
     return res.ok ? { ok: true } : { ok: false, reason: res.reason };
   }
 
-  repo.applyExtractedToOpening(openingId, extracted);
+  if (followNotes) repo.applyExtractedToOpening(openingId, extracted);
   const res = await generateJdText(context, briefs, template, opening.jdMarkdown ?? "");
   // The template is not a failure state — it is what the desk has always had.
   repo.updateJd(openingId, res.ok ? res.text : template);
@@ -3146,16 +3433,21 @@ export async function setAutoShortlistScore(formData: FormData) {
 
 // ─── Database matches (13 September) ────────────────────────────────────────
 
+/**
+ * Run database matching again, from the matching banner (MatchingStatus).
+ *
+ * After the response, like every other run: it takes up to a minute and a
+ * half, and the banner shows it running and then what it added (25 Sep).
+ */
 export async function findMatchesNow(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const r = await findDatabaseMatches(openingId, "manual");
+  if (repo.opening(openingId)?.jdStatus !== "approved") await fail(matchFailureText("jd_not_approved"));
+  markMatching(openingId);
+  after(() => rematchWhenRequirementsSettle(openingId, user.id, "manual"));
   revalidatePath(`/openings/${openingId}`, "layout");
-  if (!r.ok || !r.run) {
-    await fail(r.reason === "jd_not_approved" ? "Approve the JD first — matching reads it." : `Matching did not run (${r.reason}).`);
-  }
-  await back(`${r.run!.added} added from ${r.run!.considered} nearest; ${r.run!.afterRules} passed the rules.`);
+  await done("Matching started — new matches appear here when it finishes.");
 }
 
 /** The desk's standard questions — which are asked, and how they read. */
@@ -3369,14 +3661,13 @@ export async function sendEod(formData: FormData) {
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const ids = String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
 
-  // Anybody currently in an active, unreturned review round is dropped
-  const activePending = new Set(
-    repo.reviewRounds(openingId).filter((r) => r.kind === kind && r.status !== "returned").flatMap((r) => r.applicationIds),
-  );
-  const fresh = ids.filter((id) => !activePending.has(id) && repo.application(id)?.openingId === openingId);
+  // Anybody already sent to this reviewer is dropped, and so is anybody who is
+  // not on this opening — the list came from the browser.
+  const sent = new Set(repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds));
+  const fresh = ids.filter((id) => !sent.has(id) && repo.application(id)?.openingId === openingId);
   if (fresh.length === 0)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
-      ids.length ? "Everyone on that list is already awaiting a reply." : "Nothing to send.",
+      ids.length ? "Everyone on that list has already been sent." : "Nothing to send.",
     )}`);
   const sets = fresh.map((id) => repo.application(id)?.setNumber).filter((n): n is number => n != null);
 
@@ -3469,8 +3760,12 @@ export async function sendEod(formData: FormData) {
   );
 }
 
-/** Graph's sendMail supports up to 25 MB payload; allow up to 20 MB for all candidate CV attachments. */
-const EOD_ATTACHMENT_BUDGET = 20 * 1024 * 1024;
+/**
+ * Graph's sendMail takes about 4 MB in one request; the CVs share what is left
+ * after the email. Raising this (to 20 MB, PR #56) made a large set fail to
+ * send at all instead of listing the CVs that did not fit (review, 25 Sep).
+ */
+const EOD_ATTACHMENT_BUDGET = 3 * 1024 * 1024;
 
 /**
  * Send the Director's end-of-day email through Microsoft Graph (convex/ta/eodMail.ts).
@@ -3672,7 +3967,7 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
   const roster = repo.replyRoster(openingId, kind, roundId);
   if (!roster) return "Nobody is waiting on a reply for this job.";
   const { round } = roster;
-  const { parseReply, extractReplyText } = await import("@/lib/reviewReply");
+  const { parseReply, extractReplyText, withUnpickedRejected } = await import("@/lib/reviewReply");
   const cleanBody = extractReplyText(body);
   const list = roster.applicationIds.map((applicationId) => {
     const app = repo.application(applicationId);
@@ -3688,39 +3983,11 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
       : "Nothing in that reply could be read as a decision. Nobody has been moved — say who is in, by name or by number.";
   }
 
-  // When the director selects candidates from the batch (e.g. 1 out of 4),
-  // any unselected candidate in the batch is marked as not selected (passed over)
-  // so the set is completed and other candidates are not left hanging for re-review.
-  const decidedIds = new Set(parsed.decisions.map((d) => d.applicationId));
-  const fullDecisions = [...parsed.decisions];
-  for (const appId of round.applicationIds) {
-    if (!decidedIds.has(appId)) {
-      fullDecisions.push({
-        applicationId: appId,
-        outcome: "rejected",
-        note: "Not selected from this set",
-      });
-    }
-  }
-
+  // Everyone in the email the reply did not pick is marked not selected, so
+  // the set is closed (owner, 25 Sep). The store's write reaches the backend
+  // itself; a second backend move here moved everyone twice (review of #56).
+  const fullDecisions = withUnpickedRejected(parsed, round.applicationIds);
   const res = repo.applyReviewDecisions(round.id, fullDecisions.map((d) => ({ ...d, confirmed: false })), cleanBody);
-
-  if (isConvex()) {
-    const user = await getCurrentUser();
-    const shortlistStage = kind === "director" ? "director_shortlist" : "client_shortlist";
-    for (const d of fullDecisions) {
-      if (d.outcome === "shortlisted") {
-        await backend
-          .moveStage({ id: user.id }, d.applicationId, shortlistStage, `Shortlisted by ${kind === "director" ? "Director" : "Client"}`)
-          .catch((e) => console.warn(`[readReplyFor] moveStage error:`, e));
-      } else if (d.outcome === "rejected") {
-        await backend
-          .moveStage({ id: user.id }, d.applicationId, "rejected", d.note || "Not selected from review set")
-          .catch((e) => console.warn(`[readReplyFor] moveStage error:`, e));
-      }
-    }
-    await afterBackendWrite(openingId);
-  }
 
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath("/alerts");
@@ -3733,9 +4000,13 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
     })
     .filter(Boolean);
 
-  return shortlistedNames.length > 0
-    ? `Shortlisted: ${shortlistedNames.join(", ")}. Reply recorded.`
-    : `Reply recorded for Set ${round.setNumber ?? 1}.`;
+  const said =
+    shortlistedNames.length > 0
+      ? `Shortlisted: ${shortlistedNames.join(", ")}. ${res.rejected} not selected. Reply recorded.`
+      : `Reply recorded for Set ${round.setNumber ?? 1}: ${res.rejected} not selected.`;
+  return `${said}${res.stale ? ` ${res.stale} not moved because they have moved on since.` : ""}${
+    parsed.unmatched.length ? ` Read yourself — nobody else was marked not selected: ${parsed.unmatched.join(" · ")}` : ""
+  }`;
 }
 
 export async function readEodReply(formData: FormData) {
@@ -4049,6 +4320,10 @@ export async function saveBriefNotesInline(_: ActionResult | null, formData: For
   return inline(() => saveBriefNotes(formData));
 }
 
+export async function updateCandidateContactInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => updateCandidateContact(formData));
+}
+
 export async function addToOpeningInline(_: ActionResult | null, formData: FormData) {
   return inline(() => addToOpening(formData));
 }
@@ -4064,6 +4339,14 @@ export async function addLinkInline(_: ActionResult | null, formData: FormData) 
 
 export async function generateJdInline(_: ActionResult | null, formData: FormData) {
   return inline(() => generateJdWithModel(formData));
+}
+
+export async function reviseJdInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => reviseJd(formData));
+}
+
+export async function restoreJdVersionInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => restoreJdVersion(formData));
 }
 
 export async function moveStageInline(_: ActionResult | null, formData: FormData) {
@@ -4092,6 +4375,14 @@ export async function updateLinkInline(_: ActionResult | null, formData: FormDat
 
 export async function logOutreachInline(_: ActionResult | null, formData: FormData) {
   return inline(() => logOutreach(formData));
+}
+
+export async function addLeadNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLeadNote(formData));
+}
+
+export async function removeLeadNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeLeadNote(formData));
 }
 
 export async function addLinkToPipelineInline(_: ActionResult | null, formData: FormData) {

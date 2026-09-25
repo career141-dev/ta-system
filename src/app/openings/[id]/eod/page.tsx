@@ -4,6 +4,8 @@ import { repo, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
+import { readEodReply, readInboundReply } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
@@ -79,7 +81,7 @@ export default async function EodPage({
 
   // Determine the set number for today's submission
   const nextSetNumber = openSet?.setNumber ?? (sets.length ? Math.max(...sets.map((s) => s.setNumber)) + 1 : 1);
-  const formattedSubject = subjectLine(o.title, nextSetNumber, rows.length || 1);
+  const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
 
   return (
     <main className="mx-auto max-w-[1100px] px-8 py-9">
@@ -102,6 +104,123 @@ export default async function EodPage({
           Replies are tracked and candidate stages advance automatically.
         </p>
       </header>
+
+
+      {/* ── Waiting on a reply ─────────────────────────────────────────── */}
+      {awaiting && (
+        <section className="mb-6 overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+          <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule px-7 py-4">
+            <h2 className="text-[13.5px] font-semibold">
+              Waiting on {director?.name ?? "the Director"}
+            </h2>
+            <span className="text-[12px] text-ink-faint">
+              {waiting.length} waiting · last sent {timeAt(awaiting.sentAt)}
+              {awaiting.trackedAt ? ` · watching ${awaiting.trackedAt}` : ""}
+            </span>
+          </div>
+
+          <ol className="divide-y divide-rule">
+            {waiting.map((w, i) => {
+              const app = repo.application(w.applicationId);
+              const c = app ? repo.candidate(app.candidateId) : null;
+              return (
+                <li key={w.applicationId} className="flex items-baseline gap-3 px-7 py-2.5">
+                  <span className="tabular w-5 shrink-0 text-[12px] text-ink-faint">{i + 1}</span>
+                  <span className="flex-1 text-[12.5px] font-medium">{c?.fullName ?? "Unknown"}</span>
+                  <span className="text-[12px] text-ink-soft">{app?.setNumber ? `set ${app.setNumber}` : ""}</span>
+                </li>
+              );
+            })}
+          </ol>
+
+          <form action={readEodReply} className="border-t border-rule px-7 py-5">
+            <input type="hidden" name="openingId" value={id} />
+            <input type="hidden" name="kind" value={kind} />
+            <label className="block">
+              <span className="mb-1.5 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
+                Their reply
+              </span>
+              <textarea
+                name="reply"
+                rows={3}
+                placeholder={'Paste the reply. "1, 3 and 5", "shortlist Nimal and Kasun", "2-4" all read correctly.'}
+                className="w-full rounded-lg border border-rule bg-paper px-3 py-2.5 text-[12.5px] leading-relaxed"
+              />
+            </label>
+            <div className="mt-2.5 flex flex-wrap items-center gap-3">
+              <SubmitButton
+                pendingLabel="Reading…"
+                className="rounded-full bg-ink px-5 py-2 text-[12.5px] font-medium text-surface disabled:opacity-60"
+              >
+                Read it and move them
+              </SubmitButton>
+              <span className="text-[11.5px] text-ink-faint">
+                Anyone the reply picks is shortlisted, and the rest of that email are marked not
+                selected. If part of the reply cannot be read, nobody is marked not selected.
+              </span>
+            </div>
+          </form>
+        </section>
+      )}
+
+      {/* A reply landed in the shared box and does not obviously belong to the
+          set on this screen — or to this opening at all. Given the sender and
+          the subject it finds its own round. */}
+      <details className="mb-6 rounded-2xl border border-rule bg-surface">
+        <summary className="cursor-pointer px-7 py-4 text-[13px] font-medium">
+          A reply came into {repo.shortlistInbox()} — place it for me
+        </summary>
+        <form action={readInboundReply} className="border-t border-rule px-7 py-5">
+          <input type="hidden" name="openingId" value={id} />
+          <input type="hidden" name="kind" value={kind} />
+          {/* The action checks this to refuse a CV that wandered into the
+              shortlist box. It was reading a field the form never sent, so the
+              check could never fire. */}
+          <input type="hidden" name="to" value={repo.shortlistInbox()} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
+                From
+              </span>
+              <input
+                name="from"
+                placeholder="director@career141.com"
+                className="w-full rounded border border-rule bg-paper px-2.5 py-1.5 text-[13px]"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
+                Subject
+              </span>
+              <input
+                name="subject"
+                placeholder={subjectLine(client.name, o.title, nextSetNumber)}
+                className="w-full rounded border border-rule bg-paper px-2.5 py-1.5 text-[13px]"
+              />
+            </label>
+          </div>
+          <textarea
+            name="reply"
+            rows={3}
+            placeholder="What they wrote."
+            className="mt-3 w-full rounded-lg border border-rule bg-paper px-3 py-2.5 text-[12.5px] leading-relaxed"
+          />
+          <div className="mt-2.5 flex flex-wrap items-center gap-3">
+            <SubmitButton
+              tone="dark"
+              pendingLabel="Applying…"
+              className="rounded-full border border-rule-strong px-5 py-2 text-[12.5px] font-medium disabled:opacity-60"
+            >
+              Find the set and apply it
+            </SubmitButton>
+            <span className="max-w-[62ch] text-[11.5px] text-ink-faint">
+              The subject says which opening, the sender says whether it is the Director or the
+              client. It searches every open round, not just this opening&rsquo;s — and refuses
+              rather than guessing when either is missing.
+            </span>
+          </div>
+        </form>
+      </details>
 
       {/* ── Email Composer (for sending next set) ────────────────────────── */}
       <EodComposer
@@ -169,7 +288,7 @@ export default async function EodPage({
 
                   {r.replyBody && (
                     <div className="mt-3 rounded-lg bg-tag/60 px-3.5 py-2 text-[12.5px] text-ink-soft">
-                      <span className="font-medium text-ink">Director Reply: </span>
+                      <span className="font-medium text-ink">{kind === "director" ? "Director" : "Client"} reply: </span>
                       &ldquo;{extractReplyText(r.replyBody)}&rdquo;
                     </div>
                   )}

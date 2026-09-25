@@ -14,6 +14,7 @@ import { scopeSuggestions } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { DoneBadge, SubmitButton } from "@/components/SubmitButton";
+import { SubmitButton as Submit } from "@/components/Submit";
 import { BUTTON } from "@/components/buttonStyles";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 
@@ -239,9 +240,13 @@ export default async function Page({
                       <form action={dismissSuggestion}>
                         <input type="hidden" name="openingId" value={id} />
                         <input type="hidden" name="suggestionId" value={s.id} />
-                        <button className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink">
+                        <Submit
+                          tone="dark"
+                          pendingLabel="Rejecting…"
+                          className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink disabled:opacity-60"
+                        >
                           Reject
-                        </button>
+                        </Submit>
                       </form>
                     </div>
                   ) : (

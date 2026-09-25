@@ -3,13 +3,11 @@ import "server-only";
 import { repo } from "@/data/store";
 import { fetchMailboxMessages } from "./graphInbox";
 import { matchReviewReply } from "./routing";
-import { extractReplyText, parseReply } from "./reviewReply";
+import { extractReplyText, parseReply, withUnpickedRejected } from "./reviewReply";
 import { revalidatePath } from "next/cache";
 import { isConvex } from "@/data/mode";
+import { primeStore } from "@/data/prime";
 import { convexMutation } from "./convexServer";
-import * as backend from "@/data/convex/backend";
-import { resetStore } from "@/data/prime";
-import type { User } from "@/data/types";
 
 let lastSyncTime = 0;
 const SYNC_COOLDOWN_MS = 15_000; // Throttle to max once per 15s
@@ -18,8 +16,14 @@ const processedMsgIds = new Set<string>();
 /**
  * Automatically check Microsoft 365 mailboxes for any review replies in the background,
  * parse incoming decisions, update candidates to shortlisted/passed, and trigger notifications.
+ *
+ * Reads the mailboxes the sets were sent from (a reply comes back to the TA who
+ * sent it) and the shortlist inbox — not the mailbox of whoever happens to be
+ * looking at a page. Only a reply from the Director's or the client contact's
+ * own address is applied (matchReviewReply checks the sender). Owner's call,
+ * 25 Sep: replies are applied automatically.
  */
-export async function syncMailboxRepliesSilently(user?: User | null): Promise<number> {
+export async function syncMailboxRepliesSilently(): Promise<number> {
   const now = Date.now();
   if (now - lastSyncTime < SYNC_COOLDOWN_MS) {
     return 0;
@@ -30,12 +34,15 @@ export async function syncMailboxRepliesSilently(user?: User | null): Promise<nu
   if (openRounds.length === 0) {
     return 0;
   }
+  // The notifications feed loads very little; reading a reply needs the
+  // applications in the sets and the people's names.
+  await primeStore({ allApplications: true });
+  await primeStore({
+    candidateIds: openRounds.flatMap((r) => r.applicationIds.map((id) => repo.application(id)?.candidateId ?? "")).filter(Boolean),
+  });
 
-  const mailboxes = [
-    user?.email,
-    repo.shortlistInbox(),
-    process.env.MS_SENDER_EMAIL || "job@career141.com",
-  ].filter((m): m is string => Boolean(m && m.includes("@")));
+  const senders = openRounds.map((r) => (r.sentBy ? repo.user(r.sentBy)?.email : null));
+  const mailboxes = [...new Set([...senders, repo.shortlistInbox()].filter((m): m is string => Boolean(m && m.includes("@"))))];
 
   let messages: { id: string; from: string; subject: string; body: string; bodyPreview: string; receivedDateTime: string }[] = [];
   try {
@@ -84,41 +91,14 @@ export async function syncMailboxRepliesSilently(user?: User | null): Promise<nu
 
     processedMsgIds.add(msg.id);
 
-    // Full decisions: Selected candidate(s) are shortlisted, unselected are passed over
-    const decidedIds = new Set(parsed.decisions.map((d) => d.applicationId));
-    const fullDecisions = [...parsed.decisions];
-    for (const appId of round.applicationIds) {
-      if (!decidedIds.has(appId)) {
-        fullDecisions.push({
-          applicationId: appId,
-          outcome: "rejected",
-          note: "Not selected from this set",
-        });
-      }
-    }
-
+    // The store's write reaches the backend itself; moving each person again
+    // through the backend moved them twice (review of #56).
+    const fullDecisions = withUnpickedRejected(parsed, round.applicationIds);
     const res = repo.applyReviewDecisions(
       round.id,
       fullDecisions.map((d) => ({ ...d, confirmed: false })),
       cleanBody,
     );
-
-    if (isConvex()) {
-      const shortlistStage = round.kind === "director" ? "director_shortlist" : "client_shortlist";
-      const actorId = round.sentBy || opening?.taLeadId || null;
-      for (const d of fullDecisions) {
-        if (d.outcome === "shortlisted") {
-          await backend
-            .moveStage({ id: actorId }, d.applicationId, shortlistStage, `Shortlisted by ${round.kind === "director" ? "Director" : "Client"}`)
-            .catch((e) => console.warn(`[sync-inbox] moveStage error:`, e));
-        } else if (d.outcome === "rejected") {
-          await backend
-            .moveStage({ id: actorId }, d.applicationId, "rejected", d.note || "Not selected from review set")
-            .catch((e) => console.warn(`[sync-inbox] moveStage error:`, e));
-        }
-      }
-      resetStore();
-    }
 
     if (res.moved > 0 || res.rejected > 0) {
       appliedCount++;

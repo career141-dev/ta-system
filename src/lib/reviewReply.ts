@@ -142,6 +142,10 @@ export interface Unreadable {
   why: string;
 }
 
+/** A line made of nothing but candidate numbers and joining words. */
+const ONLY_NUMBERS =
+  /^[\s,.;:&#+/()-]*(?:(?:\d{1,2}(?:st|nd|rd|th)?|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|and|&|one|ones|no\.?|nos\.?|number|numbers|candidates?)[\s,.;:&#+/()-]*)+$/i;
+
 const WORD_ORDINALS: Record<string, number> = {
   first: 1,
   "1st": 1,
@@ -376,9 +380,10 @@ export function readNumbers(reply: string, list: Candidateish[]): ParsedDecision
         nums.add(1);
       }
 
-      // When reviewer replies with bare numbers/ordinals ("1, 3, 5" or "1st and 3rd") without an explicit verb,
-      // and no negative/refusal was present in the sentence, it represents shortlisting those candidates.
-      if (!outcome && nums.size > 0 && !isUnreadable(outcomeOf(line))) {
+      // A line that is ONLY numbers ("1, 3, 5", "1st and 3rd", "#2") picks
+      // those people. A number inside other words is not a pick: "busy with 2
+      // interviews" must not shortlist candidate 2 (review of PR #56, 25 Sep).
+      if (!outcome && nums.size > 0 && ONLY_NUMBERS.test(line) && !isUnreadable(outcomeOf(line))) {
         outcome = "shortlisted";
       }
 
@@ -527,3 +532,21 @@ export async function parseReply(
   }
 }
 
+/**
+ * The whole set's decisions: what the reply picked, and everyone else in that
+ * email marked not selected — the owner's rule (25 Sep, PR #56), so a set is
+ * closed by its reply rather than left hanging.
+ *
+ * Only when the whole reply was read. If any clause could not be read, nobody
+ * is marked not selected on a guess: the reply may have been about them.
+ */
+export function withUnpickedRejected(parsed: ParseResult, applicationIds: string[]): ParsedDecision[] {
+  if (parsed.unmatched.length > 0) return parsed.decisions;
+  const decided = new Set(parsed.decisions.map((d) => d.applicationId));
+  return [
+    ...parsed.decisions,
+    ...applicationIds
+      .filter((id) => !decided.has(id))
+      .map((applicationId) => ({ applicationId, outcome: "rejected" as const, note: "Not selected from this set" })),
+  ];
+}

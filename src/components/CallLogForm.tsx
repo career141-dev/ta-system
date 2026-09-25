@@ -2,6 +2,7 @@
 
 import { logCall } from "@/app/actions";
 import { inputClass } from "./form";
+import { SubmitButton } from "./Submit";
 
 const KINDS = [
   { value: "pre_interview", label: "Pre-interview — confirming attendance" },
@@ -78,9 +79,12 @@ export function CallLogForm({
         />
       </label>
       <div className="mt-4 flex items-center gap-4">
-        <button className="rounded-full bg-brand px-5 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90">
+        <SubmitButton
+          pendingLabel="Saving…"
+          className="rounded-full bg-brand px-5 py-2 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+        >
           Save call
-        </button>
+        </SubmitButton>
         <span className="text-[11.5px] text-ink-faint">
           A pre-interview call marked &ldquo;reached&rdquo; clears the lead&rsquo;s escalation.
         </span>
