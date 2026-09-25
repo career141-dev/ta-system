@@ -2,6 +2,7 @@ import { repo, setsForOpening } from "@/data/store";
 import { colomboDayStart } from "@/lib/calendar";
 import { PRIORITY_TARGET, URGENT_ALERTS, type AlertKind, type Id } from "@/data/types";
 import { hasWorkingHours, isWorkingDay, workingHoursBetween } from "./calendar";
+import { extractReplyText, readNumbers } from "./reviewReply";
 
 export { isWorkingDay, workingHoursBetween, nextWorkingDay, TIMEZONE, DAILY_CUTOFF_HOUR } from "./calendar";
 
@@ -208,6 +209,79 @@ function computeAlertsAt(now: number): LiveAlert[] {
         assignedTo: escalated
           ? [...new Set([round.sentBy, o.taLeadId])]
           : [round.sentBy],
+      });
+    }
+
+    // 4b. Review reply received — notifies TA and TA Lead of what happened.
+    // Only show the latest returned round per (kind, setNumber) so old superseded/duplicate test runs don't clutter alerts.
+    const returnedRounds = repo
+      .reviewRounds(o.id)
+      .filter((r) => r.status === "returned" && r.returnedAt && now - r.returnedAt <= 2 * DAY)
+      .sort((a, b) => (b.returnedAt ?? 0) - (a.returnedAt ?? 0));
+
+    const seenSets = new Set<string>();
+    for (const round of returnedRounds) {
+      const setKey = `${round.kind}_${round.setNumber ?? 1}`;
+      if (seenSets.has(setKey)) continue;
+      seenSets.add(setKey);
+
+      let shortlisted = round.decisions
+        .filter((d) => d.outcome === "shortlisted")
+        .map((d) => {
+          const app = repo.application(d.applicationId);
+          return app ? repo.candidate(app.candidateId)?.fullName : null;
+        })
+        .filter(Boolean) as string[];
+
+      const cleanBody = extractReplyText(round.replyBody ?? "").trim();
+      const snippet = cleanBody ? `"${cleanBody.slice(0, 45)}"` : "Reply received";
+
+      // If an older test round was stored before the parser update, read candidates on the fly
+      if (shortlisted.length === 0 && cleanBody && round.applicationIds.length > 0) {
+        const list = round.applicationIds.map((id) => {
+          const app = repo.application(id);
+          const c = app ? repo.candidate(app.candidateId) : null;
+          return { applicationId: id, name: c?.fullName ?? "" };
+        });
+        const parsed = readNumbers(cleanBody, list);
+        const derived = parsed
+          .filter((x) => x.outcome === "shortlisted")
+          .map((x) => list.find((c) => c.applicationId === x.applicationId)?.name)
+          .filter(Boolean) as string[];
+        if (derived.length > 0) {
+          shortlisted = derived;
+        }
+      }
+
+      const reviewer = round.kind === "director" ? "Director" : "Client";
+
+      let resultText = "";
+      if (shortlisted.length > 0) {
+        resultText = `${shortlisted.join(", ")} shortlisted`;
+      } else {
+        const rejected = round.decisions
+          .filter((d) => d.outcome === "rejected")
+          .map((d) => {
+            const app = repo.application(d.applicationId);
+            return app ? repo.candidate(app.candidateId)?.fullName : null;
+          })
+          .filter(Boolean) as string[];
+        resultText = rejected.length > 0
+          ? `${rejected.join(", ")} rejected`
+          : "No candidates shortlisted";
+      }
+
+      out.push({
+        id: `rr_${round.id}`,
+        kind: "review_reply_received",
+        urgent: true,
+        openingId: o.id,
+        subjectId: round.id,
+        detail: `${o.title} — ${reviewer} replied to Set ${round.setNumber ?? 1}: ${snippet} → ${resultText}`,
+        action: "View review",
+        href: `/openings/${o.id}/eod?kind=${round.kind}`,
+        dueAt: round.returnedAt!,
+        assignedTo: [...new Set([round.sentBy, o.taLeadId, ...o.assignedTaIds])],
       });
     }
 

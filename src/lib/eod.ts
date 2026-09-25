@@ -38,29 +38,15 @@ export function shortlistRows(
   taId: Id | null,
   kind: "director" | "client" = "director",
 ): ShortlistRow[] {
-  // Who is waiting to be sent: people at the stage BEFORE this reviewer's
-  // decision, and not already in a set that went to them. The list used to
-  // include people the reviewer had already shortlisted, so a second send
-  // put decided candidates back in front of them (audit finding 27).
+  // Only draft candidates who have been explicitly moved to the reviewer's stage
+  // (director_review for Director, director_shortlist for Client), and not already in a sent set.
   const stage = kind === "director" ? "director_review" : "director_shortlist";
-  const alreadySent = new Set(
-    repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds),
+  const activePending = new Set(
+    repo.reviewRounds(openingId).filter((r) => r.kind === kind && r.status !== "returned").flatMap((r) => r.applicationIds),
   );
-  // For the Director, a candidate whose follow-up is finished is ready too:
-  // every question answered is what "ready for the Director" means, and making
-  // the TA move each one by hand first is a step the desk does not have.
-  const readyFromFollowUp =
-    kind === "director"
-      ? new Set(
-          repo
-            .followUps()
-            .filter((f) => f.application.openingId === openingId && f.followUp.state === "complete")
-            .map((f) => f.application.id),
-        )
-      : new Set<string>();
   const apps = repo
     .applications(openingId)
-    .filter((a) => (a.stage === stage || readyFromFollowUp.has(a.id)) && !alreadySent.has(a.id))
+    .filter((a) => a.stage === stage && !activePending.has(a.id))
     // The client's copy is the Director's decision, not the TA's, so it is not
     // narrowed to one recruiter's own shortlisting.
     .filter((a) => (taId && kind === "director" ? a.ownerTaId === taId : true))
@@ -155,10 +141,10 @@ export function effortFromForm(formData: FormData, base: EffortRow): EffortRow {
   return out;
 }
 
-export function subjectLine(clientName: string, title: string, date = new Date()): string {
-  return `${clientName.toUpperCase()} - ${title.toUpperCase()} - ${date
-    .toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
-    .toUpperCase()}`;
+export function subjectLine(title: string, setNumber: number | null = 1, cvCount = 1): string {
+  const setPart = `Set ${setNumber ?? 1}`;
+  const cvPart = `${cvCount} ${cvCount === 1 ? "CV" : "CVs"}`;
+  return `${title.toUpperCase()} - ${setPart} - ${cvPart}`;
 }
 
 /**

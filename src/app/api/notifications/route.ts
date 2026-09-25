@@ -27,6 +27,14 @@ export async function GET() {
   // nothing: an empty feed, flagged.
   if (!user) return NextResponse.json({ signedOut: true, unreadCount: 0, notifications: [] });
 
+  // Auto-sync review replies silently in the background if any review rounds are pending
+  try {
+    const { syncMailboxRepliesSilently } = await import("@/lib/graphInboxSync");
+    await syncMailboxRepliesSilently(user);
+  } catch (e) {
+    console.warn("[notifications] Background sync error:", (e as Error).message);
+  }
+
   const payload = await convexQuery<NotificationsPayload>("ta/notifications:listForUser", {
     userId: user.id,
     limit: 30,

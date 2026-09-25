@@ -42,12 +42,79 @@ export interface ParseResult {
   unmatched: string[];
 }
 
+/**
+ * Strips quoted email reply headers ("On Fri, Sep 25... wrote:", "-----Original Message-----", etc.)
+ * so only the actual reviewer's newly typed text is parsed and displayed.
+ */
+export function extractReplyText(raw: string): string {
+  if (!raw) return "";
+  let text = raw.replace(/\r\n/g, "\n");
+
+  // If raw contains HTML markup, clean HTML-level quotes and strip tags first
+  if (/<[a-z][\s\S]*>/i.test(text)) {
+    text = text.replace(/<head[\s\S]*?<\/head>/gi, "");
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, "");
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, "");
+
+    // Cut HTML quote containers
+    const htmlQuotePatterns = [
+      /<div[^>]*class=["'][^"']*(?:gmail_quote|gmail_quote_container|x_gmail_quote|gmail_attr|WordSection1|quoted-text)[^"']*["'][\s\S]*/i,
+      /<blockquote[^>]*>[\s\S]*/i,
+      /<div[^>]*id=["'][^"']*(?:divRplyFwdMsg|orig_message|appendonsend|mail_quote|quote)[^"']*["'][\s\S]*/i,
+      /<hr[^>]*id=["'][^"']*(?:stopSpelling|lineBreakAtBeginningOfQuote)[^"']*["'][\s\S]*/i,
+    ];
+    for (const re of htmlQuotePatterns) {
+      const match = re.exec(text);
+      if (match && match.index >= 0) {
+        text = text.slice(0, match.index);
+      }
+    }
+
+    text = text.replace(/<br\s*\/?>/gi, "\n");
+    text = text.replace(/<\/(?:p|div|tr|h\d|li)>/gi, "\n");
+    text = text.replace(/<[^>]+>/g, " ");
+    text = text
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/gi, '"');
+  }
+
+  const headerPatterns = [
+    // Divider line: "---", "___", "==="
+    /(?:^|\n|\s+)[-_=]{3,}[\s\S]*/i,
+    // Gmail / Apple Mail / Outlook "On <date> ... wrote:" or "On <date> ... <email>:"
+    /(?:^|\n|\s+)(?:On\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun|[A-Z][a-z]{2,8}|\d{1,2})[\s\S]*?(?:wrote\s*:|wrote|>|:\s*\n|<[^>]+>:?))/i,
+    // "On [Date/Time] ...:"
+    /(?:^|\n|\s+)On\s+[A-Za-z]{3},\s+[A-Za-z]{3}\s+\d{1,2},\s+\d{4}[\s\S]*/i,
+    /(?:^|\n|\s+)On\s+\d{1,2}\s+[A-Za-z]{3}\s+\d{4}[\s\S]*/i,
+    // Outlook / standard headers
+    /(?:^|\n|\s+)-{2,}\s*(?:Original Message|Forwarded message|Reply Message)\s*-{2,}/i,
+    /(?:^|\n)\s*(?:From|Sent|To|Subject|Date):\s*.+/i,
+    // Quote indicators
+    /(?:^|\n)\s*>{1,}\s*.+/i,
+    // Mobile signatures
+    /(?:^|\n)\s*(?:Get Outlook for (?:iOS|Android)|Sent from my (?:iPhone|iPad|Android|Galaxy|mobile)|Sent with Gmail|Sent from Mail for Windows)[\s\S]*/i,
+  ];
+
+  for (const re of headerPatterns) {
+    const match = re.exec(text);
+    if (match && match.index >= 0) {
+      text = text.slice(0, match.index);
+    }
+  }
+
+  return text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 const YES =
-  /\b(shortlist(ed)?|proceed|go ahead|take forward|take|yes|approve[d]?|ok(ay)?|good|fine|strong|keep|include|happy with|like)\b/i;
+  /\b(shortlist(ed|ing)?|proceed|go ahead|take forward|take|yes|approve[d]?|ok(ay)?|good|fine|strong|keep|include|happy with|like|select(ed|ing|ion)?|pick(ed)?|choose|chosen|prefer(red)?|this one|this candidate|only|just)\b/i;
 /** "not sure" is a hold, not a rejection, so it is excluded here and caught by
  *  MAYBE below — which is why MAYBE is tested first. */
 const NO =
-  /\b(reject(ed)?|drop|no\b|pass|decline[d]?|not suitable|unsuitable|remove|not|except|apart from|other than|exclude|leave out|weak|poor fit|not a fit|no good)\b/i;
+  /\b(reject(ed|ing)?|drop(ped)?|no\b|pass(ed)?|decline[d]?|not suitable|unsuitable|remove|not|except|apart from|other than|exclude|leave out|weak|poor fit|not a fit|no good|none|discard|skip)\b/i;
 const MAYBE = /\b(hold|maybe|not sure|not certain|unsure|reserve|backup|stand ?by)\b/i;
 
 /**
@@ -75,6 +142,29 @@ export interface Unreadable {
   why: string;
 }
 
+const WORD_ORDINALS: Record<string, number> = {
+  first: 1,
+  "1st": 1,
+  second: 2,
+  "2nd": 2,
+  third: 3,
+  "3rd": 3,
+  fourth: 4,
+  "4th": 4,
+  fifth: 5,
+  "5th": 5,
+  sixth: 6,
+  "6th": 6,
+  seventh: 7,
+  "7th": 7,
+  eighth: 8,
+  "8th": 8,
+  ninth: 9,
+  "9th": 9,
+  tenth: 10,
+  "10th": 10,
+};
+
 /**
  * Numbers in a reply are not all candidate numbers.
  *
@@ -92,14 +182,15 @@ const NOT_A_CANDIDATE: RegExp[] = [
   /\b\d{1,2}\s*(?:[ap]\.?\s?m\.?)\b/gi,
   // "at 2", "by 4" where a meeting is being arranged
   /\b(?:at|by|around|from|until|till)\s+\d{1,2}\b(?=\s*(?:[ap]\.?m|o'?clock|hrs|$|[^\d]))/gi,
-  // Dates: 2nd, 12/3, 12-03-2026, 3 March, March 3
-  /\b\d{1,2}(?:st|nd|rd|th)\b/gi,
+  // Dates: on the 2nd, 12/3, 12-03-2026, 3 March, March 3
+  /\b(?:on\s+(?:the\s+)?|dated?\s+)\d{1,2}(?:st|nd|rd|th)\b/gi,
+  /\b\d{1,2}(?:st|nd|rd|th)\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/gi,
+  /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?\b/gi,
   // A slash is always a date; a hyphen is only a date when it has three parts,
   // because "shortlist 2-4" is a range of candidates and must survive.
   /\b\d{1,2}\s*\/\s*\d{1,2}(?:\s*\/\s*\d{2,4})?\b/g,
   /\b\d{1,2}\s*-\s*\d{1,2}\s*-\s*\d{2,4}\b/g,
   /\b\d{1,2}\s+(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\b/gi,
-  /\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}\b/gi,
   // Money: Rs 450,000 · LKR 5 lakhs · $2k · 15%
   /(?:rs\.?|lkr|usd|aud|gbp|eur|inr|aed|\$|£|€)\s*[\d,.]+/gi,
   /\b[\d,.]+\s*(?:k\b|m\b|mn\b|lakhs?|crores?|million|bn|billion)/gi,
@@ -246,8 +337,7 @@ export function readNumbers(reply: string, list: Candidateish[]): ParsedDecision
     const verdicts = verdictsForSentence(sentence);
 
     for (let i = 0; i < sentence.length; i++) {
-      const outcome = verdicts[i];
-      if (!outcome) continue;
+      let outcome = verdicts[i];
       const line = sentence[i];
       // Times, dates, salaries and notice periods are masked before any number
       // is read, so "Interview at 2 pm" decides nothing about candidate two.
@@ -260,7 +350,39 @@ export function readNumbers(reply: string, list: Candidateish[]): ParsedDecision
         for (let n = Math.min(a, b); n <= Math.max(a, b); n++) nums.add(n);
       }
       for (const m of readable.matchAll(/(?<![\d.\-–#])(\d{1,2})(?![\d\-–#])/g)) nums.add(Number(m[1]));
-      if (nums.size === 0) continue;
+
+      // Ordinals: "1st", "2nd", "3rd", "first", "second", "third", etc.
+      for (const m of readable.matchAll(/\b(1st|2nd|3rd|4th|5th|6th|7th|8th|9th|10th|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)\b/gi)) {
+        const val = WORD_ORDINALS[m[1].toLowerCase()];
+        if (val) nums.add(val);
+      }
+      if (/\b(?:last|final)\s*(?:one|candidate|cv)?\b/i.test(readable)) {
+        if (list.length > 0) nums.add(list.length);
+      }
+
+      // "all", "both", "everyone", "all of them"
+      if (/\b(all|both|everyone|everybody|all of them)\b/i.test(readable)) {
+        for (let idx = 1; idx <= list.length; idx++) nums.add(idx);
+      }
+
+      // "none", "neither", "nobody", "none of them"
+      if (/\b(none|neither|nobody|none of them)\b/i.test(readable)) {
+        if (!outcome) outcome = "rejected";
+        for (let idx = 1; idx <= list.length; idx++) nums.add(idx);
+      }
+
+      // When there is only 1 candidate in the set, any explicit approval/rejection applies to candidate #1
+      if (nums.size === 0 && list.length === 1 && outcome) {
+        nums.add(1);
+      }
+
+      // When reviewer replies with bare numbers/ordinals ("1, 3, 5" or "1st and 3rd") without an explicit verb,
+      // and no negative/refusal was present in the sentence, it represents shortlisting those candidates.
+      if (!outcome && nums.size > 0 && !isUnreadable(outcomeOf(line))) {
+        outcome = "shortlisted";
+      }
+
+      if (!outcome || nums.size === 0) continue;
 
       for (const n of nums) {
         const c = list[n - 1];

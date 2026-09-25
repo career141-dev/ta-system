@@ -121,8 +121,9 @@ export function EodComposer({
           <div className="mt-5 overflow-x-auto">
             {rows.length === 0 ? (
               <p className="rounded-xl border border-dashed border-rule px-5 py-8 text-center text-[12.5px] text-ink-faint">
-                Nobody is ready to go yet — a candidate is ready once their follow-up questions are all answered, or they are in Director Review. There is nothing to
-                send.
+                {kind === "director"
+                  ? "Nobody is in Director Review yet — move candidates to Director Review on the pipeline to include them in today's submission."
+                  : "Nobody is in Client Review yet — move candidates to Client Review to include them in the submission."}
               </p>
             ) : (
               <>
@@ -239,18 +240,10 @@ export function EodComposer({
         />
         <button
           disabled={rows.length === 0}
-          className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35"
+          className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
           {kind === "director" ? "Send email" : "Record that it went to the client"}
         </button>
-        <span className="max-w-[62ch] text-[12.5px] text-ink-faint">
-          {rows.length === 0
-            ? "Nobody new to send — everyone at this stage has already gone out."
-            : kind === "director"
-              ? `Sends this email now from your mailbox through Microsoft Graph, with the ${rows.length} CV${rows.length === 1 ? "" : "s"} attached, and holds the list for the Director's reply. ${openSetNote ?? ""}`
-              : `The client email is sent by operations, not from here. Record it once it has gone, so the reply to the shortlist inbox can be read back onto these ${rows.length}.`}
-          {alreadyOut && " An earlier set is still waiting on a reply — that is fine; replies are matched by the date in their subject."}
-        </span>
       </form>
     </div>
   );

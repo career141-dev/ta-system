@@ -277,12 +277,19 @@ async function refresh(scope: PrimeScope): Promise<void> {
   }
   /*
    * The alerts name people, and the root layout computes them on every page
-   * for the badge. They read candidates on the late stages only — follow-up
-   * chases, interviews, offers, joining — a few hundred, not the whole desk.
+   * for the badge. They read candidates on the active alert stages and recent review rounds.
    */
   if (scope.followUps) {
     for (const a of db.applications) {
       if (ALERT_STAGES.has(a.stage)) wanted.add(a.candidateId);
+    }
+    for (const r of db.reviewRounds) {
+      if (now - (r.returnedAt ?? r.sentAt) <= 3 * 86_400_000) {
+        for (const appId of r.applicationIds) {
+          const a = db.applications.find((x) => x.id === appId);
+          if (a) wanted.add(a.candidateId);
+        }
+      }
     }
   }
   const stale = [...wanted].filter((id) => now - (state.candidates.get(id) ?? 0) > CANDIDATE_TTL_MS);
@@ -329,7 +336,7 @@ const WHOLE_TABLES = [
 ] as const;
 
 async function loadWholeTables(): Promise<Partial<Database>> {
-  const chunkSize = 6;
+  const chunkSize = 3;
   const entries: (readonly [string, unknown[]])[] = [];
   for (let i = 0; i < WHOLE_TABLES.length; i += chunkSize) {
     const chunk = WHOLE_TABLES.slice(i, i + chunkSize);
@@ -363,7 +370,16 @@ async function loadWholeTables(): Promise<Partial<Database>> {
 }
 
 /** Stages whose people `computeAlerts` reads by name (src/lib/sla.ts). */
-const ALERT_STAGES = new Set<Application["stage"]>(["ai_follow_up", "ta_follow_up", "interview", "offer", "placed"]);
+const ALERT_STAGES = new Set<Application["stage"]>([
+  "ai_follow_up",
+  "ta_follow_up",
+  "director_review",
+  "director_shortlist",
+  "client_shortlist",
+  "interview",
+  "offer",
+  "placed",
+]);
 
 function merge<T>(have: T[], incoming: T[], key: (x: T) => string): T[] {
   if (incoming.length === 0) return have;

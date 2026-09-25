@@ -192,6 +192,40 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
         });
         return;
       }
+      // Check if this is an EOD Review Round reply from Director or Client
+      const openRounds = await ctx.runQuery(internal.mailIntake.model.openReviewRounds, {});
+      if (openRounds && openRounds.length > 0) {
+        const sNorm = (subject || "").toLowerCase();
+        const matched = openRounds.find((r) => {
+          const titleHit = r.openingTitle && sNorm.includes(r.openingTitle.toLowerCase());
+          const clientHit = !r.clientName || sNorm.includes(r.clientName.toLowerCase());
+          return titleHit && clientHit;
+        }) ?? (openRounds.length === 1 ? openRounds[0] : null);
+
+        if (matched && parsed.text) {
+          const { readNumbers } = await import("../../src/lib/reviewReply");
+          const decisions = readNumbers(parsed.text, matched.candidates);
+          if (decisions.length > 0) {
+            const res = await ctx.runMutation(internal.mailIntake.model.applyReviewRoundReply, {
+              roundId: matched.roundId,
+              replyBody: parsed.text,
+              decisions: decisions.map((d) => ({
+                applicationId: d.applicationId as Id<"applications">,
+                outcome: d.outcome,
+                note: d.note,
+              })),
+            });
+            await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+              id: m._id,
+              outcome: "filed",
+              note: `Review reply for ${matched.openingTitle} (${matched.kind}): ${res.moved} shortlisted, ${res.rejected} rejected.`,
+              openingIds: [matched.openingId],
+            });
+            return;
+          }
+        }
+      }
+
       await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "no_cv", note: "No CV attached, and not a reply from anyone we are chasing." });
       return;
     }
