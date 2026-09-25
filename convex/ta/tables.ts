@@ -16,7 +16,7 @@ import { TABLES } from "./model/tables";
 /** Tables the store loads whole. The large shared ones have their own scoped reads. */
 const WHOLE = new Set([
   "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
-  "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "intake",
+  "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "jdChat", "intake",
   "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
   "matchExclusions", "callFeedback", "interviews",
 ]);

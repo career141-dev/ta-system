@@ -222,6 +222,37 @@ export function parseBenchmark(text: string, openingId: string, sources: Source[
 
 // ─── The JD ──────────────────────────────────────────────────────────────────
 
+/**
+ * The shape of a JD and what may go in it — shared by the first draft and by
+ * every revision the TA asks for in the JD chat, so the two cannot drift apart.
+ */
+function jdShape(title: string): string {
+  return `Write it in Markdown under these headings, in this order, and leave out only a heading you truly have nothing for:
+
+## <role title>
+**Client** · **Location** · **Package** · **Nationality** · **Headcount** — one line each, only where known.
+### About the role — two or three sentences: what the job is and where it sits.
+### Responsibilities — 5 to 8 bullets.
+### Requirements — the must-haves: years, industry, background.
+### Qualifications — degrees, professional qualifications.
+### Skills — the skills the role is worked with, as bullets.
+### Experience — how many years of what.
+### Package — salary, allowances and benefits.
+### Other — anything left: notice period, travel, shift, reporting line, headcount.
+
+Two kinds of thing go in it, and they are not treated the same:
+
+FACTS about this role and this client — salary, allowances, benefits, location, nationality, headcount, notice period, the client's name and industry, must-haves, anything the notes say. Only from the material above. Never invent one, and never write filler like "competitive salary" or "attractive benefits". A fact nobody gave you is left out, and its line with it.
+
+THE ORDINARY WORK of the job titled "${title}" — responsibilities, the skills it is done with, the usual qualifications. A short note ("we need a finance manager, 10 years, CIMA") is a brief, not a job description: write out what this role does day to day, the way a recruiter who has filled it would, and keep it recognisable for Sri Lanka. Never contradict the notes, and never dress an assumption up as the client's requirement — anything essential comes from the notes.
+
+Rules:
+- Use everything above together. Nothing the lead or the TA wrote is dropped.
+- Where they disagree, follow the TA's notes — written later, usually after speaking to the client again.
+- No hype, no marketing. A Sri Lankan candidate reading this should learn what the job is and whether they qualify.
+- Plain Markdown. No preamble, no closing note, no "here is the job description".`;
+}
+
 export async function generateJdText(
   c: OpeningContext,
   briefs: JdBrief[],
@@ -250,30 +281,70 @@ The desk's own short template for this role, for the facts it carries:
 ${houseTemplate}
 """
 
-Write it in Markdown under these headings, in this order, and leave out only a heading you truly have nothing for:
-
-## <role title>
-**Client** · **Location** · **Package** · **Nationality** · **Headcount** — one line each, only where known.
-### About the role — two or three sentences: what the job is and where it sits.
-### Responsibilities — 5 to 8 bullets.
-### Requirements — the must-haves: years, industry, background.
-### Qualifications — degrees, professional qualifications.
-### Skills — the skills the role is worked with, as bullets.
-### Experience — how many years of what.
-### Package — salary, allowances and benefits.
-### Other — anything left: notice period, travel, shift, reporting line, headcount.
-
-Two kinds of thing go in it, and they are not treated the same:
-
-FACTS about this role and this client — salary, allowances, benefits, location, nationality, headcount, notice period, the client's name and industry, must-haves, anything the notes say. Only from the material above. Never invent one, and never write filler like "competitive salary" or "attractive benefits". A fact nobody gave you is left out, and its line with it.
-
-THE ORDINARY WORK of the job titled "${c.title}" — responsibilities, the skills it is done with, the usual qualifications. A short note ("we need a finance manager, 10 years, CIMA") is a brief, not a job description: write out what this role does day to day, the way a recruiter who has filled it would, and keep it recognisable for Sri Lanka. Never contradict the notes, and never dress an assumption up as the client's requirement — anything essential comes from the notes.
-
-Rules:
-- Use everything above together. Nothing the lead or the TA wrote is dropped.
-- Where they disagree, follow the TA's notes — written later, usually after speaking to the client again.
-- No hype, no marketing. A Sri Lankan candidate reading this should learn what the job is and whether they qualify.
-- Plain Markdown. No preamble, no closing note, no "here is the job description".`,
+${jdShape(c.title)}`,
     2500,
   );
+}
+
+/**
+ * One round of the JD chat (25 Sep): the TA says what to change, the AI
+ * rewrites the whole JD with it and says in one sentence what it changed.
+ * The JD comes back complete, never as a diff, so what is shown is what is
+ * approved.
+ */
+export async function reviseJdText(
+  c: OpeningContext,
+  briefs: JdBrief[],
+  currentJd: string,
+  request: string,
+  history: { role: "user" | "assistant"; body: string }[] = [],
+): Promise<AiResult & { changes?: string }> {
+  const given = briefs.filter((b) => b.notes.trim());
+  const notes = given.length
+    ? given
+        .map((b) => `${b.role === "lead" ? "The TA lead's brief" : "The TA's notes"} (${b.author}):\n"""\n${b.notes.trim()}\n"""`)
+        .join("\n\n")
+    : "(no notes were left)";
+  // The last few turns, so "shorter again" or "put that back" can be understood.
+  const earlier = history
+    .slice(-6)
+    .map((m) => `${m.role === "user" ? "TA" : "You"}: ${m.body.trim().slice(0, 400)}`)
+    .join("\n");
+  const res = await write(
+    `${HOUSE_RULES}
+
+You are revising a job description that goes out under Career141's name to candidates in Sri Lanka. The TA working the role tells you what to change.`,
+    `The opening, as it was set up:
+${ctxLines(c)}
+
+${notes}
+
+The job description as it stands:
+"""
+${currentJd.trim().slice(0, 8000)}
+"""
+${earlier ? `\nWhat was asked and done so far:\n${earlier}\n` : ""}
+The TA now asks:
+"""
+${request.trim()}
+"""
+
+Rewrite the whole job description with that change made. Keep everything the TA did not ask to change. A fact the TA gives here counts as a fact from the notes, and where it differs from the notes the TA's request wins — it is the latest word, and may remove something the notes said. Never invent any other fact.
+
+${jdShape(c.title)}
+
+After the job description, on a line of its own, write "CHANGES:" and one plain sentence saying what you changed, for the TA to read — e.g. "CHANGES: Added CIMA and 5 years in FMCG under Requirements, and removed the driving licence."`,
+    2500,
+  );
+  if (!res.ok) return res;
+  const { text, changes } = splitChanges(res.text);
+  return { ...res, text, changes };
+}
+
+/** The JD, and the AI's one-line "what I changed" that it writes after it. */
+export function splitChanges(text: string): { text: string; changes: string } {
+  const m = text.match(/\n\s*\**CHANGES\**:?\**\s*([\s\S]*)$/i);
+  if (!m || m.index === undefined) return { text: text.trim(), changes: "Revised the JD." };
+  const changes = m[1].trim().split("\n")[0].trim() || "Revised the JD.";
+  return { text: text.slice(0, m.index).trim(), changes };
 }

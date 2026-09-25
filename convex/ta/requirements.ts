@@ -37,9 +37,11 @@ export async function scheduleExtraction(
   ctx: { db: any; scheduler: any },
   jobId: Id<"jobs">,
   mode: "fill" | "replace",
+  /** With `replace`: keep the fields a person corrected (applyExtraction). */
+  keepLocks = false,
 ): Promise<void> {
   await ctx.db.patch(jobId, { requirementsStatus: "extracting", requirementsError: undefined });
-  await ctx.scheduler.runAfter(0, internal.ta.requirementsActions.extract, { jobId, mode });
+  await ctx.scheduler.runAfter(0, internal.ta.requirementsActions.extract, { jobId, mode, ...(keepLocks ? { keepLocks } : {}) });
 }
 
 export const jobForExtraction = internalQuery({

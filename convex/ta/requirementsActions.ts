@@ -14,7 +14,11 @@ import { extractSearchRequirements } from "../lib/jdParser";
 import { valuesFromExtraction } from "../lib/jobRequirements";
 
 export const extract = internalAction({
-  args: { jobId: v.id("jobs"), mode: v.union(v.literal("fill"), v.literal("replace")) },
+  args: {
+    jobId: v.id("jobs"),
+    mode: v.union(v.literal("fill"), v.literal("replace")),
+    keepLocks: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     const job = await ctx.runQuery(internal.ta.requirements.jobForExtraction, { jobId: args.jobId });
     if (!job) return;
@@ -42,6 +46,7 @@ export const extract = internalAction({
         mode: args.mode,
         values: valuesFromExtraction(requirements),
         model: usage.model,
+        ...(args.keepLocks ? { keepLocks: true } : {}),
       });
     } catch (e) {
       await ctx.runMutation(internal.ta.requirements.markExtractionFailed, {

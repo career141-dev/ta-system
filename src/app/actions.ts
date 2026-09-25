@@ -9,6 +9,7 @@ import type { FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
+import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
 import { invalidateCandidate, markTablesStale, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
@@ -32,6 +33,7 @@ function redirect(url: string): never {
 import { after } from "next/server";
 import {
   generateJdText,
+  reviseJdText,
   type JdBrief,
   type OpeningContext,
 } from "@/lib/headhunt";
@@ -708,21 +710,13 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   }
 
   // The groundwork starts the moment the job exists, not when somebody finds
-  // the button: the JD draft for the TA to approve, then the market research
-  // and the first round of Suggestions, so there is something waiting when the
-  // team opens it. All of it after the response is sent, so creating the
-  // opening is not held up.
+  // the button: the JD draft for the TA to read, after the response is sent so
+  // creating the opening is not held up.
   //
-  // Research and Suggestions came off this list on 13 September, when a round
-  // run before there was any JD searched with the wrong words. They are back
-  // at the owner's request (24 Sep), and now run after the draft, so they
-  // search with its words. A first round that finds nobody is run again when
-  // the JD is approved (approveJd), as before. Research's run is the opening's
-  // one run; a lead can still run it again.
-  //
-  // The Suggestions round belongs to the TA the opening is on, not to whoever
-  // created it — a lead creating it must not end up owning the list.
-  const owner = assigned[0] ?? user.id;
+  // Research and the first round of Suggestions ran here too from 24 Sep, on
+  // the first draft. Since 25 Sep the TA works the JD out with the AI in the
+  // JD chat, so they wait for the approved JD and start from approveJd,
+  // searching with the words the TA agreed.
   after(async () => {
     const step = async (what: string, work: () => Promise<unknown>) => {
       try {
@@ -733,20 +727,6 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
     };
     if (isConvex()) await step("load", () => primeStore({ openingId }));
     await step("JD draft", () => draftJd(openingId));
-    // The draft is saved through the backend and the loaded copy dropped
-    // (draftJd), so it is read again before anything searches with it.
-    if (isConvex()) await step("reload", () => primeStore({ openingId }));
-    revalidatePath(`/openings/${openingId}`, "layout");
-    await Promise.all([
-      step("research", async () => {
-        const r = await researchOpening(openingId, user.id);
-        if (!r.ok) console.warn(`[prepare ${openingId}] research did not run: ${r.reason}${r.detail ? ` (${r.detail})` : ""}`);
-      }),
-      step("suggestions", async () => {
-        const r = await sourceFor(openingId, owner);
-        if (r.error) console.warn(`[prepare ${openingId}] suggestions did not run: ${r.error}`);
-      }),
-    ]);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
 
@@ -838,14 +818,22 @@ export async function approveJd(formData: FormData) {
     // Matching waits for that, so it scores against the real requirements.
     const suggestionsBefore = repo.suggestions(openingId).length;
     const owner = repo.opening(openingId)?.assignedTaIds[0];
+    const researched = !!repo.research(openingId);
+    const fromChat = !detailsFollowNotes(repo.jdChat(openingId));
     try {
-      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined);
+      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined, fromChat);
     } catch (e) {
       await fail(backendMessage(e, "The JD could not be approved."));
     }
     markMatching(openingId);
+    // Research and the first Suggestions round wait for the approved JD, so
+    // they search with the words the TA agreed (25 Sep). Before that they ran
+    // on the first draft, the moment the opening was created.
     after(async () => {
-      await rematchWhenRequirementsSettle(openingId, user.id);
+      await Promise.all([
+        rematchWhenRequirementsSettle(openingId, user.id),
+        researched ? null : researchOpening(openingId, user.id).catch(() => undefined),
+      ]);
       if (suggestionsBefore === 0) await sourceFor(openingId, owner).catch(() => undefined);
       revalidatePath(`/openings/${openingId}`, "layout");
     });
@@ -868,6 +856,12 @@ export async function approveJd(formData: FormData) {
     await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
+  if (!repo.research(openingId)) {
+    after(async () => {
+      await researchOpening(openingId, user.id).catch(() => undefined);
+      revalidatePath(`/openings/${openingId}`, "layout");
+    });
+  }
 
   if (repo.suggestions(openingId).length === 0) {
     // The auto-run belongs to the TA the opening is on, not to whoever
@@ -927,6 +921,98 @@ export async function amendJd(formData: FormData) {
 
 function amendedJd(openingId: string, message: string) {
   return `/openings/${openingId}/jd?msg=${encodeURIComponent(message)}&tone=ok`;
+}
+
+// ─── The JD chat (25 Sep) ────────────────────────────────────────────────────
+
+/**
+ * Save a JD the chat produced. Before approval it is a draft like any other;
+ * after approval it stays approved and the Job details follow it at once
+ * (keeping what a person corrected), because the TA's request is the change.
+ */
+async function saveChatJd(openingId: string, userId: string, jd: string): Promise<void> {
+  const o = repo.opening(openingId);
+  if (isConvex()) {
+    const r = await convexMutation<{ reextracting: boolean }>("ta/openings:saveJd", {
+      actorId: userId,
+      openingId,
+      jdMarkdown: jd,
+      ...(o?.jdStatus === "approved" ? { detailsFromJd: true } : {}),
+    });
+    if (r?.reextracting) {
+      markMatching(openingId);
+      after(() => rematchWhenRequirementsSettle(openingId, userId));
+    }
+    return;
+  }
+  repo.updateJd(openingId, jd);
+}
+
+/**
+ * The TA tells the AI what to change in the JD, and it rewrites it — as many
+ * times as it takes, until the TA approves it. Each answer keeps the JD it
+ * produced, so an earlier one can be put back (restoreJdVersion).
+ */
+export async function reviseJd(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const request = String(formData.get("request") ?? "").trim();
+  if (!request) await fail("Write what should change in the JD first.");
+  if (request.length > JD_REQUEST_MAX) await fail(`That is too long — keep it under ${JD_REQUEST_MAX} characters.`);
+  const opening = repo.opening(openingId);
+  const c = contextFor(openingId);
+  if (!opening || !c) await fail("The opening could not be found. Reload the page and try again.");
+  // The editor as it stands, so hand edits not yet saved are revised, not lost.
+  const currentJd = String(formData.get("currentJd") ?? "").trim() || opening!.jdMarkdown || "";
+  if (!currentJd.trim()) await fail("There is no JD to revise yet. Generate one first.");
+
+  const history = chatHistory(repo.jdChat(openingId));
+  repo.addJdChat({ openingId, role: "user", body: request, jdMarkdown: null, byUserId: user.id, at: Date.now() });
+
+  const res = await reviseJdText(c!, jdBriefsFor(openingId), currentJd, request, history);
+  if (!res.ok || !res.text.trim()) {
+    repo.addJdChat({
+      openingId, role: "assistant", jdMarkdown: null, byUserId: null, at: Date.now(), failed: true,
+      body: `Could not revise the JD — ${res.ok ? "the AI sent back nothing." : reasonInWords(res.reason)} The JD is as it was. Try again.`,
+    });
+    revalidatePath(`/openings/${openingId}/jd`);
+    await fail("Could not revise the JD. The JD is as it was — try again.");
+  }
+  const jd = res.ok ? res.text : currentJd;
+  const changes = (res.ok && res.changes) || "Revised the JD.";
+
+  repo.addJdChat({ openingId, role: "assistant", body: changes, jdMarkdown: jd, byUserId: null, at: Date.now() });
+  try {
+    await saveChatJd(openingId, user.id, jd);
+  } catch (e) {
+    await fail(backendMessage(e, "The revised JD could not be saved. Try again."));
+  }
+  if (isConvex()) await afterBackendWrite(openingId);
+  else revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Revised: ${changes}`);
+}
+
+/** Put back the JD an earlier answer in the JD chat produced. */
+export async function restoreJdVersion(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const turn = repo.jdChat(openingId).find((m) => m.id === String(formData.get("messageId") ?? ""));
+  if (!turn?.jdMarkdown) await fail("That version could not be found. Reload the page and try again.");
+  const when = new Date(turn!.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Colombo" });
+  repo.addJdChat({
+    openingId, role: "assistant", body: `Put back the version from ${when}.`,
+    jdMarkdown: turn!.jdMarkdown, byUserId: user.id, at: Date.now(),
+  });
+  try {
+    await saveChatJd(openingId, user.id, turn!.jdMarkdown!);
+  } catch (e) {
+    await fail(backendMessage(e, "That version could not be put back. Try again."));
+  }
+  if (isConvex()) await afterBackendWrite(openingId);
+  else revalidatePath(`/openings/${openingId}`, "layout");
+  await done(`Put back the version from ${when}.`);
 }
 
 // ─── Job details: requirements extracted from the approved JD ────────────────
@@ -2543,12 +2629,16 @@ async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boole
   const template = buildJd(extracted, client?.name ?? "the client");
   const context = { ...c, mustHaves: extracted.mustHaves?.length ? extracted.mustHaves : c.mustHaves };
 
+  // Once the TA has started asking the AI for changes, the Job details stay
+  // as they were until the JD is approved, and are then read from it (25 Sep).
+  const followNotes = detailsFollowNotes(repo.jdChat(openingId));
+
   if (isConvex()) {
     // The draft is saved in the backend. Nothing is approved here — the TA reads it first.
     // The Job details are read from the same notes at the same time.
     const [res] = await Promise.all([
       generateJdText(context, briefs, template, opening.jdMarkdown ?? ""),
-      extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)),
+      followNotes ? extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)) : null,
     ]);
     // The backend is the only writer here. It stamps the row's updatedAt, so
     // a second write through the store (repo.updateJd) arrived with an older
@@ -2573,7 +2663,7 @@ async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boole
     return res.ok ? { ok: true } : { ok: false, reason: res.reason };
   }
 
-  repo.applyExtractedToOpening(openingId, extracted);
+  if (followNotes) repo.applyExtractedToOpening(openingId, extracted);
   const res = await generateJdText(context, briefs, template, opening.jdMarkdown ?? "");
   // The template is not a failure state — it is what the desk has always had.
   repo.updateJd(openingId, res.ok ? res.text : template);
@@ -4080,6 +4170,14 @@ export async function addLinkInline(_: ActionResult | null, formData: FormData) 
 
 export async function generateJdInline(_: ActionResult | null, formData: FormData) {
   return inline(() => generateJdWithModel(formData));
+}
+
+export async function reviseJdInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => reviseJd(formData));
+}
+
+export async function restoreJdVersionInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => restoreJdVersion(formData));
 }
 
 export async function moveStageInline(_: ActionResult | null, formData: FormData) {

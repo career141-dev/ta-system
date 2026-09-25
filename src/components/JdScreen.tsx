@@ -6,6 +6,7 @@ import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { JdEditor } from "./JdEditor";
 import { inputClass } from "./form";
 import { BriefRecorder } from "./BriefRecorder";
+import { JdChat, type JdChatTurn } from "./JdChat";
 
 /**
  * Screen two, and the TA's whole job in one place: notes in, JD out, approved.
@@ -22,6 +23,7 @@ export function JdScreen({
   jd,
   extractedSummary,
   otherBriefs,
+  chat,
 }: {
   openingId: string;
   title: string;
@@ -32,6 +34,8 @@ export function JdScreen({
   otherBriefs: { id: string; author: string; isLead: boolean; notes: string; at: string }[];
   jd: string;
   extractedSummary: string[];
+  /** The TA's conversation with the AI about this JD (JdChat). */
+  chat: JdChatTurn[];
 }) {
   const fromLead = otherBriefs.length > 0;
   const [notes, setNotes] = useState(initialNotes);
@@ -196,6 +200,9 @@ export function JdScreen({
             <input type="hidden" name="openingId" value={openingId} />
             <input type="hidden" name="thenGo" value="opening" />
             <JdEditor name="jdMarkdown" value={jdText} onChange={setJdText} />
+            <div className="mt-5">
+              <JdChat openingId={openingId} turns={chat} currentJd={jdText} approved={false} />
+            </div>
             <div className="mt-5 flex flex-wrap items-center gap-4">
               <SubmitButton
                 pendingLabel="Approving…"

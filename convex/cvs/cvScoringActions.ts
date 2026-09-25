@@ -7,6 +7,7 @@ import { adjustJobStageStat } from "../jobs/stats";
 import { initiateFollowUpOutreach } from "../pipeline/followUpHelper";
 import { scoreCandidateAgainstRequirements, scoreWithLLM } from "./cvScoring";
 import { getOpenAI, getModelForTask, OPENROUTER_CV_EXTRACTION_MODEL } from "../lib/llm";
+import { scoringWaitsForJd } from "../lib/jdGate";
 
 // 1. Internal Query to get the necessary data for scoring
 export const getScoringData = internalQuery({
@@ -112,6 +113,14 @@ export const processCvScoring = action({
     }
 
     const { candidate, job, application } = data;
+
+    // A JD still being worked out with the AI is not what the client agreed,
+    // so a CV is not scored against it. It stays in New CVs and is scored when
+    // the JD is approved (ta/jdApproval.scoreWaitingCvs, 25 September).
+    if (scoringWaitsForJd(job)) {
+      console.log(`[Scoring] ${args.jobId}: JD not approved yet, scoring waits`);
+      return;
+    }
 
     // Extraction keeps the CV text in file storage, not on the resume row, so
     // read it from there; scoring without it judged every CV on its headline fields.
