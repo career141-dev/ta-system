@@ -104,11 +104,12 @@ export async function opening(actor: Actor, openingId: Id): Promise<OpeningDetai
   };
 }
 
-export async function approveJd(actor: Actor, openingId: Id, jdMarkdown?: string) {
+export async function approveJd(actor: Actor, openingId: Id, jdMarkdown?: string, detailsFromJd = false) {
   return convexMutation<{ ok: boolean; approvedBy: string }>("ta/openings:approveJd", {
     actorId: requireActorId(actor),
     openingId,
     jdMarkdown,
+    ...(detailsFromJd ? { detailsFromJd } : {}),
   });
 }
 

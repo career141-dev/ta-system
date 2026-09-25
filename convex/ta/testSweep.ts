@@ -125,7 +125,7 @@ async function removeOpening(ctx: Ctx, id: Id<"jobs">, del: (t: string, id: stri
   for (const r of await ctx.db.query("jobAssignments").withIndex("by_jobId", (q) => q.eq("jobId", id)).collect()) await del("jobAssignments", r._id);
   for (const r of await ctx.db.query("placements").withIndex("by_jobId", (q) => q.eq("jobId", id)).collect()) await del("placements", r._id);
   for (const r of await ctx.db.query("pipelineEvents").withIndex("by_job_time", (q) => q.eq("jobId", id as never)).collect()) await del("pipelineEvents", r._id);
-  for (const table of ["jobPosts", "reviewRounds", "linkVault", "profileSuggestions", "matchRuns", "matchExclusions", "sourcingChat", "benchmarks", "researchReports", "briefs"]) {
+  for (const table of ["jobPosts", "reviewRounds", "linkVault", "profileSuggestions", "matchRuns", "matchExclusions", "sourcingChat", "jdChat", "benchmarks", "researchReports", "briefs"]) {
     for (const r of await ctx.db.query(table as never).withIndex("by_opening" as never, (q: any) => q.eq("openingId", id)).collect()) await del(table, (r as { _id: string })._id);
   }
   for (const r of await ctx.db.query("taAlerts").withIndex("by_subject", (q) => q.eq("subjectId", id)).collect()) await del("taAlerts", r._id);

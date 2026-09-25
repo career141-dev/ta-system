@@ -36,6 +36,7 @@ import type {
   LinkOutcome,
   BenchmarkEntry,
   ChatMessage,
+  JdChatMessage,
   Assignment,
   AssignmentRole,
   WorkingStage,
@@ -165,7 +166,7 @@ function backfill(db: Partial<Database>): Database {
     users: [], briefs: [], clients: [], openings: [], jobPosts: [], candidates: [],
     referees: [], applications: [], callFeedback: [], interviews: [], linkVault: [],
     assignments: [], pipelineEvents: [], reviewRounds: [],
-    alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [],
+    alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
     matchRuns: [], matchExclusions: [], liveMirror: [],
   } satisfies Database;
@@ -1381,6 +1382,7 @@ const rawRepo = {
       db.benchmarks = db.benchmarks.filter((b) => b.openingId !== id);
       db.researchReports = db.researchReports.filter((r) => r.openingId !== id);
       db.chat = db.chat.filter((c) => c.openingId !== id);
+      db.jdChat = db.jdChat.filter((c) => c.openingId !== id);
       db.callFeedback = db.callFeedback.filter((f) => !gone(f.applicationId));
       db.interviews = db.interviews.filter((i) => !gone(i.applicationId));
       db.alerts = db.alerts.filter((a) => a.subjectId !== id && !gone(a.subjectId));
@@ -2393,6 +2395,20 @@ const rawRepo = {
   addChat(m: Omit<ChatMessage, "id">): Id {
     const id = `cm_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => db.chat.push({ ...m, id }));
+    return id;
+  },
+
+  /** The TA's conversation with the AI about this opening's JD, oldest first. */
+  jdChat(openingId: Id): JdChatMessage[] {
+    return (load().jdChat ?? []).filter((m) => m.openingId === openingId).sort((a, b) => a.at - b.at);
+  },
+
+  addJdChat(m: Omit<JdChatMessage, "id">): Id {
+    const id = `jc_${Math.random().toString(36).slice(2, 10)}`;
+    mutate((db) => {
+      db.jdChat ??= [];
+      db.jdChat.push({ ...m, id });
+    });
     return id;
   },
 

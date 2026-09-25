@@ -69,6 +69,7 @@ const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   ["benchmarks", "by_opening", "openingId"],
   ["profileSuggestions", "by_opening", "openingId"],
   ["sourcingChat", "by_opening", "openingId"],
+  ["jdChat", "by_opening", "openingId"],
   ["matchRuns", "by_opening", "openingId"],
   ["matchExclusions", "by_opening", "openingId"],
   ["reviewRounds", "by_opening", "openingId"],

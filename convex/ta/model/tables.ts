@@ -677,6 +677,7 @@ export const TABLES: Record<string, TableModel> = {
   benchmarks: identity("benchmarks", ["name", "linkedinUrl", "sourceUrl", "sourceTitle"]),
   suggestions: identity("profileSuggestions", ["company", "location", "linkedinUrl", "concern", "sourceUrl", "feedback", "generatedFor", "keptBy"]),
   chat: identity("sourcingChat", ["action", "byUserId"]),
+  jdChat: identity("jdChat", ["jdMarkdown", "byUserId"]),
   intake: identity("intakeItems", ["receivedFrom", "fileName", "fileHash", "sizeBytes", "rawText", "parsed", "match", "toAddress", "subject", "openingId", "jobPostId", "routedToTaId", "routeNote", "routeConfidence", "candidateId", "handledBy", "handledAt", "note"]),
   matchRuns: identity("matchRuns", ["note"]),
   callFeedback: identity("callFeedback", ["structured"]),
