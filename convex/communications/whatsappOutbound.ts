@@ -386,6 +386,34 @@ export const sendWhatsApp = internalAction({
           candidatePhone: targetPhone,
           jobId: args.jobId,
         });
+      } else if (result.outsideWindow) {
+        /*
+         * Our guess about the 24-hour window was wrong.
+         *
+         * `hasRecentInboundComm` reads our own rows, and the same phone number
+         * sits on several candidate records — so a reply logged against one
+         * leaves another looking silent, or looking active when Meta disagrees.
+         * When the guess said "open" and Meta said 131047, the free text was
+         * rejected and the candidate received NOTHING: the TA pressed Send,
+         * saw no error worth noticing, and the message simply never arrived.
+         * Sending "hi" from the candidate's phone made the next attempt work,
+         * which is what made it look intermittent (25 September).
+         *
+         * Meta is the authority on its own window. Now its refusal re-opens
+         * the conversation with an approved template instead of giving up.
+         */
+        console.warn(
+          `[WhatsApp Outbound] Meta refused free text to +${cleanPhone} as outside the 24h window, ` +
+            `though our own records said it was open. Falling back to the approved template.`,
+        );
+        await ctx.scheduler.runAfter(0, internal.communications.metaTemplateSender.sendMetaTemplate, {
+          applicationId: commRecord?.applicationId,
+          candidateId: args.candidateId,
+          jobId: args.jobId,
+          communicationId: args.communicationId,
+          templateType: "reengagement",
+        });
+        return;
       } else {
         throw new Error(result.error || "Failed to send WhatsApp message via Meta");
       }
