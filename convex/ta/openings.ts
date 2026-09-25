@@ -16,6 +16,8 @@ import { requireActor, assertJobAccess, optionalActor} from "./guard";
 import { scheduleExtraction } from "./requirements";
 import { autoFollowUpPatch } from "../lib/followUpScope";
 import { firstPostFor } from "../lib/firstPost";
+import { SCORE_AFTER_APPROVAL_MS } from "../lib/jdGate";
+import { internal } from "../_generated/api";
 
 
 export const list = internalQuery({
@@ -153,6 +155,12 @@ export const approveJd = internalMutation({
     actorId: v.optional(v.string()),
     openingId: v.string(),
     jdMarkdown: v.optional(v.string()),
+    /**
+     * The JD was worked out with the AI in the JD chat (25 Sep). The Job
+     * details stopped following the notes when the chat began, so they are
+     * read again from the approved JD, keeping what a person corrected.
+     */
+    detailsFromJd: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -170,8 +178,13 @@ export const approveJd = internalMutation({
     });
     // The approved JD is what matching scores against, so its structured
     // requirements are read out of it now — filling blanks, never overwriting
-    // what a person corrected (ta/requirements.ts).
-    await scheduleExtraction(ctx, jobId, "fill");
+    // what a person corrected (ta/requirements.ts). A JD from the chat
+    // replaces them instead, still keeping a person's corrections.
+    if (args.detailsFromJd) await scheduleExtraction(ctx, jobId, "replace", true);
+    else await scheduleExtraction(ctx, jobId, "fill");
+    // CVs that came in while the JD was a draft were not scored (cvScoringActions);
+    // they are scored now, once the requirements above have been read.
+    await ctx.scheduler.runAfter(SCORE_AFTER_APPROVAL_MS, internal.ta.jdApproval.scoreWaitingCvs, { jobId });
     return { ok: true, approvedBy: user._id as string };
   },
 });
@@ -194,7 +207,13 @@ export const briefNotes = internalQuery({
  * JD that changes is read again for requirements, in fill mode.
  */
 export const saveJd = internalMutation({
-  args: { actorId: v.string(), openingId: v.string(), jdMarkdown: v.string() },
+  args: {
+    actorId: v.string(),
+    openingId: v.string(),
+    jdMarkdown: v.string(),
+    /** A JD chat revision of an approved JD: the Job details follow it (25 Sep). */
+    detailsFromJd: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     const jobId = args.openingId as Id<"jobs">;
@@ -204,7 +223,8 @@ export const saveJd = internalMutation({
     const changed = (job.jobDescription ?? "") !== args.jdMarkdown;
     await ctx.db.patch(jobId, { jobDescription: args.jdMarkdown, updatedAt: new Date().toISOString() });
     if (changed && job.jdStatus === "approved" && args.jdMarkdown.trim()) {
-      await scheduleExtraction(ctx, jobId, "fill");
+      if (args.detailsFromJd) await scheduleExtraction(ctx, jobId, "replace", true);
+      else await scheduleExtraction(ctx, jobId, "fill");
     }
     return { ok: true, reextracting: changed && job.jdStatus === "approved" };
   },

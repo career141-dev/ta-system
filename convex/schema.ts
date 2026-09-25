@@ -2434,6 +2434,18 @@ export default defineSchema({
     at: v.number(),
   }).index("by_opening", ["openingId"]),
 
+  /** The TA's conversation with the AI about an opening's JD (25 Sep). Each
+   *  answer keeps the JD it produced, so an earlier version can be put back. */
+  jdChat: defineTable({
+    openingId: v.id("jobs"),
+    role: v.union(v.literal("user"), v.literal("assistant")),
+    body: v.string(),
+    jdMarkdown: v.optional(v.union(v.string(), v.null())),
+    byUserId: v.optional(v.union(v.id("users"), v.null())),
+    at: v.number(),
+    failed: v.optional(v.boolean()),
+  }).index("by_opening", ["openingId"]),
+
   savedSearches: defineTable({
     name: v.string(),
     query: v.string(),

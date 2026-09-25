@@ -1233,5 +1233,5 @@ export function buildSeed(): Database {
   // Research, benchmarks and suggestions are generated on demand and cost money
   // to produce. Seeding fakes would teach the desk to trust output nothing
   // fetched, which is the opposite of what these features are for.
-  return { users, briefs, clients, openings, jobPosts, candidates, referees, applications, callFeedback, interviews, linkVault, alerts, savedSearches, savedReports: [], assignments: [], pipelineEvents: makeEvents(), reviewRounds: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], intake: makeIntake(), outreach: makeOutreach(), ...makeClosings(), esaRecords: makeEsas(), aiCalls: [], settings: [], matchRuns: [], matchExclusions: [], liveMirror: [] };
+  return { users, briefs, clients, openings, jobPosts, candidates, referees, applications, callFeedback, interviews, linkVault, alerts, savedSearches, savedReports: [], assignments: [], pipelineEvents: makeEvents(), reviewRounds: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [], intake: makeIntake(), outreach: makeOutreach(), ...makeClosings(), esaRecords: makeEsas(), aiCalls: [], settings: [], matchRuns: [], matchExclusions: [], liveMirror: [] };
 }
