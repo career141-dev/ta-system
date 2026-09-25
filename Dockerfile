@@ -34,6 +34,14 @@ RUN npm run build
 FROM node:22-bookworm-slim AS run
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3100 HOSTNAME=0.0.0.0
+# LibreOffice (Writer only, no GUI), so a Word CV opens in the app's PDF viewer
+# instead of only downloading (src/lib/wordToPdf.ts, 25 Sep). Carlito and
+# Caladea are metric twins of Calibri and Cambria, so a CV written in those
+# keeps its line and page breaks. Installed before the app is copied in, so
+# this layer is the same in every release and the server downloads it once.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-liberation fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea \
+  && rm -rf /var/lib/apt/lists/*
 # The standalone server, its traced dependencies, and the static files.
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static
@@ -42,13 +50,6 @@ COPY --from=build /app/public ./public
 # subscription (src/lib/claudeSub.ts). Idle unless CLAUDE_CODE_OAUTH_TOKEN and
 # C141_CLAUDE_SUB_TASKS are set; the app falls back to OpenRouter without it.
 RUN npm install -g @anthropic-ai/claude-code && npm cache clean --force
-# LibreOffice (Writer only, no GUI), so a Word CV opens in the app's PDF viewer
-# instead of only downloading (src/lib/wordToPdf.ts, 25 Sep). Carlito and
-# Caladea are metric twins of Calibri and Cambria, so a CV written in those
-# keeps its line and page breaks.
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-liberation fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea \
-  && rm -rf /var/lib/apt/lists/*
 USER node
 EXPOSE 3100
 # Next writes its own server.js into the standalone output.
