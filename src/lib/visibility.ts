@@ -73,12 +73,24 @@ export function scopeApplications(
   return out;
 }
 
-/** Table rows: mine, plus anyone another TA has shortlisted. */
-export function scopeLinks(rows: LinkVaultEntry[], user: User): Scoped<LinkVaultEntry>[] {
+/**
+ * Table rows: mine, anything a lead put in, and anyone another TA has
+ * shortlisted.
+ *
+ * A row added by a lead, director, admin or ops is handed to the TAs, not
+ * claimed — it usually arrives with a note saying what to do with it. Until
+ * 25 Sep it showed as "Shortlisted by <lead> — leave this one alone", which
+ * is the opposite of what the lead meant.
+ */
+export function scopeLinks(
+  rows: LinkVaultEntry[],
+  user: User,
+  addedByDeskWide: (userId: string) => boolean,
+): Scoped<LinkVaultEntry>[] {
   if (!isScoped(user)) return rows.map((row) => ({ row, takenBy: null }));
   const out: Scoped<LinkVaultEntry>[] = [];
   for (const r of rows) {
-    if (r.addedBy === user.id) out.push({ row: r, takenBy: null });
+    if (r.addedBy === user.id || addedByDeskWide(r.addedBy)) out.push({ row: r, takenBy: null });
     else if (r.outcome === "shortlisted") out.push({ row: r, takenBy: r.addedBy });
   }
   return out;

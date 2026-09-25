@@ -637,6 +637,19 @@ export interface LinkVaultEntry {
   createdAt: number;
   /** Present when the row came from, or was enriched by, the extension. */
   capture?: ProfileCapture | null;
+  /** Feedback for the TA from a lead, director, admin or ops. Absent on rows
+   *  nobody has left a note on. */
+  leadNotes?: LeadNote[];
+}
+
+/** A note left on an Excel Tables row for the TA working it. */
+export interface LeadNote {
+  id: Id;
+  at: number;
+  note: string;
+  by: Id;
+  /** The author's role when they wrote it — the note says who it came from. */
+  byRole: Role;
 }
 
 // ─── Alerts (spec §12) ───────────────────────────────────────────────────────

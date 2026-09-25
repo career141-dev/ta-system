@@ -2,6 +2,7 @@ import { repo } from "@/data/store";
 import { AddLinkForm } from "./AddLinkForm";
 import { LinkRow } from "./LinkRow";
 import { scopeLinks } from "@/lib/visibility";
+import { can, isDeskWide } from "@/lib/auth";
 import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
@@ -31,9 +32,13 @@ export function LinkVaultTable({
 }) {
   const users = repo.users();
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
-  // A TA's table is their own. The exception is somebody the other TA has
-  // already shortlisted, which appears marked so it is not worked twice.
-  const everyRow = scopeLinks(repo.linkVault(openingId), user);
+  // A TA's table is their own, plus whatever a lead put in for them. The
+  // exception is somebody the other TA has already shortlisted, which appears
+  // marked so it is not worked twice.
+  const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
+  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
+  // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
+  const canNote = can(user, "link.note").ok;
   const matching = everyRow.filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber));
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
@@ -42,7 +47,7 @@ export function LinkVaultTable({
 
   return (
     <>
-      <AddLinkForm openingId={openingId} />
+      <AddLinkForm openingId={openingId} canNote={canNote} />
 
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">
         {rows.length === 0 && q && everyRow.length > 0 ? (
@@ -76,6 +81,8 @@ export function LinkVaultTable({
                         : null
                     }
                     userNames={userNames}
+                    canNote={canNote}
+                    viewerId={user.id}
                   />
                 </div>
               </div>
