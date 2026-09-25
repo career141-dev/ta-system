@@ -4,6 +4,7 @@ import { isConvex } from "@/data/mode";
 import { currentUser } from "@/lib/session";
 import { repo } from "@/data/store";
 import { cvBytes, mayOpenCv } from "@/lib/cvAccess";
+import { isWordFile, wordToPdf } from "@/lib/wordToPdf";
 
 /**
  * A candidate's CV file.
@@ -18,6 +19,10 @@ import { cvBytes, mayOpenCv } from "@/lib/cvAccess";
  *
  * `?app=<applicationId>` opens it from a candidate on an opening — the CV tab.
  * Access is then the opening's (lib/cvAccess).
+ *
+ * `?view=pdf` shows a Word CV as a PDF, converted on the server
+ * (lib/wordToPdf), so it opens in the same viewer. With `?download=1` the
+ * original Word file is still what is saved.
  */
 export async function GET(req: NextRequest, { params }: { params: Promise<{ candidateId: string }> }) {
   const { candidateId } = await params;
@@ -38,6 +43,26 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ cand
 
   const download = req.nextUrl.searchParams.get("download") === "1";
   const cv = await cvBytes(candidateId, download);
+  if (cv.ok && !download && req.nextUrl.searchParams.get("view") === "pdf" && isWordFile(cv.fileName)) {
+    try {
+      const pdf = await wordToPdf(cv.bytes, cv.fileName ?? "cv.docx");
+      const name = (cv.fileName ?? "cv").replace(/\.[a-z]+$/i, ".pdf").replace(/["\r\n]/g, "");
+      return new NextResponse(new Uint8Array(pdf), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": `inline; filename="${name}"`,
+          "Cache-Control": "private, no-store",
+        },
+      });
+    } catch (err) {
+      console.warn("[cv word→pdf]", (err as Error).message);
+      return new NextResponse("Could not show this Word file here — use Download to open it.", {
+        status: 415,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+  }
   if (cv.ok) {
     const filename = (cv.fileName ?? (cv.isPdf ? "cv.pdf" : "cv")).replace(/["\r\n]/g, "");
     return new NextResponse(new Uint8Array(cv.bytes), {

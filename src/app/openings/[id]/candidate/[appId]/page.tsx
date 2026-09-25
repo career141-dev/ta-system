@@ -10,6 +10,7 @@ import { seatFor } from "@/lib/visibility";
 import { STAGE_LABEL } from "@/data/types";
 import { timeAt } from "@/lib/format";
 import { claimCandidate } from "@/app/actions";
+import { isWordFile } from "@/lib/wordToPdf";
 import { SubmitButton } from "@/components/Submit";
 import { RowActions } from "@/components/RowActions";
 import { CallLogForm } from "@/components/CallLogForm";
@@ -175,6 +176,9 @@ export default async function CandidateDrawer({
       /\.pdf$/i.test(cvFile.fileName ?? "") ||
       /\.pdf$/i.test(c.cvFileName ?? "") ||
       !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(cvFile.fileName ?? c.cvFileName ?? ""));
+
+  // Shown as a PDF made from it (lib/wordToPdf); Download still gives the Word file.
+  const cvIsWord = !!cvFile?.ok && !cvIsPdf && isWordFile(cvFile.fileName ?? c.cvFileName);
 
   const base = `/openings/${id}/candidate/${appId}`;
   const tabHref = (t: string) => (t === "cv" ? `${base}` : `${base}?tab=${t}`);
@@ -373,9 +377,9 @@ export default async function CandidateDrawer({
                 Career141 block, for the Director and the client) is still one
                 click away. */}
             <div className="mb-5 overflow-hidden rounded-xl border border-rule">
-              {cvFile?.ok && cvIsPdf ? (
+              {cvFile?.ok && (cvIsPdf || cvIsWord) ? (
                 <CvFrame
-                  src={cvHref}
+                  src={cvIsWord ? `${cvHref}&view=pdf` : cvHref}
                   title={`CV — ${c.fullName}`}
                   fileName={(cvFile?.ok ? cvFile.fileName : null) ?? c.cvFileName ?? "CV"}
                   downloadHref={`${cvHref}&download=1`}

@@ -14,6 +14,7 @@ import { DbCandidateDrawer } from "@/components/db/DbCandidateDrawer";
 import { DATABASE_STEPS, LoadingProgress } from "@/components/LoadingScenes";
 import { booleanScore, booleanTerms } from "@/lib/booleanScore";
 import { addManyToOpening, saveSearch } from "@/app/actions";
+import { isWordFile } from "@/lib/wordToPdf";
 import { BulkBar, DownloadCvsButton } from "@/components/BulkSelect";
 import { SubmitButton } from "@/components/Submit";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
@@ -556,11 +557,14 @@ async function ResultsView({
       (/pdf/i.test(found.fileType ?? "") ||
         /\.pdf$/i.test(fileName ?? "") ||
         !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(fileName ?? ""));
+    // A Word CV is shown as a PDF made from it (lib/wordToPdf); Download,
+    // which adds download=1, still saves the Word file.
+    const word = found.ok && !isPdf && isWordFile(fileName);
     activeCv = found.ok
       ? {
-          href: `/api/cv/${encodeURIComponent(activeCandidate.id)}`,
+          href: `/api/cv/${encodeURIComponent(activeCandidate.id)}${word ? "?view=pdf" : ""}`,
           fileName,
-          inline: isPdf,
+          inline: isPdf || word,
           problem: null,
         }
       : { href: null, fileName, inline: false, problem: found.detail };
