@@ -37,11 +37,11 @@ import { primeStore } from "@/data/prime";
  * it repeatedly and gets the same paragraph. It comes back the day the WhatsApp
  * ingestion is connected and has threads to show.
  */
-const TABS = ["cv", "history", "call", "chat", "reference"] as const;
+const TABS = ["cv", "history", "call", "chat", "reference", "company_refs"] as const;
 const TAB_LABEL: Record<(typeof TABS)[number], string> = {
   // Calls and messages stay apart: one is a TA's account of a conversation,
   // the other is the conversation.
-  cv: "CV", history: "History", call: "Call Log", chat: "Chat", reference: "Reference",
+  cv: "CV", history: "History", call: "Call Log", chat: "Chat", reference: "Reference", company_refs: "Company Reference",
 };
 
 export default async function CandidateDrawer({
@@ -54,7 +54,7 @@ export default async function CandidateDrawer({
   const sp = await searchParams;
   const { tab = "cv", q = "" } = sp;
   const logPage = Math.max(1, Math.floor(Number(sp.page)) || 1);
-  await primeStore({ openingId: id });
+  await primeStore({ openingId: id, allApplications: tab === "company_refs" });
   const user = await getCurrentUser();
 
   const app = repo.application(appId);
@@ -116,6 +116,36 @@ export default async function CandidateDrawer({
     };
   });
 
+  const presentCompany = (c.currentEmployer ?? "").trim();
+  const targetCompany = presentCompany || (c.workHistory?.[0]?.employer ?? "").trim();
+  let companyColleagues = targetCompany
+    ? repo.peopleAtCompany(targetCompany, c.id)
+    : [];
+
+  if (isConvex() && targetCompany && tab === "company_refs") {
+    try {
+      const { convexQuery } = await import("@/lib/convexServer");
+      const backendResults = await convexQuery<{
+        candidates: { id: string; fullName: string; currentTitle: string; currentEmployer: string; phone: string | null; email: string | null }[];
+      }>("ta/candidates:peopleAtCompany", {
+        company: targetCompany,
+        excludeCandidateId: c.id,
+      }).catch(() => null);
+
+      if (backendResults?.candidates) {
+        const existingColleagueIds = new Set(companyColleagues.map((cand) => cand.id));
+        for (const cand of backendResults.candidates) {
+          if (!existingColleagueIds.has(cand.id)) {
+            companyColleagues.push(cand as any);
+            existingColleagueIds.add(cand.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[candidate page] peopleAtCompany Convex lookup failed:", err);
+    }
+  }
+
   // Counted off the real records now, not from the application's shape.
   const COUNTS: Record<(typeof TABS)[number], number | null> = {
     cv: null,
@@ -123,6 +153,7 @@ export default async function CandidateDrawer({
     call: calls.length + repo.outreach(app.id).filter((m) => m.channel === "ai_call").length,
     chat: repo.outreach(app.id).filter((m) => m.channel !== "ai_call").length,
     reference: referees.length,
+    company_refs: companyColleagues.length,
   };
 
   // The candidate's own CV file, looked up only when the tab shows it.
@@ -509,6 +540,89 @@ export default async function CandidateDrawer({
               ))}
             </div>
           )
+        )}
+
+        {tab === "company_refs" && (
+          <div className="flex flex-col gap-5">
+            {/* Header: Company Name and Count */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-4">
+              <div>
+                <span className="text-[12px] font-semibold uppercase tracking-wider text-brand">Present Company</span>
+                <h3 className="mt-0.5 text-[18px] font-bold tracking-tight text-ink">
+                  {targetCompany || "No employer listed on candidate profile"}
+                </h3>
+              </div>
+
+              <span className="rounded-full bg-tag px-3 py-1 text-[12px] font-medium text-ink">
+                {companyColleagues.length} {companyColleagues.length === 1 ? "person" : "people"} in database
+              </span>
+            </div>
+
+            {/* Candidates from Database */}
+            {!targetCompany ? (
+              <div className="py-10 text-center text-[13px] text-ink-faint">
+                No company listed on this candidate&rsquo;s profile.
+              </div>
+            ) : companyColleagues.length === 0 ? (
+              <div className="py-10 text-center text-[13px] text-ink-faint">
+                No other candidates from <span className="font-medium text-ink-soft">{targetCompany}</span> found in the database.
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2">
+                {companyColleagues.map((colleague) => {
+                  const apps = repo.applicationsForCandidate(colleague.id);
+                  const latestApp = apps[0];
+                  return (
+                    <div
+                      key={colleague.id}
+                      className="flex flex-col justify-between rounded-xl border border-rule bg-paper p-4 transition-colors hover:border-brand-line"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[14px] font-semibold text-ink">{colleague.fullName}</span>
+                          {latestApp ? (
+                            <span className="rounded bg-tag px-1.5 py-0.5 text-[10.5px] text-ink-faint">
+                              {STAGE_LABEL[latestApp.stage] ?? latestApp.stage}
+                            </span>
+                          ) : (
+                            <span className="rounded bg-tag px-1.5 py-0.5 text-[10.5px] text-ink-faint">
+                              Database Candidate
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-[12.5px] font-medium text-ink-soft">{colleague.currentTitle || "Position not listed"}</p>
+                        <p className="mt-0.5 text-[11.5px] text-ink-faint">{colleague.currentEmployer || targetCompany}</p>
+                      </div>
+
+                      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-rule/60 pt-2 text-[12px]">
+                        <div className="text-ink-soft">
+                          {colleague.phone ? (
+                            <a href={`tel:${colleague.phone}`} className="tabular mr-2 font-medium text-brand hover:underline">
+                              {colleague.phone}
+                            </a>
+                          ) : colleague.email ? (
+                            <a href={`mailto:${colleague.email}`} className="text-ink-soft hover:underline">
+                              {colleague.email}
+                            </a>
+                          ) : (
+                            <span className="text-ink-faint">No direct contact</span>
+                          )}
+                        </div>
+                        {latestApp && (
+                          <Link
+                            href={`/openings/${latestApp.openingId}/candidate/${latestApp.id}`}
+                            className="font-medium text-brand hover:underline"
+                          >
+                            View profile →
+                          </Link>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
       </section>
           </div>

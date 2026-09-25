@@ -8,6 +8,10 @@ import { dropIntake } from "@/app/actions";
 import type { IntakeItem, IntakeStatus } from "@/data/types";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
+import { PlaceUnmatched } from "@/components/PlaceUnmatched";
+import { isConvex } from "@/data/mode";
+import { unmatchedCvs, type UnmatchedCv } from "@/data/convex/backend";
+import { isDeskWide } from "@/lib/auth";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 
 const PAGE_SIZE = 25;
@@ -128,7 +132,7 @@ export default async function IntakePage({
   const sp = await searchParams;
   const { all, q = "" } = sp;
   await primeStore({ allApplications: true });
-  await pageUser("intake.handle");
+  const user = await pageUser("intake.handle");
   // The header search, on this page, narrows the queue: the name read off the
   // CV, the role, the employer, the file, or where it came from.
   const items = repo.intake().filter((i) =>
@@ -142,9 +146,33 @@ export default async function IntakePage({
       i.match?.candidateName,
     ),
   );
+  // Mailbox CVs no post claimed: in the database, seen by no TA (24 September).
+  // A lead places them; a TA's view is their own posts, so it is not theirs.
+  let unmatched: UnmatchedCv[] | null = null;
+  let unmatchedProblem: string | null = null;
+  if (isDeskWide(user) && isConvex()) {
+    try {
+      unmatched = await unmatchedCvs(14);
+    } catch (e) {
+      unmatchedProblem = (e as Error).message;
+    }
+  }
   const counts = repo.intakeCounts();
   const states = channelStates();
   const openings = repo.openings().filter((o) => o.status === "open");
+
+  // The advert each unmatched CV can be placed on: every live or draft post of
+  // an open opening, so the post's TA sees them; the opening alone if it has none.
+  const placeTargets = openings.flatMap((o) => {
+    const client = repo.client(o.clientId)?.name;
+    const head = `${o.title}${client ? ` — ${client}` : ""}`;
+    const posts = repo.jobPosts().filter((p) => p.openingId === o.id && (p.status === "live" || p.status === "draft"));
+    if (posts.length === 0) return [{ value: o.id, label: head }];
+    return posts.map((p) => ({
+      value: `${o.id}:${p.id}`,
+      label: `${head} · ${p.title}${p.country || p.city ? ` (${[p.city, p.country].filter(Boolean).join(", ")})` : ""}`,
+    }));
+  });
 
   const waiting = items.filter((i) => i.status !== "admitted" && i.status !== "merged" && i.status !== "rejected");
   const review = waiting.filter((i) => i.status === "needs_review");
@@ -191,6 +219,46 @@ export default async function IntakePage({
         sub={`${waiting.length} waiting · ${counts.needs_review} need a second look`}
       />
 
+
+      {(unmatched || unmatchedProblem) && (
+        <section className="mb-7">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+            <h2 className="text-[13.5px] font-semibold">Mailbox CVs that matched no job</h2>
+            <span className="text-[12px] text-ink-faint">
+              Last 14 days · no TA sees these until they are placed
+            </span>
+          </div>
+          <Card className="overflow-hidden shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+            {unmatchedProblem ? (
+              <Empty>Could not load them: {unmatchedProblem}</Empty>
+            ) : unmatched!.length === 0 ? (
+              <Empty>Every mailbox CV found its job.</Empty>
+            ) : (
+              <div className="divide-y divide-rule">
+                {unmatched!.map((u) => (
+                  <div key={u.candidateId} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4">
+                    <div className="min-w-[190px] flex-1">
+                      <Link href={`/candidates/${u.candidateId}`} className="text-[13.5px] font-medium hover:underline">
+                        {u.name ?? "Name not readable"}
+                      </Link>
+                      <div className="mt-0.5 truncate text-[12px] text-ink-soft">
+                        {u.subject ?? "No subject kept"}
+                      </div>
+                    </div>
+                    <span className="w-[86px] shrink-0 text-[12px] text-ink-soft">
+                      {u.source === "linkedin" ? "LinkedIn" : u.source === "email_campaign" ? "Campaign" : "Mailbox"}
+                    </span>
+                    <span className="tabular w-[62px] shrink-0 text-right text-[11.5px] text-ink-faint">
+                      {inHours(u.receivedAt)}
+                    </span>
+                    <PlaceUnmatched candidateId={u.candidateId} targets={placeTargets} />
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </section>
+      )}
 
       {/* The switch, said plainly rather than hidden in a settings page. */}
       <Card className="mb-7 overflow-hidden">

@@ -878,6 +878,11 @@ export default defineSchema({
     })
     .searchIndex("search_name", {
       searchField: "fullName",
+    })
+    // Company Reference tab (ta/candidates:peopleAtCompany): everyone in the
+    // database at a company, not just the newest few hundred (24 Sep).
+    .searchIndex("search_employer", {
+      searchField: "currentEmployer",
     }),
 
   applications: defineTable({

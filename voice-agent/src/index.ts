@@ -58,25 +58,35 @@ const num = (name: string, fallback: number) => {
 };
 
 /**
- * How OpenAI decides the candidate has finished speaking.
+ * How Aura takes turns.
  *
- * 24 Sep: testers found Aura laggy on semantic VAD. Even at "high" eagerness it
- * holds the turn open when an answer sounds unfinished — "my current salary
- * is… 80k" — and that wait is the pause before every reply. Plain silence
- * detection answers a fixed AURA_SILENCE_MS after the candidate stops.
- * If it starts cutting people off, raise AURA_SILENCE_MS, or set
- * AURA_TURN_DETECTION=semantic to go back — config, not a rebuild.
+ * 24 Sep, first: with OpenAI's server VAD, LiveKit hard-cancelled Aura's reply
+ * the instant the server heard any sound — a cough, an "mm-hmm", her own voice
+ * echoing back — and the model started a fresh one, so testers heard half a
+ * sentence. Moving turn-taking to a local Silero VAD fixed that but made it
+ * worse: Silero hears the raw line, before any noise reduction, so hiss or
+ * echo kept it sure the candidate was still talking. Aura kept listening and
+ * answered late or not at all.
+ *
+ * So OpenAI's server VAD decides turns again (it hears noise-reduced audio,
+ * and was quick), and nothing may cut Aura off: interrupt_response is off on
+ * the server and interruptions are off in the session. While she speaks, the
+ * line is not sent on at all (LiveKit drops audio during speech that cannot
+ * be interrupted), so her own echo cannot become a "reply" either. Her
+ * sentences are one or two short lines, so the candidate never waits long.
+ * If she starts talking over pauses, raise AURA_SILENCE_MS; if room noise
+ * starts turns, raise AURA_VAD_THRESHOLD.
  */
-const TURN_DETECTION =
-  (process.env.AURA_TURN_DETECTION ?? "").trim() === "semantic"
-    ? ({ type: "semantic_vad", eagerness: "high" } as const)
-    : ({
-        type: "server_vad",
-        threshold: num("AURA_VAD_THRESHOLD", 0.5),
-        // Keeps the first syllable of an answer.
-        prefix_padding_ms: 300,
-        silence_duration_ms: num("AURA_SILENCE_MS", 350),
-      } as const);
+const SILENCE_MS = num("AURA_SILENCE_MS", 400);
+const TURN_DETECTION = {
+  type: "server_vad",
+  threshold: num("AURA_VAD_THRESHOLD", 0.5),
+  // Keeps the first syllable of an answer.
+  prefix_padding_ms: 300,
+  silence_duration_ms: SILENCE_MS,
+  create_response: true,
+  interrupt_response: false,
+} as const;
 
 /**
  * A provider hiccup must not end the call.
@@ -101,14 +111,13 @@ export default defineAgent({
 
     const brief = readBrief(ctx.room.metadata);
     console.info(
-      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}] [turn=${TURN_DETECTION.type}]`,
+      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}] [silence=${SILENCE_MS}ms]`,
     );
 
     // OpenAI decides when the candidate has finished (TURN_DETECTION above);
     // minimal reasoning keeps the first word fast. Candidate speech is
-    // transcribed by OpenAI too, for the call transcript. Noise reduction keeps
-    // room noise from reading as speech, which silence detection is quicker to
-    // mistake for the candidate still talking.
+    // transcribed by OpenAI too, for the call transcript. Noise reduction is
+    // applied before OpenAI's VAD, so room noise does not hold a turn open.
     const llm = new openai.realtime.RealtimeModel({
       apiKey: OPENAI_API_KEY,
       model: REALTIME_MODEL,
@@ -123,7 +132,9 @@ export default defineAgent({
       // The browser already cancels its own echo; three seconds of warm-up only
       // stopped the candidate interrupting at the start of every answer.
       aecWarmupDuration: 0,
-      turnHandling: { turnDetection: "realtime_llm", interruption: { enabled: true } },
+      // LiveKit logs a startup warning that interruptions "cannot be false"
+      // with server-side turn detection; here that is the point (see above).
+      turnHandling: { turnDetection: "realtime_llm", interruption: { enabled: false } },
     });
 
     // Each finished line goes to the call window, which keeps the transcript.

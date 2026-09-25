@@ -2160,6 +2160,33 @@ export async function addToOpening(formData: FormData) {
   await done(`Added to ${title} in TA Follow-up${claimed.ok && claimed.setNumber ? `, set ${claimed.setNumber}` : ""}.`);
 }
 
+/**
+ * Place a mailbox CV that matched no post (convex/ta/unmatched.ts) on the job
+ * it applied for. Unlike addToOpening it does not shortlist: they applied, so
+ * they land in New CVs on the post, and the post's TA sees them there exactly
+ * as if the email had routed (24 September).
+ *
+ * `target` is "openingId" or "openingId:postId".
+ */
+export async function placeUnmatched(formData: FormData) {
+  const [openingId, postId] = String(formData.get("target") ?? "").split(":");
+  if (!openingId) await fail("Pick the job they applied for.");
+  formData.set("openingId", openingId);
+  await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  const candidateId = String(formData.get("candidateId"));
+  const title = repo.opening(openingId)?.title ?? "the opening";
+  const r = repo.addCandidateToOpening(candidateId, openingId, user.id, postId || null, { kind: "intake", source: "email" });
+  revalidatePath("/intake");
+  revalidatePath(`/openings/${openingId}`, "layout");
+  if (!r.ok) await fail(`Could not place them on ${title}: ${r.reason ?? "unknown reason"}.`);
+  await done(`Placed on ${title}, in New CVs.`);
+}
+
+export async function placeUnmatchedInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => placeUnmatched(formData));
+}
+
 // ─── Headhunting intelligence (spec §8A) ─────────────────────────────────────
 
 
@@ -3837,7 +3864,10 @@ export async function devSignInAs(formData: FormData) {
 export async function devSignOut() {
   const { DEV_SESSION_COOKIE } = await import("@/lib/devSignin");
   const { cookies } = await import("next/headers");
-  (await cookies()).delete(DEV_SESSION_COOKIE);
+  const c = await cookies();
+  c.delete(DEV_SESSION_COOKIE);
+  c.delete("__session");
+  c.delete("__client_uat");
   redirect("/signin");
 }
 

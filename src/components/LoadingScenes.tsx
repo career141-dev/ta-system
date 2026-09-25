@@ -44,6 +44,16 @@ export const REPORT_STEPS: LoadingStep[] = [
   { after: 4, title: "Building the report", detail: "Checking every field against what the records actually hold, then running it.", scene: "check" },
 ];
 
+/**
+ * Longer than any run takes, even Claude's slowest headhunt followed by the
+ * old search behind it. A run past this has died — most often because the app
+ * was restarted for a release while it worked (24 Sep: a Suggestions run sat
+ * at "Ranking the best candidates" for an hour and a half, counting, after the
+ * server it was waiting on had gone). The steps are timed, not reported, so
+ * nothing else on this screen can tell.
+ */
+const GIVE_UP_AFTER_S = 20 * 60;
+
 export function LoadingProgress({
   steps,
   heading,
@@ -93,9 +103,17 @@ export function LoadingProgress({
         ))}
       </ol>
 
-      <p className="tabular mt-4 text-[11.5px] text-ink-faint">
-        {seconds}s{note ? ` · ${note}` : ""}
-      </p>
+      {seconds >= GIVE_UP_AFTER_S ? (
+        <p role="alert" className="mx-auto mt-4 max-w-[52ch] rounded-lg border border-warn/40 bg-warn-soft px-4 py-3 text-[12.5px] leading-relaxed text-warn">
+          This has stopped. It has been working for {Math.floor(seconds / 60)} minutes, far longer than it ever takes, so the run
+          most likely ended when the system was updated. Reload the page: anything it found is already saved. If nothing is
+          there, press the button again.
+        </p>
+      ) : (
+        <p className="tabular mt-4 text-[11.5px] text-ink-faint">
+          {seconds}s{note ? ` · ${note}` : ""}
+        </p>
+      )}
     </div>
   );
 }

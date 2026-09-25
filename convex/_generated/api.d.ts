@@ -177,6 +177,7 @@ import type * as ta_stages from "../ta/stages.js";
 import type * as ta_storage from "../ta/storage.js";
 import type * as ta_tables from "../ta/tables.js";
 import type * as ta_testSweep from "../ta/testSweep.js";
+import type * as ta_unmatched from "../ta/unmatched.js";
 import type * as ta_users from "../ta/users.js";
 import type * as ta_voice from "../ta/voice.js";
 import type * as ta_voiceExtract from "../ta/voiceExtract.js";
@@ -359,6 +360,7 @@ declare const fullApi: ApiFromModules<{
   "ta/storage": typeof ta_storage;
   "ta/tables": typeof ta_tables;
   "ta/testSweep": typeof ta_testSweep;
+  "ta/unmatched": typeof ta_unmatched;
   "ta/users": typeof ta_users;
   "ta/voice": typeof ta_voice;
   "ta/voiceExtract": typeof ta_voiceExtract;

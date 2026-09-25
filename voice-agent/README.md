@@ -19,10 +19,11 @@ Optional: `AURA_REALTIME_MODEL` (default `gpt-realtime-2.1-mini`) and
 `AURA_REALTIME_VOICE` (default `marin`; also `cedar`, `alloy`, `coral`, `sage`,
 `verse`…).
 
-Turn-taking (how soon Aura answers): `AURA_SILENCE_MS` (default 350 — raise it
-if Aura cuts people off), `AURA_VAD_THRESHOLD` (default 0.5 — raise it in a
-noisy room), or `AURA_TURN_DETECTION=semantic` for OpenAI's slower semantic
-detection. Each reply logs `[Aura] reply first audio in … ms`.
+Turn-taking runs on OpenAI's server VAD, and nothing cuts Aura off mid-sentence.
+`AURA_SILENCE_MS` (default 400) is how long after the candidate stops that Aura
+answers; raise it if she talks over people who pause. `AURA_VAD_THRESHOLD`
+(default 0.5) — raise it if room noise starts turns. Each reply logs
+`[Aura] reply first audio in … ms`.
 
 ```bash
 cd voice-agent && npm install && npm run dev
