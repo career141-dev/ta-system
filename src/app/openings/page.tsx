@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { isDeskWide } from "@/lib/auth";
+import { allows, isDeskWide } from "@/lib/auth";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
 import { WorkingStageMenu } from "@/components/WorkingStageMenu";
 import { OpeningMenu } from "@/components/OpeningMenu";
@@ -227,10 +227,11 @@ export default async function OpeningsPage({
             const target = PRIORITY_TARGET[o.priorityTier].days;
             const urgent = liveAlerts.filter((a) => a.openingId === o.id && a.urgent).length;
 
-            // The TA's own stage on this job (100% / Follow-up / Add-on), next
-            // to the status so it can be changed without opening the job. It is
-            // what the end-of-day L-sheet reports; a lead not on the job has none.
-            const onJob = !!repo.assignmentFor(o.id, user.id);
+            // The reader's own stage on this job (100% / Follow-up / Add-on),
+            // next to the status so it can be changed without opening the job.
+            // It is what the end-of-day L-sheet reports. Everyone who works
+            // the job has one, not only its TAs (25 Sep).
+            const canStage = allows(user, "opening.act", { assignment: repo.assignmentFor(o.id, user.id) });
             const workingStage = repo.workingStage(o.id, user.id);
 
             return (
@@ -265,7 +266,7 @@ export default async function OpeningsPage({
                       <span className="pointer-events-auto relative z-10">
                         <StatusMenu openingId={o.id} status={o.status as OpeningStatus} size="small" />
                       </span>
-                      {onJob && (
+                      {canStage && (
                         <span className="pointer-events-auto relative z-10">
                           <WorkingStageMenu openingId={o.id} stage={workingStage} size="small" />
                         </span>

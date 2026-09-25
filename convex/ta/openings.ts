@@ -18,6 +18,7 @@ import { autoFollowUpPatch } from "../lib/followUpScope";
 import { firstPostFor } from "../lib/firstPost";
 import { SCORE_AFTER_APPROVAL_MS } from "../lib/jdGate";
 import { internal } from "../_generated/api";
+import { workingStageKey } from "../../src/lib/workingStage";
 
 
 export const list = internalQuery({
@@ -384,11 +385,26 @@ export const setWorkingStage = internalMutation({
       .withIndex("by_jobId_userId", (q) => q.eq("jobId", jobId).eq("userId", targetUserId))
       .first();
 
-    // Only someone already on the job has a working stage. Creating the row
+    if (assignment && assignment.isActive) {
+      if (assignment.assignmentRole === "client_contact") throw new Error("A client seat does not work the pipeline.");
+      await ctx.db.patch(assignment._id, { workingStage: args.stage });
+      return { ok: true, stage: args.stage };
+    }
+
+    // Anyone else working the job — an admin, director or lead who is not on
+    // its team — keeps their stage in the TA settings. Creating an assignment
     // here made a lead who changed the menu the job's primary recruiter
-    // (review, 22 Sep).
-    if (!assignment || !assignment.isActive) throw new Error("You are not on this opening.");
-    await ctx.db.patch(assignment._id, { workingStage: args.stage });
+    // (review, 22 Sep); the menu was then shown to TAs only (25 Sep). Who may
+    // work an opening is decided by the app ("opening.act") before this runs.
+    if (["client", "viewer"].includes(actor.role)) throw new Error("You are not on this opening.");
+    if (!(await ctx.db.get(jobId))) throw new Error("That opening no longer exists.");
+    const key = workingStageKey(jobId, targetUserId);
+    const held = await ctx.db
+      .query("taSettings")
+      .withIndex("by_key", (q) => q.eq("key", key))
+      .first();
+    if (held) await ctx.db.patch(held._id, { value: args.stage, updatedAt: Date.now() });
+    else await ctx.db.insert("taSettings", { key, value: args.stage, updatedAt: Date.now() });
     return { ok: true, stage: args.stage };
   },
 });

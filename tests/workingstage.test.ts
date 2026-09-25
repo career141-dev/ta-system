@@ -50,12 +50,21 @@ eq("TA 1 effort row now has Add-on", eodAddOn.hundredOrFollowUp, "Add-on");
 
 eq("the rest of the team is still on the opening", repo.assignments(opening.id).map((a) => a.userId).sort(), teamBefore);
 
-console.log("\nsomeone not on the opening is not put on it");
-const outsider = repo.users().find((u) => u.role === "ta_lead" && !repo.assignmentFor(opening.id, u.id));
-if (outsider) {
+console.log("\nan admin, director or lead not on the team has a stage too, and is not put on it");
+let outsiders = 0;
+for (const role of ["ta_lead", "director", "admin"] as const) {
+  const outsider = repo.users().find((u) => u.role === role && !repo.assignmentFor(opening.id, u.id));
+  if (!outsider) continue;
+  outsiders++;
+  eq(`${role} starts at 100%`, repo.workingStage(opening.id, outsider.id), "100%");
   repo.setWorkingStage(opening.id, outsider.id, "Follow-up");
-  eq("no assignment is created for them", !!repo.assignmentFor(opening.id, outsider.id), false);
+  eq(`${role} stage is now Follow-up`, repo.workingStage(opening.id, outsider.id), "Follow-up");
+  eq(`${role} end-of-day row says Follow-up`, effortRow(opening.id, outsider).hundredOrFollowUp, "Follow-up");
+  eq(`no assignment is created for the ${role}`, !!repo.assignmentFor(opening.id, outsider.id), false);
+  eq(`the team is unchanged by the ${role}`, repo.assignments(opening.id).map((a) => a.userId).sort(), teamBefore);
+  eq(`the TA's own stage is untouched by the ${role}`, repo.workingStage(opening.id, ta1.id), "Add-on");
 }
+eq("someone off the team was tried", outsiders > 0, true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
