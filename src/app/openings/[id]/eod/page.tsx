@@ -11,6 +11,7 @@ import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { extractReplyText } from "@/lib/reviewReply";
 
 const PAGE_SIZE = 10;
 
@@ -50,6 +51,7 @@ export default async function EodPage({
 
   const rows = shortlistRows(id, user.role === "ta" ? user.id : null, kind);
   const effort = effortRow(id, user);
+
   // This TA's own sets — each recruiter numbers their own.
   const sets = setsForOpening(id, user.id);
   const openSet = sets.find((s) => s.status === "open");
@@ -59,8 +61,7 @@ export default async function EodPage({
   const awaiting = waiting.length
     ? repo.reviewRounds(id).filter((r) => r.kind === kind && r.status !== "returned").sort((a, b) => b.sentAt - a.sentAt)[0]
     : undefined;
-  // The replies already in, newest first, narrowed by the header search (the
-  // reply itself, or a name in it) and a page at a time.
+
   const allHistory = repo
     .reviewRounds(id)
     .filter((r) => r.kind === kind && r.status === "returned")
@@ -78,21 +79,29 @@ export default async function EodPage({
   const historyPage = pageFrom(sp, matchingHistory.length, PAGE_SIZE);
   const history = slicePage(matchingHistory, historyPage, PAGE_SIZE);
 
+  // Determine the set number for today's submission
+  const nextSetNumber = openSet?.setNumber ?? (sets.length ? Math.max(...sets.map((s) => s.setNumber)) + 1 : 1);
+  const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
+
   return (
     <main className="mx-auto max-w-[1100px] px-8 py-9">
-      <Link
-        href={`/openings/${id}`}
-        className="text-[12.5px] text-ink-soft transition-colors hover:text-ink"
-      >
-        ← {o.title}
-      </Link>
+      <div className="flex items-center justify-between">
+        <Link
+          href={`/openings/${id}`}
+          className="text-[12.5px] text-ink-soft transition-colors hover:text-ink font-medium"
+        >
+          ← Back to {o.title}
+        </Link>
+        <span className="text-[12px] text-ink-faint">
+          {kind === "director" ? "Director Review" : "Client Review"}
+        </span>
+      </div>
 
-      <header className="mb-6 mt-3">
-        <h1 className="text-[26px] font-semibold tracking-tight">End of day</h1>
-        <p className="mt-2 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
-          Sent from your own mailbox to {director?.name ?? "the Director"}, copying{" "}
-          {lead?.name ?? "the TA Lead"} and {repo.eodCopyTo()}. When the reply comes back, paste it below — whoever he
-          picks moves to the Director shortlist on its own.
+      <header className="mb-7 mt-3">
+        <h1 className="text-[26px] font-semibold tracking-tight">End of Day Submission</h1>
+        <p className="mt-1.5 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
+          Daily shortlist and effort summary sent to {director?.name ?? "the Director"} ({director?.email || "director"}).
+          Replies are tracked and candidate stages advance automatically.
         </p>
       </header>
 
@@ -146,8 +155,8 @@ export default async function EodPage({
                 Read it and move them
               </SubmitButton>
               <span className="text-[11.5px] text-ink-faint">
-                Anyone the reply names is moved. Anyone it does not mention stays where they are —
-                nobody is moved on a guess.
+                Anyone the reply picks is shortlisted, and the rest of that email are marked not
+                selected. If part of the reply cannot be read, nobody is marked not selected.
               </span>
             </div>
           </form>
@@ -185,7 +194,7 @@ export default async function EodPage({
               </span>
               <input
                 name="subject"
-                placeholder={subjectLine(client.name, o.title)}
+                placeholder={subjectLine(client.name, o.title, nextSetNumber)}
                 className="w-full rounded border border-rule bg-paper px-2.5 py-1.5 text-[13px]"
               />
             </label>
@@ -213,16 +222,15 @@ export default async function EodPage({
         </form>
       </details>
 
+      {/* ── Email Composer (for sending next set) ────────────────────────── */}
       <EodComposer
         openingId={id}
         kind={kind}
-        subject={subjectLine(client.name, o.title)}
+        subject={formattedSubject}
         toName={director?.name ?? "Director"}
         toEmail={director?.email ?? ""}
         ccName={lead?.name ?? ""}
         ccEmail={lead?.email ?? ""}
-        /* Copied in and named on the reply-to, so the reply is caught whether
-           they press Reply or Reply All. */
         trackedAt={repo.shortlistInbox()}
         eodCc={kind === "director" ? repo.eodCopyTo() : null}
         rows={rows}
@@ -238,33 +246,68 @@ export default async function EodPage({
         }
       />
 
-      {sp.q && allHistory.length > 0 && matchingHistory.length === 0 && (
-        <p className="mt-6 text-center text-[12.5px] text-ink-faint">No reply matches that search.</p>
-      )}
-
+      {/* ── Email Replies & Review History ──────────────────────────────── */}
       {history.length > 0 && (
-        <section className="mt-6">
-          <h2 className="mb-3 text-[13.5px] font-semibold">Replies already in</h2>
-          <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
-            <div className="divide-y divide-rule">
-              {history.map((r) => (
-                <div key={r.id} className="px-7 py-3.5">
-                  <div className="flex flex-wrap items-baseline gap-x-3 text-[12px] text-ink-faint">
-                    <span>{r.returnedAt ? timeAt(r.returnedAt) : ""}</span>
-                    <span>
-                      {r.decisions.filter((d) => d.outcome === "shortlisted").length} shortlisted ·{" "}
-                      {r.decisions.filter((d) => d.outcome === "rejected").length} passed
-                    </span>
+        <section className="mt-9">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-[14px] font-semibold text-ink">Replies Received for this Role</h2>
+            <span className="text-[12px] text-ink-faint">{allHistory.length} email(s) logged</span>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-sm divide-y divide-rule">
+            {history.map((r) => {
+              const shortlisted = r.decisions
+                .filter((d) => d.outcome === "shortlisted")
+                .map((d) => {
+                  const app = repo.application(d.applicationId);
+                  return app ? repo.candidate(app.candidateId) : null;
+                })
+                .filter(Boolean);
+
+              return (
+                <div key={r.id} className="p-6">
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-ink">
+                        {r.setNumber ? `Set ${r.setNumber}` : "Review Round"}
+                      </span>
+                      <span className="text-ink-faint">·</span>
+                      <span className="text-ink-soft">{r.returnedAt ? timeAt(r.returnedAt) : timeAt(r.sentAt)}</span>
+                    </div>
+
+                    {shortlisted.length > 0 ? (
+                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
+                        {shortlisted.length} shortlisted
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-stone-500/10 px-2.5 py-0.5 text-[11px] font-medium text-stone-600">
+                        No candidates selected
+                      </span>
+                    )}
                   </div>
+
                   {r.replyBody && (
-                    <p className="mt-1 text-[12.5px] italic text-ink-soft">
-                      &ldquo;{r.replyBody.slice(0, 220)}
-                      {r.replyBody.length > 220 ? "…" : ""}&rdquo;
-                    </p>
+                    <div className="mt-3 rounded-lg bg-tag/60 px-3.5 py-2 text-[12.5px] text-ink-soft">
+                      <span className="font-medium text-ink">{kind === "director" ? "Director" : "Client"} reply: </span>
+                      &ldquo;{extractReplyText(r.replyBody)}&rdquo;
+                    </div>
+                  )}
+
+                  {shortlisted.length > 0 && (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {shortlisted.map((c) => (
+                        <span
+                          key={c!.id}
+                          className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[12px] font-medium text-emerald-800"
+                        >
+                          ✓ Shortlisted: {c!.fullName}
+                        </span>
+                      ))}
+                    </div>
                   )}
                 </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
           <Pager page={historyPage} pageSize={PAGE_SIZE} total={matchingHistory.length} href={pageLink(`/openings/${id}/eod`, sp)} />
         </section>

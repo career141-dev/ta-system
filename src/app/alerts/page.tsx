@@ -18,6 +18,7 @@ const KIND_LABEL: Record<string, string> = {
   shortlist_sla: "Unscreened",
   client_review_chase: "Client chase",
   director_review_chase: "Director chase",
+  review_reply_received: "Review reply",
   interview_confirmation: "Confirm attendance",
   interview_confirmation_escalation: "Escalation",
   interview_followup: "Interview follow-up",

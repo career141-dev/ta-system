@@ -3655,10 +3655,10 @@ export async function finishCall(formData: FormData) {
 // reply landing.
 
 export async function sendEod(formData: FormData) {
-  await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
+  await primeStore({ openingId, allApplications: true });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const ids = String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
 
   // Anybody already sent to this reviewer is dropped, and so is anybody who is
@@ -3760,7 +3760,11 @@ export async function sendEod(formData: FormData) {
   );
 }
 
-/** Graph's sendMail takes about 4 MB in one request; the CVs share what is left after the email. */
+/**
+ * Graph's sendMail takes about 4 MB in one request; the CVs share what is left
+ * after the email. Raising this (to 20 MB, PR #56) made a large set fail to
+ * send at all instead of listing the CVs that did not fit (review, 25 Sep).
+ */
 const EOD_ATTACHMENT_BUDGET = 3 * 1024 * 1024;
 
 /**
@@ -3785,20 +3789,46 @@ async function emailEod(input: {
   if (!to) return { ok: false, error: "There is no Director email address to send to." };
   if (!input.subject.trim()) return { ok: false, error: "The email needs a subject." };
 
+  const candidateIds = input.applicationIds
+    .map((id) => repo.application(id)?.candidateId)
+    .filter((c): c is string => !!c);
+  await primeStore({ openingId, candidateIds });
+
   const { shortlistRows, effortRow } = await import("@/lib/eod");
   const { eodEmailHtml } = await import("@/lib/eod-format");
   const { buildPreparedCv, preparedCvFileName } = await import("@/lib/pdf");
 
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
-  const byId = new Map(shortlistRows(openingId, user.role === "ta" ? user.id : null, "director").map((r) => [r.applicationId, r]));
+  const byId = new Map(shortlistRows(openingId, null, "director").map((r) => [r.applicationId, r]));
   const rows = input.applicationIds
-    .map((id) => byId.get(id))
-    .filter((r): r is NonNullable<typeof r> => !!r)
-    .map((r, i) => ({ ...r, no: i + 1 }));
+    .map((id, i) => {
+      const existing = byId.get(id);
+      if (existing) return { ...existing, no: i + 1 };
+      const a = repo.application(id);
+      const c = a ? repo.candidate(a.candidateId) : null;
+      if (!a || !c) return null;
+      return {
+        no: i + 1,
+        name: c.fullName,
+        age: c.age ? String(c.age) : "",
+        notice: c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : "",
+        notes: [
+          c.totalExperienceYears ? `>Total Experience - ${c.totalExperienceYears}yr` : "",
+          c.currentEmployer ? `>Currently at ${c.currentEmployer}` : "",
+          ...a.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean).map((n) => `>${n}`),
+        ].filter(Boolean).slice(0, 4),
+        currentCompany: c.currentEmployer ?? "",
+        currentDesignation: c.currentTitle ?? "",
+        currentRemuneration: c.currentSalary ?? "Not disclosed",
+        expectedRemuneration: c.expectedSalary ?? "Open to discuss",
+        applicationId: id,
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => !!r);
+
   if (rows.length === 0) return { ok: false, error: "Nobody on that list is ready to send." };
 
-  await primeStore({ candidateIds: rows.map((r) => repo.application(r.applicationId)?.candidateId).filter((c): c is string => !!c) });
   const attachments: { name: string; contentType: string; base64: string }[] = [];
   const left: string[] = [];
   let used = 0;
@@ -3937,13 +3967,14 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
   const roster = repo.replyRoster(openingId, kind, roundId);
   if (!roster) return "Nobody is waiting on a reply for this job.";
   const { round } = roster;
-  const { parseReply } = await import("@/lib/reviewReply");
+  const { parseReply, extractReplyText, withUnpickedRejected } = await import("@/lib/reviewReply");
+  const cleanBody = extractReplyText(body);
   const list = roster.applicationIds.map((applicationId) => {
     const app = repo.application(applicationId);
     const c = app ? repo.candidate(app.candidateId) : null;
     return { applicationId, name: c?.fullName ?? "Unknown" };
   });
-  const parsed = await parseReply(body, list);
+  const parsed = await parseReply(cleanBody, list);
   const decided = parsed.decisions.filter((d) => d.outcome !== "hold");
 
   if (decided.length === 0) {
@@ -3952,18 +3983,30 @@ async function readReplyFor(openingId: string, kind: "director" | "client", body
       : "Nothing in that reply could be read as a decision. Nobody has been moved — say who is in, by name or by number.";
   }
 
-  const res = repo.applyReviewDecisions(round.id, parsed.decisions.map((d) => ({ ...d, confirmed: false })), body);
+  // Everyone in the email the reply did not pick is marked not selected, so
+  // the set is closed (owner, 25 Sep). The store's write reaches the backend
+  // itself; a second backend move here moved everyone twice (review of #56).
+  const fullDecisions = withUnpickedRejected(parsed, round.applicationIds);
+  const res = repo.applyReviewDecisions(round.id, fullDecisions.map((d) => ({ ...d, confirmed: false })), cleanBody);
+
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath("/alerts");
-  const stillWaiting = repo.waitingOn(openingId, kind).filter((w) => w.roundId === round.id).length;
-  const older = roster.openRounds - 1;
-  return `${res.moved} shortlisted, ${res.rejected} passed over${
-    res.stale ? `, ${res.stale} not moved because they have moved on since` : ""
-  }${res.repeated ? `, ${res.repeated} already recorded` : ""}${
-    stillWaiting > 0 ? `. ${stillWaiting} in this email not decided yet — still waiting` : ""
-  }${older > 0 ? `. ${older} earlier email${older === 1 ? " is" : "s are"} still open — read ${older === 1 ? "its" : "their"} replies against ${older === 1 ? "it" : "them"}` : ""}${
-    parsed.unmatched.length ? `. Read yourself: ${parsed.unmatched.join(" · ")}` : ""
-  }.`;
+  
+  const shortlistedNames = fullDecisions
+    .filter((d) => d.outcome === "shortlisted")
+    .map((d) => {
+      const app = repo.application(d.applicationId);
+      return app ? repo.candidate(app.candidateId)?.fullName : null;
+    })
+    .filter(Boolean);
+
+  const said =
+    shortlistedNames.length > 0
+      ? `Shortlisted: ${shortlistedNames.join(", ")}. ${res.rejected} not selected. Reply recorded.`
+      : `Reply recorded for Set ${round.setNumber ?? 1}: ${res.rejected} not selected.`;
+  return `${said}${res.stale ? ` ${res.stale} not moved because they have moved on since.` : ""}${
+    parsed.unmatched.length ? ` Read yourself — nobody else was marked not selected: ${parsed.unmatched.join(" · ")}` : ""
+  }`;
 }
 
 export async function readEodReply(formData: FormData) {
@@ -3975,6 +4018,72 @@ export async function readEodReply(formData: FormData) {
   const go = (m: string) => redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(m)}`);
   if (!body) go("Paste the reply first.");
   go(await readReplyFor(openingId, kind, body));
+}
+
+/**
+ * Check the recruiter's mailbox / shared shortlist inbox automatically via Microsoft Graph,
+ * find replies matching this opening's open review rounds, and apply the decisions.
+ */
+export async function syncEodReplies(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { opening: "openingId" });
+  const user = await getCurrentUser();
+  const openingId = String(formData.get("openingId"));
+  const kind = (String(formData.get("kind") ?? "director") === "client" ? "client" : "director") as "director" | "client";
+  const go = (m: string) => redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(m)}`);
+
+  const opening = repo.opening(openingId);
+  if (!opening) go("Opening not found.");
+
+  const waiting = repo.waitingOn(openingId, kind);
+  if (waiting.length === 0) {
+    go("Nobody is currently waiting on a review reply for this opening.");
+  }
+
+  const mailboxes = [user.email, repo.shortlistInbox(), process.env.MS_SENDER_EMAIL || "job@career141.com"].filter(Boolean);
+
+  let messages: { id: string; from: string; subject: string; body: string; bodyPreview: string }[] = [];
+  try {
+    const { fetchMailboxMessages } = await import("@/lib/graphInbox");
+    messages = await fetchMailboxMessages(mailboxes, 25);
+  } catch (e) {
+    go(`Could not check mailbox: ${(e as Error).message}`);
+  }
+
+  if (!messages || messages.length === 0) {
+    go("Checked mailbox — no recent messages found.");
+  }
+
+  const { matchReviewReply } = await import("@/lib/routing");
+  let matchedMsg: (typeof messages)[0] | null = null;
+  let targetRoundId: string | null = null;
+
+  for (const msg of messages) {
+    const target = matchReviewReply(
+      { from: msg.from, subject: msg.subject, receivedAt: (msg as { receivedDateTime?: string }).receivedDateTime },
+      {
+        rounds: repo.reviewRounds().filter((r) => r.openingId === openingId && r.kind === kind && r.status !== "returned"),
+        openings: repo.openings(),
+        clients: repo.clients(),
+        users: repo.users(),
+      },
+    );
+
+    if (target.round && target.round.openingId === openingId) {
+      matchedMsg = msg;
+      targetRoundId = target.round.id;
+      break;
+    }
+  }
+
+  if (!matchedMsg || !targetRoundId) {
+    go(`Checked ${messages.length} message(s) in mailbox — no new matching reply found for this opening yet.`);
+  }
+
+  const { extractReplyText } = await import("@/lib/reviewReply");
+  const cleanBody = extractReplyText(matchedMsg!.body || matchedMsg!.bodyPreview || "");
+  const outcome = await readReplyFor(openingId, kind, cleanBody, targetRoundId!);
+  go(`Retrieved reply from ${matchedMsg!.from} ("${cleanBody.slice(0, 50)}"): ${outcome}`);
 }
 
 /** The one shortlist-replies box, changed by a director without a deploy. */

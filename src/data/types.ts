@@ -666,13 +666,15 @@ export type AlertKind =
   | "director_review_chase"
   | "advert_quiet"
   | "cv_waiting"
-  | "followup_due";
+  | "followup_due"
+  | "review_reply_received";
 
 /** Spec §12.3 — only urgent kinds push outside working days. */
 export const URGENT_ALERTS: AlertKind[] = [
   "interview_confirmation",
   "interview_confirmation_escalation",
   "interview_followup",
+  "review_reply_received",
 ];
 
 export interface Alert {
