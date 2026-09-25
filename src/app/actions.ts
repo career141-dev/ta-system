@@ -477,21 +477,81 @@ export async function addLink(formData: FormData) {
     await fail("That is not a LinkedIn profile link. It should look like linkedin.com/in/their-name.");
   }
   const { url, key, guessedName } = profile!;
+  // A note for the TA, typed alongside the link by a lead (25 Sep). Checked
+  // before anything is saved, so a refused note does not leave half a row.
+  const leadNote = String(formData.get("note") ?? "").trim();
+  if (leadNote) await checkLeadNote(user, leadNote);
   const already = repo.findLinkByUrl(openingId, key);
   if (already) {
     const who = repo.users().find((u) => u.id === already.addedBy)?.name;
-    await note(`${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`);
+    const said = `${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`;
+    if (!leadNote) await note(said);
+    // The note was the point of the paste; it goes on the row that is there.
+    repo.addLeadNote(already.id, user.id, user.role, leadNote);
+    revalidateLinks(openingId);
+    await note(`${said} Your note was added to that row.`);
   }
   const name = String(formData.get("name") ?? "").trim() || guessedName;
-  repo.addLink(openingId, url, user.id, name);
+  const id = repo.addLink(openingId, url, user.id, name);
+  if (leadNote) repo.addLeadNote(id, user.id, user.role, leadNote);
+  revalidateLinks(openingId);
+  await done(
+    (name
+      ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
+      : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.") +
+      (leadNote ? " Your note is on the row." : ""),
+  );
+}
+
+/** Longest note a lead can leave: feedback, not a document. */
+const LEAD_NOTE_MAX = 2000;
+
+async function checkLeadNote(user: User, text: string) {
+  const may = can(user, "link.note");
+  if (!may.ok) await fail(may.message);
+  if (text.length > LEAD_NOTE_MAX) {
+    await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
+  }
+}
+
+function revalidateLinks(openingId: string) {
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
-  await done(
-    name
-      ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
-      : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.",
-  );
+}
+
+/**
+ * A note for the TA on an Excel Tables row, from a lead, director, admin or
+ * ops. The TA reads it on the row as "TA Lead · <name> sent this note".
+ */
+export async function addLeadNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "link.note", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const text = String(formData.get("note") ?? "").trim();
+  if (!text) await fail("Write the note first.");
+  await checkLeadNote(user, text);
+  if (!repo.addLeadNote(entryId, user.id, user.role, text)) {
+    await fail("That row no longer exists — it may have been removed.");
+  }
+  revalidateLinks(openingId);
+  await done("Note sent.");
+}
+
+export async function removeLeadNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "link.note", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const noteId = String(formData.get("noteId") ?? "");
+  const row = repo.linkVault(openingId).find((l) => l.id === entryId);
+  const target = row?.leadNotes?.find((n) => n.id === noteId);
+  if (!target) await fail("That note is already gone.");
+  if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
+  repo.removeLeadNote(entryId, noteId);
+  revalidateLinks(openingId);
+  await done("Note removed.");
 }
 
 export async function toggleEyeMark(formData: FormData) {
@@ -4206,6 +4266,14 @@ export async function updateLinkInline(_: ActionResult | null, formData: FormDat
 
 export async function logOutreachInline(_: ActionResult | null, formData: FormData) {
   return inline(() => logOutreach(formData));
+}
+
+export async function addLeadNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLeadNote(formData));
+}
+
+export async function removeLeadNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeLeadNote(formData));
 }
 
 export async function addLinkToPipelineInline(_: ActionResult | null, formData: FormData) {

@@ -34,6 +34,8 @@ export type Capability =
   | "opening.manage"
   /** Headhunting, the link table, suggestions, research, benchmarking. */
   | "opening.sourcing"
+  /** Leave a note for the TA on an Excel Tables row. */
+  | "link.note"
   /** Record a decision that says the director approved somebody. */
   | "decide.director"
   /** Record a decision that says the client approved somebody. */
@@ -200,6 +202,13 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       return user.role === "client"
         ? deny("Incoming CVs are the desk's to sort, not a client's.")
         : ALLOW;
+
+    case "link.note":
+      // Feedback runs one way: whoever reviews the desk writes, the TA working
+      // the row reads (25 Sep). Desk-wide is exactly that set of people.
+      return isDeskWide(user)
+        ? ALLOW
+        : deny("Only a TA Lead, Director, Admin or Ops can leave notes.");
   }
 }
 

@@ -2350,6 +2350,17 @@ export default defineSchema({
     /** What the browser extension read off a profile the TA had open. One at a
      *  time, by a person — there is no crawl here and must never be one. */
     capture: v.optional(v.union(v.any(), v.null())),
+    /** Feedback left for the TA by a lead, director, admin or ops (25 Sep).
+     *  Kept apart from the approach log: a note is not an approach, and logging
+     *  one there would move the outcome on. `byRole` is the role at the time,
+     *  so "TA Lead sent this note" stays true if the author's role changes. */
+    leadNotes: v.optional(v.array(v.object({
+      id: v.string(),
+      at: v.number(),
+      note: v.string(),
+      by: v.id("users"),
+      byRole: v.string(),
+    }))),
   })
     .index("by_opening", ["openingId"])
     .index("by_addedBy", ["addedBy"])

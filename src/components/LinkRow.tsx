@@ -3,9 +3,11 @@
 import { externalUrl, profileLink } from "@/lib/url";
 import { useEffect, useRef, useState } from "react";
 import {
+  addLeadNoteInline,
   addLinkToPipelineInline,
   deleteLinkInline,
   logOutreachInline,
+  removeLeadNoteInline,
   toggleEyeMarkInline,
   updateLinkInline,
 } from "@/app/actions";
@@ -13,6 +15,7 @@ import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit
 import Link from "next/link";
 import { inputClass } from "./form";
 import { dateAt } from "@/lib/format";
+import { newestFirst, noteByline } from "@/lib/leadNotes";
 import { STAGE_LABEL } from "@/data/types";
 import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
 
@@ -47,6 +50,10 @@ const chev = (
  * Label on the left, facts on the right, the same as every other candidate row
  * in the product. `Overview` carries where they are and what has been said to
  * them; `LinkedIn URL` carries the link the whole record hangs off.
+ *
+ * `Notes` sits above both when a lead, director, admin or ops has left one:
+ * feedback for the TA, open on the row rather than behind •••, so it is read
+ * without being looked for (25 Sep).
  */
 export function LinkRow({
   entry: r,
@@ -54,6 +61,8 @@ export function LinkRow({
   addedByName,
   userNames,
   onPipeline = null,
+  canNote = false,
+  viewerId = "",
 }: {
   entry: LinkVaultEntry;
   openingId: string;
@@ -61,6 +70,10 @@ export function LinkRow({
   userNames: Record<string, string>;
   /** Their application on this opening, once they have been added. */
   onPipeline?: Pick<Application, "id" | "stage"> | null;
+  /** A lead, director, admin or ops: may leave notes for the TA. */
+  canNote?: boolean;
+  /** Who is looking — the author of a note may remove it. */
+  viewerId?: string;
 }) {
   const [removed, setRemoved] = useState(false);
   const [isEyeMarked, setIsEyeMarked] = useState(r.isEyeMarked);
@@ -81,8 +94,21 @@ export function LinkRow({
     if (logIt.result?.tone === "ok") logForm.current?.reset();
   }, [logIt.result]);
   const del = useInline(deleteLinkInline);
-  const busy = eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending;
-  const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [allNotes, setAllNotes] = useState(false);
+  const sendNote = useInline(addLeadNoteInline);
+  const dropNote = useInline(removeLeadNoteInline);
+  // Closed once the note is sent; a refused one stays in the box to send again.
+  const noteForm = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (sendNote.result?.tone === "ok") {
+      noteForm.current?.reset();
+      setNoteOpen(false);
+    }
+  }, [sendNote.result]);
+  const busy =
+    eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending;
+  const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result, sendNote.result, dropNote.result);
 
   useEffect(() => {
     setIsEyeMarked(r.isEyeMarked);
@@ -100,6 +126,8 @@ export function LinkRow({
   const log = [...r.conversationLog].reverse();
   const shown = allLog ? log : log.slice(0, 2);
   const outcome = OUTCOMES.find((o) => o.value === r.outcome)?.label ?? r.outcome;
+  const notes = newestFirst(r.leadNotes);
+  const shownNotes = allNotes ? notes : notes.slice(0, 2);
 
   if (removed || del.result?.tone === "ok") return null;
 
@@ -146,6 +174,11 @@ export function LinkRow({
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}
                 </span>
+                {notes.length > 0 && (
+                  <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">
+                    Note from {noteByline(notes[0], userNames).role}
+                  </span>
+                )}
               </div>
               <p className="mt-0.5 text-[13px]">{r.title ?? "Title not recorded"}</p>
               <p className="mt-0.5 text-[12px] text-ink-faint">
@@ -188,6 +221,16 @@ export function LinkRow({
                     className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
                   >
                     Add to pipeline
+                  </button>
+                )}
+                {canNote && (
+                  <button
+                    type="button"
+                    onClick={() => setNoteOpen((v) => !v)}
+                    aria-expanded={noteOpen}
+                    className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                  >
+                    Add note
                   </button>
                 )}
                 <button
@@ -238,7 +281,92 @@ export function LinkRow({
             </div>
           </div>
 
+          {canNote && noteOpen && (
+            <form
+              ref={noteForm}
+              onSubmit={(e) => sendNote.run(submitted(e).formData)}
+              className="mt-3 flex flex-col gap-2.5"
+            >
+              <input type="hidden" name="openingId" value={openingId} />
+              <input type="hidden" name="entryId" value={r.id} />
+              <span className="text-[11.5px] text-ink-soft">Note for the TA</span>
+              <textarea
+                name="note"
+                rows={3}
+                maxLength={2000}
+                autoFocus
+                placeholder="What the TA should know or do with this person"
+                className={`${inputClass} leading-relaxed`}
+              />
+              <div className="flex items-center gap-2.5">
+                <SubmitButton
+                  busy={sendNote.pending}
+                  locked={busy}
+                  pendingLabel="Sending…"
+                  className="rounded-full bg-brand px-4 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                >
+                  Send note
+                </SubmitButton>
+                <button
+                  type="button"
+                  onClick={() => setNoteOpen(false)}
+                  className="text-[12px] text-ink-faint transition-colors hover:text-ink"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
           <dl className="mt-3 grid grid-cols-[96px_1fr] gap-x-4 gap-y-1.5 text-[12.5px] leading-relaxed">
+            {notes.length > 0 && (
+              <>
+                <dt className="font-medium text-ink-soft">Notes</dt>
+                <dd className="flex flex-col gap-1.5">
+                  {shownNotes.map((n) => {
+                    const { role, name } = noteByline(n, userNames);
+                    return (
+                      <div key={n.id} className="rounded-lg border border-brand-line bg-brand-soft px-3 py-2">
+                        <p className="whitespace-pre-line text-ink">{n.note}</p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-ink-soft">
+                          <span className="font-semibold text-brand">{role}</span>
+                          <span>· {name} sent this note · {dateAt(n.at)}</span>
+                          {n.by === viewerId && (
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                if (!window.confirm("Remove this note? The TA will no longer see it.")) return;
+                                dropNote.run(submitted(e).formData);
+                              }}
+                              className="inline"
+                            >
+                              <input type="hidden" name="openingId" value={openingId} />
+                              <input type="hidden" name="entryId" value={r.id} />
+                              <input type="hidden" name="noteId" value={n.id} />
+                              <button
+                                type="submit"
+                                disabled={busy}
+                                className="text-ink-faint transition-colors hover:text-danger disabled:opacity-50"
+                              >
+                                · Remove
+                              </button>
+                            </form>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {notes.length > 2 && (
+                    <button
+                      onClick={() => setAllNotes((v) => !v)}
+                      className="self-start text-[12px] text-accent hover:underline"
+                    >
+                      {allNotes ? "Show less" : `Show all (${notes.length})`}
+                    </button>
+                  )}
+                </dd>
+              </>
+            )}
             <dt className="font-medium text-ink-soft">Overview</dt>
             <dd>
               <span className="text-ink-soft">

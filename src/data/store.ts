@@ -32,8 +32,10 @@ import type {
   Client,
   Database,
   Id,
+  LeadNote,
   LinkVaultEntry,
   LinkOutcome,
+  Role,
   BenchmarkEntry,
   ChatMessage,
   JdChatMessage,
@@ -1755,6 +1757,32 @@ const rawRepo = {
       if (!e) return;
       e.conversationLog.push({ at: Date.now(), channel, note, by });
       if (e.outcome === "no_contact") e.outcome = "contacted";
+    });
+  },
+
+  /**
+   * A lead's note for the TA on this row. Deliberately not an approach: it
+   * leaves the outcome and the approach log alone (25 Sep).
+   */
+  addLeadNote(entryId: Id, by: Id, byRole: Role, note: string): Id | null {
+    const id = `ln_${Math.random().toString(36).slice(2, 10)}`;
+    let found = false;
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (!e) return;
+      found = true;
+      const added: LeadNote = { id, at: Date.now(), note, by, byRole };
+      // A new array rather than a push, so the row that had none compares as changed.
+      e.leadNotes = [...(e.leadNotes ?? []), added];
+    });
+    return found ? id : null;
+  },
+
+  removeLeadNote(entryId: Id, noteId: Id) {
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (!e?.leadNotes) return;
+      e.leadNotes = e.leadNotes.filter((n) => n.id !== noteId);
     });
   },
 

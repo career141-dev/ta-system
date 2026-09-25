@@ -51,5 +51,15 @@ eq("TA cannot fake a client decision", ok(ta, "decide.client", { assignment: on(
 console.log("\nadministration");
 eq("only admin manages people", [ok(user("admin"), "user.manage"), ok(user("director"), "user.manage"), ok(ta, "user.manage")], [true, false, false]);
 
+console.log("\nExcel Tables notes: leads write, TAs read (25 Sep)");
+eq(
+  "lead, director, admin and ops leave notes",
+  (["ta_lead", "director", "admin", "ops"] as const).map((r) => ok(user(r), "link.note")),
+  [true, true, true, true],
+);
+eq("a TA cannot, even on the opening", ok(ta, "link.note", { assignment: on("primary_recruiter") }), false);
+eq("nor a client or a viewer", [ok(client, "link.note"), ok(viewer, "link.note")], [false, false]);
+eq("nor a deactivated lead", ok(user("ta_lead", { isActive: false }), "link.note"), false);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
