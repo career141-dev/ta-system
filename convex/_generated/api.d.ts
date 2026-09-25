@@ -16,6 +16,7 @@ import type * as admin_checkAndStopImports from "../admin/checkAndStopImports.js
 import type * as admin_checkData from "../admin/checkData.js";
 import type * as admin_cleanCandidateApps from "../admin/cleanCandidateApps.js";
 import type * as admin_cleanupCandidates from "../admin/cleanupCandidates.js";
+import type * as admin_deleteTestOpenings from "../admin/deleteTestOpenings.js";
 import type * as admin_debugWhatsApp from "../admin/debugWhatsApp.js";
 import type * as admin_followUpBacklog from "../admin/followUpBacklog.js";
 import type * as admin_resetFollowUpTest from "../admin/resetFollowUpTest.js";
@@ -200,6 +201,7 @@ declare const fullApi: ApiFromModules<{
   "admin/cleanCandidateApps": typeof admin_cleanCandidateApps;
   "admin/cleanupCandidates": typeof admin_cleanupCandidates;
   "admin/debugWhatsApp": typeof admin_debugWhatsApp;
+  "admin/deleteTestOpenings": typeof admin_deleteTestOpenings;
   "admin/followUpBacklog": typeof admin_followUpBacklog;
   "admin/resetFollowUpTest": typeof admin_resetFollowUpTest;
   "admin/inspectComms": typeof admin_inspectComms;
