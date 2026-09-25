@@ -13,7 +13,7 @@ import type { EffortRow, ShortlistRow } from "./eod-format";
  */
 
 export type { ShortlistRow, EffortRow } from "./eod-format";
-export { SHORTLIST_COLUMNS, EFFORT_COLUMNS, UNDEFINED_COLUMNS } from "./eod-format";
+export { SHORTLIST_COLUMNS, EFFORT_COLUMNS, MANUAL_EFFORT } from "./eod-format";
 
 const HOUSE_NOTE = (c: Candidate, a: Application): string[] => {
   const out: string[] = [];
@@ -89,44 +89,41 @@ export function shortlistRows(
   });
 }
 
-/** Table 2 — the L-sheet line for today. Every figure is today's. */
+/**
+ * Table 2 — the L-sheet line for today.
+ *
+ * Only SETS and DA come from the records. The rest the TA types in the
+ * composer (the desk, 25 September): L EFFORT and L are the LinkedIn searches
+ * they ran on the job, and scoops — CVs the Director, Ops or another TA send
+ * them for the job — arrive on WhatsApp or email, outside the system. POST,
+ * ADD-ONS and BACK-UP are theirs to state too. Until then these were counted
+ * from the records, and SCOOP counted database picks, which the desk calls
+ * TBR, not scoops.
+ */
 export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow {
-  const apps = repo.applications(openingId);
-  const vault = repo.linkVault(openingId);
   // Today in Colombo, whatever the server's clock is set to.
   const since = colomboDayStart(date.getTime());
-
-  const mine = apps.filter((a) => a.ownerTaId === ta.id);
-  const todays = mine.filter((a) => (a.shortlistedAt ?? 0) >= since);
-  // The set going out tonight — this TA's newest.
+  const todays = repo
+    .applications(openingId)
+    .filter((a) => a.ownerTaId === ta.id && (a.shortlistedAt ?? 0) >= since);
+  // The set this TA's latest CV went into — sets fill to five and move on.
   const mySets = setsForOpening(openingId, ta.id);
-  const tonight = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
-
-  const approached = vault.filter((v) => v.addedBy === ta.id && v.outcome !== "no_contact" && v.createdAt >= since).length;
-  const addOns = mine.filter((a) => a.isAddOn && (a.addedOnAt ?? 0) >= since).length;
-  // The TA's working stage for this opening (100% / Follow-up / Add-on),
-  // set manually in the sticky bar or defaulting to "100%".
-  const kind = repo.workingStage(openingId, ta.id);
+  const latest = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
 
   return {
     date: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" }),
     assignee: ta.name,
-    hundredOrFollowUp: kind,
-    // Profiles approached today on a hunt; on a follow-up day, CVs brought in.
-    lEffort: kind === "Follow-up" ? todays.length : approached,
-    sets: tonight,
+    // The TA's working stage for this opening (100% / Follow-up / Add-on),
+    // set manually in the sticky bar or defaulting to "100%".
+    hundredOrFollowUp: repo.workingStage(openingId, ta.id),
+    lEffort: null,
+    sets: latest,
     da: todays.filter((a) => a.sourcingChannel === "DA").length,
-    // Database picks shortlisted today, plus scoops: CVs this TA brought in on
-    // someone else's candidate today (plan 6.4).
-    scoop:
-      todays.filter((a) => a.sourcingChannel === "SCOOP").length +
-      apps.filter((a) => a.scoopBy === ta.id && (a.scoopAt ?? 0) >= since).length,
-    l: todays.filter((a) => a.sourcingChannel === "L").length,
-    // Counted now, not left blank (21 Sep): adverts this TA put live today,
-    // add-ons marked today, and backups lined up today.
-    post: repo.jobPosts(openingId).filter((p) => (p.postedAt ?? 0) >= since && (!p.assignedTaId || p.assignedTaId === ta.id)).length,
-    addOns,
-    backUp: mine.filter((a) => a.backupForApplicationId && a.createdAt >= since).length,
+    scoop: null,
+    l: null,
+    post: null,
+    addOns: null,
+    backUp: null,
   };
 }
 

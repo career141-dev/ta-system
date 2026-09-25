@@ -168,11 +168,11 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
       waitingForReview: { newCvs: apps.filter((a) => a.stage === "new_cv" && !a.ownerTaId).length, databaseMatches: databaseMatches.unclaimed },
       databaseMatches,
       posts: repo.jobPosts(o.id).map((p) => ({ title: p.title, status: p.status, cvsToday: p.cvCountToday, owner: users.get(p.assignedTaId ?? "") ?? null })),
-      sets: setsForOpening(o.id, isDeskWide(user) ? undefined : user.id, now).map((s) => ({
+      sets: setsForOpening(o.id, isDeskWide(user) ? undefined : user.id).map((s) => ({
         recruiter: users.get(s.taId) ?? s.taId,
         set: s.setNumber,
         people: s.count,
-        status: s.status === "open" ? "still open (under 5 before today)" : "closed",
+        status: s.status === "open" ? "still open (under 5)" : "closed",
       })),
       shortlistedToday: apps.filter((a) => (a.shortlistedAt ?? 0) >= today).length,
       followUps,

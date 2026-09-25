@@ -86,10 +86,10 @@ export const EFFORT_COLUMNS = [
 ] as const;
 
 /**
- * Columns with no figure behind them. Empty since 21 Sep: POST, ADD-ONS and
- * BACK-UP are counted from the records, and the TA can correct any of them.
+ * The columns the TA types in; the records give only SETS and DA (the desk,
+ * 25 Sep — see effortRow in lib/eod). These start blank in the composer.
  */
-export const UNDEFINED_COLUMNS = new Set<string>();
+export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["lEffort", "scoop", "l", "post", "addOns", "backUp"]);
 
 /** Who is copied on every end-of-day email, until it is changed on the People page. */
 export const DEFAULT_EOD_CC = "azim@career141.com";

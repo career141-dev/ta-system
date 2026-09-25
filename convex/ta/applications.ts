@@ -157,9 +157,12 @@ export const shortlist = internalMutation({
 /**
  * The set a newly shortlisted person joins.
  *
- * A set closes on the day it reaches five, so anybody shortlisted today joins
- * the set that was open this morning even if that takes it to seven. Counted
- * per recruiter per opening.
+ * A set is five CVs, whatever the day (the desk, 25 September): the sixth
+ * starts the next set. This replaced the 13 September rule, under which a set
+ * took everyone shortlisted on the day it filled and could reach seven — and
+ * which measured "today" from UTC midnight, not Colombo's. Sets numbered under
+ * it are left alone: one already past five is simply full. Counted per
+ * recruiter per opening; mirrored in src/data/store.ts.
  */
 async function nextSetNumber(
   ctx: { db: any },
@@ -174,12 +177,8 @@ async function nextSetNumber(
   if (mine.length === 0) return 1;
 
   const top = Math.max(...mine.map((a) => a.setNumber as number));
-  const startOfToday = new Date();
-  startOfToday.setUTCHours(0, 0, 0, 0);
-  const beforeToday = mine.filter(
-    (a) => a.setNumber === top && (a.shortlistedAt ?? 0) < startOfToday.getTime(),
-  ).length;
-  return beforeToday >= SET_SIZE ? top + 1 : top;
+  const inTop = mine.filter((a) => a.setNumber === top).length;
+  return inTop >= SET_SIZE ? top + 1 : top;
 }
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */

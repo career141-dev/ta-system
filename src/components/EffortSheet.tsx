@@ -1,19 +1,20 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { EFFORT_NUMBERS, OUTREACH_TYPES, effortColumns, type EffortKey, type EffortRow } from "@/lib/eod-format";
+import { EFFORT_NUMBERS, MANUAL_EFFORT, OUTREACH_TYPES, effortColumns, type EffortKey, type EffortRow } from "@/lib/eod-format";
 import { setWorkingStage } from "@/app/actions";
 
 /**
  * The L-sheet, editable before it is sent (plan 6.1–6.3, 21 Sep).
  *
- * Every figure starts from the records and can be corrected; what kind of day
- * it was (100% / Follow-up / Add-on) is picked here, and switches the fourth
- * column between links approached and CVs. A target row is optional. The
- * inputs belong to the send form (`form=`), so what is sent is what is on
- * screen. Edits are kept in this browser until sent, so a reload loses
- * nothing; a changed figure is marked, with the record's figure on hover.
+ * SETS and DA start from the records and can be corrected; the other columns
+ * the TA types (MANUAL_EFFORT, 25 Sep). What kind of day it was (100% /
+ * Follow-up / Add-on) is picked here, and switches the fourth column between
+ * links approached and CVs. A target row is optional. The inputs belong to the
+ * send form (`form=`), so what is sent is what is on screen. Edits are kept in
+ * this browser until sent, so a reload loses nothing; a corrected record
+ * figure is marked, with the record's figure on hover.
  */
 export function EffortSheet({
   effort,
@@ -41,6 +42,8 @@ export function EffortSheet({
     targets: {},
   };
   const [draft, setDraft] = useState<Draft>(initial);
+  // The draft as the page opened with it, before anything kept was read back.
+  const opened = useRef(draft);
 
   useEffect(() => {
     if (effort.hundredOrFollowUp) {
@@ -90,6 +93,11 @@ export function EffortSheet({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draftKey]);
   useEffect(() => {
+    // Not until the draft has changed: writing the opening figures straight
+    // away replaced what was kept before it had been read back, and React's
+    // development double-run of effects then read the blank copy — the TA's
+    // typed figures were gone after a reload (25 Sep).
+    if (draft === opened.current) return;
     try {
       localStorage.setItem(draftKey, JSON.stringify({ ...draft, base: initial.values }));
     } catch {
@@ -171,13 +179,16 @@ export function EffortSheet({
               }
               const k = c.key as EffortKey;
               const recorded = effort[k] == null ? "" : String(effort[k]);
-              const changed = (draft.values[k] ?? "") !== recorded;
+              // A typed column has no record to differ from, so it is never marked.
+              const manual = MANUAL_EFFORT.has(k);
+              const changed = !manual && (draft.values[k] ?? "") !== recorded;
               return (
                 <td key={c.key} className={`${td} ${changed ? "bg-warn-soft/60" : ""}`} title={changed ? `From the records: ${recorded || "—"}` : undefined}>
                   <input
                     form={formId}
                     name={`effort_${k}`}
                     inputMode="numeric"
+                    placeholder={manual ? "—" : undefined}
                     value={draft.values[k] ?? ""}
                     onChange={(e) => setDraft({ ...draft, values: { ...draft.values, [k]: e.target.value.replace(/[^\d]/g, "") } })}
                     aria-label={c.label}
@@ -216,11 +227,21 @@ export function EffortSheet({
       </table>
       <p className="mt-2 flex flex-wrap items-center gap-3 text-[11.5px] text-ink-faint">
         <span>
-          Every figure can be corrected before sending; a shaded cell differs from the records. The fourth column counts{" "}
-          {draft.kind === "Follow-up" ? "CVs brought in" : "profiles approached"} for a {draft.kind} day. Targets are optional —
-          green once met.
+          SETS and DA come from the records; type the other figures in. A shaded cell differs from the records. The fourth
+          column is {draft.kind === "Follow-up" ? "CVs brought in" : "profiles approached"} for a {draft.kind} day. Targets are
+          optional — green once met.
         </span>
-        <button type="button" onClick={() => setDraft(initial)} className="text-accent hover:underline">
+        <button
+          type="button"
+          // Only the records' columns go back; what the TA typed stays.
+          onClick={() =>
+            setDraft({
+              ...draft,
+              values: Object.fromEntries(EFFORT_NUMBERS.map((k) => [k, MANUAL_EFFORT.has(k) ? draft.values[k] ?? "" : initial.values[k]])),
+            })
+          }
+          className="text-accent hover:underline"
+        >
           Put back the records&rsquo; figures
         </button>
       </p>

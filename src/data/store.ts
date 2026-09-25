@@ -470,35 +470,31 @@ function localNationalityOf(country: string): string {
 const JD_NOT_APPROVED =
   "This job cannot go live until its JD is approved. Approve the JD first, then set the advert live.";
 
-/** A set closes on the day it reaches this many. */
+/** A set is full at this many. */
 export const SET_SIZE = 5;
 
 /**
  * The set a newly shortlisted person joins.
  *
- * The desk's rule, as the user put it on 13 September: the end-of-day email
- * goes out every day, even with fewer than five. Set 1 with three CVs today is
- * still Set 1 tomorrow. Only a day on which the set reaches five — or passes
- * it — finishes the set, and the next working day starts Set 2.
- *
- * So a set is closed when five or more of its members were shortlisted before
- * today. Anybody shortlisted today joins the set that is open this morning,
- * even if that takes it to seven.
+ * The desk's rule, as the user put it on 25 September: a set is five CVs.
+ * Set 1 with four today takes one more tomorrow and is full; the other five
+ * shortlisted that day are Set 2. The date plays no part. This replaces the
+ * 13 September rule, under which everyone shortlisted on a day joined the set
+ * open that morning, so a set could reach seven. Sets numbered under that rule
+ * are left as they are: one already at six or seven is simply full.
  *
  * Counted per recruiter per opening: each TA sends their own end-of-day email,
  * so Shamra's Set 1 and Azma's Set 1 on the same job are different sets.
+ * Mirrored in convex/ta/applications.ts, which numbers the live shortlists.
  */
-function nextSetNumber(db: Database, openingId: Id, taId: Id, now = Date.now()): number {
+function nextSetNumber(db: Database, openingId: Id, taId: Id): number {
   const mine = db.applications.filter(
     (a) => a.openingId === openingId && a.ownerTaId === taId && a.setNumber !== null,
   );
   if (mine.length === 0) return 1;
   const top = Math.max(...mine.map((a) => a.setNumber as number));
-  const today = colomboDayStart(now);
-  const beforeToday = mine.filter(
-    (a) => a.setNumber === top && a.shortlistedAt !== null && a.shortlistedAt < today,
-  ).length;
-  return beforeToday >= SET_SIZE ? top + 1 : top;
+  const inTop = mine.filter((a) => a.setNumber === top).length;
+  return inTop >= SET_SIZE ? top + 1 : top;
 }
 
 /**
@@ -815,7 +811,7 @@ const rawRepo = {
       a.ownerTaId = taId;
       a.shortlistedAt = now;
       if (a.setNumber === null) {
-        a.setNumber = nextSetNumber(d, a.openingId, taId, now);
+        a.setNumber = nextSetNumber(d, a.openingId, taId);
         setNumber = a.setNumber;
       }
       if (to !== from) {
@@ -3977,19 +3973,18 @@ function buildVocabulary(db: Database): Vocabulary {
 // ─── Derived values ──────────────────────────────────────────────────────────
 
 /**
- * Spec §7 — a set closes at five or more; an open set carries across days.
+ * Spec §7 — a set is five; an open set carries across days until it has them.
  * Counted per Opening, across whichever TAs are working it (Q2).
  */
 /**
  * The sets on an opening, one list across every recruiter on it.
  *
  * A set belongs to the TA who built it (see `nextSetNumber`), so two TAs each
- * have a Set 1. A set is closed when it is not that TA's newest, or when five
- * or more of it were shortlisted before today — the same test that decides
- * where tomorrow's shortlist goes, so the screen and the numbering agree.
+ * have a Set 1. A set is closed when it is not that TA's newest, or when it
+ * holds five — the same test that decides where the next shortlist goes, so
+ * the screen and the numbering agree.
  */
-export function setsForOpening(openingId: Id, taId?: Id, now = Date.now()) {
-  const today = colomboDayStart(now);
+export function setsForOpening(openingId: Id, taId?: Id) {
   const apps = repo
     .applications(openingId)
     .filter((a) => a.setNumber !== null && a.ownerTaId && (!taId || a.ownerTaId === taId));
@@ -4003,8 +3998,7 @@ export function setsForOpening(openingId: Id, taId?: Id, now = Date.now()) {
     const bySet = new Map<number, Application[]>();
     for (const a of mine) bySet.set(a.setNumber!, [...(bySet.get(a.setNumber!) ?? []), a]);
     for (const [setNumber, members] of bySet) {
-      const beforeToday = members.filter((m) => (m.shortlistedAt ?? 0) < today).length;
-      const closed = setNumber < top || beforeToday >= SET_SIZE;
+      const closed = setNumber < top || members.length >= SET_SIZE;
       out.push({ taId: owner, setNumber, count: members.length, status: closed ? "closed" : "open" });
     }
   }
