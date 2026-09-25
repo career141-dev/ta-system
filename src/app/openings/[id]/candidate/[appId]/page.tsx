@@ -10,6 +10,8 @@ import { seatFor } from "@/lib/visibility";
 import { STAGE_LABEL } from "@/data/types";
 import { timeAt } from "@/lib/format";
 import { claimCandidate } from "@/app/actions";
+import { isWordFile } from "@/lib/wordToPdf";
+import { SubmitButton } from "@/components/Submit";
 import { RowActions } from "@/components/RowActions";
 import { CallLogForm } from "@/components/CallLogForm";
 import { ContactRow } from "@/components/ContactRow";
@@ -175,6 +177,9 @@ export default async function CandidateDrawer({
       /\.pdf$/i.test(c.cvFileName ?? "") ||
       !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(cvFile.fileName ?? c.cvFileName ?? ""));
 
+  // Shown as a PDF made from it (lib/wordToPdf); Download still gives the Word file.
+  const cvIsWord = !!cvFile?.ok && !cvIsPdf && isWordFile(cvFile.fileName ?? c.cvFileName);
+
   const base = `/openings/${id}/candidate/${appId}`;
   const tabHref = (t: string) => (t === "cv" ? `${base}` : `${base}?tab=${t}`);
   const logHref = pageLink(base, sp);
@@ -265,7 +270,12 @@ export default async function CandidateDrawer({
                 <form action={claimCandidate}>
                   <input type="hidden" name="appId" value={app.id} />
                   <input type="hidden" name="openingId" value={id} />
-                  <button className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90">Save to pipeline</button>
+                  <SubmitButton
+                    pendingLabel="Saving…"
+                    className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-70"
+                  >
+                    Save to pipeline
+                  </SubmitButton>
                 </form>
               ) : (
                 <RowActions
@@ -367,9 +377,9 @@ export default async function CandidateDrawer({
                 Career141 block, for the Director and the client) is still one
                 click away. */}
             <div className="mb-5 overflow-hidden rounded-xl border border-rule">
-              {cvFile?.ok && cvIsPdf ? (
+              {cvFile?.ok && (cvIsPdf || cvIsWord) ? (
                 <CvFrame
-                  src={cvHref}
+                  src={cvIsWord ? `${cvHref}&view=pdf` : cvHref}
                   title={`CV — ${c.fullName}`}
                   fileName={(cvFile?.ok ? cvFile.fileName : null) ?? c.cvFileName ?? "CV"}
                   downloadHref={`${cvHref}&download=1`}

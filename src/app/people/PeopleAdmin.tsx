@@ -4,6 +4,7 @@ import { useState } from "react";
 import { addUser, inviteUser, revokeUserInvite, setShortlistInbox, setUserActive, updateUser } from "@/app/actions";
 import type { OffDeskAccount, PendingInvite } from "@/lib/invites";
 import { inputClass } from "@/components/form";
+import { SubmitButton } from "@/components/Submit";
 import type { Role, User } from "@/data/types";
 
 const ROLES: { value: Role; label: string; note: string }[] = [
@@ -86,7 +87,6 @@ export function PeopleAdmin({
       {inviting && (
         <form
           action={inviteUser}
-          onSubmit={() => setInviting(false)}
           className="mb-6 rounded-2xl border border-rule bg-surface px-6 py-5"
         >
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -107,9 +107,13 @@ export function PeopleAdmin({
               </select>
             </label>
           </div>
-          <button className="mt-4 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+          <SubmitButton
+            pendingLabel="Sending…"
+            onDone={() => setInviting(false)}
+            className="mt-4 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
             Send invite
-          </button>
+          </SubmitButton>
           <p className="mt-3 max-w-[80ch] text-[11.5px] leading-relaxed text-ink-faint">
             The role is saved now, so it applies from their first sign-in. They get an email from
             Clerk with a link to set up their sign-in. You can change the role later with Edit.
@@ -132,7 +136,13 @@ export function PeopleAdmin({
                 <span className="text-[12px] text-ink-faint">sent {new Date(i.createdAt).toLocaleDateString()}</span>
                 <form action={revokeUserInvite}>
                   <input type="hidden" name="invitationId" value={i.id} />
-                  <button className="text-[12.5px] text-ink-faint transition-colors hover:text-ink">Revoke</button>
+                  <SubmitButton
+                    tone="dark"
+                    pendingLabel="Revoking…"
+                    className="text-[12.5px] text-ink-faint transition-colors hover:text-ink disabled:opacity-60"
+                  >
+                    Revoke
+                  </SubmitButton>
                 </form>
               </div>
             ))}
@@ -175,9 +185,12 @@ export function PeopleAdmin({
               />
             </label>
           </div>
-          <button className="mt-4 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+          <SubmitButton
+            pendingLabel="Adding…"
+            className="mt-4 rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+          >
             Add them
-          </button>
+          </SubmitButton>
           <p className="mt-3 max-w-[80ch] text-[11.5px] leading-relaxed text-ink-faint">
             The mobile shows on every snippet they publish, so it is worth getting right. The
             applications inbox is the address that goes into the LinkedIn job setup for every
@@ -203,9 +216,13 @@ export function PeopleAdmin({
               className={inputClass}
             />
           </label>
-          <button className="rounded-full border border-rule-strong px-5 py-2.5 text-[13px] font-medium">
+          <SubmitButton
+            tone="dark"
+            pendingLabel="Saving…"
+            className="rounded-full border border-rule-strong px-5 py-2.5 text-[13px] font-medium disabled:opacity-60"
+          >
             Save
-          </button>
+          </SubmitButton>
           <p className="w-full max-w-[84ch] text-[11.5px] leading-relaxed text-ink-faint">
             Copied on every shortlist email to a Director or a client, and named on the reply-to,
             so the reply is tracked whichever way they answer. One box is enough because the
@@ -220,7 +237,7 @@ export function PeopleAdmin({
           {shown.map((u) => (
             <div key={u.id} className={`px-6 py-4 ${u.isActive ? "" : "bg-paper/50"}`}>
               {editing === u.id ? (
-                <form action={updateUser} onSubmit={() => setEditing(null)} className="flex flex-col gap-3">
+                <form action={updateUser} className="flex flex-col gap-3">
                   <input type="hidden" name="userId" value={u.id} />
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <input name="name" defaultValue={u.name} required className={inputClass} />
@@ -257,7 +274,13 @@ export function PeopleAdmin({
                     </span>
                   </label>
                   <div className="flex items-center gap-2.5">
-                    <button className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white">Save</button>
+                    <SubmitButton
+                      pendingLabel="Saving…"
+                      onDone={() => setEditing(null)}
+                      className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+                    >
+                      Save
+                    </SubmitButton>
                     <button type="button" onClick={() => setEditing(null)} className="px-2 text-[12.5px] text-ink-soft hover:text-ink">
                       Cancel
                     </button>
@@ -292,9 +315,13 @@ export function PeopleAdmin({
                         <form action={setUserActive}>
                           <input type="hidden" name="userId" value={u.id} />
                           <input type="hidden" name="active" value={u.isActive ? "0" : "1"} />
-                          <button className="text-[12.5px] text-ink-faint transition-colors hover:text-ink">
+                          <SubmitButton
+                            tone="dark"
+                            pendingLabel="Saving…"
+                            className="text-[12.5px] text-ink-faint transition-colors hover:text-ink disabled:opacity-60"
+                          >
                             {u.isActive ? "Mark as left" : "Bring back"}
-                          </button>
+                          </SubmitButton>
                         </form>
                       )}
                     </div>
@@ -340,9 +367,13 @@ export function PeopleAdmin({
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
                 </select>
-                <button className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand hover:bg-brand-soft">
+                <SubmitButton
+                  tone="dark"
+                  pendingLabel="Giving access…"
+                  className="rounded-full border border-brand-line px-4 py-1.5 text-[12.5px] font-medium text-brand hover:bg-brand-soft disabled:opacity-60"
+                >
                   Give access
-                </button>
+                </SubmitButton>
               </form>
             ))}
           </div>

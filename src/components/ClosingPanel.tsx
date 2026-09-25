@@ -1,6 +1,7 @@
 import type { Application, Offer, Placement } from "@/data/types";
 import { dateAt } from "@/lib/format";
 import { makeOffer, recordPlacement, respondToOffer } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 
 /**
  * The offer, on the candidate.
@@ -82,9 +83,12 @@ export function ClosingPanel({
                 className={input}
               />
             </label>
-            <button className="rounded bg-ink px-3 py-1.5 text-[12.5px] font-medium text-surface">
+            <SubmitButton
+              pendingLabel="Placing…"
+              className="rounded bg-ink px-3 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+            >
               Place
-            </button>
+            </SubmitButton>
           </form>
 
           <form action={respondToOffer} className="flex flex-wrap items-end gap-2">
@@ -96,9 +100,13 @@ export function ClosingPanel({
               <span className={label}>They turned it down — why</span>
               <input name="reason" placeholder="Counter-offered" className={input} />
             </label>
-            <button className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium">
+            <SubmitButton
+              tone="dark"
+              pendingLabel="Recording…"
+              className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
+            >
               Decline
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </div>
@@ -156,9 +164,12 @@ export function ClosingPanel({
           <input name="terms" placeholder="Vehicle, fuel, driver allowance" className={input} />
         </label>
         <div className="flex flex-wrap items-center gap-2">
-          <button className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface">
+          <SubmitButton
+            pendingLabel="Recording…"
+            className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+          >
             Record the offer
-          </button>
+          </SubmitButton>
           <span className="text-[11.5px] text-ink-faint">
             {expectedSalary
               ? `They asked for ${expectedSalary}.`

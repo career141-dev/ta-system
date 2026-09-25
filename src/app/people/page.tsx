@@ -9,6 +9,7 @@ import { pendingInvites, offDeskAccounts } from "@/lib/invites";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { SubmitButton } from "@/components/SubmitButton";
+import { SubmitButton as Submit } from "@/components/Submit";
 
 const PAGE_SIZE = 25;
 
@@ -123,9 +124,13 @@ export default async function PeoplePage({
           ))}
           {canEdit && (
             <div>
-              <button className="rounded-full border border-rule-strong px-5 py-2 text-[13px] font-medium">
+              <Submit
+                tone="dark"
+                pendingLabel="Saving…"
+                className="rounded-full border border-rule-strong px-5 py-2 text-[13px] font-medium disabled:opacity-60"
+              >
                 Save questions
-              </button>
+              </Submit>
             </div>
           )}
         </form>

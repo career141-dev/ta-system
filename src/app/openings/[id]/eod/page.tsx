@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
 import { readEodReply, readInboundReply } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
@@ -138,9 +139,12 @@ export default async function EodPage({
               />
             </label>
             <div className="mt-2.5 flex flex-wrap items-center gap-3">
-              <button className="rounded-full bg-ink px-5 py-2 text-[12.5px] font-medium text-surface">
+              <SubmitButton
+                pendingLabel="Reading…"
+                className="rounded-full bg-ink px-5 py-2 text-[12.5px] font-medium text-surface disabled:opacity-60"
+              >
                 Read it and move them
-              </button>
+              </SubmitButton>
               <span className="text-[11.5px] text-ink-faint">
                 Anyone the reply names is moved. Anyone it does not mention stays where they are —
                 nobody is moved on a guess.
@@ -193,9 +197,13 @@ export default async function EodPage({
             className="mt-3 w-full rounded-lg border border-rule bg-paper px-3 py-2.5 text-[12.5px] leading-relaxed"
           />
           <div className="mt-2.5 flex flex-wrap items-center gap-3">
-            <button className="rounded-full border border-rule-strong px-5 py-2 text-[12.5px] font-medium">
+            <SubmitButton
+              tone="dark"
+              pendingLabel="Applying…"
+              className="rounded-full border border-rule-strong px-5 py-2 text-[12.5px] font-medium disabled:opacity-60"
+            >
               Find the set and apply it
-            </button>
+            </SubmitButton>
             <span className="max-w-[62ch] text-[11.5px] text-ink-faint">
               The subject says which opening, the sender says whether it is the Director or the
               client. It searches every open round, not just this opening&rsquo;s — and refuses

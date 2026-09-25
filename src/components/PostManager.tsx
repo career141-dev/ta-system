@@ -110,9 +110,12 @@ export function PostManager({
               />
               <span className="text-[12.5px]">It is live now</span>
             </label>
-            <button className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">
+            <SubmitButton
+              pendingLabel="Creating…"
+              className="rounded-full bg-brand px-5 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
               Create post
-            </button>
+            </SubmitButton>
           </div>
           <p className="mt-3 max-w-[78ch] text-[11.5px] leading-relaxed text-ink-faint">
             <strong className="font-medium text-ink-soft">LinkedIn:</strong> put the owner&rsquo;s
@@ -257,7 +260,11 @@ export function PostManager({
                       <input type="hidden" name="openingId" value={openingId} />
                       <input type="hidden" name="postId" value={p.id} />
                       <input type="hidden" name="status" value={next} />
-                      <button className="text-ink-soft transition-colors hover:text-ink">
+                      <SubmitButton
+                        tone="dark"
+                        pendingLabel="Saving…"
+                        className="text-ink-soft transition-colors hover:text-ink disabled:opacity-60"
+                      >
                         {next === "live"
                           ? "Set live"
                           : next === "paused"
@@ -265,7 +272,7 @@ export function PostManager({
                             : next === "draft"
                               ? "Back to draft"
                               : "Close"}
-                      </button>
+                      </SubmitButton>
                     </form>
                   ))}
 
@@ -305,14 +312,16 @@ export function PostManager({
                   </p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {live.map((t) => (
-                      <button
+                      <SubmitButton
                         key={t.id}
                         name="toPostId"
                         value={t.id}
-                        className="rounded-full border border-brand-line px-3.5 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                        tone="dark"
+                        pendingLabel="Moving…"
+                        className="rounded-full border border-brand-line px-3.5 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
                       >
                         {t.title}
-                      </button>
+                      </SubmitButton>
                     ))}
                   </div>
                 </form>

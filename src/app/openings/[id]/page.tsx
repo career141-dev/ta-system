@@ -12,6 +12,7 @@ import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
+import { MatchingStatus } from "@/components/MatchingStatus";
 
 /**
  * Modelled on Recruiter's project overview: a short state line, a few suggested
@@ -143,6 +144,10 @@ export default async function OverviewPage({
       {/* The facts only; the form is edited on the Job description page, beside
           the JD it is read from (testing, 21 Sep). */}
       {o.requirements && <JobDetailsSummary openingId={id} requirements={o.requirements} />}
+
+      <div className="-mt-3 mb-8">
+        <MatchingStatus openingId={id} />
+      </div>
 
       {suggested.length > 0 && (
         <section className="mb-9">

@@ -6,6 +6,7 @@ import { Fragment, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { addJobPost, deleteJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
+import { SubmitButton } from "./Submit";
 import { RAIL_TOP } from "@/lib/chrome";
 
 export interface SidebarPost {
@@ -234,10 +235,7 @@ export function ProjectSidebar({
               <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                 {addingJob && (
                   <form
-                    action={async (formData) => {
-                      setAddingJob(false);
-                      await addJobPost(formData);
-                    }}
+                    action={addJobPost}
                     className="my-1.5 flex flex-col gap-1.5 rounded-lg border border-rule bg-surface p-2 shadow-sm"
                   >
                     <input type="hidden" name="openingId" value={openingId} />
@@ -262,12 +260,13 @@ export function ProjectSidebar({
                       >
                         Cancel
                       </button>
-                      <button
-                        type="submit"
-                        className="rounded bg-brand px-2.5 py-0.5 text-[11.5px] font-medium text-white transition-opacity hover:opacity-90"
+                      <SubmitButton
+                        pendingLabel="Adding…"
+                        onDone={() => setAddingJob(false)}
+                        className="rounded bg-brand px-2.5 py-0.5 text-[11.5px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
                       >
                         Add
-                      </button>
+                      </SubmitButton>
                     </div>
                   </form>
                 )}
@@ -320,11 +319,11 @@ export function ProjectSidebar({
                       >
                         <input type="hidden" name="openingId" value={openingId} />
                         <input type="hidden" name="postId" value={p.id} />
-                        <button
-                          type="submit"
+                        <SubmitButton
+                          tone="dark"
                           title={`Delete post "${p.title}"`}
                           aria-label={`Delete post "${p.title}"`}
-                          className="rounded p-0.5 text-danger transition-colors hover:bg-danger-soft hover:opacity-80"
+                          className="rounded p-0.5 text-danger transition-colors hover:bg-danger-soft hover:opacity-80 disabled:opacity-60"
                         >
                           <svg
                             width={13}
@@ -340,7 +339,7 @@ export function ProjectSidebar({
                               strokeLinejoin="round"
                             />
                           </svg>
-                        </button>
+                        </SubmitButton>
                       </form>
                     </div>
                   </div>

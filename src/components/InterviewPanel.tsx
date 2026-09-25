@@ -1,6 +1,7 @@
 import type { Interview } from "@/data/types";
 import { timeAt } from "@/lib/format";
 import { confirmInterview, setInterviewOutcome, setInterviewResult } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 
 /**
  * The interview, and the two facts about it that somebody has to record.
@@ -56,9 +57,12 @@ export function InterviewPanel({
           {!interview.confirmedAt ? (
             <form action={confirmInterview} className="flex flex-wrap items-center gap-2">
               {ids}
-              <button className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface">
+              <SubmitButton
+                pendingLabel="Saving…"
+                className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+              >
                 They have confirmed they are attending
-              </button>
+              </SubmitButton>
               <span className="text-[11.5px] text-warn">
                 Unconfirmed — this is what the reminder is chasing.
               </span>
@@ -79,9 +83,13 @@ export function InterviewPanel({
                 <form key={o} action={setInterviewOutcome}>
                   {ids}
                   <input type="hidden" name="outcome" value={o} />
-                  <button className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px]">
+                  <SubmitButton
+                    tone="dark"
+                    pendingLabel="Saving…"
+                    className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] disabled:opacity-60"
+                  >
                     {o === "attended" ? "They attended" : o === "no_show" ? "No show" : "Cancelled"}
-                  </button>
+                  </SubmitButton>
                 </form>
               ))}
             </div>
@@ -135,9 +143,13 @@ export function InterviewPanel({
                 placeholder="Their words, as close as you can get them — this is what decides the next set."
                 className="w-full rounded border border-rule bg-paper px-2.5 py-2 text-[12.5px]"
               />
-              <button className="justify-self-start rounded border border-rule-strong px-3.5 py-1.5 text-[12.5px] font-medium">
+              <SubmitButton
+                tone="dark"
+                pendingLabel="Saving…"
+                className="justify-self-start rounded border border-rule-strong px-3.5 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
+              >
                 Save the feedback
-              </button>
+              </SubmitButton>
             </form>
           )}
         </div>

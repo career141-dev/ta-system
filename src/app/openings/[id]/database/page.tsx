@@ -10,6 +10,7 @@ import { primeStore } from "@/data/prime";
 import { requireSourcingSeat } from "../sourcingGate";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
+import { MatchingStatus } from "@/components/MatchingStatus";
 
 export default async function DatabasePage({
   params,
@@ -86,6 +87,9 @@ export default async function DatabasePage({
         ]}
       />
 
+      <div className="mb-6">
+        <MatchingStatus openingId={id} full={everyone.length === 0} />
+      </div>
 
       <div className="flex gap-9">
         <FilterPanel

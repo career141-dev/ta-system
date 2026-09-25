@@ -8,6 +8,7 @@ import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { JobDetailsPanel } from "@/components/JobDetailsPanel";
 import { allows } from "@/lib/auth";
+import { MatchingStatus } from "@/components/MatchingStatus";
 import { detailsFollowNotes } from "@/lib/jdChat";
 import type { JdChatTurn } from "@/components/JdChat";
 
@@ -108,6 +109,7 @@ export default async function JdPage({
           canAmend={canWrite}
           chat={chat}
         />
+        <MatchingStatus openingId={id} />
         {details}
       </>
     );

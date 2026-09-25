@@ -314,9 +314,12 @@ export function RowActions({
             >
               Cancel
             </button>
-            <button className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white">
+            <SubmitButton
+              pendingLabel="Finding cover…"
+              className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+            >
               Find cover
-            </button>
+            </SubmitButton>
           </div>
         </form>
       )}

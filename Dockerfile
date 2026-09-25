@@ -34,6 +34,14 @@ RUN npm run build
 FROM node:22-bookworm-slim AS run
 WORKDIR /app
 ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PORT=3100 HOSTNAME=0.0.0.0
+# LibreOffice (Writer only, no GUI), so a Word CV opens in the app's PDF viewer
+# instead of only downloading (src/lib/wordToPdf.ts, 25 Sep). Carlito and
+# Caladea are metric twins of Calibri and Cambria, so a CV written in those
+# keeps its line and page breaks. Installed before the app is copied in, so
+# this layer is the same in every release and the server downloads it once.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends libreoffice-writer-nogui fonts-liberation fonts-dejavu-core fonts-crosextra-carlito fonts-crosextra-caladea \
+  && rm -rf /var/lib/apt/lists/*
 # The standalone server, its traced dependencies, and the static files.
 COPY --from=build /app/.next/standalone ./
 COPY --from=build /app/.next/static ./.next/static

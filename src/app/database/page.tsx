@@ -5,6 +5,7 @@ import { SearchBox } from "@/components/db/SearchBox";
 import { Suggestion } from "@/components/db/Suggestion";
 import { Illustration } from "@/components/db/Illustration";
 import { deleteSearch } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
@@ -138,9 +139,9 @@ export default async function DatabaseHome({
                     </Link>
                     <form action={deleteSearch}>
                       <input type="hidden" name="searchId" value={s.id} />
-                      <button title="Delete" className="rounded px-1.5 py-0.5 text-[12px] text-ink-faint hover:bg-tag hover:text-ink">
+                      <SubmitButton tone="dark" title="Delete" className="rounded px-1.5 py-0.5 text-[12px] text-ink-faint hover:bg-tag hover:text-ink disabled:opacity-60">
                         ✕
-                      </button>
+                      </SubmitButton>
                     </form>
                   </li>
                 ))}

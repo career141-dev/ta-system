@@ -5,6 +5,7 @@ import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { mailIntakeStatus, type MailIntakeStatus } from "@/data/convex/backend";
 import { setMailboxEnabled, syncMailboxNow } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import { AutoRefresh } from "./AutoRefresh";
 
 /**
@@ -142,22 +143,28 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                       <form action={setMailboxEnabled}>
                         <input type="hidden" name="mailbox" value={m.mailbox} />
                         {!m.enabled && <input type="hidden" name="enabled" value="on" />}
-                        <button
+                        <SubmitButton
+                          tone={m.enabled ? "dark" : "light"}
+                          pendingLabel={m.enabled ? "Stopping…" : "Starting…"}
                           className={
                             m.enabled
-                              ? "rounded-full border border-rule px-3.5 py-1.5 text-[12px] font-medium text-ink hover:border-ink-faint"
-                              : "rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white hover:opacity-90"
+                              ? "rounded-full border border-rule px-3.5 py-1.5 text-[12px] font-medium text-ink hover:border-ink-faint disabled:opacity-60"
+                              : "rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-60"
                           }
                         >
                           {m.enabled ? "Stop reading" : "Start reading"}
-                        </button>
+                        </SubmitButton>
                       </form>
                       {m.enabled && (
                         <form action={syncMailboxNow}>
                           <input type="hidden" name="mailbox" value={m.mailbox} />
-                          <button className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand hover:bg-brand-soft">
+                          <SubmitButton
+                            tone="dark"
+                            pendingLabel="Syncing…"
+                            className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand hover:bg-brand-soft disabled:opacity-60"
+                          >
                             Sync now
-                          </button>
+                          </SubmitButton>
                         </form>
                       )}
                     </div>

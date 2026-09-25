@@ -83,6 +83,7 @@ import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
 import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
+import { WORKING_STAGES, workingStageKey } from "@/lib/workingStage";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -2017,16 +2018,27 @@ const rawRepo = {
     });
   },
 
-  /** The TA's working stage on an opening (100% / Follow-up / Add-on). Defaults to "100%". */
+  /**
+   * Someone's working stage on an opening (100% / Follow-up / Add-on).
+   * Defaults to "100%". A person on the team keeps it on their assignment;
+   * anyone else — an admin, director or lead working the job without being
+   * on its team — keeps it in the settings, so changing it never puts them
+   * on the team (25 Sep: it was shown to TAs only).
+   */
   workingStage(openingId: Id, userId: Id): WorkingStage {
     const a = this.assignmentFor(openingId, userId);
-    return a?.workingStage ?? "100%";
+    if (a) return a.workingStage ?? "100%";
+    const held = this.setting(workingStageKey(openingId, userId), "");
+    return (WORKING_STAGES as string[]).includes(held) ? (held as WorkingStage) : "100%";
   },
 
-  /** Update the TA's working stage for this opening. Only someone on the job has one. */
+  /** Update someone's working stage for this opening. */
   setWorkingStage(openingId: Id, userId: Id, stage: WorkingStage) {
     const team = this.assignments(openingId);
-    if (!team.some((x) => x.userId === userId)) return;
+    if (!team.some((x) => x.userId === userId)) {
+      this.setSetting(workingStageKey(openingId, userId), stage);
+      return;
+    }
     mutate((db) => {
       // An older opening's team is derived on read (assignments above) until
       // one row is stored, and then only stored rows count — so store the

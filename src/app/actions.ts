@@ -48,6 +48,7 @@ import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { findDatabaseMatches } from "@/lib/dbMatch";
+import { clearMatching, markMatching, matchFailureText } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
@@ -884,6 +885,7 @@ export async function approveJd(formData: FormData) {
     } catch (e) {
       await fail(backendMessage(e, "The JD could not be approved."));
     }
+    markMatching(openingId);
     // Research and the first Suggestions round wait for the approved JD, so
     // they search with the words the TA agreed (25 Sep). Before that they ran
     // on the first draft, the moment the opening was created.
@@ -955,21 +957,30 @@ export async function amendJd(formData: FormData) {
   if (!o.assignedTaIds.includes(user.id) && user.role === "ta") return;
   const jd = String(formData.get("jdMarkdown") ?? "");
   if (isConvex()) {
+    let r: { reextracting: boolean } | null = null;
     if (jd.trim()) {
-      let r: { reextracting: boolean } | null = null;
       try {
         r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
       } catch (e) {
         await fail(backendMessage(e, "The JD could not be saved."));
       }
-      if (r?.reextracting) after(() => rematchWhenRequirementsSettle(openingId, user.id));
+      if (r?.reextracting) {
+        markMatching(openingId);
+        after(() => rematchWhenRequirementsSettle(openingId, user.id));
+      }
     }
     await afterBackendWrite(openingId);
-    redirect(`/openings/${openingId}/jd`);
+    // It used to come back with no word at all, so a save looked like nothing
+    // had happened (25 Sep).
+    redirect(amendedJd(openingId, r?.reextracting ? "JD saved. The job details are read again, then matching re-runs." : "JD saved."));
   }
   if (jd.trim()) repo.updateJd(openingId, jd);
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}/jd`);
+  redirect(amendedJd(openingId, "JD saved."));
+}
+
+function amendedJd(openingId: string, message: string) {
+  return `/openings/${openingId}/jd?msg=${encodeURIComponent(message)}&tone=ok`;
 }
 
 // ─── The JD chat (25 Sep) ────────────────────────────────────────────────────
@@ -988,7 +999,10 @@ async function saveChatJd(openingId: string, userId: string, jd: string): Promis
       jdMarkdown: jd,
       ...(o?.jdStatus === "approved" ? { detailsFromJd: true } : {}),
     });
-    if (r?.reextracting) after(() => rematchWhenRequirementsSettle(openingId, userId));
+    if (r?.reextracting) {
+      markMatching(openingId);
+      after(() => rematchWhenRequirementsSettle(openingId, userId));
+    }
     return;
   }
   repo.updateJd(openingId, jd);
@@ -1099,18 +1113,26 @@ function salaryNoteOf(o: import("@/data/types").Opening): string {
  * approval), then run matching against the result. Bounded: if extraction is
  * slow or failed, matching still runs on what the opening has.
  */
-async function rematchWhenRequirementsSettle(openingId: string, actorId: string) {
-  for (let i = 0; i < 30; i++) {
-    const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
-    const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
-    if (status !== "extracting") break;
-    await new Promise((res) => setTimeout(res, 3_000));
+async function rematchWhenRequirementsSettle(openingId: string, actorId: string, trigger: "jd_approved" | "manual" = "jd_approved") {
+  // Marked before the response by the caller (lib/matchingNow); cleared here
+  // however the run ends, so the page never says "running" for a dead run.
+  let failure: string | null = null;
+  try {
+    for (let i = 0; i < 30; i++) {
+      const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
+      const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
+      if (status !== "extracting") break;
+      await new Promise((res) => setTimeout(res, 3_000));
+    }
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+    await primeStore({ openingId });
+    const r = await findDatabaseMatches(openingId, trigger).catch((e: unknown) => ({ ok: false as const, reason: (e as Error).message }));
+    if (!r.ok) failure = matchFailureText(r.reason);
+  } finally {
+    clearMatching(openingId, failure);
+    revalidatePath(`/openings/${openingId}`, "layout");
   }
-  const { resetStore } = await import("@/data/prime");
-  resetStore();
-  await primeStore({ openingId });
-  await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
-  revalidatePath(`/openings/${openingId}`, "layout");
 }
 
 // Split the same way the backend does, so a comma inside brackets
@@ -1162,6 +1184,7 @@ export async function saveJobDetails(formData: FormData) {
   } catch (e) {
     await fail(backendMessage(e, "The job details could not be saved."));
   }
+  markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
   await done("Job details saved. Matching is re-running against them.");
@@ -1177,6 +1200,7 @@ export async function reextractJobDetails(formData: FormData) {
   } catch (e) {
     await fail(backendMessage(e, "Could not start the extraction."));
   }
+  markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
   await done("Reading the JD again — the details update in a few seconds.");
@@ -1833,6 +1857,122 @@ export async function removeApplication(formData: FormData) {
     revalidatePath(`/openings/${openingId}`, "layout");
   }
   await done("Removed from the opening — they are under Dropped out, and can be brought back from there.");
+}
+
+/**
+ * Several at once, from the list's tick boxes (components/BulkSelect, 25 Sep).
+ *
+ * Each one runs the single action exactly as its own button would — its
+ * permission check, its lock, its message — and the answers are counted
+ * instead of shown one by one. ponytail: sequential, each re-reading the
+ * store; fine for a page of 25, batch it if people tick hundreds.
+ */
+async function eachInline(ids: string[], run: (id: string) => Promise<unknown>) {
+  const results: ActionResult[] = [];
+  for (const id of ids) results.push(await inline(() => run(id)));
+  const ok = results.filter((r) => r.tone === "ok").length;
+  const problems = [...new Set(results.filter((r) => r.tone !== "ok").map((r) => r.message))];
+  return { ok, notOk: results.length - ok, problems };
+}
+
+function bulkSummary(r: { ok: number; notOk: number; problems: string[] }, did: string) {
+  const first = `${r.ok} ${did}.`;
+  if (!r.notOk) return first;
+  return `${first} ${r.notOk} not: ${r.problems.slice(0, 2).join(" ")}${r.problems.length > 2 ? " …" : ""}`;
+}
+
+function one(formData: FormData, fields: Record<string, string>) {
+  const fd = new FormData();
+  for (const [k, v] of formData.entries()) if (typeof v === "string") fd.append(k, v);
+  for (const [k, v] of Object.entries(fields)) fd.set(k, v);
+  return fd;
+}
+
+export async function removeApplications(formData: FormData) {
+  const ids = formData.getAll("appId").map(String);
+  if (ids.length === 0) await fail("Tick at least one candidate.");
+  const r = await eachInline(ids, (appId) => removeApplication(one(formData, { appId })));
+  await (r.ok ? (r.notOk ? note : done) : fail)(
+    bulkSummary(r, "removed from the opening — they are under Dropped out"),
+  );
+}
+
+export async function addManyToOpening(formData: FormData) {
+  const ids = formData.getAll("candidateId").map(String);
+  if (ids.length === 0) await fail("Tick at least one candidate.");
+  if (!String(formData.get("openingId") ?? "")) await fail("Pick an opening.");
+  const r = await eachInline(ids, (candidateId) => addToOpening(one(formData, { candidateId })));
+  await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, "added to the opening in TA Follow-up"));
+}
+
+export async function deleteOpenings(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  // The same rule as the one-at-a-time delete: a desk decision.
+  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
+  const ids = formData.getAll("openingId").map(String);
+  if (ids.length === 0) await fail("Tick at least one opening.");
+  let deleted = 0;
+  const problems: string[] = [];
+  for (const openingId of ids) {
+    const title = repo.opening(openingId)?.title ?? "An opening";
+    const allowed = can(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
+    if (!allowed.ok) {
+      problems.push(`${title}: ${allowed.message}`);
+      continue;
+    }
+    if (isConvex()) {
+      try {
+        await convexMutation("ta/openingDelete:start", { actorId: user.id, openingId });
+        deleted++;
+      } catch (e) {
+        problems.push(`${title}: ${backendMessage(e, "could not be deleted")}`);
+      }
+    } else {
+      const r = repo.deleteOpening(openingId);
+      if (r.ok) deleted++;
+      else problems.push(`${title}: ${r.message}`);
+    }
+  }
+  if (isConvex()) {
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  }
+  revalidatePath("/", "layout");
+  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} deleted. Their candidates are still in the database.`;
+  await (deleted ? (problems.length ? note : done) : fail)(problems.length ? `${said} Not deleted — ${problems.join("; ")}` : said);
+}
+
+export async function deleteClients(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "client.manage");
+  const ids = formData.getAll("clientId").map(String);
+  if (ids.length === 0) await fail("Tick at least one client.");
+  const actor = isConvex() ? await (await import("@/lib/convexServer")).convexActorForEmail(user.email) : null;
+  let deleted = 0;
+  const kept: string[] = [];
+  for (const clientId of ids) {
+    const name = repo.client(clientId)?.name ?? "A client";
+    let res: { ok: boolean; openings?: number };
+    try {
+      res = isConvex()
+        ? await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", { actorId: actor?._id, clientId })
+        : repo.deleteClient(clientId);
+    } catch (e) {
+      kept.push(`${name} (${backendMessage(e, "could not be deleted")})`);
+      continue;
+    }
+    if (res.ok) deleted++;
+    else kept.push(`${name} (${res.openings ?? "has"} ${res.openings === 1 ? "opening" : "openings"})`);
+  }
+  if (isConvex()) markTablesStale();
+  revalidatePath("/clients");
+  revalidatePath("/openings/new");
+  // A client with work filed under it is kept, as the single delete does.
+  const said = `${deleted} ${deleted === 1 ? "client" : "clients"} deleted.`;
+  await (deleted ? (kept.length ? note : done) : fail)(
+    kept.length ? `${said} Kept — they still have openings: ${kept.join(", ")}.` : said,
+  );
 }
 
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
@@ -3293,16 +3433,21 @@ export async function setAutoShortlistScore(formData: FormData) {
 
 // ─── Database matches (13 September) ────────────────────────────────────────
 
+/**
+ * Run database matching again, from the matching banner (MatchingStatus).
+ *
+ * After the response, like every other run: it takes up to a minute and a
+ * half, and the banner shows it running and then what it added (25 Sep).
+ */
 export async function findMatchesNow(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const r = await findDatabaseMatches(openingId, "manual");
+  if (repo.opening(openingId)?.jdStatus !== "approved") await fail(matchFailureText("jd_not_approved"));
+  markMatching(openingId);
+  after(() => rematchWhenRequirementsSettle(openingId, user.id, "manual"));
   revalidatePath(`/openings/${openingId}`, "layout");
-  if (!r.ok || !r.run) {
-    await fail(r.reason === "jd_not_approved" ? "Approve the JD first — matching reads it." : `Matching did not run (${r.reason}).`);
-  }
-  await back(`${r.run!.added} added from ${r.run!.considered} nearest; ${r.run!.afterRules} passed the rules.`);
+  await done("Matching started — new matches appear here when it finishes.");
 }
 
 /** The desk's standard questions — which are asked, and how they read. */
@@ -4064,6 +4209,10 @@ export async function reextractJobDetailsInline(_: ActionResult | null, formData
 
 export async function saveBriefNotesInline(_: ActionResult | null, formData: FormData) {
   return inline(() => saveBriefNotes(formData));
+}
+
+export async function updateCandidateContactInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => updateCandidateContact(formData));
 }
 
 export async function addToOpeningInline(_: ActionResult | null, formData: FormData) {

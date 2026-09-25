@@ -4,6 +4,7 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, reviewList, reviewRequirements, type ReviewDecision } from "@/lib/review";
 import { recordReview } from "../actions";
+import { SubmitButton } from "@/components/Submit";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
@@ -124,16 +125,17 @@ export default async function ReviewJob({
                   <input type="hidden" name="job" value={job} />
                   <input type="hidden" name="candidateId" value={id} />
                   {CHOICES.map((ch) => (
-                    <button
+                    <SubmitButton
                       key={ch.value}
                       name="decision"
                       value={ch.value}
-                      className={`rounded-lg border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors ${
+                      tone={mine?.decision === ch.value && ch.value === "shortlist" ? "light" : "dark"}
+                      className={`rounded-lg border px-3.5 py-1.5 text-[12.5px] font-medium transition-colors disabled:opacity-60 ${
                         mine?.decision === ch.value ? ch.on : "border-rule bg-surface text-ink hover:bg-paper"
                       }`}
                     >
                       {ch.label}
-                    </button>
+                    </SubmitButton>
                   ))}
                 </form>
               </div>
@@ -145,14 +147,15 @@ export default async function ReviewJob({
                   <input type="hidden" name="decision" value={mine.decision} />
                   <span className="mr-1 text-ink-faint">Main reason:</span>
                   {REASONS.map((r) => (
-                    <button
+                    <SubmitButton
                       key={r}
                       name="note"
                       value={r}
-                      className={`rounded-full border px-2.5 py-0.5 ${mine.note === r ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:bg-paper"}`}
+                      tone={mine.note === r ? "light" : "dark"}
+                      className={`rounded-full border px-2.5 py-0.5 disabled:opacity-60 ${mine.note === r ? "border-ink bg-ink text-paper" : "border-rule text-ink-soft hover:bg-paper"}`}
                     >
                       {r}
-                    </button>
+                    </SubmitButton>
                   ))}
                 </form>
               )}
