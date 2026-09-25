@@ -9,6 +9,7 @@ import {
   saveFollowUpAnswers,
 } from "@/app/actions";
 import { SubmitButton } from "@/components/SubmitButton";
+import { SubmitButton as Submit } from "@/components/Submit";
 
 /**
  * One candidate's follow-up day, beside everything else said to them.
@@ -152,12 +153,13 @@ export function FollowUpPanel({
                 </option>
               ))}
             </select>
-            <button
+            <Submit
+              pendingLabel="Recording…"
               disabled={next.at > Date.now()}
               className="rounded bg-ink px-3 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-40"
             >
               {next.at > Date.now() ? `Due ${timeAt(next.at)}` : "Record as sent"}
-            </button>
+            </Submit>
           </form>
         </>
       )}
@@ -177,7 +179,13 @@ export function FollowUpPanel({
               <option value="whatsapp">WhatsApp</option>
               <option value="email">Email</option>
             </select>
-            <button className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium">Log the reply</button>
+            <Submit
+              tone="dark"
+              pendingLabel="Logging…"
+              className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
+            >
+              Log the reply
+            </Submit>
           </div>
         </form>
       )}

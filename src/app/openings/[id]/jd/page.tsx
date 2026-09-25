@@ -8,6 +8,7 @@ import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { JobDetailsPanel } from "@/components/JobDetailsPanel";
 import { allows } from "@/lib/auth";
+import { MatchingStatus } from "@/components/MatchingStatus";
 
 export default async function JdPage({
   params,
@@ -85,6 +86,7 @@ export default async function JdPage({
           approvedAt={o.jdApprovedAt ? dateAt(o.jdApprovedAt) : null}
           canAmend={canWrite}
         />
+        <MatchingStatus openingId={id} />
         {details}
       </>
     );

@@ -1,5 +1,6 @@
 "use client";
 
+import { RowCheck } from "./BulkSelect";
 import { useEffect, useState } from "react";
 import { CLIENTS_TOGGLE_ALL } from "./ClientsToolbar";
 import Link from "next/link";
@@ -67,6 +68,7 @@ export function ClientCard({
   allTime,
   value,
   openings,
+  selectForm,
 }: {
   clientId: string;
   name: string;
@@ -80,6 +82,8 @@ export function ClientCard({
   allTime: number;
   value: string;
   openings: ClientOpening[];
+  /** The page's bulk bar (components/BulkSelect), for those who may delete. */
+  selectForm?: string;
 }) {
   // Starts on the server default so the first paint matches the markup, then
   // takes whatever this browser last chose.
@@ -133,6 +137,11 @@ export function ClientCard({
           aria-label={`${open ? "Collapse" : "Expand"} ${name}`}
           className="absolute inset-0 z-0"
         />
+        {selectForm && (
+          <span className="pointer-events-auto relative z-10">
+            <RowCheck form={selectForm} name="clientId" value={clientId} label={name} />
+          </span>
+        )}
         <div className="pointer-events-none relative min-w-0 flex-1">
           <h2 className="text-[17px] font-semibold tracking-tight">{name}</h2>
           <p className="mt-1 text-[12.5px] text-ink-soft">

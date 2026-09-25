@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useEffect, useState, type FormEvent } from "react";
+import { startTransition, useActionState, useEffect, useRef, useState, type FormEvent } from "react";
 import { useFormStatus } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { ActionResult } from "@/lib/inlineResult";
@@ -17,6 +17,9 @@ import type { ActionResult } from "@/lib/inlineResult";
  * Inside a plain `<form action>` it reads `useFormStatus`. A form driven by
  * `useInline` passes `busy` (this button's action is running) and `locked`
  * (any of the form's actions is) instead.
+ *
+ * A form that closes itself once saved passes `onDone` rather than closing in
+ * onSubmit — closing there unmounted the button, and its spinner, at once.
  */
 export function SubmitButton({
   children,
@@ -28,8 +31,11 @@ export function SubmitButton({
   formNoValidate,
   name,
   value,
+  title,
+  "aria-label": ariaLabel,
   busy,
   locked,
+  onDone,
 }: {
   children: React.ReactNode;
   pendingLabel?: string;
@@ -42,17 +48,30 @@ export function SubmitButton({
   /** Which button was pressed, for a form with two (see `submitted`). */
   name?: string;
   value?: string;
+  title?: string;
+  "aria-label"?: string;
   busy?: boolean;
   locked?: boolean;
+  /** Called when this button's action has finished. */
+  onDone?: () => void;
 }) {
   const status = useFormStatus();
-  const mine = busy ?? (status.pending && (!formAction || status.action === formAction));
+  // Several buttons in one form, told apart by name/value: only the pressed one spins.
+  const pressed = !name || value === undefined || status.data?.get(name) === value;
+  const mine = busy ?? (status.pending && (!formAction || status.action === formAction) && pressed);
   const lock = locked ?? status.pending;
+  const ran = useRef(false);
+  useEffect(() => {
+    if (ran.current && !mine) onDone?.();
+    ran.current = mine;
+  }, [mine, onDone]);
   return (
     <button
       type="submit"
       name={name}
       value={value}
+      title={title}
+      aria-label={ariaLabel}
       formAction={formAction}
       formNoValidate={formNoValidate}
       disabled={disabled || lock}

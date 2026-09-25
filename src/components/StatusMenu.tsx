@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { setOpeningStatus } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 
 export type OpeningStatus = "open" | "on_hold" | "closed" | "filled";
 
@@ -90,26 +91,27 @@ export function StatusMenu({
       {open && (
         <form
           action={setOpeningStatus}
-          onSubmit={() => setOpen(false)}
           className="absolute left-0 top-full z-50 mt-1.5 w-[184px] rounded-xl border border-rule bg-surface py-1 shadow-lg"
         >
           <input type="hidden" name="openingId" value={openingId} />
           {ORDER.map((s) => (
-            <button
+            <SubmitButton
               key={s}
               name="status"
               value={s}
+              tone="dark"
               disabled={s === status}
-              className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[12.5px] transition-colors ${
+              onDone={() => setOpen(false)}
+              className={`flex w-full items-center justify-start! gap-2.5 px-3 py-2 text-left text-[12.5px] transition-colors ${
                 s === status
                   ? "cursor-default font-semibold text-ink"
-                  : "text-ink-soft hover:bg-paper hover:text-ink"
+                  : "text-ink-soft hover:bg-paper hover:text-ink disabled:opacity-60"
               }`}
             >
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[s]}`} />
               {STATUS_LABEL[s]}
               {s === status && <span className="ml-auto text-[11px] text-ink-faint">now</span>}
-            </button>
+            </SubmitButton>
           ))}
         </form>
       )}

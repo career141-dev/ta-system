@@ -12,6 +12,7 @@ import {
   rejectIntake,
 } from "@/app/actions";
 import { primeStore } from "@/data/prime";
+import { SubmitButton } from "@/components/Submit";
 
 /**
  * One CV at the door.
@@ -206,9 +207,13 @@ export default async function IntakeItemPage({
             {!settled && (
               <form action={recheckIntake}>
                 <input type="hidden" name="itemId" value={item.id} />
-                <button className="text-[12px] text-ink-soft underline underline-offset-2 hover:text-ink">
+                <SubmitButton
+                  tone="dark"
+                  pendingLabel="Checking…"
+                  className="text-[12px] text-ink-soft underline underline-offset-2 hover:text-ink disabled:opacity-60"
+                >
                   Check again
-                </button>
+                </SubmitButton>
               </form>
             )}
           </div>
@@ -283,12 +288,13 @@ export default async function IntakeItemPage({
 
             {!settled && (
               <div>
-                <button
-                  type="submit"
-                  className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium"
+                <SubmitButton
+                  tone="dark"
+                  pendingLabel="Saving…"
+                  className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
                 >
                   Save corrections
-                </button>
+                </SubmitButton>
               </div>
             )}
           </form>
@@ -326,13 +332,13 @@ export default async function IntakeItemPage({
                     <span>Yes, this is a different person to {match.candidateName}.</span>
                   </label>
                 )}
-                <button
-                  type="submit"
+                <SubmitButton
+                  pendingLabel="Admitting…"
                   disabled={!p?.fullName}
                   className="rounded bg-ink px-3 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-40"
                 >
                   Admit
-                </button>
+                </SubmitButton>
                 {!p?.fullName && (
                   <span className="text-[11px] text-ink-faint">Fill the name in first.</span>
                 )}
@@ -351,13 +357,14 @@ export default async function IntakeItemPage({
               <form action={mergeIntake} className="mt-3">
                 <input type="hidden" name="itemId" value={item.id} />
                 <input type="hidden" name="candidateId" value={match?.candidateId ?? ""} />
-                <button
-                  type="submit"
+                <SubmitButton
+                  tone="dark"
+                  pendingLabel="Merging…"
                   disabled={!match?.candidateId}
                   className="w-full rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-40"
                 >
                   Merge
-                </button>
+                </SubmitButton>
                 {!match?.candidateId && (
                   <span className="mt-1 block text-[11px] text-ink-faint">Nothing to merge into.</span>
                 )}
@@ -377,12 +384,13 @@ export default async function IntakeItemPage({
                   placeholder="Why"
                   className="w-full rounded border border-rule bg-paper px-2 py-1.5 text-[12.5px]"
                 />
-                <button
-                  type="submit"
-                  className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium"
+                <SubmitButton
+                  tone="dark"
+                  pendingLabel="Rejecting…"
+                  className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
                 >
                   Reject
-                </button>
+                </SubmitButton>
               </form>
             </Card>
           </div>

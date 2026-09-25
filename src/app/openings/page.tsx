@@ -14,6 +14,8 @@ import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { BulkBar, BulkConfirm, RowCheck } from "@/components/BulkSelect";
+import { deleteOpenings } from "@/app/actions";
 
 const PAGE_SIZE = 20;
 
@@ -201,6 +203,16 @@ export default async function OpeningsPage({
         </div>
       ) : (
         <div className="flex flex-col gap-4">
+          {/* Deleting is a desk decision, so only desk-wide people tick. */}
+          {isDeskWide(user) && (
+            <BulkBar form="bulk-openings" noun={["opening", "openings"]} action={deleteOpenings}>
+              <BulkConfirm
+                label="Delete"
+                noun={["opening", "openings"]}
+                warning="Each goes with its posts, pipeline, calls, messages and offers. Their candidates stay in the database. This cannot be undone."
+              />
+            </BulkBar>
+          )}
           {list.map((o) => {
             const client = clients.find((c) => c.id === o.clientId);
             const c = stageCounts(o.id);
@@ -237,6 +249,12 @@ export default async function OpeningsPage({
                   className="absolute inset-0 z-0 rounded-xl"
                 />
                 <div className="pointer-events-none relative flex flex-wrap items-start justify-between gap-5">
+                  <div className="flex min-w-0 items-start gap-3.5">
+                  {isDeskWide(user) && (
+                    <span className="pointer-events-auto relative z-10 pt-1">
+                      <RowCheck form="bulk-openings" name="openingId" value={o.id} label={o.title} />
+                    </span>
+                  )}
                   <div className="min-w-0">
                     <p className="text-[12px] text-ink-faint">{client?.name}</p>
                     <div className="mt-0.5 flex flex-wrap items-center gap-2.5">
@@ -266,6 +284,7 @@ export default async function OpeningsPage({
                         <span className="rounded bg-warn-soft px-1.5 py-px text-warn">Unassigned</span>
                       )}
                     </p>
+                  </div>
                   </div>
 
                   <div className="flex shrink-0 items-start gap-8 text-right">

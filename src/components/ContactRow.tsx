@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { updateCandidateContact } from "@/app/actions";
+import { useEffect, useState } from "react";
+import { updateCandidateContact, updateCandidateContactInline } from "@/app/actions";
 import { Confirm } from "./Confirm";
+import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 
 /**
  * A candidate's email or phone, corrected where it is read — finding 13.
@@ -27,6 +28,12 @@ export function ContactRow({
   locked: boolean;
 }) {
   const [editing, setEditing] = useState(false);
+  // Saved beside the field, and the editor closes only once it has saved — it
+  // used to close on the press, before anyone knew whether it had (25 Sep).
+  const save = useInline(updateCandidateContactInline);
+  useEffect(() => {
+    if (save.result?.ok) setEditing(false);
+  }, [save.result]);
 
   const icon =
     kind === "email" ? (
@@ -45,11 +52,7 @@ export function ContactRow({
 
   if (editing) {
     return (
-      <form
-        action={updateCandidateContact}
-        onSubmit={() => setEditing(false)}
-        className="flex flex-wrap items-center gap-2"
-      >
+      <form onSubmit={(e) => save.run(submitted(e).formData)} className="flex flex-wrap items-center gap-2">
         <input type="hidden" name="candidateId" value={candidateId} />
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="field" value={kind} />
@@ -62,16 +65,23 @@ export function ContactRow({
           placeholder={kind === "email" ? "name@company.com" : "+94 77 000 0000"}
           className="w-[230px] rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-brand"
         />
-        <button className="rounded-full bg-brand px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90">
+        <SubmitButton
+          busy={save.pending}
+          locked={save.pending}
+          pendingLabel="Saving…"
+          className="rounded-full bg-brand px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+        >
           Save
-        </button>
+        </SubmitButton>
         <button
           type="button"
+          disabled={save.pending}
           onClick={() => setEditing(false)}
           className="px-1 text-[12px] text-ink-soft hover:text-ink"
         >
           Cancel
         </button>
+        {save.result && !save.result.ok && <ActionNote result={save.result} className="basis-full" />}
       </form>
     );
   }
@@ -81,9 +91,17 @@ export function ContactRow({
   return (
     <span className="group inline-flex items-center gap-2">
       <span className="w-4 shrink-0 text-ink-faint">{icon}</span>
-      <span className={missing ? "text-[13px] text-ink-faint" : "font-medium"}>
-        {value ?? (kind === "email" ? "No email on file" : "No number on file")}
-      </span>
+      {missing ? (
+        <span className="text-[13px] text-ink-faint">{kind === "email" ? "No email on file" : "No number on file"}</span>
+      ) : (
+        <a
+          href={kind === "email" ? `mailto:${value}` : `tel:${value.replace(/[^\d+]/g, "")}`}
+          className="font-medium hover:text-accent hover:underline"
+        >
+          {value}
+        </a>
+      )}
+      {save.result?.ok && <span className="text-[11.5px] text-brand">✓ Saved</span>}
 
       {!locked && (
         <span className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">

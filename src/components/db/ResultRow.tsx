@@ -1,6 +1,7 @@
 "use client";
 
-import { externalUrl } from "@/lib/url";
+import { ContactLinks } from "@/components/ContactLinks";
+import { RowCheck } from "@/components/BulkSelect";
 import { packageLine } from "@/lib/format";
 import { useState } from "react";
 import Link from "next/link";
@@ -60,6 +61,7 @@ export function ResultRow({
   defaultOpeningId,
   backHref,
   candidateHref,
+  selectForm,
 }: {
   candidate: Candidate;
   /** The same fit score the lists use. Only present when the search is tied
@@ -75,6 +77,8 @@ export function ResultRow({
   /** The search results URL to return to from the candidate profile. */
   backHref?: string;
   candidateHref?: string;
+  /** The results' bulk bar (components/BulkSelect). */
+  selectForm?: string;
 }) {
   const [allRoles, setAllRoles] = useState(false);
   const [allSkills, setAllSkills] = useState(false);
@@ -96,6 +100,11 @@ export function ResultRow({
   return (
     <article className="border-b border-rule px-6 py-5 last:border-b-0">
       <div className="flex gap-4">
+        {selectForm && (
+          <span className="pt-3.5">
+            <RowCheck form={selectForm} name="candidateId" value={c.id} label={c.fullName} />
+          </span>
+        )}
         <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[#c9a227] text-[14px] font-semibold text-white">
           {initials}
         </span>
@@ -224,17 +233,13 @@ export function ResultRow({
                 {addedTo.length ? "Add to another opening" : "Add to an opening"}
               </button>
             )}
-            {c.linkedinUrl && (
-              <a
-                href={externalUrl(c.linkedinUrl) ?? undefined}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-              >
-                Profile
-              </a>
-            )}
-            <span className="tabular text-[11.5px] text-ink-faint">{c.phone}</span>
+            <ContactLinks
+              phone={c.phone}
+              email={c.email}
+              linkedinUrl={c.linkedinUrl}
+              cvHref={c.cvFileName ? `/api/cv/${c.id}` : null}
+              className="ml-1"
+            />
           </div>
         </div>
       </div>

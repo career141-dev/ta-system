@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useFormStatus } from "react-dom";
+import { Spinner } from "./Submit";
 
 /**
  * The one way anything destructive is confirmed — finding 22.
@@ -35,9 +37,12 @@ export function Confirm({
 }) {
   const [armed, setArmed] = useState(false);
   const box = useRef<HTMLSpanElement | null>(null);
+  // While the delete runs the question stays, with the button busy — it used
+  // to look unpressed until the page came back (25 Sep).
+  const { pending } = useFormStatus();
 
   useEffect(() => {
-    if (!armed) return;
+    if (!armed || pending) return;
     const away = (e: MouseEvent) => {
       if (box.current && !box.current.contains(e.target as Node)) setArmed(false);
     };
@@ -50,7 +55,7 @@ export function Confirm({
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", key);
     };
-  }, [armed]);
+  }, [armed, pending]);
 
   if (disabled) {
     return (
@@ -87,12 +92,16 @@ export function Confirm({
       <span className="text-[12px] leading-snug text-ink">{question}</span>
       <button
         type="submit"
-        className="rounded-full bg-danger px-3 py-1 text-[12px] font-medium text-white transition-opacity hover:opacity-90"
+        disabled={pending}
+        aria-busy={pending}
+        className="inline-flex items-center gap-1.5 rounded-full bg-danger px-3 py-1 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-70"
       >
-        {confirmLabel}
+        {pending && <Spinner />}
+        {pending ? "Working…" : confirmLabel}
       </button>
       <button
         type="button"
+        disabled={pending}
         onClick={() => setArmed(false)}
         className="px-1 text-[12px] text-ink-soft transition-colors hover:text-ink"
       >
