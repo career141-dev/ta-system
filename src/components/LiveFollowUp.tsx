@@ -1,6 +1,7 @@
 import { convexQuery } from "@/lib/convexServer";
 import { timeAt } from "@/lib/format";
 import { stopFollowUpNow } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 import { FollowUpActions } from "./FollowUpActions";
 import { SendToDirectorReview } from "./SendToDirectorReview";
 
@@ -163,7 +164,9 @@ export async function LiveFollowUp({
               <form action={stopFollowUpNow}>
                 <input type="hidden" name="appId" value={applicationId} />
                 <input type="hidden" name="openingId" value={openingId} />
-                <button className="text-[12.5px] text-ink-faint hover:text-ink">Stop follow-up</button>
+                <SubmitButton tone="dark" pendingLabel="Stopping…" className="text-[12.5px] text-ink-faint hover:text-ink disabled:opacity-60">
+                  Stop follow-up
+                </SubmitButton>
               </form>
             )}
           </div>

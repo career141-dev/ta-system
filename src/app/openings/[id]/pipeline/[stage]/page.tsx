@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { allows } from "@/lib/auth";
 import { AskQuestion } from "@/components/AskQuestion";
 import { SubmitButton } from "@/components/SubmitButton";
+import { SubmitButton as Submit } from "@/components/Submit";
 import { setOpeningAutoFollowUp, setOpeningQuestions } from "@/app/actions";
 import { repo, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
@@ -87,9 +88,13 @@ export default async function StagePage({
                 <form action={setOpeningAutoFollowUp}>
                   <input type="hidden" name="openingId" value={id} />
                   <input type="hidden" name="enabled" value={opening.autoFollowUp ? "off" : "on"} />
-                  <button className="rounded-full border border-rule px-3 py-1 text-[11.5px] font-medium hover:bg-tag">
+                  <Submit
+                    tone="dark"
+                    pendingLabel={opening.autoFollowUp ? "Turning off…" : "Turning on…"}
+                    className="rounded-full border border-rule px-3 py-1 text-[11.5px] font-medium hover:bg-tag disabled:opacity-60"
+                  >
                     {opening.autoFollowUp ? "Turn off" : "Turn on"}
-                  </button>
+                  </Submit>
                 </form>
               )}
             </div>

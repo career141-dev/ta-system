@@ -5,6 +5,7 @@ import { channelStates, liveIntakeEnabled } from "@/lib/ingest";
 import { PageHead, Card, Empty } from "@/components/ui";
 import { inHours } from "@/lib/format";
 import { dropIntake } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import type { IntakeItem, IntakeStatus } from "@/data/types";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
@@ -359,12 +360,12 @@ export default async function IntakePage({
               />
             </label>
             <div>
-              <button
-                type="submit"
-                className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface"
+              <SubmitButton
+                pendingLabel="Reading…"
+                className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
               >
                 Read it
-              </button>
+              </SubmitButton>
             </div>
           </form>
         </Card>

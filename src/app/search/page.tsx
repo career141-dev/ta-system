@@ -6,6 +6,7 @@ import { storeMode } from "@/data/mode";
 import { convexQuery } from "@/lib/convexServer";
 import { Pager } from "@/components/Pager";
 import { pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { BulkBar, DownloadCvsButton, RowCheck } from "@/components/BulkSelect";
 
 const PAGE_SIZE = 20;
 
@@ -57,17 +58,23 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
             <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
               {candidates.length === 0 ? <p className="px-6 py-8 text-center text-[12.5px] text-ink-faint">None</p> : (
                 <div className="divide-y divide-rule">
+                  <div className="px-4 pt-3">
+                    <BulkBar form="bulk-search" noun={["candidate", "candidates"]}>
+                      <DownloadCvsButton field="candidateId" />
+                    </BulkBar>
+                  </div>
                   {/* Somebody on no opening has no candidate page to open, so
                       they go to their database record rather than a dead link. */}
                   {candidates.map(({ candidate: c, application: a }) => (
-                    <Link
-                      key={c.id}
-                      href={`/candidates/${c.id}`}
-                      className="block px-6 py-3.5 hover:bg-paper/60"
-                    >
-                      <p className="text-[13.5px] font-medium">{c.fullName}</p>
-                      <p className="text-[11.5px] text-ink-faint">{c.currentTitle} at {c.currentEmployer}{a ? ` · in ${repo.opening(a.openingId)?.title} for ${clients.find((x) => x.id === repo.opening(a.openingId)?.clientId)?.name}` : ""}</p>
-                    </Link>
+                    <div key={c.id} className="flex items-start gap-3 px-6 py-3.5 hover:bg-paper/60">
+                      <span className="pt-0.5">
+                        <RowCheck form="bulk-search" name="candidateId" value={c.id} label={c.fullName} />
+                      </span>
+                      <Link href={`/candidates/${c.id}`} className="block min-w-0 flex-1">
+                        <p className="text-[13.5px] font-medium">{c.fullName}</p>
+                        <p className="text-[11.5px] text-ink-faint">{c.currentTitle} at {c.currentEmployer}{a ? ` · in ${repo.opening(a.openingId)?.title} for ${clients.find((x) => x.id === repo.opening(a.openingId)?.clientId)?.name}` : ""}</p>
+                      </Link>
+                    </div>
                   ))}
                 </div>
               )}

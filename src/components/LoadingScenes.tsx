@@ -39,6 +39,14 @@ export const DATABASE_STEPS: LoadingStep[] = [
   { after: 14, title: "Ranking the closest people", detail: "Scoring each CV against what you asked for, best first.", scene: "rank" },
 ];
 
+/** Database matching for an opening, which runs in the background (MatchingStatus). */
+export const MATCHING_STEPS: LoadingStep[] = [
+  { after: 0, title: "Reading the job details", detail: "The skills, years, level and location agreed for this job.", scene: "read" },
+  { after: 5, title: "Searching every CV on file", detail: "Looking by meaning and by job title across the whole database.", scene: "database" },
+  { after: 20, title: "Scoring each person against the job", detail: "Setting aside anyone this client turned down or who is already on it.", scene: "check" },
+  { after: 45, title: "Adding the best matches", detail: "They appear in the list below as soon as they are saved.", scene: "rank" },
+];
+
 export const REPORT_STEPS: LoadingStep[] = [
   { after: 0, title: "Reading your question", detail: "Working out which records, filters and grouping you are actually asking for.", scene: "read" },
   { after: 4, title: "Building the report", detail: "Checking every field against what the records actually hold, then running it.", scene: "check" },
@@ -59,6 +67,7 @@ export function LoadingProgress({
   heading,
   note,
   bare = false,
+  since,
 }: {
   steps: LoadingStep[];
   heading: string;
@@ -66,13 +75,17 @@ export function LoadingProgress({
   note?: string;
   /** Inside something that already has a border. */
   bare?: boolean;
+  /** When the work started, for a run that began before this page was drawn. */
+  since?: number;
 }) {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
-    const started = Date.now();
-    const t = setInterval(() => setSeconds(Math.floor((Date.now() - started) / 1000)), 1000);
+    const started = since ?? Date.now();
+    const tick = () => setSeconds(Math.max(0, Math.floor((Date.now() - started) / 1000)));
+    tick();
+    const t = setInterval(tick, 1000);
     return () => clearInterval(t);
-  }, []);
+  }, [since]);
   const current = steps.reduce((at, s, i) => (seconds >= s.after ? i : at), 0);
   const step = steps[current];
 

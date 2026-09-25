@@ -10,6 +10,7 @@ import {
 } from "@/lib/voice";
 import { timeAt } from "@/lib/format";
 import { finishCall, recordCallAnswer, recordConsent, startCall } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 
 /**
  * The screening call, on the candidate.
@@ -97,9 +98,12 @@ export function ScreeningPanel({
               })}
             </select>
           </label>
-          <button className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface">
+          <SubmitButton
+            pendingLabel="Starting…"
+            className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+          >
             Start
-          </button>
+          </SubmitButton>
         </form>
 
         <ul className="mt-3 grid gap-1">
@@ -165,17 +169,24 @@ export function ScreeningPanel({
             {hidden}
             <input type="hidden" name="callId" value={live.id} />
             <input type="hidden" name="decision" value="granted" />
-            <button className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface">
+            <SubmitButton
+              pendingLabel="Recording…"
+              className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+            >
               They agreed
-            </button>
+            </SubmitButton>
           </form>
           <form action={recordConsent}>
             {hidden}
             <input type="hidden" name="callId" value={live.id} />
             <input type="hidden" name="decision" value="declined" />
-            <button className="rounded border border-rule-strong px-3.5 py-1.5 text-[12.5px] font-medium">
+            <SubmitButton
+              tone="dark"
+              pendingLabel="Recording…"
+              className="rounded border border-rule-strong px-3.5 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
+            >
               They said no
-            </button>
+            </SubmitButton>
           </form>
           <span className="self-center text-[11.5px] text-ink-faint">
             Saying no ends the call and keeps nothing.
@@ -211,9 +222,12 @@ export function ScreeningPanel({
                 className={input}
               />
             </label>
-            <button className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface">
+            <SubmitButton
+              pendingLabel="Saving…"
+              className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+            >
               Next
-            </button>
+            </SubmitButton>
           </form>
           <p className="mt-1.5 text-[11.5px] text-ink-faint">
             Type it as they said it. Anything that cannot be read as a figure is refused rather
@@ -231,9 +245,12 @@ export function ScreeningPanel({
             {hidden}
             <input type="hidden" name="callId" value={live.id} />
             <input type="hidden" name="status" value="completed" />
-            <button className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface">
+            <SubmitButton
+              pendingLabel="Closing…"
+              className="rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60"
+            >
               {writePolicy(live.mode).candidateFields ? "Close and write it down" : "Close the dry run"}
-            </button>
+            </SubmitButton>
           </form>
         </div>
       )}
@@ -259,9 +276,13 @@ export function ScreeningPanel({
           placeholder="No answer, wrong number, call back later…"
           className={`${input} w-[260px]`}
         />
-        <button className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px]">
+        <SubmitButton
+          tone="dark"
+          pendingLabel="Saving…"
+          className="rounded border border-rule-strong px-3 py-1.5 text-[12.5px] disabled:opacity-60"
+        >
           Did not get through
-        </button>
+        </SubmitButton>
       </form>
     </div>
   );

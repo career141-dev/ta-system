@@ -8,8 +8,12 @@ import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { Pager } from "./Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { BulkBar, BulkConfirm, DownloadCvsButton } from "./BulkSelect";
+import { SubmitButton } from "./Submit";
+import { confirmShortlist, removeApplications } from "@/app/actions";
 
 const PAGE_SIZE = 25;
+const BULK_FORM = "bulk-applications";
 
 export type ListFilters = {
   q?: string;
@@ -114,6 +118,7 @@ export function CandidateList({
   const seat = seatFor(currentUser, assignment?.role ?? null);
   const canDecideDirector = allows(currentUser, "decide.director", { openingId, assignment });
   const canDecideClient = allows(currentUser, "decide.client", { openingId, assignment });
+  const canManage = allows(currentUser, "opening.manage", { openingId, assignment });
   const apps = visibleToSeat(given, seat);
 
   const active = Object.entries(filters).filter(([k, v]) => v && k !== "page" && k !== "msg");
@@ -288,6 +293,28 @@ export function CandidateList({
         </div>
       ) : (
         <div className="divide-y divide-rule">
+          <div className="px-8 pt-4">
+            <BulkBar form={BULK_FORM} noun={["candidate", "candidates"]} action={canManage ? removeApplications : undefined}>
+              <input type="hidden" name="openingId" value={openingId} />
+              {claimable && (
+                <SubmitButton
+                  formAction={confirmShortlist}
+                  pendingLabel="Shortlisting…"
+                  className="rounded-full bg-brand px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  Shortlist selected
+                </SubmitButton>
+              )}
+              <DownloadCvsButton field="appId" />
+              {canManage && (
+                <BulkConfirm
+                  label="Remove from this job"
+                  noun={["candidate", "candidates"]}
+                  warning="They move to Dropped out and can be brought back from there."
+                />
+              )}
+            </BulkBar>
+          </div>
           {onPage.map((a) => {
             const c = repo.candidate(a.candidateId);
             if (!c) return null;
@@ -308,6 +335,7 @@ export function CandidateList({
                 rank={scored.has(a.id) ? rankOf(a.id) : undefined}
                 canDecideDirector={canDecideDirector}
                 canDecideClient={canDecideClient}
+                selectForm={BULK_FORM}
               />
             );
           })}

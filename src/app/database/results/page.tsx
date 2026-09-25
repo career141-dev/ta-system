@@ -13,7 +13,9 @@ import { ResultRow, type RowApp } from "@/components/db/ResultRow";
 import { DbCandidateDrawer } from "@/components/db/DbCandidateDrawer";
 import { DATABASE_STEPS, LoadingProgress } from "@/components/LoadingScenes";
 import { booleanScore, booleanTerms } from "@/lib/booleanScore";
-import { saveSearch } from "@/app/actions";
+import { addManyToOpening, saveSearch } from "@/app/actions";
+import { BulkBar, DownloadCvsButton } from "@/components/BulkSelect";
+import { SubmitButton } from "@/components/Submit";
 import { BELOW_BAR, RELEVANT_SIMILARITY, embedQuery, isMeaningBased, nearestCandidates } from "@/lib/embed";
 import { refreshCandidateVectors } from "@/lib/dbMatch";
 import { primeStore } from "@/data/prime";
@@ -620,9 +622,13 @@ async function ResultsView({
                 placeholder="Name this search to keep it"
                 className="min-w-0 flex-1 rounded-lg border border-rule bg-surface px-3 py-1.5 text-[12px] outline-none transition-colors placeholder:text-ink-faint/70 focus:border-brand"
               />
-              <button className="shrink-0 rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-soft">
+              <SubmitButton
+                tone="dark"
+                pendingLabel="Saving…"
+                className="shrink-0 rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand-soft disabled:opacity-60"
+              >
                 Save
-              </button>
+              </SubmitButton>
             </form>
           </div>
         </aside>
@@ -708,6 +714,26 @@ async function ResultsView({
               </div>
             )}
 
+            {shown.length > 0 && (
+              <div className="border-b border-rule px-6 pt-3">
+                <BulkBar form="bulk-results" noun={["candidate", "candidates"]}>
+                  {target?.status === "open" && (
+                    <>
+                      <input type="hidden" name="openingId" value={target.id} />
+                      <SubmitButton
+                        formAction={addManyToOpening}
+                        pendingLabel="Adding…"
+                        className="rounded-full bg-brand px-3.5 py-1.5 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+                      >
+                        Add to {target.title}
+                      </SubmitButton>
+                    </>
+                  )}
+                  <DownloadCvsButton field="candidateId" />
+                </BulkBar>
+              </div>
+            )}
+
             {shown.length === 0 ? (
               <div className="px-8 py-16 text-center">
                 <p className="text-[14px] font-medium">{mode === "meaning" ? "Nobody relevant found" : "Nobody matches all of that"}</p>
@@ -758,6 +784,7 @@ async function ResultsView({
                     defaultOpeningId={forOpening}
                     backHref={backToResults}
                     candidateHref={candidateHref(r.candidate.id)}
+                    selectForm="bulk-results"
                   />
                   {i === 1 && suggestions.length > 0 && (
                     <div className="border-b border-rule bg-paper/60 px-6 py-5">

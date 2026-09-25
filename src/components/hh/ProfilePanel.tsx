@@ -4,6 +4,7 @@ import { externalUrl } from "@/lib/url";
 import { useState } from "react";
 import { keepSuggestion, dismissSuggestion } from "@/app/actions";
 import { SubmitButton } from "@/components/SubmitButton";
+import { SubmitButton as Submit } from "@/components/Submit";
 import { BUTTON } from "@/components/buttonStyles";
 import type { ProfileSuggestion } from "@/data/types";
 
@@ -100,9 +101,13 @@ export function ProfilePanel({
               <form action={dismissSuggestion}>
                 <input type="hidden" name="openingId" value={openingId} />
                 <input type="hidden" name="suggestionId" value={s.id} />
-                <button className="rounded-full border border-rule px-4 py-2 text-[13px] text-ink-soft transition-colors hover:bg-tag hover:text-ink">
+                <Submit
+                  tone="dark"
+                  pendingLabel="Rejecting…"
+                  className="rounded-full border border-rule px-4 py-2 text-[13px] text-ink-soft transition-colors hover:bg-tag hover:text-ink disabled:opacity-60"
+                >
                   Reject
-                </button>
+                </Submit>
               </form>
             </div>
           </section>

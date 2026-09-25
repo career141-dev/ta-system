@@ -10,6 +10,7 @@ import { seatFor } from "@/lib/visibility";
 import { STAGE_LABEL } from "@/data/types";
 import { timeAt } from "@/lib/format";
 import { claimCandidate } from "@/app/actions";
+import { SubmitButton } from "@/components/Submit";
 import { RowActions } from "@/components/RowActions";
 import { CallLogForm } from "@/components/CallLogForm";
 import { ContactRow } from "@/components/ContactRow";
@@ -265,7 +266,12 @@ export default async function CandidateDrawer({
                 <form action={claimCandidate}>
                   <input type="hidden" name="appId" value={app.id} />
                   <input type="hidden" name="openingId" value={id} />
-                  <button className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90">Save to pipeline</button>
+                  <SubmitButton
+                    pendingLabel="Saving…"
+                    className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-70"
+                  >
+                    Save to pipeline
+                  </SubmitButton>
                 </form>
               ) : (
                 <RowActions
