@@ -80,8 +80,8 @@ export default async function EodPage({
   const historyPage = pageFrom(sp, matchingHistory.length, PAGE_SIZE);
   const history = slicePage(matchingHistory, historyPage, PAGE_SIZE);
 
-  // Determine the set number for today's submission
-  const nextSetNumber = openSet?.setNumber ?? (sets.length ? Math.max(...sets.map((s) => s.setNumber)) + 1 : 1);
+  // The set tonight's CVs went into — the same figure as the SETS column.
+  const nextSetNumber = latestSet?.setNumber ?? 1;
   const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
 
   return (

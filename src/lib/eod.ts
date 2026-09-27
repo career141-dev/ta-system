@@ -100,13 +100,17 @@ export function shortlistRows(
  * ADD-ONS and BACK-UP are theirs to state too. Until then these were counted
  * from the records, and SCOOP counted database picks, which the desk calls
  * TBR, not scoops.
+ *
+ * SCOOP is counted again from 27 Sep, but only scoops that reached the TA's
+ * own mailbox from the Director, a TA Lead or Ops (convex/mailIntake). Blank
+ * when there were none, and the TA adds WhatsApp ones on top.
  */
 export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow {
   // Today in Colombo, whatever the server's clock is set to.
   const since = colomboDayStart(date.getTime());
-  const todays = repo
-    .applications(openingId)
-    .filter((a) => a.ownerTaId === ta.id && (a.shortlistedAt ?? 0) >= since);
+  const apps = repo.applications(openingId);
+  const todays = apps.filter((a) => a.ownerTaId === ta.id && (a.shortlistedAt ?? 0) >= since);
+  const mailedScoops = apps.filter((a) => a.ownerTaId === ta.id && (a.scoopReceivedAt ?? 0) >= since).length;
   // The set this TA's latest CV went into — sets fill to five and move on.
   const mySets = setsForOpening(openingId, ta.id);
   const latest = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
@@ -120,7 +124,7 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
     lEffort: null,
     sets: latest,
     da: todays.filter((a) => a.sourcingChannel === "DA").length,
-    scoop: null,
+    scoop: mailedScoops || null,
     l: null,
     post: null,
     addOns: null,

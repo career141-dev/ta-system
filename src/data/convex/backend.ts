@@ -664,6 +664,9 @@ const unconfiguredDetail = (fileName: string | null) =>
 export interface MailIntakeStatus {
   mailboxes: {
     mailbox: string;
+    /** ta: a TA's own mailbox, read only for scoops (27 Sep). */
+    kind: "shared" | "ta";
+    taName: string | null;
     enabled: boolean;
     synced: boolean;
     backfillFrom: number;

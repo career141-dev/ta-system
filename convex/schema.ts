@@ -1022,6 +1022,11 @@ export default defineSchema({
     // them on their end-of-day L-sheet; the owner is unchanged.
     scoopByUserId: v.optional(v.string()),
     scoopAt: v.optional(v.number()),
+    // A scoop sent TO the owner: the Director, a TA Lead or Ops mailed the CV
+    // to the TA's own mailbox (mailIntake, 27 Sep). Counted on the owner's
+    // end-of-day SCOOP. Not the `SCOOP` channel, which is a database pick.
+    scoopFromUserId: v.optional(v.id("users")),
+    scoopReceivedAt: v.optional(v.number()),
     /** Cover for someone who declined, and the decline that started the search. */
     backupForApplicationId: v.optional(v.id("applications")),
     offerDeclinedAt: v.optional(v.number()),
@@ -1832,7 +1837,8 @@ export default defineSchema({
       v.literal("reverse_match_ready"),
       v.literal("candidate_replied"),
       v.literal("candidate_unresponsive"),
-      v.literal("opening_assigned")
+      v.literal("opening_assigned"),
+      v.literal("scoop_received")
     ),
     title: v.string(),
     body: v.string(),
@@ -2663,6 +2669,10 @@ export default defineSchema({
   mailIntakeMailboxes: defineTable({
     mailbox: v.string(),
     enabled: v.boolean(),
+    /** shared (absent): linkedin@, cv@, job@. ta: a TA's own mailbox, read only
+     *  for scoops the Director, a TA Lead or Ops send them (27 Sep). */
+    kind: v.optional(v.union(v.literal("shared"), v.literal("ta"))),
+    taUserId: v.optional(v.id("users")),
     /** Graph's delta token URL; absent until the first full sync completes. */
     deltaLink: v.optional(v.string()),
     /** A page to resume from when a sync stopped part-way through. */
@@ -2709,6 +2719,9 @@ export default defineSchema({
     cvUploadIds: v.array(v.id("cvUploads")),
     note: v.optional(v.string()),
     error: v.optional(v.string()),
+    /** A scoop in a TA's mailbox: whose pipeline it goes on, and who sent it. */
+    scoopTaId: v.optional(v.id("users")),
+    scoopFromUserId: v.optional(v.id("users")),
     processedAt: v.optional(v.number()),
     createdAt: v.number(),
   })

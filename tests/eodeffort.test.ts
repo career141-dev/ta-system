@@ -10,6 +10,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-effort-"));
 process.chdir(tmp);
 const { repo } = await import("@/data/store");
 const { effortRow, effortFromForm } = await import("@/lib/eod");
+const { dayTotal, setsCell } = await import("@/lib/eod-format");
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -63,6 +64,41 @@ repo.reset();
     [30, 3, 12, 1, null, 2],
   );
   eq("SETS and DA keep the records' figures when not typed over", [sent.sets, sent.da], [2, 2]);
+
+  // The day's total beside the set (the desk, 27 Sep): DA 2 + scoop 3 + L 12 + post 1 + back-up 2.
+  eq("the day's total adds DA, scoop, L, post, add-ons and back-up", dayTotal(sent), 20);
+  eq("L EFFORT and SETS are not in the total", dayTotal({ lEffort: 30, sets: 2 }), 0);
+  eq("typed figures count as they are typed", dayTotal({ da: "1", scoop: "", l: "4" }), 5);
+  eq("the SETS cell carries the set and the total", setsCell(2, 20), "2 · 20 CVs");
+  eq("one CV is one CV", setsCell(1, 1), "1 · 1 CV");
+  eq("no set yet: just the total", setsCell(null, 3), "3 CVs");
+}
+
+console.log("\neffortRow: SCOOP counts scoops mailed to the TA today");
+repo.reset();
+{
+  const o = [...repo.openings()].sort((x, y) => repo.applications(y.id).length - repo.applications(x.id).length)[0];
+  const ta = repo.users().find((u) => u.role === "ta")!;
+  const other = repo.users().find((u) => u.role === "ta" && u.id !== ta.id);
+  const director = repo.users().find((u) => u.role === "director")!;
+  const [a1, a2, a3, a4] = repo.applications(o.id).slice(0, 4).map((a) => a.id);
+  const raw = JSON.parse(fs.readFileSync(dbFile(), "utf8"));
+  for (const a of raw.applications) {
+    if (a.openingId !== o.id) continue;
+    a.scoopFrom = null; a.scoopReceivedAt = null;
+    if (a.id === a1 || a.id === a2) { a.ownerTaId = ta.id; a.scoopFrom = director.id; a.scoopReceivedAt = Date.now(); }
+    // Yesterday's scoop is yesterday's.
+    if (a.id === a3) { a.ownerTaId = ta.id; a.scoopFrom = director.id; a.scoopReceivedAt = Date.now() - 36 * 3_600_000; }
+    // Another TA's scoop is theirs.
+    if (a.id === a4 && other) { a.ownerTaId = other.id; a.scoopFrom = director.id; a.scoopReceivedAt = Date.now(); }
+  }
+  fs.writeFileSync(dbFile(), JSON.stringify(raw));
+  eq("today's mailed scoops, this TA's only", effortRow(o.id, ta).scoop, 2);
+
+  const none = JSON.parse(fs.readFileSync(dbFile(), "utf8"));
+  for (const a of none.applications) if (a.openingId === o.id) a.scoopReceivedAt = null;
+  fs.writeFileSync(dbFile(), JSON.stringify(none));
+  eq("none mailed: SCOOP stays blank for the TA to type", effortRow(o.id, ta).scoop, null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

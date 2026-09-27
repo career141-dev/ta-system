@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { EFFORT_NUMBERS, MANUAL_EFFORT, OUTREACH_TYPES, effortColumns, type EffortKey, type EffortRow } from "@/lib/eod-format";
+import { EFFORT_NUMBERS, MANUAL_EFFORT, OUTREACH_TYPES, dayTotal, effortColumns, setsCell, type EffortKey, type EffortRow } from "@/lib/eod-format";
 import { setWorkingStage } from "@/app/actions";
 
 /**
@@ -194,6 +194,12 @@ export function EffortSheet({
                     aria-label={c.label}
                     className={cell}
                   />
+                  {k === "sets" && (
+                    // The day's total beside the set, as the email sends it (27 Sep).
+                    <span className="block whitespace-nowrap px-1 text-[11px] tabular-nums text-ink-soft">
+                      {setsCell(null, dayTotal(draft.values))}
+                    </span>
+                  )}
                 </td>
               );
             })}
@@ -227,7 +233,9 @@ export function EffortSheet({
       </table>
       <p className="mt-2 flex flex-wrap items-center gap-3 text-[11.5px] text-ink-faint">
         <span>
-          SETS and DA come from the records; type the other figures in. A shaded cell differs from the records. The fourth
+          SETS and DA come from the records, and SCOOP counts CVs mailed to you by the Director, a TA Lead or Ops — add any
+          that came on WhatsApp. Type the other figures in. Under SETS is the day&rsquo;s total: DA, scoop, L, post, add-ons
+          and back-up. A shaded cell differs from the records. The fourth
           column is {draft.kind === "Follow-up" ? "CVs brought in" : "profiles approached"} for a {draft.kind} day. Targets are
           optional — green once met.
         </span>

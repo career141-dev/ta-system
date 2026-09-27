@@ -86,10 +86,29 @@ export const EFFORT_COLUMNS = [
 ] as const;
 
 /**
- * The columns the TA types in; the records give only SETS and DA (the desk,
+ * The columns the TA types in; the records give SETS and DA (the desk,
  * 25 Sep — see effortRow in lib/eod). These start blank in the composer.
+ * SCOOP left this list on 27 Sep: scoops mailed to the TA are counted, and
+ * the TA adds the ones that came on WhatsApp.
  */
-export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["lEffort", "scoop", "l", "post", "addOns", "backUp"]);
+export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["lEffort", "l", "post", "addOns", "backUp"]);
+
+/** The CVs the day brought, whatever the route — summed beside the set (the desk, 27 Sep). */
+export const DAY_TOTAL_KEYS: EffortKey[] = ["da", "scoop", "l", "post", "addOns", "backUp"];
+
+/** DA + SCOOP + L + POST + ADD-ONS + BACK-UP; a blank counts as none. */
+export function dayTotal(values: Partial<Record<EffortKey, number | string | null | undefined>>): number {
+  return DAY_TOTAL_KEYS.reduce((sum, k) => {
+    const n = Number(values[k] ?? 0);
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+}
+
+/** The SETS cell as sent: "2 · 14 CVs" — the set, then the day's total. */
+export function setsCell(sets: number | string | null | undefined, total: number): string {
+  const cvs = `${total} ${total === 1 ? "CV" : "CVs"}`;
+  return sets === null || sets === undefined || sets === "" ? cvs : `${sets} · ${cvs}`;
+}
 
 /** Who is copied on every end-of-day email, until it is changed on the People page. */
 export const DEFAULT_EOD_CC = "azim@career141.com";
@@ -135,6 +154,7 @@ export function eodEmailHtml(input: {
   const effort = table(
     cols.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
     `<tr>${cols.map((c) => {
+      if (c.key === "sets") return `<td ${td.replace('"', '"white-space:nowrap;')}>${esc(setsCell(input.effort.sets, dayTotal(input.effort)))}</td>`;
       const v = input.effort[c.key as keyof EffortRow];
       return `<td ${td}>${v === null || v === undefined || typeof v === "object" ? "" : esc(v)}</td>`;
     }).join("")}</tr>` +

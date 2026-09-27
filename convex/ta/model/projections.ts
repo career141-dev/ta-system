@@ -98,6 +98,8 @@ export function projectApplication(a: Doc<"applications">) {
     addedOnAt: a.addedOnAt ?? null,
     scoopBy: a.scoopByUserId ?? null,
     scoopAt: a.scoopAt ?? null,
+    scoopFrom: (a.scoopFromUserId ?? null) as string | null,
+    scoopReceivedAt: a.scoopReceivedAt ?? null,
     rating: x.rating ?? null,
     notes: x.taNotes ?? [],
     statusA: a.statusA ?? null,
