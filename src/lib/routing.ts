@@ -413,7 +413,7 @@ export interface ReplyTarget {
  * applied to whichever round was most recent.
  */
 export function matchReviewReply(
-  msg: { from: string; subject: string; inReplyTo?: string | null },
+  msg: { from: string; subject: string; inReplyTo?: string | null; receivedAt?: number | string | null },
   ctx: {
     rounds: ReviewRound[];
     openings: Opening[];
@@ -424,7 +424,15 @@ export function matchReviewReply(
   const from = addressOf(msg.from);
   if (!from) return { round: null, note: "No readable sender address.", near: [] };
 
-  const open = ctx.rounds.filter((r) => r.status !== "returned");
+  const openAll = ctx.rounds.filter((r) => r.status !== "returned");
+  if (openAll.length === 0)
+    return { round: null, note: "Nothing is out waiting on a reply.", near: [] };
+
+  const receivedTs = msg.receivedAt ? new Date(msg.receivedAt).getTime() : null;
+  const open = receivedTs
+    ? openAll.filter((r) => r.sentAt <= receivedTs + 60_000)
+    : openAll;
+
   if (open.length === 0)
     return { round: null, note: "Nothing is out waiting on a reply.", near: [] };
 

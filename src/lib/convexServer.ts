@@ -78,7 +78,10 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
     // that signal into a connection error, and `next build` failed on the first
     // page that loads data. Control-flow errors pass through untouched.
     if (e && typeof e === "object" && "digest" in e) throw e;
-    throw new ConvexCallError(`Could not reach the Convex backend (${(e as Error).message}).`);
+    const err = e as Error;
+    const cause = (err as unknown as { cause?: Error | string })?.cause;
+    const causeMsg = cause ? ` - ${typeof cause === "object" && "message" in cause ? cause.message : cause}` : "";
+    throw new ConvexCallError(`Could not reach the Convex backend (${err.message}${causeMsg}).`);
   }
 
   const raw = await res.text().catch(() => "");
@@ -109,8 +112,8 @@ export async function convexQuery<T>(path: string, args: Record<string, unknown>
     try {
       return await call<T>("query", path, args);
     } catch (e) {
-      if (attempt >= 3 || !(e instanceof ConvexCallError) || !RETRYABLE.test(e.message)) throw e;
-      await new Promise((r) => setTimeout(r, 250 * attempt));
+      if (attempt >= 4 || !(e instanceof ConvexCallError) || !RETRYABLE.test(e.message)) throw e;
+      await new Promise((r) => setTimeout(r, Math.min(300 * Math.pow(2, attempt - 1), 2000)));
     }
   }
 }

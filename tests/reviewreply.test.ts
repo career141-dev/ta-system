@@ -81,5 +81,67 @@ console.log("\nthe carry does not cross a full stop");
 eq("Shortlist 1, 3 and 5. 2 and 4 are weak.", "YNYNY");
 eq("Reject 1. 2 and 3 are fine, take them.", "NYY--");
 
+console.log("\nordinals and select verbs");
+eq("3rd one only", "--Y--");
+eq("1st and 3rd", "Y-Y--");
+eq("Select 1 and 2", "YY---");
+eq("Selected 2", "-Y---");
+eq("Choose 4", "---Y-");
+eq("First and third are good", "Y-Y--");
+
+console.log("\nsingle candidate sets");
+const singleList = [{ applicationId: "a1", name: "Gajuurthi" }];
+const testSingle = (reply: string, want: string) => {
+  const d = readNumbers(reply, singleList);
+  const got = d.length ? (d[0].outcome === "shortlisted" ? "Y" : d[0].outcome === "rejected" ? "N" : "H") : "-";
+  const ok = got === want;
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} single: "${reply}" -> ${got}${ok ? "" : " want " + want}`);
+};
+testSingle("select this", "Y");
+testSingle("selected", "Y");
+testSingle("select", "Y");
+testSingle("proceed", "Y");
+testSingle("yes", "Y");
+testSingle("reject", "N");
+testSingle("not suitable", "N");
+
+console.log("\nextractReplyText header stripping");
+const { extractReplyText } = await import("@/lib/reviewReply");
+const raw1 = "select this\n\nOn Fri, Sep 25, 2026 at 10:07 AM Gajuurthi <gajuurthi@example.com> wrote:\n> Set 1 sent";
+const clean1 = extractReplyText(raw1);
+const ok1 = clean1 === "select this";
+ok1 ? pass++ : fail++;
+console.log(`${ok1 ? "  ok  " : "  FAIL"} extractReplyText 1: "${clean1}"`);
+
+const raw2 = "3rd one only --- 3rd one only On Thu, Sep 24, 2026 at 11:33 AM wrote:\nSome old text";
+const clean2 = extractReplyText(raw2);
+const ok2 = clean2 === "3rd one only";
+ok2 ? pass++ : fail++;
+console.log(`${ok2 ? "  ok  " : "  FAIL"} extractReplyText 2: "${clean2}"`);
+
+const rawHtml = `<html><head><meta http-equiv="Content-Type" content="text/html; charset=utf-8"></head><body><div dir="ltr">shortlist the 1st one</div><br><div class="gmail_quote_container"><div dir="ltr" class="gmail_attr">On Fri, Sep 25, 2026 at 2:16 PM Gajani Linathiranthan &lt;<a href="mailto:Gajani@career141.com">Gajani@career141.com</a>&gt; wrote:<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;"><table><tr><td>1</td><td>Shehan PW</td></tr><tr><td>2</td><td>MA RUZNY AHAMED</td></tr></table></blockquote></div></body></html>`;
+const cleanHtml = extractReplyText(rawHtml);
+const okHtml = cleanHtml === "shortlist the 1st one";
+okHtml ? pass++ : fail++;
+console.log(`${okHtml ? "  ok  " : "  FAIL"} extractReplyText HTML: "${cleanHtml}"`);
+
+console.log("\na number inside other words is not a pick (review of #56)");
+eq("1, 3", "Y-Y--");
+eq("busy with 2 interviews this week, will reply tomorrow", "-----");
+eq("I have 3 concerns about this set", "-----");
+
+console.log("\neveryone not picked is marked not selected — only when the whole reply was read");
+const { withUnpickedRejected } = await import("@/lib/reviewReply");
+const ids5 = ["a1", "a2", "a3", "a4", "a5"];
+const picked = withUnpickedRejected({ decisions: [{ applicationId: "a2", outcome: "shortlisted", note: null }], method: "numbers", unmatched: [] }, ids5);
+const okAll = picked.length === 5 && picked.filter((d) => d.outcome === "rejected").length === 4;
+okAll ? pass++ : fail++;
+console.log(`${okAll ? "  ok  " : "  FAIL"} one picked, four not selected`);
+const unsure = withUnpickedRejected({ decisions: [{ applicationId: "a2", outcome: "shortlisted", note: null }], method: "numbers", unmatched: ["what about the others?"] }, ids5);
+const okUnsure = unsure.length === 1;
+okUnsure ? pass++ : fail++;
+console.log(`${okUnsure ? "  ok  " : "  FAIL"} a clause it could not read: nobody else is marked`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);
