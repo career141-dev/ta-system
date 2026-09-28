@@ -32,7 +32,12 @@ export const fmt = (n: number) =>
 
 /** Two greens and a slate, so a second series reads as a comparison rather
  *  than as decoration. Semantic colour stays reserved for warnings. */
-export const SERIES = ["#165b42", "#4f9e7a", "#7d94a8", "#b8a06a"];
+export const SERIES = [
+  "var(--c141-series-1, #165b42)",
+  "var(--c141-series-2, #4f9e7a)",
+  "var(--c141-series-3, #7d94a8)",
+  "var(--c141-series-4, #b8a06a)",
+];
 
 export function points(rows: Row[], group: Column, metrics: Column[], order?: string[]): Point[] {
   const list = rows.map((r) => ({

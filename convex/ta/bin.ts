@@ -40,12 +40,24 @@ export const binOpening = internalMutation({
   args: { actorId: v.string(), openingId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
-    if (!MAY_DELETE_OPENINGS.includes(user.role)) {
-      throw new Error("Only an admin, TA manager, director or ops can delete an opening. Close it instead.");
-    }
     const jobId = ctx.db.normalizeId("jobs", args.openingId);
     const job = jobId ? await ctx.db.get(jobId) : null;
     if (!job || job.deletingAt) throw new Error("That opening no longer exists.");
+    // A lead or above may bin any opening; a TA, the openings they recruit on
+    // (owner, 28 Sep). The Bin keeps it restorable for seven days, which is
+    // what made this safe to hand to TAs. "Delete now" stays with the leads.
+    if (!MAY_DELETE_OPENINGS.includes(user.role)) {
+      // As the app reads a team (store.ts assignments): the stored rows, or on
+      // an older opening with none, its `assignedTaIds`.
+      const team = await ctx.db.query("jobAssignments").withIndex("by_jobId", (q) => q.eq("jobId", job._id)).collect();
+      const seat = team.find((a) => a.userId === user._id);
+      const recruits = team.length
+        ? !!seat && seat.isActive && (seat.assignmentRole === "primary_recruiter" || seat.assignmentRole === "supporting_recruiter")
+        : ((job.assignedTaIds ?? []) as string[]).includes(user._id as string);
+      if (!recruits) {
+        throw new Error("Only the recruiters on this opening, or a lead, director or admin, can delete it.");
+      }
+    }
     if (job.binnedAt) return { ok: true as const, title: job.title, purgeAt: purgeAt(job.binnedAt) };
 
     const now = Date.now();

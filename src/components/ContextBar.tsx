@@ -5,7 +5,7 @@ import { StatusMenu, type OpeningStatus } from "./StatusMenu";
 import { WorkingStageMenu } from "./WorkingStageMenu";
 import { OpeningMenu } from "./OpeningMenu";
 import { getCurrentUser } from "@/lib/session";
-import { allows, isDeskWide } from "@/lib/auth";
+import { allows } from "@/lib/auth";
 
 /**
  * The persistent identity band: client, position, the TAs on it. It stays put
@@ -74,7 +74,8 @@ export async function ContextBar({
         <span className="text-[12px] text-ink-soft">
           {tas.map((t) => t!.name.split(" ")[0]).join(", ")}
         </span>
-        {user && isDeskWide(user) && (
+        {/* A lead or above, or a recruiter on this opening — Delete only moves it to the Bin (28 Sep). */}
+        {user && allows(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null }) && (
           <OpeningMenu openingId={openingId} title={o.title} candidates={repo.applications(openingId).length} />
         )}
       </div>
