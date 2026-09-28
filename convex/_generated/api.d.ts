@@ -121,6 +121,7 @@ import type * as lib_outreachSafety from "../lib/outreachSafety.js";
 import type * as lib_permissions from "../lib/permissions.js";
 import type * as lib_postRouting from "../lib/postRouting.js";
 import type * as lib_qdrant from "../lib/qdrant.js";
+import type * as lib_samePerson from "../lib/samePerson.js";
 import type * as lib_screeningCall from "../lib/screeningCall.js";
 import type * as lib_validate from "../lib/validate.js";
 import type * as lib_vectorPayload from "../lib/vectorPayload.js";
@@ -311,6 +312,7 @@ declare const fullApi: ApiFromModules<{
   "lib/permissions": typeof lib_permissions;
   "lib/postRouting": typeof lib_postRouting;
   "lib/qdrant": typeof lib_qdrant;
+  "lib/samePerson": typeof lib_samePerson;
   "lib/screeningCall": typeof lib_screeningCall;
   "lib/validate": typeof lib_validate;
   "lib/vectorPayload": typeof lib_vectorPayload;

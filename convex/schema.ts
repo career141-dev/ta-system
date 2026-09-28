@@ -2346,6 +2346,18 @@ export default defineSchema({
     sourcingChannel: v.string(),
     outcome: v.string(),
     candidateId: v.optional(v.union(v.id("candidates"), v.null())),
+    // Who in the database this profile is, if anyone (lib/samePerson, 28 Sep).
+    // "same" rows are linked through candidateId as well; "possible" waits for
+    // a TA, who answers same or different.
+    cvMatch: v.optional(v.union(v.null(), v.object({
+      candidateId: v.id("candidates"),
+      fullName: v.string(),
+      strength: v.string(),
+      reasons: v.array(v.string()),
+      hasCv: v.boolean(),
+      decided: v.optional(v.string()),
+      checkedAt: v.number(),
+    }))),
     conversationLog: v.array(v.object({
       at: v.number(),
       channel: v.string(),

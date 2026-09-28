@@ -639,6 +639,8 @@ export interface LinkVaultEntry {
   sourcingChannel: SourcingChannel;
   outcome: LinkOutcome;
   candidateId: Id | null;
+  /** Who in the database this profile is, if anyone — see convex/lib/samePerson. */
+  cvMatch?: CvMatch | null;
   conversationLog: { at: number; channel: string; note: string; by: Id }[];
   createdAt: number;
   /** Present when the row came from, or was enriched by, the extension. */
@@ -646,6 +648,19 @@ export interface LinkVaultEntry {
   /** Feedback for the TA from a lead, director, admin or ops. Absent on rows
    *  nobody has left a note on. */
   leadNotes?: LeadNote[];
+}
+
+/** A LinkedIn row matched to a candidate we already hold (28 Sep). */
+export interface CvMatch {
+  candidateId: Id;
+  fullName: string;
+  /** "same" is linked already; "possible" waits for a TA. */
+  strength: "same" | "possible";
+  reasons: string[];
+  hasCv: boolean;
+  /** A TA's answer to a possible match. */
+  decided?: "same" | "different";
+  checkedAt: number;
 }
 
 /** A note left on an Excel Tables row for the TA working it. */

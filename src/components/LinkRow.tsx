@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   addLeadNoteInline,
   addLinkToPipelineInline,
+  decideCvMatchInline,
   deleteLinkInline,
   logOutreachInline,
   removeLeadNoteInline,
@@ -86,6 +87,7 @@ export function LinkRow({
   const eye = useInline(toggleEyeMarkInline);
   const save = useInline(updateLinkInline);
   const toPipeline = useInline(addLinkToPipelineInline);
+  const decide = useInline(decideCvMatchInline);
   const logIt = useInline(logOutreachInline);
   // Cleared once the approach is logged, not on the click: a refused note
   // stays to be sent again (review of PR #2, 21 Sep).
@@ -184,6 +186,7 @@ export function LinkRow({
               <p className="mt-0.5 text-[12px] text-ink-faint">
                 {[r.company, r.phoneNumber].filter(Boolean).join(" · ") || "No company or number yet"}
               </p>
+              <CvStatus entry={r} openingId={openingId} decide={decide} />
             </div>
 
             <div className="flex shrink-0 flex-col items-end gap-2">
@@ -548,4 +551,66 @@ export function LinkRow({
       </div>
     </article>
   );
+}
+
+/**
+ * Whether we already hold this person, and their CV (28 Sep, lib/cvMatch).
+ * A certain match is linked already; a possible one asks the TA, because
+ * guessing either way is wrong — a second record, or someone else's CV.
+ */
+function CvStatus({
+  entry: r,
+  openingId,
+  decide,
+}: {
+  entry: LinkVaultEntry;
+  openingId: string;
+  decide: ReturnType<typeof useInline>;
+}) {
+  const m = r.cvMatch ?? null;
+  const pill = "mt-1.5 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2.5 py-1.5 text-[12px]";
+  const linkCls = "font-medium text-accent hover:underline";
+
+  if (r.candidateId) {
+    const hasCv = m ? m.hasCv : null;
+    return (
+      <div className={`${pill} bg-brand-soft text-brand`}>
+        <span>{hasCv === false ? "In our database — no CV yet" : "In our database"}{m ? `: ${m.fullName}` : ""}</span>
+        {hasCv !== false && (
+          <a href={`/api/cv/${encodeURIComponent(r.candidateId)}`} target="_blank" rel="noreferrer" className={linkCls}>
+            View CV
+          </a>
+        )}
+        <Link href={`/candidates/${encodeURIComponent(r.candidateId)}`} className={linkCls}>
+          Their record
+        </Link>
+        {m?.reasons.length ? <span className="text-ink-faint">· {m.reasons.join(", ")}</span> : null}
+      </div>
+    );
+  }
+  if (m?.strength === "possible" && !m.decided) {
+    return (
+      <form
+        onSubmit={(e) => decide.run(submitted(e).formData)}
+        className={`${pill} border border-warn/40 bg-warn-soft text-warn`}
+      >
+        <input type="hidden" name="openingId" value={openingId} />
+        <input type="hidden" name="entryId" value={r.id} />
+        <span>
+          Possibly <strong>{m.fullName}</strong>, already in our database{m.hasCv ? " with a CV" : ""} ({m.reasons.join(", ")}).
+        </span>
+        <Link href={`/candidates/${encodeURIComponent(m.candidateId)}`} target="_blank" className={linkCls}>
+          Check
+        </Link>
+        <button name="decision" value="same" disabled={decide.pending} className="rounded-full bg-brand px-3 py-0.5 text-[11.5px] font-medium text-white disabled:opacity-60">
+          Same person
+        </button>
+        <button name="decision" value="different" disabled={decide.pending} className="rounded-full border border-rule-strong bg-surface px-3 py-0.5 text-[11.5px] font-medium text-ink disabled:opacity-60">
+          Different person
+        </button>
+        <ActionNote result={decide.result} className="w-full" />
+      </form>
+    );
+  }
+  return <p className="mt-1.5 text-[12px] text-ink-faint">Not in our database — CV not available yet</p>;
 }
