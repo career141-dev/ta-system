@@ -277,11 +277,11 @@ export default async function EodPage({
                     </div>
 
                     {shortlisted.length > 0 ? (
-                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
+                      <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
                         {shortlisted.length} shortlisted
                       </span>
                     ) : (
-                      <span className="rounded-full bg-stone-500/10 px-2.5 py-0.5 text-[11px] font-medium text-stone-600">
+                      <span className="rounded-full bg-stone-500/10 px-2.5 py-0.5 text-[11px] font-medium text-stone-600 dark:text-stone-300">
                         No candidates selected
                       </span>
                     )}
@@ -299,7 +299,7 @@ export default async function EodPage({
                       {shortlisted.map((c) => (
                         <span
                           key={c!.id}
-                          className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[12px] font-medium text-emerald-800"
+                          className="inline-flex items-center gap-1 rounded-md bg-emerald-50 border border-emerald-200 px-2.5 py-1 text-[12px] font-medium text-emerald-800 dark:bg-emerald-500/10 dark:border-emerald-500/30 dark:text-emerald-300"
                         >
                           ✓ Shortlisted: {c!.fullName}
                         </span>

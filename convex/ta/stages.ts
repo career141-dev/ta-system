@@ -114,6 +114,7 @@ export function directorReviewBlockers(
     currentSalary?: unknown;
     expectedSalary?: unknown;
     noticePeriodDays?: unknown;
+    noticePeriod?: unknown;
   } | null,
 ): string[] {
   if (!candidate) return ["the candidate record is missing"];
@@ -122,8 +123,8 @@ export function directorReviewBlockers(
     flag === true || (flag === undefined && fallback);
 
   if (!has(app.followUpCvReceived, Boolean(candidate.cvUploadId || app.cvFileId))) blockers.push("a CV");
-  if (!has(app.followUpCurrentSalary, candidate.currentSalary !== undefined)) blockers.push("current salary");
+  // Current salary is not mandatory for Director review.
   if (!has(app.followUpExpectedSalary, candidate.expectedSalary !== undefined)) blockers.push("expected salary");
-  if (!has(app.followUpNoticePeriod, candidate.noticePeriodDays !== undefined)) blockers.push("notice period");
+  if (!has(app.followUpNoticePeriod, candidate.noticePeriodDays !== undefined || candidate.noticePeriod !== undefined)) blockers.push("notice period");
   return blockers;
 }

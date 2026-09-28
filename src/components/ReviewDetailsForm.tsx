@@ -69,6 +69,7 @@ export function ReviewDetailsForm({
   currentSalary,
   expectedSalary,
   noticePeriodDays,
+  noticePeriod,
   hasCv,
   notes = [],
   // None by default: a bare "12000" already on file, for a Gulf role, was
@@ -80,6 +81,7 @@ export function ReviewDetailsForm({
   currentSalary: string | null;
   expectedSalary: string | null;
   noticePeriodDays: number | null;
+  noticePeriod?: string | null;
   hasCv: boolean;
   notes?: string[];
   defaultCurrency?: string;
@@ -110,12 +112,13 @@ export function ReviewDetailsForm({
   }, [save.result, router]);
 
   const hasCvNow = Boolean(hasCv || cvOnFile);
+  const hasNotice = noticePeriodDays != null || Boolean(noticePeriod?.trim());
 
+  // Current salary is not mandatory for Director review.
   const missing = [
     !hasCvNow && "CV",
-    !currentSalary?.trim() && "current salary",
     !expectedSalary?.trim() && "expected salary",
-    noticePeriodDays == null && "notice period",
+    !hasNotice && "notice period",
   ].filter(Boolean) as string[];
 
   /** Sent with XHR, not fetch, so the bar can say how far it has got. */
@@ -228,11 +231,17 @@ export function ReviewDetailsForm({
         </span>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
-        {money("currentSalary", cur, curAmount, "250,000 a month", "Current salary")}
+        {money("currentSalary", cur, curAmount, "e.g. 250,000 / Not disclosed", "Current salary (optional)")}
         {money("expectedSalary", exp, expAmount, "300,000 a month", "Expected salary")}
         <label>
-          <span className="mb-1 block text-[11.5px] text-ink-soft">Notice period (days)</span>
-          <input name="noticePeriodDays" type="number" min={0} step={1} defaultValue={noticePeriodDays ?? ""} placeholder="30 (0 if immediate)" className={inputClass} />
+          <span className="mb-1 block text-[11.5px] text-ink-soft">Notice period</span>
+          <input
+            name="noticePeriod"
+            type="text"
+            defaultValue={noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : "")}
+            placeholder="e.g. 30 days, Immediate, 2 months"
+            className={inputClass}
+          />
         </label>
       </div>
 
@@ -280,7 +289,7 @@ export function ReviewDetailsForm({
                   type="button"
                   onClick={() => removeField(idx)}
                   title="Remove this detail"
-                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600"
+                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600 dark:text-red-400"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

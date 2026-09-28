@@ -278,6 +278,7 @@ export interface Candidate {
   skills: string[];
   industries: string[];
   noticePeriodDays: number | null;
+  noticePeriod?: string | null;
   currentSalary: string | null;
   expectedSalary: string | null;
   cvFileName: string | null;

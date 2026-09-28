@@ -26,7 +26,7 @@ export interface EffortRow {
   hundredOrFollowUp: string;
   /** Profiles approached (100% / Add-on) or CVs (Follow-up) — see effortColumns. */
   lEffort: number | null;
-  sets: number | null;
+  sets: string | number | null;
   da: number | null;
   scoop: number | null;
   l: number | null;
@@ -37,7 +37,7 @@ export interface EffortRow {
    *  CVs, and the scoops among them that came by email (28 Sep). */
   recorded?: { cvs: number; scoop: number };
   /** The day's targets, typed by the TA; shown as a TARGET row when any is set. */
-  targets?: Partial<Record<EffortKey, number | null>>;
+  targets?: Partial<Record<EffortKey, number | string | null>>;
 }
 
 /** The numeric L-sheet columns, which take a count and a target. */
@@ -140,6 +140,8 @@ export function eodEmailHtml(input: {
   effort: EffortRow;
   senderName: string;
   senderTitle?: string;
+  introText?: string;
+  outroText?: string;
   /** A line under the tables when some CVs could not be attached. */
   attachmentNote?: string | null;
 }): string {
@@ -176,11 +178,27 @@ export function eodEmailHtml(input: {
         : ""),
   );
 
+  const formatParagraph = (text: string) =>
+    text
+      .split(/\n{2,}/)
+      .map((p) => `<p>${p.split("\n").map(esc).join("<br>")}</p>`)
+      .join("");
+
+  const intro =
+    input.introText && input.introText.trim()
+      ? formatParagraph(input.introText.trim())
+      : `<p>Dear Sir,<br><br>Please find the attached Shortlisted CV for the above-mentioned position</p>`;
+
+  const outro =
+    input.outroText && input.outroText.trim()
+      ? formatParagraph(input.outroText.trim())
+      : `<p>Thank You<br>Best Regards,<br><br>${esc(input.senderName)}<br>${esc(input.senderTitle ?? "Executive - Talent Acquisition")}</p>`;
+
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.7;color:#171c18">
-<p>Dear Sir,<br><br>Please find the attached Shortlisted CV for the above-mentioned position</p>
+${intro}
 ${shortlist}
 ${effort}
 ${input.attachmentNote ? `<p style="color:#6b736d">${esc(input.attachmentNote)}</p>` : ""}
-<p>Thank You<br>Best Regards,<br><br>${esc(input.senderName)}<br>${esc(input.senderTitle ?? "Executive - Talent Acquisition")}</p>
+${outro}
 </div>`;
 }
