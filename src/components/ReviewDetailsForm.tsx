@@ -280,7 +280,7 @@ export function ReviewDetailsForm({
                   type="button"
                   onClick={() => removeField(idx)}
                   title="Remove this detail"
-                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600"
+                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600 dark:text-red-400"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

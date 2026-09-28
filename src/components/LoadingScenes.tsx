@@ -134,10 +134,10 @@ export function LoadingProgress({
 // ─── scenes ─────────────────────────────────────────────────────────────────
 // The Database home's palette: pale green sky, slate, soft grey, brand green.
 
-const SKY = "#eef4f1";
-const SLATE = "#2f3d38";
-const GREY = "#cfd8d4";
-const PAPER = "#f7f8fa";
+const SKY = "var(--c141-sky, #eef4f1)";
+const SLATE = "var(--c141-slate, #2f3d38)";
+const GREY = "var(--c141-grey, #cfd8d4)";
+const PAPER = "var(--c141-paper, #f7f8fa)";
 const GREEN = "#165b42";
 
 function Frame({ children, label }: { children: React.ReactNode; label: string }) {
@@ -211,8 +211,8 @@ export function Scene({ name }: { name: SceneName }) {
       <Frame label="Searching the database">
         {[0, 1, 2].map((i) => (
           <g key={i} className="c141-scene-pop" style={{ animationDelay: `${i * 0.3}s` }}>
-            <ellipse cx="160" cy={118 - i * 26} rx="44" ry="11" fill={i === 2 ? GREY : "#dde4e1"} />
-            <rect x="116" y={118 - i * 26} width="88" height="20" fill={i === 2 ? GREY : "#dde4e1"} />
+            <ellipse cx="160" cy={118 - i * 26} rx="44" ry="11" fill={i === 2 ? GREY : "var(--c141-grey-2, #dde4e1)"} />
+            <rect x="116" y={118 - i * 26} width="88" height="20" fill={i === 2 ? GREY : "var(--c141-grey-2, #dde4e1)"} />
             <ellipse cx="160" cy={138 - i * 26} rx="44" ry="11" fill={GREY} />
           </g>
         ))}
@@ -233,8 +233,8 @@ export function Scene({ name }: { name: SceneName }) {
       ].map((p, i) => (
         <g key={p.place} className="c141-scene-pop" style={{ animationDelay: `${i * 0.3}s` }}>
           <rect x={p.x} y={150 - p.h} width="26" height={p.h} fill={p.place === 1 ? GREEN : GREY} opacity={p.place === 1 ? 0.85 : 1} />
-          <circle cx={p.x + 13} cy={150 - p.h - 16} r="9" fill={p.place === 1 ? SLATE : "#8a9a92"} />
-          <rect x={p.x + 4} y={150 - p.h - 6} width="18" height="6" rx="3" fill={p.place === 1 ? SLATE : "#8a9a92"} />
+          <circle cx={p.x + 13} cy={150 - p.h - 16} r="9" fill={p.place === 1 ? SLATE : "var(--c141-trunk, #8a9a92)"} />
+          <rect x={p.x + 4} y={150 - p.h - 6} width="18" height="6" rx="3" fill={p.place === 1 ? SLATE : "var(--c141-trunk, #8a9a92)"} />
         </g>
       ))}
       <path className="c141-scene-float" d="M226 52 l5 10 11 1.5 -8 7.5 2 11 -10 -5.5 -10 5.5 2 -11 -8 -7.5 11 -1.5 z" fill="#f2c94c" />
