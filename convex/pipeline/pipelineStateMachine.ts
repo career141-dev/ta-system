@@ -106,23 +106,18 @@ export async function executeStageTransition(
     const hasCV =
       app.followUpCvReceived === true ||
       (app.followUpCvReceived === undefined && (!!candidate.cvUploadId || !!app.cvFileId));
-    const hasCurrentSalary =
-      app.followUpCurrentSalary === true ||
-      (app.followUpCurrentSalary === undefined && candidate.currentSalary !== undefined);
     const hasExpectedSalary =
       app.followUpExpectedSalary === true ||
       (app.followUpExpectedSalary === undefined && candidate.expectedSalary !== undefined);
     const hasNoticePeriod =
       app.followUpNoticePeriod === true ||
-      (app.followUpNoticePeriod === undefined && candidate.noticePeriodDays !== undefined);
+      (app.followUpNoticePeriod === undefined && (candidate.noticePeriodDays !== undefined || (candidate as any).noticePeriod !== undefined));
 
-    if (!(hasCV && hasCurrentSalary && hasExpectedSalary && hasNoticePeriod)) {
-      // Name only what is actually missing for THIS candidate — not all four
-      // every time, which sends a TA hunting for a salary that was already on
-      // file because the notice period was the one thing outstanding.
+    if (!(hasCV && hasExpectedSalary && hasNoticePeriod)) {
+      // Name only what is actually missing for THIS candidate — not all
+      // every time, which sends a TA hunting for something already on file.
       const missing: string[] = [];
       if (!hasCV) missing.push("CV");
-      if (!hasCurrentSalary) missing.push("current salary");
       if (!hasExpectedSalary) missing.push("expected salary");
       if (!hasNoticePeriod) missing.push("notice period");
       throw new Error(

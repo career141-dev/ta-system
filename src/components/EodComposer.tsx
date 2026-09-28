@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SHORTLIST_COLUMNS, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
@@ -9,14 +9,10 @@ import { sendEod } from "@/app/actions";
 /**
  * The end-of-day email, composed for review.
  *
- * Table one is the client snapshot the desk builds by hand in Sheets every
- * evening; table two is the L-sheet. Both are drawn with the column names from
- * the real emails, so what arrives in the Director's inbox looks like what he
- * already reads.
- *
- * Never sent on its own — spec §10.3. The Director's copy is sent through
- * Microsoft Graph when the TA presses Send, from their own mailbox, copying the
- * TA Lead, the desk's end-of-day copy and the shortlist inbox.
+ * Fully editable: the subject line, greeting/intro message, candidate shortlist
+ * table cells (age, notice, notes, current company, designation, current/expected remuneration),
+ * L-sheet effort numbers/dates/assignee, and sign-off message can all be edited directly on screen.
+ * Edits are kept in this browser's localStorage until sent so nothing is lost on page reload.
  */
 export function EodComposer({
   openingId,
@@ -28,7 +24,7 @@ export function EodComposer({
   ccEmail,
   trackedAt,
   eodCc,
-  rows,
+  rows: initialRows,
   effort,
   senderName,
   alreadyOut,
@@ -53,11 +49,82 @@ export function EodComposer({
   alreadyOut: boolean;
   openSetNote: string | null;
 }) {
+  const draftKey = `eod-composer-draft:${openingId}:${kind}`;
+  const defaultIntro = "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position";
+  const defaultOutro = `Thank You\nBest Regards,\n\n${senderName}\nExecutive - Talent Acquisition`;
+
   const [subject, setSubject] = useState(initialSubject);
+  const [introText, setIntroText] = useState(defaultIntro);
+  const [outroText, setOutroText] = useState(defaultOutro);
+  const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
+
+  // Restore draft from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
+      if (saved) {
+        if (saved.subject !== undefined) setSubject(saved.subject);
+        if (saved.introText !== undefined) setIntroText(saved.introText);
+        if (saved.outroText !== undefined) setOutroText(saved.outroText);
+        if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
+      }
+    } catch {
+      /* storage disabled */
+    }
+  }, [draftKey]);
+
+  // Persist draft to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        draftKey,
+        JSON.stringify({ subject, introText, outroText, shortlistDraft }),
+      );
+    } catch {
+      /* storage disabled */
+    }
+  }, [draftKey, subject, introText, outroText, shortlistDraft]);
+
+  // Clear draft on send
+  useEffect(() => {
+    const form = document.getElementById("eod-send");
+    const clear = () => {
+      try {
+        localStorage.removeItem(draftKey);
+      } catch {
+        /* storage disabled */
+      }
+    };
+    form?.addEventListener("submit", clear);
+    return () => form?.removeEventListener("submit", clear);
+  }, [draftKey]);
+
+  const updateCandidateField = (appId: string, field: keyof ShortlistRow, value: any) => {
+    setShortlistDraft((prev) => ({
+      ...prev,
+      [appId]: {
+        ...prev[appId],
+        [field]: value,
+      },
+    }));
+  };
+
+  const getCandidateRow = (r: ShortlistRow): ShortlistRow => {
+    const override = shortlistDraft[r.applicationId] || {};
+    return {
+      ...r,
+      ...override,
+      notes: override.notes !== undefined ? override.notes : r.notes,
+    };
+  };
+
+  const effectiveRows = initialRows.map(getCandidateRow);
 
   const th =
     "whitespace-nowrap border border-rule bg-tag px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-[0.04em] text-ink-soft";
-  const td = "border border-rule px-2.5 py-2 align-top text-[12px]";
+  const td = "border border-rule px-1.5 py-1 align-top text-[12px]";
+  const cellInput =
+    "w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-[12px] text-ink outline-none hover:border-rule focus:border-brand focus:bg-surface transition-colors";
 
   return (
     <div className="flex flex-col gap-5">
@@ -100,26 +167,46 @@ export function EodComposer({
             </p>
           )}
           <label className="flex items-center gap-3">
-            <span className="text-[12.5px] text-ink-faint">Subject</span>
+            <span className="text-[12.5px] font-medium text-ink-faint">Subject</span>
             <input
+              form="eod-send"
+              name="subject"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className={`${inputClass} flex-1`}
+              className={`${inputClass} flex-1 font-medium`}
             />
           </label>
         </div>
 
         <div className="px-7 py-6">
-          <p className="text-[13px] leading-[1.8]">
-            Dear Sir,
-            <br />
-            <br />
-            Please find the attached Shortlisted CV for the above-mentioned position
-          </p>
+          {/* Editable Salutation / Intro */}
+          <div className="mb-4">
+            <label className="block text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint mb-1">
+              Introductory Greeting & Message
+            </label>
+            <textarea
+              form="eod-send"
+              name="introText"
+              value={introText}
+              onChange={(e) => setIntroText(e.target.value)}
+              rows={Math.max(2, introText.split("\n").length)}
+              className="w-full rounded-lg border border-transparent bg-paper/60 p-2.5 text-[13px] leading-[1.8] text-ink outline-none hover:border-rule focus:border-brand focus:bg-surface resize-y transition-colors font-sans"
+              placeholder="Dear Sir,&#10;&#10;Please find the attached Shortlisted CV..."
+            />
+          </div>
 
-          {/* Table one — the client snapshot */}
+          {/* Table one — the client snapshot (Fully editable) */}
           <div className="mt-5 overflow-x-auto">
-            {rows.length === 0 ? (
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
+                Candidate Shortlist Table
+              </span>
+              <span className="text-[11px] text-ink-faint">
+                Click any cell to edit details before sending
+              </span>
+            </div>
+
+            {initialRows.length === 0 ? (
               <p className="rounded-xl border border-dashed border-rule px-5 py-8 text-center text-[12.5px] text-ink-faint">
                 {kind === "director"
                   ? "Nobody is ready to go yet — a candidate is ready once their follow-up questions are all answered, or they are in Director Review."
@@ -127,119 +214,207 @@ export function EodComposer({
               </p>
             ) : (
               <>
-              {(() => {
-                // The email's columns never change (the Director reads this
-                // format), so an empty column is pointed out instead of hidden.
-                const empty = [
-                  ["AGE", rows.every((r) => !r.age.trim())],
-                  ["NOTICE", rows.every((r) => !r.notice.trim())],
-                  ["NOTES", rows.every((r) => r.notes.every((n) => !n.trim()))],
-                  ["CURRENT REMUNERATION", rows.every((r) => !r.currentRemuneration.trim())],
-                  ["EXPECTED REMUNERATION", rows.every((r) => !r.expectedRemuneration.trim())],
-                ].filter(([, e]) => e).map(([h]) => h as string);
-                return empty.length > 0 ? (
-                  <p className="mb-3 rounded-lg bg-warn-soft px-3.5 py-2 text-[12px] text-warn">
-                    {empty.join(", ")} {empty.length === 1 ? "is" : "are"} empty for everyone in this set. Fill them in on each
-                    candidate before sending, or the Director gets blank columns.
-                  </p>
-                ) : null;
-              })()}
-              <table className="w-full border-collapse">
-                <thead>
-                  <tr>
-                    {SHORTLIST_COLUMNS.map((h) => (
-                      <th key={h} className={th}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.applicationId}>
-                      <td className={`${td} tabular`}>{r.no}</td>
-                      <td className={`${td} whitespace-nowrap font-medium`}>{r.name}</td>
-                      <td className={`${td} tabular`}>{r.age}</td>
-                      <td className={`${td} whitespace-nowrap`}>{r.notice}</td>
-                      <td className={`${td} min-w-[220px] leading-[1.6] text-ink-soft`}>
-                        {r.notes.map((n) => (
-                          <span key={n} className="block">
-                            {n}
-                          </span>
-                        ))}
-                      </td>
-                      <td className={td}>{r.currentCompany}</td>
-                      <td className={td}>{r.currentDesignation}</td>
-                      <td className={td}>{r.currentRemuneration}</td>
-                      <td className={td}>{r.expectedRemuneration}</td>
+                {(() => {
+                  const empty = [
+                    ["AGE", effectiveRows.every((r) => !String(r.age ?? "").trim())],
+                    ["NOTICE", effectiveRows.every((r) => !String(r.notice ?? "").trim())],
+                    ["NOTES", effectiveRows.every((r) => !Array.isArray(r.notes) ? !String(r.notes).trim() : r.notes.every((n) => !n.trim()))],
+                    ["CURRENT REMUNERATION", effectiveRows.every((r) => !String(r.currentRemuneration ?? "").trim())],
+                    ["EXPECTED REMUNERATION", effectiveRows.every((r) => !String(r.expectedRemuneration ?? "").trim())],
+                  ]
+                    .filter(([, e]) => e)
+                    .map(([h]) => h as string);
+                  return empty.length > 0 ? (
+                    <p className="mb-3 rounded-lg bg-warn-soft px-3.5 py-2 text-[12px] text-warn">
+                      {empty.join(", ")} {empty.length === 1 ? "is" : "are"} empty for everyone in this set. You can type them into the table cells below before sending.
+                    </p>
+                  ) : null;
+                })()}
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr>
+                      {SHORTLIST_COLUMNS.map((h) => (
+                        <th key={h} className={th}>
+                          {h}
+                        </th>
+                      ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {effectiveRows.map((r) => {
+                      const notesStr = Array.isArray(r.notes) ? r.notes.join("\n") : String(r.notes ?? "");
+                      return (
+                        <tr key={r.applicationId} className="hover:bg-paper/30 transition-colors">
+                          <td className={`${td} tabular font-medium text-ink-faint text-center pt-2.5`}>
+                            {r.no}
+                          </td>
+                          <td className={`${td} min-w-[140px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_name`}
+                              value={r.name}
+                              onChange={(e) => updateCandidateField(r.applicationId, "name", e.target.value)}
+                              className={`${cellInput} font-semibold`}
+                            />
+                          </td>
+                          <td className={`${td} w-[65px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_age`}
+                              value={r.age}
+                              onChange={(e) => updateCandidateField(r.applicationId, "age", e.target.value)}
+                              className={`${cellInput} tabular-nums`}
+                            />
+                          </td>
+                          <td className={`${td} min-w-[95px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_notice`}
+                              value={r.notice}
+                              onChange={(e) => updateCandidateField(r.applicationId, "notice", e.target.value)}
+                              className={cellInput}
+                            />
+                          </td>
+                          <td className={`${td} min-w-[240px]`}>
+                            <textarea
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_notes`}
+                              value={notesStr}
+                              onChange={(e) =>
+                                updateCandidateField(
+                                  r.applicationId,
+                                  "notes",
+                                  e.target.value.split("\n"),
+                                )
+                              }
+                              rows={Math.max(2, notesStr.split("\n").length)}
+                              className={`${cellInput} resize-y leading-[1.6] text-ink-soft`}
+                            />
+                          </td>
+                          <td className={`${td} min-w-[140px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_currentCompany`}
+                              value={r.currentCompany}
+                              onChange={(e) => updateCandidateField(r.applicationId, "currentCompany", e.target.value)}
+                              className={cellInput}
+                            />
+                          </td>
+                          <td className={`${td} min-w-[140px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_currentDesignation`}
+                              value={r.currentDesignation}
+                              onChange={(e) => updateCandidateField(r.applicationId, "currentDesignation", e.target.value)}
+                              className={cellInput}
+                            />
+                          </td>
+                          <td className={`${td} min-w-[130px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_currentRemuneration`}
+                              value={r.currentRemuneration}
+                              onChange={(e) => updateCandidateField(r.applicationId, "currentRemuneration", e.target.value)}
+                              className={cellInput}
+                            />
+                          </td>
+                          <td className={`${td} min-w-[130px]`}>
+                            <input
+                              form="eod-send"
+                              name={`shortlist_${r.applicationId}_expectedRemuneration`}
+                              value={r.expectedRemuneration}
+                              onChange={(e) => updateCandidateField(r.applicationId, "expectedRemuneration", e.target.value)}
+                              className={cellInput}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </>
             )}
           </div>
 
-          {/* Table two — the L-sheet, editable before it goes (plan 6.1–6.3). */}
-          <div className="mt-7">
-            <EffortSheet effort={effort} formId="eod-send" draftKey={`eod-effort:${openingId}:${effort.date}`} openingId={openingId} />
+          {/* Table two — the L-sheet, editable before it goes */}
+          <div className="mt-8">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint">
+                L-Sheet Daily Effort Table
+              </span>
+              <span className="text-[11px] text-ink-faint">
+                Edit outreach counts, targets, stage, date & assignee
+              </span>
+            </div>
+            <EffortSheet
+              effort={effort}
+              formId="eod-send"
+              draftKey={`eod-effort:${openingId}:${effort.date}`}
+              openingId={openingId}
+            />
           </div>
 
-          <p className="mt-7 text-[13px] leading-[1.8]">
-            Thank You
-            <br />
-            Best Regards,
-            <br />
-            <br />
-            {senderName}
-            <br />
-            <span className="text-ink-soft">Executive - Talent Acquisition</span>
-          </p>
+          {/* Editable Sign-off / Outro */}
+          <div className="mt-8">
+            <label className="block text-[11px] font-medium uppercase tracking-[0.06em] text-ink-faint mb-1">
+              Sign-off & Closing
+            </label>
+            <textarea
+              form="eod-send"
+              name="outroText"
+              value={outroText}
+              onChange={(e) => setOutroText(e.target.value)}
+              rows={Math.max(3, outroText.split("\n").length)}
+              className="w-full rounded-lg border border-transparent bg-paper/60 p-2.5 text-[13px] leading-[1.8] text-ink outline-none hover:border-rule focus:border-brand focus:bg-surface resize-y transition-colors font-sans"
+              placeholder="Thank You&#10;Best Regards,&#10;&#10;..."
+            />
+          </div>
         </div>
       </section>
 
       <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <h2 className="text-[13.5px] font-semibold">
-          Attachments <span className="ml-1.5 font-normal text-[12px] text-ink-faint">{rows.length}</span>
+          Attachments <span className="ml-1.5 font-normal text-[12px] text-ink-faint">{effectiveRows.length}</span>
         </h2>
-        {rows.length === 0 ? (
+        {effectiveRows.length === 0 ? (
           <p className="mt-2 text-[12.5px] text-ink-faint">Nothing to attach.</p>
         ) : (
           <div className="mt-3 flex flex-col gap-1.5">
-            {rows.map((r) => (
-              <a
-                key={r.applicationId}
-                href={`/api/prepared-cv/${r.applicationId}?current=${encodeURIComponent(r.currentRemuneration)}&expected=${encodeURIComponent(r.expectedRemuneration)}&notes=${encodeURIComponent(r.notes.join("\n"))}`}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2.5 text-[12.5px] text-brand hover:underline"
-              >
-                <span className="text-ink-faint">PDF</span>
-                {r.name} - Career141.pdf
-              </a>
-            ))}
+            {effectiveRows.map((r) => {
+              const notesStr = Array.isArray(r.notes) ? r.notes.join("\n") : String(r.notes ?? "");
+              return (
+                <a
+                  key={r.applicationId}
+                  href={`/api/prepared-cv/${r.applicationId}?current=${encodeURIComponent(r.currentRemuneration)}&expected=${encodeURIComponent(r.expectedRemuneration)}&notes=${encodeURIComponent(notesStr)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-2.5 text-[12.5px] text-brand hover:underline"
+                >
+                  <span className="text-ink-faint">PDF</span>
+                  {r.name} - Career141.pdf
+                </a>
+              );
+            })}
           </div>
         )}
         <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
-          Each one carries the green CAREER141 block on page one, so the Director reads the package and
-          the notes without going back to the email.
+          Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
         </p>
       </section>
 
       <form id="eod-send" action={sendEod} className="flex flex-wrap items-center gap-4">
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="kind" value={kind} />
-        <input type="hidden" name="subject" value={subject} />
         <input type="hidden" name="to" value={toEmail} />
         {/* The order here is the order they are numbered in the table, which is
             the order the reply's numbers will refer to. */}
         <input
           type="hidden"
           name="applicationIds"
-          value={rows.map((r) => r.applicationId).join(",")}
+          value={initialRows.map((r) => r.applicationId).join(",")}
         />
         <button
-          disabled={rows.length === 0}
+          disabled={initialRows.length === 0}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
           {kind === "director" ? "Send email" : "Record that it went to the client"}
