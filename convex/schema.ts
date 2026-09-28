@@ -613,6 +613,10 @@ export default defineSchema({
     alsoAssignTo: v.optional(v.array(v.object({ jobId: v.string(), jobPostId: v.string() }))),
     routeNote: v.optional(v.string()),
     uploadedBy: v.string(),
+    /** Set when a TA uploads a headhunted CV from TA Follow-up (ta/hhUpload.ts):
+     *  once the extraction has filed it on `assignToJob`, it is claimed by this
+     *  TA into TA Follow-up and flagged HH. */
+    headhuntedBy: v.optional(v.id("users")),
     status: v.string(),
     errorMessage: v.optional(v.string()),
     candidateId: v.optional(v.id("candidates")),

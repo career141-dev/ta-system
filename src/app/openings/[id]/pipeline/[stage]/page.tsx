@@ -10,6 +10,7 @@ import { seatFor } from "@/lib/visibility";
 import { ProjectHeader } from "../../ProjectHeader";
 import { CandidateList, applyFilters, type ListFilters } from "@/components/CandidateList";
 import { StatRow } from "@/components/StatRow";
+import { HhUpload } from "@/components/HhUpload";
 import { PIPELINE_STAGES, CLOSED_STAGES, EARLY_STAGES, STAGE_LABEL, type Stage } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
@@ -53,6 +54,9 @@ export default async function StagePage({
   const sets = setsForOpening(id);
   const oldest = [...everyone].sort((a, b) => a.lastStageChangedAt - b.lastStageChangedAt)[0];
   const canManage = allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
+  // Whoever works this opening can bring in a headhunted CV (the upload route
+  // checks the same rule).
+  const canAct = allows(user, "opening.act", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
 
   return (
     <>
@@ -159,6 +163,8 @@ export default async function StagePage({
           </details>
         </div>
       )}
+
+      {s === "ta_follow_up" && canAct && <HhUpload openingId={id} />}
 
       {s === "ta_follow_up" && (
         <AskQuestion
