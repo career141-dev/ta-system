@@ -1249,7 +1249,7 @@ export async function addJobPost(formData: FormData) {
     const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
     if (!linkedinJobId(externalUrl) && !linkedinProjectId(externalUrl)) {
       await fail(
-        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
       );
     }
   }
@@ -1291,7 +1291,7 @@ export async function updatePost(formData: FormData) {
     const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
     if (url && !linkedinJobId(url) && !linkedinProjectId(url)) {
       await fail(
-        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
       );
     }
     patch.externalUrl = url || null;
