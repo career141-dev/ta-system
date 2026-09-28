@@ -24,7 +24,9 @@ export const metadata: Metadata = {
   description: "Recruitment platform for the Career141 TA desk",
   // Without an icon the browser asked for /favicon.ico, which does not exist,
   // and the request fell through to a page render.
-  icons: { icon: "/career141-logo.png" },
+  // The Aura mark (28 Sep), on a dark square so it reads on light and dark
+  // browser tabs. Versioned filename: browsers cache icons hard.
+  icons: { icon: "/aura-icon-v1.png", apple: "/aura-icon-v1.png" },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
