@@ -34,6 +34,18 @@ console.log("\ndeactivated accounts can do nothing");
 const gone = user("admin", { isActive: false });
 eq("not even an admin", ok(gone, "opening.read"), false);
 
+console.log("\nwho may move an opening to the Bin (opening.manage, 28 Sep)");
+{
+  const ta = user("ta");
+  eq("the primary recruiter", ok(ta, "opening.manage", { assignment: on("primary_recruiter") }), true);
+  eq("a supporting recruiter", ok(ta, "opening.manage", { assignment: on("supporting_recruiter") }), true);
+  eq("a TA not on the opening", ok(ta, "opening.manage", {}), false);
+  eq("a TA seated only as reviewer", ok(ta, "opening.manage", { assignment: on("director") }), false);
+  eq("a lead, on it or not", ok(user("ta_lead"), "opening.manage", {}), true);
+  eq("a client contact", ok(client, "opening.manage", { assignment: on("client_contact", client.id) }), false);
+  eq("a viewer, even named as recruiter", ok(user("viewer"), "opening.manage", { assignment: on("primary_recruiter", "u_viewer") }), false);
+}
+
 console.log("\nTAs work the openings they are on");
 const ta = user("ta");
 eq("on it: acts", ok(ta, "opening.act", { assignment: on("primary_recruiter") }), true);
