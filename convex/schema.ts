@@ -2394,6 +2394,8 @@ export default defineSchema({
     /** When the outcome last changed (28 Sep), so the end-of-day L EFFORT can
      *  count a row worked today. Absent on rows not touched since. */
     outcomeAt: v.optional(v.number()),
+    /** An add-on row: added on an Add-on day, or tagged by the TA (28 Sep). */
+    isAddOn: v.optional(v.boolean()),
     /** What the browser extension read off a profile the TA had open. One at a
      *  time, by a person — there is no crawl here and must never be one. */
     capture: v.optional(v.union(v.any(), v.null())),

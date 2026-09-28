@@ -1,4 +1,5 @@
 import { externalUrl } from "@/lib/url";
+import { cvSource, headhuntedCandidates } from "@/lib/cvSource";
 import { channelTag } from "@/lib/format";
 import Link from "next/link";
 import { CvFrame } from "@/components/CvFrame";
@@ -236,8 +237,9 @@ export default async function CandidateDrawer({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] font-semibold tracking-tight">{c.fullName}</h2>
-              <span className="rounded bg-tag px-1.5 py-[3px] text-[11px] font-medium text-ink-soft">{channelTag(app.sourcingChannel)}</span>
+              <span className="rounded bg-tag px-1.5 py-[3px] text-[11px] font-medium text-ink-soft">{channelTag(app.sourcingChannel, cvSource(app, headhuntedCandidates(repo.linkVault(app.openingId))))}</span>
               {app.isAddOn && <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[11px] font-medium text-brand">Add-on</span>}
+              {app.backupForApplicationId && <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[11px] font-medium text-brand">Backup</span>}
             </div>
             <p className="mt-1 text-[14px]">{c.currentTitle}</p>
             <p className="mt-0.5 text-[12px] text-ink-faint">{[c.currentEmployer, c.educationInstitution, c.location].filter(Boolean).join(" · ")}</p>
@@ -284,6 +286,7 @@ export default async function CandidateDrawer({
                   current={app.stage}
                   candidate={c}
                   isAddOn={app.isAddOn}
+                  isBackup={!!app.backupForApplicationId}
                   canDecideDirector={canDecideDirector}
                   canDecideClient={canDecideClient}
                 />

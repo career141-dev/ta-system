@@ -10,6 +10,7 @@ import {
   logOutreachInline,
   removeLeadNoteInline,
   toggleEyeMarkInline,
+  toggleLinkAddOnInline,
   updateLinkInline,
 } from "@/app/actions";
 import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
@@ -85,6 +86,7 @@ export function LinkRow({
   // Every button on the row answers under the row (21 Sep: they answered at
   // the top of the page, or not at all).
   const eye = useInline(toggleEyeMarkInline);
+  const addOn = useInline(toggleLinkAddOnInline);
   const save = useInline(updateLinkInline);
   const toPipeline = useInline(addLinkToPipelineInline);
   const decide = useInline(decideCvMatchInline);
@@ -109,8 +111,8 @@ export function LinkRow({
     }
   }, [sendNote.result]);
   const busy =
-    eye.pending || save.pending || toPipeline.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending;
-  const answer = latest(eye.result, save.result, toPipeline.result, logIt.result, del.result, sendNote.result, dropNote.result);
+    eye.pending || addOn.pending || save.pending || toPipeline.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending;
+  const answer = latest(eye.result, addOn.result, save.result, toPipeline.result, logIt.result, del.result, sendNote.result, dropNote.result);
 
   useEffect(() => {
     setIsEyeMarked(r.isEyeMarked);
@@ -176,6 +178,9 @@ export function LinkRow({
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}
                 </span>
+                {r.isAddOn && (
+                  <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">Add-on</span>
+                )}
                 {notes.length > 0 && (
                   <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">
                     Note from {noteByline(notes[0], userNames).role}
@@ -236,6 +241,24 @@ export function LinkRow({
                     Add note
                   </button>
                 )}
+                <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <input type="hidden" name="entryId" value={r.id} />
+                  <input type="hidden" name="on" value={r.isAddOn ? "0" : "1"} />
+                  <SubmitButton
+                    busy={addOn.pending}
+                    locked={busy}
+                    pendingLabel="Saving…"
+                    tone="dark"
+                    className={`whitespace-nowrap rounded-full border px-4 py-1.5 text-[12.5px] transition-colors disabled:opacity-60 ${
+                      r.isAddOn
+                        ? "border-brand bg-brand-soft font-medium text-brand"
+                        : "border-rule-strong text-ink-soft hover:border-ink-faint hover:text-ink"
+                    }`}
+                  >
+                    {r.isAddOn ? "Add-on ✓" : "Add-on"}
+                  </SubmitButton>
+                </form>
                 <button
                   onClick={() => setEdit((v) => !v)}
                   className="rounded-full bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90"

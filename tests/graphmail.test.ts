@@ -134,7 +134,7 @@ async function main() {
 
   const body = eodEmailHtml({
     rows: [{ no: 1, name: "Nimal <Perera>", age: "34", notice: "30 days", notes: [">Currently at Hayleys"], currentCompany: "Hayleys", currentDesignation: "CFO", currentRemuneration: "LKR 450,000", expectedRemuneration: "LKR 600,000", applicationId: "a1" }],
-    effort: { date: "16 Sept", assignee: "Nimali", hundredOrFollowUp: "", lEffort: 12, sets: 2, da: 1, scoop: 0, l: 3, post: null, addOns: null, backUp: null, recorded: { cvs: 4, scoop: 0 } },
+    effort: { date: "16 Sept", assignee: "Nimali", hundredOrFollowUp: "", lEffort: 12, sets: 2, da: 1, scoop: 0, l: 3, post: null, addOns: null, backUp: null },
     senderName: "Nimali",
   });
   eq("email body escapes names", body.includes("Nimal &lt;Perera&gt;"), true);

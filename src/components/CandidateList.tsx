@@ -42,6 +42,12 @@ export type ListFilters = {
   band?: string;
   /** Which page of the list — 25 to a page. */
   page?: string;
+  /**
+   * Narrow to add-ons, backups, or the rest. Absent means all of them, tagged
+   * on the row: add-ons kept on a tab of their own were missed, because a TA
+   * working the list forgets to look there (the desk, 28 Sep).
+   */
+  tag?: string;
 };
 
 /** Filtering that actually filters. Applied server-side from the URL, so a
@@ -52,6 +58,9 @@ export function applyFilters(apps: Application[], f: ListFilters, userId: string
     if (!c) return false;
     if (f.q && !matchesQuery(f.q, c.fullName, c.currentTitle, c.currentEmployer, c.location)) return false;
     if (f.mine === "1" && a.ownerTaId !== userId) return false;
+    if (f.tag === "addon" && !a.isAddOn) return false;
+    if (f.tag === "backup" && !a.backupForApplicationId) return false;
+    if (f.tag === "standard" && (a.isAddOn || a.backupForApplicationId)) return false;
     return passesFilters(c, f);
   });
 }
@@ -211,6 +220,20 @@ export function CandidateList({
             <option value="">Any notice</option>
             <option value="30">30 days or less</option>
             <option value="60">60 days or less</option>
+          </select>
+          <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"><path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        </div>
+        <div className="relative">
+          <select
+            name="tag"
+            defaultValue={filters.tag ?? ""}
+            aria-label="Add-ons and backups"
+            className="cursor-pointer appearance-none rounded-full border border-rule bg-surface py-2 pl-3.5 pr-9 text-[12.5px] text-ink-soft outline-none transition-colors focus:border-brand"
+          >
+            <option value="">All candidates</option>
+            <option value="addon">Add-ons only</option>
+            <option value="backup">Backups only</option>
+            <option value="standard">Neither</option>
           </select>
           <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"><path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </div>

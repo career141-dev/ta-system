@@ -1,6 +1,7 @@
 import { repo, setsForOpening } from "@/data/store";
 import { EFFORT_NUMBERS, OUTREACH_TYPES } from "@/lib/eod-format";
 import { colomboDayStart } from "@/lib/calendar";
+import { cvSource, headhuntedCandidates } from "@/lib/cvSource";
 import type { Application, Candidate, Id, User } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
 
@@ -90,45 +91,93 @@ export function shortlistRows(
   });
 }
 
+/** The column a CV is counted in on the end-of-day sheet. */
+export type EffortBucket = "backUp" | "addOns" | "scoop" | "da" | "post" | "l";
+
 /**
- * Table 2 — the L-sheet line for today. Everything but BACK-UP comes from the
- * records (the desk, 28 Sep); the TA can correct any figure before sending.
+ * The one column a CV of the day goes in (the desk, 28 Sep), so the columns
+ * add up to the day's total: a backup first, then a scoop mailed in by a lead,
+ * then an add-on, then where it came from (lib/cvSource). A scoop stays a
+ * scoop on an Add-on day — the desk counts what the leads sent under SCOOP. A
+ * database pick is TBR, not a hunted CV, and is in none of them.
+ */
+export function effortBucket(app: Application, headhunted: ReadonlySet<Id>): EffortBucket | null {
+  if (app.backupForApplicationId) return "backUp";
+  if (app.scoopFrom || app.scoopReceivedAt) return "scoop";
+  if (app.isAddOn) return "addOns";
+  const source = cvSource(app, headhunted);
+  return source === "database" ? null : source;
+}
+
+/**
+ * The CVs this TA sends the Director today — the only ones the end-of-day
+ * sheet counts (the desk, 28 Sep). A lead mails six, one goes to the
+ * Director: that is 1, not 6; ten add-ons worked, three sent: 3.
  *
- *   L EFFORT  LinkedIn profiles this TA worked today in Excel Tables — added
- *             and contacted, an approach logged, or the outcome moved. On a
- *             Follow-up day the column is CVs instead (effortColumns).
+ * The rounds this TA already sent today, plus the people waiting in tonight's
+ * email, once each: so the sheet reads the same before Send (sendEod builds
+ * it before the round is opened) and after. The rounds, not the stage: a
+ * stage's time is overwritten by the next move, and Excel Tables' "Add to
+ * pipeline" puts people in Director Review without sending anything.
+ */
+export function sentToDirectorToday(openingId: Id, taId: Id, since: number): Application[] {
+  const ids = new Set(
+    repo
+      .reviewRounds(openingId)
+      .filter((r) => r.kind === "director" && r.sentBy === taId && r.sentAt >= since)
+      .flatMap((r) => r.applicationIds),
+  );
+  for (const r of shortlistRows(openingId, taId, "director")) ids.add(r.applicationId);
+  return [...ids].flatMap((id) => {
+    const a = repo.application(id);
+    return a && a.openingId === openingId ? [a] : [];
+  });
+}
+
+/**
+ * Table 2 — the L-sheet line for today. All of it comes from the records (the
+ * desk, 28 Sep); the TA can correct any figure before sending.
+ *
+ *   L EFFORT  LinkedIn profiles this TA scouted today: every Excel Tables row
+ *             added today, contacted or not, and older rows approached or
+ *             moved today. On a Follow-up day the column is the CVs sent to
+ *             the Director instead (effortColumns).
  *   SETS      the set this TA's latest CV went into (convex/lib/sets.ts).
- *   DA        direct applicants this TA shortlisted today.
- *   SCOOP     scoops mailed to the TA by the Director, a TA Lead or Ops
- *             (convex/mailIntake); the TA adds WhatsApp ones on top.
- *   L         headhunted people this TA shortlisted today — Excel Tables rows
- *             set to Shortlisted become L applications.
- *   POST      adverts for this job this TA put live today.
- *   ADD-ONS   CVs this TA flagged Add-on today.
- *   BACK-UP   typed, for now.
  *
- * Database CVs are TBR, not scoops. From 25 to 28 Sep most of these were
- * typed; the desk asked for them back once Excel Tables carried the work.
+ * Then the CVs sent to the Director today (sentToDirectorToday) — never
+ * everyone who applied or was mailed in, only who was shortlisted — each in
+ * exactly one column (effortBucket), so they add up to the total beside SETS:
+ *
+ *   BACK-UP   tagged as cover for someone already at interview or offer.
+ *   SCOOP     mailed to the TA by the Director, a TA Lead or Ops
+ *             (convex/mailIntake); the TA adds WhatsApp ones on top.
+ *   ADD-ONS   flagged Add-on — worked on an Add-on day, or tagged by hand.
+ *   DA        came to us directly — WhatsApp or a WhatsApp campaign.
+ *   POST      applied through a LinkedIn post. It counted adverts put live
+ *             until the desk asked for the CVs they brought (28 Sep).
+ *   L         headhunted through Excel Tables.
  */
 export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow {
   // Today in Colombo, whatever the server's clock is set to.
   const since = colomboDayStart(date.getTime());
-  const apps = repo.applications(openingId);
-  const mine = apps.filter((a) => a.ownerTaId === ta.id);
-  const todays = mine.filter((a) => (a.shortlistedAt ?? 0) >= since);
-  const mailed = mine.filter((a) => (a.scoopReceivedAt ?? 0) >= since);
-  const flagged = mine.filter((a) => a.isAddOn && (a.addedOnAt ?? 0) >= since);
-  const worked = repo.linkVault(openingId).filter(
+  const vault = repo.linkVault(openingId);
+  const day = sentToDirectorToday(openingId, ta.id, since);
+  const scouted = vault.filter(
     (v) =>
-      (v.addedBy === ta.id && v.createdAt >= since && v.outcome !== "no_contact") ||
+      (v.addedBy === ta.id && v.createdAt >= since) ||
       (v.addedBy === ta.id && (v.outcomeAt ?? 0) >= since) ||
       v.conversationLog.some((l) => l.by === ta.id && l.at >= since),
   ).length;
+  const headhunted = headhuntedCandidates(vault);
+  const count: Record<EffortBucket, number> = { backUp: 0, addOns: 0, scoop: 0, da: 0, post: 0, l: 0 };
+  for (const a of day) {
+    const b = effortBucket(a, headhunted);
+    if (b) count[b]++;
+  }
   const kind = repo.workingStage(openingId, ta.id);
   // The set this TA's latest CV went into.
   const mySets = setsForOpening(openingId, ta.id);
   const latest = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
-  const distinct = new Set([...todays, ...mailed, ...flagged].map((a) => a.id)).size;
 
   return {
     date: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" }),
@@ -136,15 +185,14 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
     // The TA's working stage for this opening (100% / Follow-up / Add-on),
     // set manually in the sticky bar or defaulting to "100%".
     hundredOrFollowUp: kind,
-    lEffort: kind === "Follow-up" ? todays.length : worked,
+    lEffort: kind === "Follow-up" ? day.length : scouted,
     sets: latest,
-    da: todays.filter((a) => a.sourcingChannel === "DA").length,
-    scoop: mailed.length || null,
-    l: todays.filter((a) => a.sourcingChannel === "L").length,
-    post: repo.jobPosts(openingId).filter((p) => (p.postedAt ?? 0) >= since && (!p.assignedTaId || p.assignedTaId === ta.id)).length,
-    addOns: flagged.length || null,
-    backUp: null,
-    recorded: { cvs: distinct, scoop: mailed.length },
+    da: count.da,
+    scoop: count.scoop || null,
+    l: count.l,
+    post: count.post,
+    addOns: count.addOns || null,
+    backUp: count.backUp || null,
   };
 }
 

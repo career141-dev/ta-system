@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL, type Candidate, type Stage } from "@/data/types";
-import { declineOffer, moveStageInline, scheduleInterviewInline, toggleAddOnInline } from "@/app/actions";
+import { declineOffer, moveStageInline, scheduleInterviewInline, toggleAddOnInline, toggleBackupInline } from "@/app/actions";
 import { ActionNote, SubmitButton, Spinner, latest, submitted, useInline } from "./Submit";
 import { directorReviewBlockers, nextStages } from "@/lib/pipeline";
 import { inputClass } from "./form";
@@ -37,6 +37,7 @@ export function RowActions({
   candidate,
   app,
   isAddOn = false,
+  isBackup = false,
   canDecideDirector = false,
   canDecideClient = false,
 }: {
@@ -47,6 +48,8 @@ export function RowActions({
   candidate?: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays">;
   app?: { cvFileName?: string | null; cvFileId?: string | null } | null;
   isAddOn?: boolean;
+  /** Tagged as cover for someone at interview or offer (convex/lib/backup). */
+  isBackup?: boolean;
   /** Whether this person may record a director decision by hand. The server
    *  checks again; this only decides what the menu offers. */
   canDecideDirector?: boolean;
@@ -58,11 +61,12 @@ export function RowActions({
   // Each button answers here, under the buttons — the sheet sits over the
   // page, so an answer at the top of the page was out of sight (21 Sep).
   const addOn = useInline(toggleAddOnInline);
+  const backup = useInline(toggleBackupInline);
   const move = useInline(moveStageInline);
   const book = useInline(scheduleInterviewInline);
   const [movingTo, setMovingTo] = useState<Stage | null>(null);
-  const busy = addOn.pending || move.pending || book.pending;
-  const answer = latest(addOn.result, move.result, book.result);
+  const busy = addOn.pending || backup.pending || move.pending || book.pending;
+  const answer = latest(addOn.result, backup.result, move.result, book.result);
   const moveTo = (e: React.FormEvent<HTMLFormElement>) => {
     const { formData } = submitted(e);
     setMovingTo(String(formData.get("stage")) as Stage);
@@ -89,6 +93,24 @@ export function RowActions({
           }`}
         >
           {isAddOn ? "Add-on ✓" : "Add-on"}
+        </SubmitButton>
+      </form>
+      <form onSubmit={(e) => backup.run(submitted(e).formData)}>
+        <input type="hidden" name="appId" value={appId} />
+        <input type="hidden" name="openingId" value={openingId} />
+        <input type="hidden" name="on" value={isBackup ? "0" : "1"} />
+        <SubmitButton
+          busy={backup.pending}
+          locked={busy}
+          pendingLabel="Saving…"
+          tone="dark"
+          className={`whitespace-nowrap rounded-full border px-3.5 py-[7px] text-[12.5px] transition-colors disabled:opacity-60 ${
+            isBackup
+              ? "border-brand bg-brand-soft font-medium text-brand"
+              : "border-rule-strong text-ink-soft hover:border-ink-faint hover:text-ink"
+          }`}
+        >
+          {isBackup ? "Backup ✓" : "Backup"}
         </SubmitButton>
       </form>
       <button

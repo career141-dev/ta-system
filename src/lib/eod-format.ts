@@ -24,7 +24,7 @@ export interface EffortRow {
   assignee: string;
   /** What the day was: a full hunt, follow-up, or add-ons (plan 6.1). */
   hundredOrFollowUp: string;
-  /** Profiles approached (100% / Add-on) or CVs (Follow-up) — see effortColumns. */
+  /** Profiles scouted (100% / Add-on) or CVs (Follow-up) — see effortColumns. */
   lEffort: number | null;
   sets: string | number | null;
   da: number | null;
@@ -33,9 +33,6 @@ export interface EffortRow {
   post: number | null;
   addOns: number | null;
   backUp: number | null;
-  /** What the records hold for the day, for the total beside SETS: distinct
-   *  CVs, and the scoops among them that came by email (28 Sep). */
-  recorded?: { cvs: number; scoop: number };
   /** The day's targets, typed by the TA; shown as a TARGET row when any is set. */
   targets?: Partial<Record<EffortKey, number | string | null>>;
 }
@@ -64,7 +61,7 @@ export const SHORTLIST_COLUMNS = [
 
 /**
  * Table two's columns for a given kind of day. The fourth counts links
- * (profiles approached) on a full hunt or an add-on day, and CVs on a
+ * (profiles scouted) on a full hunt or an add-on day, and CVs on a
  * follow-up day (plan 6.2).
  */
 export function effortColumns(kind: string): { key: string; label: string }[] {
@@ -89,29 +86,29 @@ export const EFFORT_COLUMNS = [
 ] as const;
 
 /**
- * The columns the TA types in; the records give the rest. BACK-UP is the only
- * one left (28 Sep): L EFFORT and L are read off Excel Tables, POST off the
- * adverts, SCOOP off mailed scoops and ADD-ONS off the Add-on flag. The TA
- * can still correct any figure before sending.
+ * The columns the TA types in; the records give the rest. None since the
+ * desk's breakdown (28 Sep): BACK-UP is counted from the Backup tag like the
+ * others. Kept so a column can go back to typed without touching the sheet.
+ * The TA can still correct any figure before sending.
  */
-export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["backUp"]);
+export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>();
+
+/** The columns each of the day's CVs is counted in — exactly one of them. */
+export const CV_COLUMNS: EffortKey[] = ["da", "scoop", "l", "post", "addOns", "backUp"];
 
 /**
- * The CVs the day brought, beside the set: each CV once (the desk, 28 Sep).
- *
- * Adding the columns counted an add-on twice — it is also a DA or an L — and
- * counted adverts as CVs. So it is the records' distinct CVs, plus any scoops
- * the TA typed over the mailed ones (WhatsApp scoops the system never saw).
- * Without the records' figure it can only be the typed SCOOP.
+ * The CVs the day brought, beside the set (the desk, 28 Sep): the columns
+ * added up. That used to count an add-on twice — it was also a DA or an L —
+ * so the total was taken from the records instead. Now each CV sits in one
+ * column (lib/eod effortBucket: backup, then add-on, then where it came
+ * from), so the sum is the day, and a figure the TA corrects — a WhatsApp
+ * scoop the system never saw — carries straight into the total.
  */
-export function dayTotal(
-  values: Partial<Record<EffortKey, number | string | null | undefined>>,
-  recorded?: { cvs: number; scoop: number },
-): number {
-  const typed = Number(values.scoop ?? 0);
-  const scoop = Number.isFinite(typed) && typed > 0 ? typed : 0;
-  if (!recorded) return scoop;
-  return recorded.cvs + Math.max(0, scoop - recorded.scoop);
+export function dayTotal(values: Partial<Record<EffortKey, number | string | null | undefined>>): number {
+  return CV_COLUMNS.reduce((sum, k) => {
+    const n = Number(values[k] ?? 0);
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
 }
 
 /** The SETS cell as sent: "2 · 14 CVs" — the set, then the day's total. */
@@ -166,7 +163,7 @@ export function eodEmailHtml(input: {
   const effort = table(
     cols.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
     `<tr>${cols.map((c) => {
-      if (c.key === "sets") return `<td ${td.replace('"', '"white-space:nowrap;')}>${esc(setsCell(input.effort.sets, dayTotal(input.effort, input.effort.recorded)))}</td>`;
+      if (c.key === "sets") return `<td ${td.replace('"', '"white-space:nowrap;')}>${esc(setsCell(input.effort.sets, dayTotal(input.effort)))}</td>`;
       const v = input.effort[c.key as keyof EffortRow];
       return `<td ${td}>${v === null || v === undefined || typeof v === "object" ? "" : esc(v)}</td>`;
     }).join("")}</tr>` +

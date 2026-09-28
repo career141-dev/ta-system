@@ -88,6 +88,7 @@ import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingC
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
 import { WORKING_STAGES, workingStageKey } from "@/lib/workingStage";
 import { SET_SIZE, nextSetFor, setClosed } from "../../convex/lib/sets";
+import { backupPrimary } from "../../convex/lib/backup";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -852,6 +853,10 @@ const rawRepo = {
     let setNumber: number | null = app.setNumber;
     // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
     const addOnDay = this.workingStage(app.openingId, taId) === "Add-on";
+    // With someone already at interview or offer, it is a backup (convex/lib/backup).
+    const primary = app.backupForApplicationId
+      ? null
+      : backupPrimary(db.applications.filter((x) => x.openingId === app.openingId), app.id);
     mutate((d) => {
       const a = d.applications.find((x) => x.id === applicationId);
       if (!a) return;
@@ -862,6 +867,7 @@ const rawRepo = {
         a.isAddOn = true;
         a.addedOnAt = now;
       }
+      if (primary) a.backupForApplicationId = primary;
       if (a.setNumber === null) {
         a.setNumber = nextSetNumber(d, a.openingId, taId);
         setNumber = a.setNumber;
@@ -1302,6 +1308,26 @@ const rawRepo = {
       a.isAddOn = on;
       a.addedOnAt = on ? Date.now() : null;
     });
+  },
+
+  /**
+   * The Backup tag, by hand (28 Sep): on, it backs up the role's candidate
+   * furthest along, or the one given; off, it clears. False when there is
+   * nobody at interview or offer to back up.
+   */
+  setBackup(appId: Id, on: boolean, forApplicationId: Id | null = null): boolean {
+    const db = load();
+    const app = db.applications.find((x) => x.id === appId);
+    if (!app) return false;
+    const primary = on
+      ? forApplicationId ?? backupPrimary(db.applications.filter((x) => x.openingId === app.openingId), appId)
+      : null;
+    if (on && !primary) return false;
+    mutate((d) => {
+      const a = d.applications.find((x) => x.id === appId);
+      if (a) a.backupForApplicationId = primary;
+    });
+    return true;
   },
 
   promoteBackup(appId: Id, forApplicationId: Id) {
@@ -2018,8 +2044,10 @@ const rawRepo = {
         statusB: null,
         rankTier: null,
         rankWeight: null,
-        isAddOn: false,
-        addedOnAt: null,
+        // An add-on row stays an add-on in the pipeline and on the end-of-day
+        // sheet; it was always false, so the tag was lost here (28 Sep).
+        isAddOn: !!e.isAddOn,
+        addedOnAt: e.isAddOn ? now : null,
         backupForApplicationId: null,
         offerDeclinedAt: null,
         offerDeclineReason: null,
@@ -2043,6 +2071,9 @@ const rawRepo = {
    */
   addLink(openingId: Id, url: string, addedBy: Id, name: string | null = null, outcome: LinkOutcome = "shortlisted"): Id {
     const id = `lv_${Math.random().toString(36).slice(2, 10)}`;
+    // Added on an Add-on day, it is an add-on — the TA filters for them
+    // rather than hunting through the whole table (the desk, 28 Sep).
+    const addOn = this.workingStage(openingId, addedBy) === "Add-on";
     mutate((db) => {
       db.linkVault.push({
         id,
@@ -2060,9 +2091,18 @@ const rawRepo = {
         candidateId: null,
         conversationLog: [],
         createdAt: Date.now(),
+        ...(addOn ? { isAddOn: true } : {}),
       });
     });
     return id;
+  },
+
+  /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */
+  setLinkAddOn(entryId: Id, on: boolean) {
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (e) e.isAddOn = on;
+    });
   },
 
   // ─── Assignments — what someone is on an opening ──────────────────────────

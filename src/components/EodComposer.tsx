@@ -63,7 +63,12 @@ export function EodComposer({
     try {
       const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
       if (saved) {
-        if (saved.subject !== undefined) setSubject(saved.subject);
+        // Only a subject the TA typed, and only while the set and CV count it
+        // was typed over still stand: the saved line was the page's own, so a
+        // visit before more CVs joined kept "2 CVs" in front of four (28 Sep).
+        if (saved.subject !== undefined && saved.subject !== saved.baseSubject && saved.baseSubject === initialSubject) {
+          setSubject(saved.subject);
+        }
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
@@ -78,12 +83,12 @@ export function EodComposer({
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ subject, introText, outroText, shortlistDraft }),
+        JSON.stringify({ subject, baseSubject: initialSubject, introText, outroText, shortlistDraft }),
       );
     } catch {
       /* storage disabled */
     }
-  }, [draftKey, subject, introText, outroText, shortlistDraft]);
+  }, [draftKey, subject, initialSubject, introText, outroText, shortlistDraft]);
 
   // Clear draft on send
   useEffect(() => {

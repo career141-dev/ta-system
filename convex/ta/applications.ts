@@ -25,6 +25,7 @@ import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./g
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
 import { nextSetFor } from "../lib/sets";
+import { backupPrimary } from "../lib/backup";
 import { workingStageKey } from "../../src/lib/workingStage";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 import { isGone } from "../../src/lib/bin";
@@ -150,11 +151,14 @@ export async function claimForTa(ctx: MutationCtx, user: Doc<"users">, app: Doc<
   const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
   // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
   const addOn = !app.isAddOn && (await workingStageOf(ctx, app.jobId, user._id)) === "Add-on";
+  // With someone already at interview or offer, it is a backup (convex/lib/backup).
+  const primary = app.backupForApplicationId ? null : await backupPrimaryOn(ctx, app.jobId, appId);
   await ctx.db.patch(appId, {
     ownerTaId: user._id,
     shortlistedAt: now,
     setNumber,
     ...(addOn ? { isAddOn: true, addedOnAt: now } : {}),
+    ...(primary ? { backupForApplicationId: primary } : {}),
   });
 
   // Shortlisting is what sends somebody to Follow-up on this desk.
@@ -198,6 +202,23 @@ async function nextSetNumber(
     .withIndex("by_jobId", (q: any) => q.eq("jobId", jobId))
     .collect();
   return nextSetFor(all.filter((a) => a.ownerTaId === taId && a.setNumber != null), now);
+}
+
+/** The job's candidate a new shortlist would back up, if anyone is at interview or offer. */
+async function backupPrimaryOn(
+  ctx: { db: any },
+  jobId: Id<"jobs">,
+  selfId: Id<"applications">,
+): Promise<Id<"applications"> | null> {
+  const all: Doc<"applications">[] = await ctx.db
+    .query("applications")
+    .withIndex("by_jobId", (q: any) => q.eq("jobId", jobId))
+    .collect();
+  const id = backupPrimary(
+    all.map((a) => ({ id: a._id as string, stage: toTaStage(a.currentStage) })),
+    selfId,
+  );
+  return id as Id<"applications"> | null;
 }
 
 /**

@@ -656,6 +656,10 @@ export interface LinkVaultEntry {
   /** When the outcome last changed (28 Sep) — the end-of-day L EFFORT counts a
    *  row worked today. Absent on rows not touched since. */
   outcomeAt?: number;
+  /** An add-on: added while the TA's stage on the job was Add-on, or tagged by
+   *  hand (28 Sep). Carried to the application when the row joins the
+   *  pipeline. Absent on rows that are not. */
+  isAddOn?: boolean;
   /** Present when the row came from, or was enriched by, the extension. */
   capture?: ProfileCapture | null;
   /** Feedback for the TA from a lead, director, admin or ops. Absent on rows

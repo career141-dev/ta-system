@@ -15,6 +15,7 @@ import { FollowUpActions } from "./FollowUpActions";
 import { repo } from "@/data/store";
 import { isConvex } from "@/data/mode";
 import { ageHint, ageText } from "@/lib/ageExperience";
+import { cvSource, headhuntedCandidates } from "@/lib/cvSource";
 
 export function CandidateRow({
   app,
@@ -47,7 +48,7 @@ export function CandidateRow({
   const stamp = (t: number) =>
     dateAt(t);
 
-  const tag = channelTag(app.sourcingChannel);
+  const tag = channelTag(app.sourcingChannel, cvSource(app, headhuntedCandidates(repo.linkVault(openingId))));
 
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <>
@@ -92,6 +93,11 @@ export function CandidateRow({
           {app.isAddOn && (
             <span className="rounded bg-brand-soft px-1.5 py-[2px] text-[11px] font-medium text-brand">
               Add-on
+            </span>
+          )}
+          {app.backupForApplicationId && (
+            <span className="rounded bg-brand-soft px-1.5 py-[2px] text-[11px] font-medium text-brand">
+              Backup
             </span>
           )}
         </div>
@@ -174,6 +180,7 @@ export function CandidateRow({
             candidate={candidate}
             app={app}
             isAddOn={app.isAddOn}
+            isBackup={!!app.backupForApplicationId}
             canDecideDirector={canDecideDirector}
             canDecideClient={canDecideClient}
           />
