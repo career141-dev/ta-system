@@ -1793,10 +1793,10 @@ export async function saveContacts(formData: FormData) {
 
 export async function deleteOpening(formData: FormData) {
   await primeStore({ allApplications: true });
+  // A lead or above, or a recruiter on this opening ("opening.manage"). Only
+  // leads could while Delete was final; into the Bin it can be undone for
+  // seven days, so TAs may bin their own openings (owner, 28 Sep).
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  // Deleting a whole role and everything under it is a desk decision, not one
-  // recruiter's.
-  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
   const openingId = String(formData.get("openingId"));
   // Into the Bin for seven days, not gone (28 Sep): it leaves every list and
   // stops following up at once, and anyone can restore it from the Bin.
@@ -1963,8 +1963,8 @@ export async function addManyToOpening(formData: FormData) {
 export async function deleteOpenings(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
-  // The same rule as the one-at-a-time delete: a desk decision.
-  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
+  // The same rule as the one-at-a-time delete, checked per opening below: a
+  // lead or above, or a recruiter on that opening.
   const ids = formData.getAll("openingId").map(String);
   if (ids.length === 0) await fail("Tick at least one opening.");
   let deleted = 0;
