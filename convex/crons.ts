@@ -1010,9 +1010,20 @@ function addMaintenance(registry: ReturnType<typeof cronJobs>) {
   registry.daily("ta-sla-breaches", { hourUTC: 8, minuteUTC: 0 }, internal.crons.checkSlaBreaches, {});
 }
 
+/**
+ * Empty the Bin: clients and openings deleted seven days ago go for good
+ * (ta/bin.ts). It removes only our own records and sends nothing, so it runs
+ * on both registries.
+ */
+function addBin(registry: ReturnType<typeof cronJobs>) {
+  registry.daily("ta-empty-bin", { hourUTC: 21, minuteUTC: 30 }, internal.ta.bin.emptyDue, {});
+}
+
 addMailIntake(crons);
+addBin(crons);
 const quiet = cronJobs();
 addMailIntake(quiet);
+addBin(quiet);
 // Only on the quiet registry: where every cron runs, the CV platform's own
 // queue, healer and SLA jobs above already cover this.
 addMaintenance(quiet);

@@ -319,6 +319,15 @@ export default defineSchema({
     /** Set when a delete is under way (ta/openingDelete.ts): hidden from every list, removed in batches. */
     deletingAt: v.optional(v.number()),
     deletingBy: v.optional(v.id("users")),
+    /** Set when someone pressed Delete (ta/bin.ts): hidden like a deleted
+     *  opening, kept whole for seven days so it can be restored, then removed. */
+    binnedAt: v.optional(v.number()),
+    binnedBy: v.optional(v.id("users")),
+    /** What Restore puts back — binning sets the status to cancelled so the
+     *  follow-up sweep and CV routing leave the opening alone. */
+    statusBeforeBin: v.optional(v.union(v.literal("active"), v.literal("on_hold"),
+      v.literal("filled"), v.literal("cancelled"),
+      v.literal("draft"))),
     conversationTone: v.optional(v.string()),
 
     agent3TriggerStages: v.optional(v.array(v.string())),
@@ -464,6 +473,7 @@ export default defineSchema({
     .index("by_client", ["clientName"])
     .index("by_clientId", ["clientId"])
     .index("by_createdAt", ["createdAt"])
+    .index("by_binnedAt", ["binnedAt"])
     .searchIndex("search_title", {
       searchField: "title",
       filterFields: ["status", "primaryRecruiterId"]
@@ -613,6 +623,10 @@ export default defineSchema({
     alsoAssignTo: v.optional(v.array(v.object({ jobId: v.string(), jobPostId: v.string() }))),
     routeNote: v.optional(v.string()),
     uploadedBy: v.string(),
+    /** Set when a TA uploads a headhunted CV from TA Follow-up (ta/hhUpload.ts):
+     *  once the extraction has filed it on `assignToJob`, it is claimed by this
+     *  TA into TA Follow-up and flagged HH. */
+    headhuntedBy: v.optional(v.id("users")),
     status: v.string(),
     errorMessage: v.optional(v.string()),
     candidateId: v.optional(v.id("candidates")),
@@ -2223,9 +2237,15 @@ export default defineSchema({
     esaSignedAt: v.optional(v.union(v.number(), v.null())),
     status: v.union(v.literal("active"), v.literal("dormant"), v.literal("archived")),
     createdAt: v.number(),
+    /** Set when someone pressed Delete (ta/bin.ts); removed seven days later. */
+    binnedAt: v.optional(v.number()),
+    binnedBy: v.optional(v.id("users")),
+    /** The desk's notes on who the client is, for Research and Suggestions (28 Sep). */
+    researchNotes: v.optional(v.string()),
   })
     .index("by_nameKey", ["nameKey"])
-    .index("by_status", ["status"]),
+    .index("by_status", ["status"])
+    .index("by_binnedAt", ["binnedAt"]),
 
   /**
    * One advert. Many posts sit under one opening and share its candidate pool

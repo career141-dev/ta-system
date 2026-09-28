@@ -18,7 +18,7 @@
 // the pipeline events and the Meta events all still fire.
 
 import { v } from "convex/values";
-import { internalMutation, internalQuery } from "../_generated/server";
+import { internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
@@ -27,6 +27,7 @@ import { followUpOn } from "../lib/followUpScope";
 import { nextSetFor } from "../lib/sets";
 import { workingStageKey } from "../../src/lib/workingStage";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
+import { isGone } from "../../src/lib/bin";
 
 
 
@@ -41,6 +42,8 @@ export const listForOpening = internalQuery({
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const jobId = args.openingId as Id<"jobs">;
+    const job = await ctx.db.get(jobId);
+    if (!job || isGone(job)) return [];
 
     const apps = await ctx.db
       .query("applications")
@@ -77,8 +80,13 @@ export const listAll = internalQuery({
       numItems: Math.min(args.limit ?? 2000, 2000),
       cursor: args.cursor ?? null,
     });
+    // Applications on an opening in the Bin stay out of the dashboards until
+    // it is restored. The Bin is a handful of rows, read through its index.
+    const binned = new Set(
+      (await ctx.db.query("jobs").withIndex("by_binnedAt", (q) => q.gt("binnedAt", 0)).collect()).map((j) => j._id as string),
+    );
     return {
-      applications: page.page.map(projectApplication),
+      applications: page.page.filter((a) => !binned.has(a.jobId as string)).map(projectApplication),
       isDone: page.isDone,
       continueCursor: page.continueCursor,
     };
@@ -91,6 +99,8 @@ export const get = internalQuery({
     await optionalActor(ctx, args.actorId);
     const app = await ctx.db.get(args.applicationId as Id<"applications">);
     if (!app) return null;
+    const job = await ctx.db.get(app.jobId);
+    if (!job || isGone(job)) return null;
     const candidate = await ctx.db.get(app.candidateId);
     return {
       ...projectApplication(app),
@@ -116,52 +126,60 @@ export const shortlist = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("Application not found");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
-
-    // Read and write inside one mutation: Convex runs it as a transaction, so
-    // a second claimer arriving mid-flight is serialised behind this one and
-    // sees the owner that was just written.
-    if (app.ownerTaId && app.ownerTaId !== user._id) {
-      return { ok: false as const, ownerTaId: app.ownerTaId as string };
-    }
-    if (app.ownerTaId === user._id) {
-      return { ok: true as const, alreadyMine: true, setNumber: app.setNumber ?? null };
-    }
-
-    const now = Date.now();
-    const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
-    // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
-    const addOn = !app.isAddOn && (await workingStageOf(ctx, app.jobId, user._id)) === "Add-on";
-    await ctx.db.patch(appId, {
-      ownerTaId: user._id,
-      shortlistedAt: now,
-      setNumber,
-      ...(addOn ? { isAddOn: true, addedOnAt: now } : {}),
-    });
-
-    // Shortlisting is what sends somebody to Follow-up on this desk.
-    // A TA's shortlist is TA Follow-up — a database match or a new CV the TA
-    // picks, and someone the AI shortlisted first: the TA taking them on is
-    // what starts the outreach. AI Follow-up is only the AI's own shortlist,
-    // a CV scored at or above the pass mark (cvs/cvScoringActions.ts). For
-    // two days on 23–24 September a TA's shortlist went to AI Follow-up by
-    // mistake; the owner asked for it back (24 September).
-    if (toTaStage(app.currentStage) !== "ta_follow_up") {
-      await executeStageTransition(ctx, {
-        applicationId: appId,
-        targetStage: "follow_up" as PipelineStage,
-        actorId: user._id,
-        reason: "Shortlisted by a TA",
-        bypassRoleCheck: true,
-        // Unless the opening's follow-up switch is off: a switch that says off
-        // has to mean off. Every message still passes the outreach gate
-        // (convex/lib/outreachSafety.ts).
-        skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
-      });
-    }
-
-    return { ok: true as const, alreadyMine: false, setNumber };
+    return claimForTa(ctx, user, app);
   },
 });
+
+/**
+ * The claim itself, shared with the headhunted-CV upload (ta/hhUpload.ts), so
+ * a CV uploaded from TA Follow-up is claimed by exactly the same rule.
+ */
+export async function claimForTa(ctx: MutationCtx, user: Doc<"users">, app: Doc<"applications">) {
+  const appId = app._id;
+  // Read and write inside one mutation: Convex runs it as a transaction, so
+  // a second claimer arriving mid-flight is serialised behind this one and
+  // sees the owner that was just written.
+  if (app.ownerTaId && app.ownerTaId !== user._id) {
+    return { ok: false as const, ownerTaId: app.ownerTaId as string };
+  }
+  if (app.ownerTaId === user._id) {
+    return { ok: true as const, alreadyMine: true, setNumber: app.setNumber ?? null };
+  }
+
+  const now = Date.now();
+  const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
+  // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
+  const addOn = !app.isAddOn && (await workingStageOf(ctx, app.jobId, user._id)) === "Add-on";
+  await ctx.db.patch(appId, {
+    ownerTaId: user._id,
+    shortlistedAt: now,
+    setNumber,
+    ...(addOn ? { isAddOn: true, addedOnAt: now } : {}),
+  });
+
+  // Shortlisting is what sends somebody to Follow-up on this desk.
+  // A TA's shortlist is TA Follow-up — a database match or a new CV the TA
+  // picks, and someone the AI shortlisted first: the TA taking them on is
+  // what starts the outreach. AI Follow-up is only the AI's own shortlist,
+  // a CV scored at or above the pass mark (cvs/cvScoringActions.ts). For
+  // two days on 23–24 September a TA's shortlist went to AI Follow-up by
+  // mistake; the owner asked for it back (24 September).
+  if (toTaStage(app.currentStage) !== "ta_follow_up") {
+    await executeStageTransition(ctx, {
+      applicationId: appId,
+      targetStage: "follow_up" as PipelineStage,
+      actorId: user._id,
+      reason: "Shortlisted by a TA",
+      bypassRoleCheck: true,
+      // Unless the opening's follow-up switch is off: a switch that says off
+      // has to mean off. Every message still passes the outreach gate
+      // (convex/lib/outreachSafety.ts).
+      skipAutoOutreach: !followUpOn(await ctx.db.get(app.jobId)),
+    });
+  }
+
+  return { ok: true as const, alreadyMine: false, setNumber };
+}
 
 /**
  * The set a newly shortlisted person joins. The rule is in convex/lib/sets.ts

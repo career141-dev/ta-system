@@ -12,6 +12,7 @@
  */
 
 import { profileLink } from "@/lib/url";
+import { isDueForPurge, purgeAt } from "@/lib/bin";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -31,6 +32,8 @@ import type {
   SalaryBasis,
   Client,
   Database,
+  BinEntry,
+  BinItem,
   Id,
   LeadNote,
   LinkVaultEntry,
@@ -172,7 +175,7 @@ function backfill(db: Partial<Database>): Database {
     assignments: [], pipelineEvents: [], reviewRounds: [],
     alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
-    matchRuns: [], matchExclusions: [], liveMirror: [],
+    matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
   } satisfies Database;
   const out = { ...empty } as Database;
   for (const key of Object.keys(empty) as (keyof Database)[]) {
@@ -512,6 +515,56 @@ function channelForIntake(source: IntakeSource, jobPostId: Id | null): Applicati
     case "portal":
       return "E";
   }
+}
+
+/**
+ * Lift an opening and everything filed under it off the desk, returning what
+ * was taken so the Bin can put it back. The candidates stay, and a CV that
+ * came in for the job stays too, without the job.
+ */
+function takeOpening(db: Database, id: Id): Pick<BinEntry, "rows" | "intake"> {
+  const appIds = new Set(db.applications.filter((a) => a.openingId === id).map((a) => a.id));
+  const gone = (appId: unknown) => appIds.has(appId as Id);
+  type Row = Record<string, unknown>;
+  const belongs: [keyof Database, (r: Row) => boolean][] = [
+    ["openings", (r) => r.id === id],
+    ["applications", (r) => r.openingId === id],
+    ["jobPosts", (r) => r.openingId === id],
+    ["linkVault", (r) => r.openingId === id],
+    ["suggestions", (r) => r.openingId === id],
+    ["benchmarks", (r) => r.openingId === id],
+    ["researchReports", (r) => r.openingId === id],
+    ["chat", (r) => r.openingId === id],
+    ["jdChat", (r) => r.openingId === id],
+    ["callFeedback", (r) => gone(r.applicationId)],
+    ["interviews", (r) => gone(r.applicationId)],
+    ["alerts", (r) => r.subjectId === id || gone(r.subjectId)],
+    // Everything else that pointed at it, which the first version left behind
+    // (audit finding 39).
+    ["reviewRounds", (r) => r.openingId === id],
+    ["pipelineEvents", (r) => r.openingId === id],
+    ["outreach", (r) => gone(r.applicationId)],
+    ["aiCalls", (r) => r.openingId === id],
+    ["assignments", (r) => r.openingId === id],
+    ["esaRecords", (r) => r.openingId === id],
+  ];
+  const rows: Partial<Database> = {};
+  for (const [key, test] of belongs) {
+    const all = db[key] as unknown as Row[];
+    const taken = all.filter(test);
+    if (taken.length === 0) continue;
+    (db[key] as unknown as Row[]) = all.filter((r) => !test(r));
+    (rows as Record<string, unknown[]>)[key] = taken;
+  }
+  const intake: BinEntry["intake"] = [];
+  for (const item of db.intake) {
+    if (item.openingId === id) {
+      intake.push({ id: item.id, openingId: item.openingId, jobPostId: item.jobPostId ?? null });
+      item.openingId = null;
+      item.jobPostId = null;
+    }
+  }
+  return { rows, intake };
 }
 
 // ─── Reads ───────────────────────────────────────────────────────────────────
@@ -1315,20 +1368,6 @@ const rawRepo = {
     });
   },
 
-  /**
-   * Refused while the client still has openings. A cascade here would take
-   * candidates, shortlists and a year of outreach history with it, and nobody
-   * deleting a duplicate client record means to do that.
-   */
-  deleteClient(id: Id): { ok: true } | { ok: false; openings: number } {
-    const held = load().openings.filter((o) => o.clientId === id).length;
-    if (held > 0) return { ok: false, openings: held };
-    mutate((db) => {
-      db.clients = db.clients.filter((c) => c.id !== id);
-    });
-    return { ok: true };
-  },
-
   setContacts(clientId: Id, contacts: Client["contacts"]) {
     mutate((db) => {
       const c = db.clients.find((x) => x.id === clientId);
@@ -1349,58 +1388,139 @@ const rawRepo = {
   // ─── Deletes (12 Sep sweep, finding 02) ───────────────────────────────────
 
   /**
-   * An opening and everything filed under it. This is the one genuinely
-   * destructive action in the product, so it is deliberate rather than
-   * convenient: the caller has to have confirmed, and what goes is listed back
-   * so the confirmation could say what it was about to take.
+   * An opening and everything filed under it, gone for good without the Bin.
+   * Only the e2e scripts' clean-up uses this; the Delete button bins.
    */
-  deleteOpening(
-    id: Id,
-  ): { ok: true; applications: number; posts: number; links: number; suggestions: number } | { ok: false; message: string } {
+  deleteOpening(id: Id): { ok: true } | { ok: false; message: string } {
     const db0 = load();
     // A role that reached an offer or a placement is history the desk has to
     // keep. It is closed, not deleted.
     if (db0.offers.some((o) => o.openingId === id) || db0.placements.some((p) => p.openingId === id)) {
       return { ok: false, message: "This opening has an offer or a placement on it. Close it instead — that record has to stay." };
     }
-    const count = {
-      applications: db0.applications.filter((a) => a.openingId === id).length,
-      posts: db0.jobPosts.filter((p) => p.openingId === id).length,
-      links: db0.linkVault.filter((l) => l.openingId === id).length,
-      suggestions: db0.suggestions.filter((x) => x.openingId === id).length,
-    };
     mutate((db) => {
-      const appIds = new Set(db.applications.filter((a) => a.openingId === id).map((a) => a.id));
-      const gone = (appId: Id) => appIds.has(appId);
-      db.openings = db.openings.filter((o) => o.id !== id);
-      db.applications = db.applications.filter((a) => a.openingId !== id);
-      db.jobPosts = db.jobPosts.filter((p) => p.openingId !== id);
-      db.linkVault = db.linkVault.filter((l) => l.openingId !== id);
-      db.suggestions = db.suggestions.filter((x) => x.openingId !== id);
-      db.benchmarks = db.benchmarks.filter((b) => b.openingId !== id);
-      db.researchReports = db.researchReports.filter((r) => r.openingId !== id);
-      db.chat = db.chat.filter((c) => c.openingId !== id);
-      db.jdChat = db.jdChat.filter((c) => c.openingId !== id);
-      db.callFeedback = db.callFeedback.filter((f) => !gone(f.applicationId));
-      db.interviews = db.interviews.filter((i) => !gone(i.applicationId));
-      db.alerts = db.alerts.filter((a) => a.subjectId !== id && !gone(a.subjectId));
-      // Everything else that pointed at it, which the first version left behind
-      // (audit finding 39).
-      db.reviewRounds = db.reviewRounds.filter((r) => r.openingId !== id);
-      db.pipelineEvents = db.pipelineEvents.filter((e) => e.openingId !== id);
-      db.outreach = db.outreach.filter((m) => !gone(m.applicationId));
-      db.aiCalls = db.aiCalls.filter((c) => c.openingId !== id);
-      db.assignments = db.assignments.filter((a) => a.openingId !== id);
-      db.esaRecords = db.esaRecords.filter((e) => e.openingId !== id);
-      // A CV that came in for this job is still a CV. It stays, without a job.
-      for (const item of db.intake) {
-        if (item.openingId === id) {
-          item.openingId = null;
-          item.jobPostId = null;
-        }
-      }
+      takeOpening(db, id);
     });
-    return { ok: true, ...count };
+    return { ok: true };
+  },
+
+  // ─── The Bin (28 Sep) ─────────────────────────────────────────────────────
+  //
+  // Delete moves a client or an opening here for seven days (src/lib/bin.ts).
+  // This store lifts the rows off the desk whole, so every read skips them
+  // without knowing about the Bin, and Restore puts them back as they were.
+
+  /** Delete pressed on an opening. Refused on the same terms as a delete. */
+  binOpening(id: Id, by: Id | null): { ok: true; title: string; purgeAt: number } | { ok: false; message: string } {
+    const db0 = load();
+    const o = db0.openings.find((x) => x.id === id);
+    if (!o) return { ok: false, message: "That opening no longer exists." };
+    if (db0.offers.some((x) => x.openingId === id) || db0.placements.some((p) => p.openingId === id)) {
+      return { ok: false, message: "This opening has an offer or a placement on it. Close it instead — that record has to stay." };
+    }
+    const now = Date.now();
+    mutate((db) => {
+      const { rows, intake } = takeOpening(db, id);
+      db.bin.push({ id: `bin_${Math.random().toString(36).slice(2, 10)}`, kind: "opening", itemId: id, binnedAt: now, binnedBy: by, rows, intake });
+    });
+    return { ok: true, title: o.title, purgeAt: purgeAt(now) };
+  },
+
+  /** Delete pressed on a client: refused while an opening on the desk is filed under it. */
+  binClient(id: Id, by: Id | null): { ok: true; name: string; purgeAt: number } | { ok: false; openings: number } {
+    const db0 = load();
+    const held = db0.openings.filter((o) => o.clientId === id).length;
+    if (held > 0) return { ok: false, openings: held };
+    const c = db0.clients.find((x) => x.id === id);
+    if (!c) return { ok: false, openings: 0 };
+    const now = Date.now();
+    mutate((db) => {
+      db.clients = db.clients.filter((x) => x.id !== id);
+      db.bin.push({ id: `bin_${Math.random().toString(36).slice(2, 10)}`, kind: "client", itemId: id, binnedAt: now, binnedBy: by, rows: { clients: [c] }, intake: [] });
+    });
+    return { ok: true, name: c.name, purgeAt: purgeAt(now) };
+  },
+
+  /** What is in the Bin, newest first. Anything past its seven days is removed first. */
+  bin(): BinItem[] {
+    repo.emptyBin(Date.now());
+    const db = load();
+    const userName = (uid: Id | null) => (uid ? (db.users.find((u) => u.id === uid)?.name ?? "Someone") : null);
+    const clientName = (cid: Id) =>
+      db.clients.find((c) => c.id === cid)?.name ??
+      db.bin.find((e) => e.kind === "client" && e.itemId === cid)?.rows.clients?.[0]?.name ??
+      null;
+    return db.bin
+      .map((e): BinItem => {
+        const opening = e.rows.openings?.[0];
+        const client = e.rows.clients?.[0];
+        return {
+          kind: e.kind,
+          id: e.itemId,
+          name: opening?.title ?? client?.name ?? "—",
+          clientName: opening ? clientName(opening.clientId) : null,
+          binnedAt: e.binnedAt,
+          binnedBy: userName(e.binnedBy),
+          purgeAt: purgeAt(e.binnedAt),
+        };
+      })
+      .sort((a, b) => b.binnedAt - a.binnedAt);
+  },
+
+  /** Out of the Bin, as it was. An opening brings its client back with it. */
+  restoreFromBin(kind: "opening" | "client", id: Id): { ok: true; name: string } | { ok: false; message: string } {
+    const entry = load().bin.find((e) => e.kind === kind && e.itemId === id);
+    if (!entry) return { ok: false, message: `That ${kind} has already been deleted for good.` };
+    const name = entry.rows.openings?.[0]?.title ?? entry.rows.clients?.[0]?.name ?? `The ${kind}`;
+    mutate((db) => {
+      const put = (e: BinEntry) => {
+        for (const [key, rows] of Object.entries(e.rows) as [keyof Database, unknown[]][]) {
+          (db[key] as unknown[]).push(...rows);
+        }
+        for (const back of e.intake) {
+          const item = db.intake.find((x) => x.id === back.id);
+          // Only where nothing has refiled it since.
+          if (item && item.openingId === null) {
+            item.openingId = back.openingId;
+            item.jobPostId = back.jobPostId;
+          }
+        }
+        db.bin = db.bin.filter((x) => x.id !== e.id);
+      };
+      put(entry);
+      const clientId = entry.rows.openings?.[0]?.clientId;
+      const binnedClient = clientId ? db.bin.find((e) => e.kind === "client" && e.itemId === clientId) : undefined;
+      if (binnedClient) put(binnedClient);
+    });
+    return { ok: true, name };
+  },
+
+  /** Skip the seven days. A client goes only once none of its openings are left in the Bin. */
+  deleteFromBin(kind: "opening" | "client", id: Id): { ok: true } | { ok: false; message: string } {
+    const db0 = load();
+    const entry = db0.bin.find((e) => e.kind === kind && e.itemId === id);
+    if (!entry) return { ok: true };
+    if (kind === "client") {
+      const under = db0.bin.filter((e) => e.kind === "opening" && e.rows.openings?.[0]?.clientId === id).length;
+      if (under > 0) {
+        return { ok: false, message: `This client still has ${under} opening${under === 1 ? "" : "s"} in the Bin. Delete those first.` };
+      }
+    }
+    mutate((db) => {
+      db.bin = db.bin.filter((e) => e.id !== entry.id);
+    });
+    return { ok: true };
+  },
+
+  /** The daily clean-up: everything binned seven days ago goes for good. */
+  emptyBin(now: number): number {
+    const due = load().bin.filter((e) => isDueForPurge(e.binnedAt, now));
+    if (due.length === 0) return 0;
+    mutate((db) => {
+      const gone = new Set(due.map((e) => e.id));
+      db.bin = db.bin.filter((e) => !gone.has(e.id));
+    });
+    return due.length;
   },
 
   updateOpening(id: Id, patch: Partial<Opening>) {
@@ -2530,6 +2650,15 @@ const rawRepo = {
       entries
         .filter((e) => !known.has((e.linkedinUrl ?? e.name).toLowerCase()))
         .forEach((e, i) => db.suggestions.push({ ...e, id: `sg_${Date.now().toString(36)}_${i}` }));
+    });
+  },
+
+  /** Every suggestion nobody has acted on yet, set aside — they came from a run about the wrong company (28 Sep). */
+  dismissNewSuggestions(openingId: Id) {
+    mutate((db) => {
+      for (const s of db.suggestions) {
+        if (s.openingId === openingId && s.status === "new") s.status = "dismissed";
+      }
     });
   },
 

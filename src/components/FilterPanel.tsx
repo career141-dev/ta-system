@@ -1,3 +1,4 @@
+import Form from "next/form";
 import type { ListFilters } from "./CandidateList";
 
 /**
@@ -45,7 +46,7 @@ export function FilterPanel({
 }) {
   return (
     <aside className="hidden w-[244px] shrink-0 lg:block">
-      <form method="GET" action={basePath} className="rounded-xl border border-rule bg-surface p-5">
+      <Form action={basePath} className="rounded-xl border border-rule bg-surface p-5">
         {/*
           Carry the toolbar's fields through.
 
@@ -55,9 +56,9 @@ export function FilterPanel({
           toolbar wiped every rail filter. Each form now re-posts the other's
           current values.
         */}
-        {/* minExp is left out: this rail has its own selector for it, and
-            sending both submitted two conflicting values (audit finding 38). */}
-        {(["q", "sort", "band", "maxNotice", "mine"] as const).map((k) =>
+        {/* minExp, maxExp and maxNotice are left out: this rail has its own selector for them, and
+            sending both submitted conflicting values (audit finding 38). */}
+        {(["q", "sort", "band", "mine"] as const).map((k) =>
           filters[k] ? <input key={k} type="hidden" name={k} value={filters[k]} /> : null,
         )}
         <div className="mb-4 flex items-baseline justify-between">
@@ -91,6 +92,26 @@ export function FilterPanel({
             <option value="5">5+ years</option>
             <option value="10">10+ years</option>
             <option value="15">15+ years</option>
+          </select>
+          <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"><path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
+          </div>
+        </label>
+
+        <label className="mt-4 block border-t border-rule pt-4">
+          <span className="text-[12.5px] font-medium">Maximum experience</span>
+          <div className="relative mt-1.5">
+          <select
+            name="maxExp"
+            defaultValue={filters.maxExp ?? ""}
+            className="w-full cursor-pointer appearance-none rounded-lg border border-rule bg-surface py-2 pl-2.5 pr-9 text-[12.5px] outline-none transition-colors focus:border-brand"
+          >
+            <option value="">Any</option>
+            <option value="3">Up to 3 years</option>
+            <option value="5">Up to 5 years</option>
+            <option value="8">Up to 8 years</option>
+            <option value="10">Up to 10 years</option>
+            <option value="15">Up to 15 years</option>
+            <option value="20">Up to 20 years</option>
           </select>
           <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint"><path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </div>
@@ -144,7 +165,7 @@ export function FilterPanel({
         <button className="mt-5 w-full rounded-full bg-brand py-2 text-[12.5px] font-medium text-white hover:opacity-90">
           Apply filters
         </button>
-      </form>
+      </Form>
     </aside>
   );
 }

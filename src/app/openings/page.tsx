@@ -70,6 +70,9 @@ export default async function OpeningsPage({
   const all = isDeskWide(user) ? repo.openings() : mine;
   const liveAlerts = computeAlerts();
   const showTaFilter = isDeskWide(user);
+  // Who may move an opening to the Bin: the same test the delete action makes.
+  const mayBin = (openingId: string) =>
+    allows(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
 
   // Extract dynamic clean country options for filters
   const locationOptions = Array.from(
@@ -203,13 +206,14 @@ export default async function OpeningsPage({
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          {/* Deleting is a desk decision, so only desk-wide people tick. */}
-          {isDeskWide(user) && (
+          {/* Delete moves to the Bin: a lead or above can tick any opening, a
+              TA the openings they recruit on (28 Sep). */}
+          {list.some((o) => mayBin(o.id)) && (
             <BulkBar form="bulk-openings" noun={["opening", "openings"]} action={deleteOpenings}>
               <BulkConfirm
                 label="Delete"
                 noun={["opening", "openings"]}
-                warning="Each goes with its posts, pipeline, calls, messages and offers. Their candidates stay in the database. This cannot be undone."
+                warning="They move to the Bin and can be restored for 7 days, then are deleted for good. Their candidates are never deleted."
               />
             </BulkBar>
           )}
@@ -251,7 +255,7 @@ export default async function OpeningsPage({
                 />
                 <div className="pointer-events-none relative flex flex-wrap items-start justify-between gap-5">
                   <div className="flex min-w-0 items-start gap-3.5">
-                  {isDeskWide(user) && (
+                  {mayBin(o.id) && (
                     <span className="pointer-events-auto relative z-10 pt-1">
                       <RowCheck form="bulk-openings" name="openingId" value={o.id} label={o.title} />
                     </span>
@@ -310,7 +314,7 @@ export default async function OpeningsPage({
                         <div className="mt-1.5 text-[11.5px] text-ink-soft">{s.l}</div>
                       </div>
                     ))}
-                    {isDeskWide(user) && (
+                    {mayBin(o.id) && (
                       <span className="pointer-events-auto relative z-10 -mr-3 -mt-1">
                         <OpeningMenu openingId={o.id} title={o.title} candidates={repo.applications(o.id).length} />
                       </span>

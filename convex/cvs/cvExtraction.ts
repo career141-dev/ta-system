@@ -1072,6 +1072,11 @@ export async function runCvExtraction(
           upload: cvUpload,
           score: !skipLLM,
         });
+        // A headhunted CV uploaded from TA Follow-up goes on into TA Follow-up,
+        // claimed and flagged HH (ta/hhUpload.ts). Nothing for any other upload.
+        if (cvUpload?.headhuntedBy) {
+          await ctx.runMutation(internal.ta.hhUpload.fileHeadhunt, { cvUploadId, candidateId: existingCandidate._id, jobId });
+        }
       }
 
       if (args.logId) {
@@ -1411,6 +1416,11 @@ export async function runCvExtraction(
         upload: cvUpload,
         score: !skipLLM,
       });
+      // A headhunted CV uploaded from TA Follow-up goes on into TA Follow-up,
+      // claimed and flagged HH (ta/hhUpload.ts). Nothing for any other upload.
+      if (cvUpload?.headhuntedBy) {
+        await ctx.runMutation(internal.ta.hhUpload.fileHeadhunt, { cvUploadId, candidateId: resolvedCandidateId, jobId });
+      }
     } else if (postRoutingOn() && isEmailChannel(sourceChannel)) {
       // No post matched the email: the person stays in the database. The
       // guess below put people on jobs they never applied for (22 September).
@@ -1506,6 +1516,11 @@ export async function runCvExtraction(
           upload: cvUpload,
           score: false,
         });
+        // A headhunted CV uploaded from TA Follow-up goes on into TA Follow-up,
+        // claimed and flagged HH (ta/hhUpload.ts). Nothing for any other upload.
+        if (cvUpload?.headhuntedBy) {
+          await ctx.runMutation(internal.ta.hhUpload.fileHeadhunt, { cvUploadId, candidateId, jobId: assignedJobId });
+        }
         console.log(`[CvExtraction] Preserved candidate ${candidateId} in job ${assignedJobId} (New CVs) despite extraction error: ${message}`);
       }
     }

@@ -127,7 +127,7 @@ export default async function ClientsPage({
             <BulkConfirm
               label="Delete"
               noun={["client", "clients"]}
-              warning="A client with openings filed under it is kept, and named."
+              warning="They move to the Bin and can be restored for 7 days. A client with openings filed under it is kept, and named."
             />
           </BulkBar>
         )}
@@ -144,6 +144,7 @@ export default async function ClientsPage({
               name={c.name}
               status={c.status}
               esaSignedAt={c.esaSignedAt}
+              researchNotes={c.researchNotes ?? ""}
               contacts={c.contacts}
               canDelete={can(user, "client.manage").ok}
               selectForm={can(user, "client.manage").ok ? "bulk-clients" : undefined}

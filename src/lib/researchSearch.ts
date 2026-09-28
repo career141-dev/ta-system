@@ -25,6 +25,8 @@ export interface ResearchInput {
   title: string;
   /** Also find who holds the role now, at the client and the competitors (Benchmark). */
   benchmark?: boolean;
+  /** What the desk wrote about the client — see `clientHints`. */
+  clientNotes?: string;
 }
 
 export interface ResearchDeps {
@@ -62,12 +64,15 @@ export const DEFAULT_DEPS: ResearchDeps = {
  * its LinkedIn page, where it is, its competitors, its market, and the role.
  * Shared with the search benchmark so it measures the searches Research makes.
  */
-export function clientQueries(name: string, industry: string, where: string, title: string): string[] {
+export function clientQueries(name: string, industry: string, where: string, title: string, anchor = ""): string[] {
+  // `anchor` is the client's own domain when the desk gave it: "SQ" alone
+  // finds a dozen companies, "SQ" next to sqsolutions.lk finds the one.
+  const a = anchor ? ` ${anchor}` : "";
   return [
-    `"${name}" ${industry}`.trim(),
-    `"${name}" site:linkedin.com/company`,
-    `"${name}" about head office ${where}`,
-    `"${name}" competitors`,
+    `"${name}"${a} ${industry}`.trim(),
+    `"${name}"${a} site:linkedin.com/company`,
+    `"${name}"${a} about head office ${where}`,
+    `"${name}"${a} competitors`,
     `top ${industry || "companies"} companies in ${where}`,
     `"${title}" jobs ${where}`,
   ];
@@ -88,6 +93,41 @@ function nameTokens(name: string): string[] {
     .replace(/\b(plc|ltd|limited|pvt|private|company|co|group|holdings|inc|llc|the|and|of|lanka|sri)\b\.?/g, " ")
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length >= 3);
+}
+
+/**
+ * What the desk wrote about the client, split into the parts Research can use
+ * directly (28 Sep).
+ *
+ * Research found "SQ" by name alone, and a short name is a dozen companies: it
+ * read the wrong one's website, and the overview, competitors and Benchmark
+ * were all about somebody else. The desk now writes what it knows on the
+ * client — pastes the website, the LinkedIn page, the full name, what they do —
+ * and a link written there is used as-is instead of guessed. The rest of the
+ * text goes to the model as the desk's own word about who the client is.
+ */
+export function clientHints(notes: string): { website: string | null; linkedin: string | null; text: string } {
+  const text = notes.trim().slice(0, 1500);
+  // With a scheme, with www., or ending in a common top-level domain. Not any
+  // "a.b": "Pvt.Ltd" and "e.g." are not websites.
+  const links =
+    text.match(
+      /(?:https?:\/\/[^\s,;()<>"']+|\bwww\.[^\s,;()<>"']+|\b(?:[a-z0-9-]+\.)+(?:com|lk|net|org|io|co|biz|info|ae|uk|in|au|sg|qa|sa|om|bh|kw|mv)\b(?:\/[^\s,;()<>"']*)?)/gi,
+    ) ?? [];
+  let website: string | null = null;
+  let linkedin: string | null = null;
+  for (const raw of links) {
+    const url = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    const company = url.match(/^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\/company\/([^/?#]+)/i);
+    if (company) {
+      linkedin ??= `https://www.linkedin.com/company/${company[1]}`;
+      continue;
+    }
+    const host = hostOf(url);
+    // The origin as written — some sites answer only on www.
+    if (!website && host && !NOT_OWN_SITE.test(host)) website = new URL(url).origin;
+  }
+  return { website, linkedin, text };
 }
 
 function hostOf(url: string): string | null {
@@ -218,6 +258,11 @@ export async function researchViaSearch(input: ResearchInput, given: ResearchDep
   if (!name || /^(the client|confidential|unknown|internal)\b/i.test(name)) return { ok: false, reason: "client_not_searchable" };
   const industry = input.industry.trim();
   const where = input.where.trim() || "Sri Lanka";
+  const hints = clientHints(input.clientNotes ?? "");
+  // Put in front of every model call that decides who the client is.
+  const deskSays = hints.text
+    ? `\n\nWhat the recruitment desk knows about ${name} (their own words — where a search result is about a different company of the same name, leave it out):\n${hints.text}`
+    : "";
 
   let searches = 0;
   // A search that fails — a rejected key, a 429, a network error — used to
@@ -236,17 +281,18 @@ export async function researchViaSearch(input: ResearchInput, given: ResearchDep
   try {
     // ── 1. The client, and who competes with them — all at once. ─────────────
     const [siteHits, linkedinHits, aboutHits, compHits, marketHits, titleHits] = await Promise.all(
-      clientQueries(name, industry, where, input.title).map(run),
+      clientQueries(name, industry, where, input.title, hints.website ? (hostOf(hints.website) ?? "") : "").map(run),
     );
     const clientHits = [...siteHits, ...aboutHits];
-    if (clientHits.length + linkedinHits.length === 0) {
+    // A website the desk gave is read whatever the search returned.
+    if (clientHits.length + linkedinHits.length === 0 && !hints.website) {
       return searchError
         ? { ok: false, reason: "search_failed", detail: searchError }
         : { ok: false, reason: "nothing_found" };
     }
 
-    const website = pickOfficialSite(clientHits, name);
-    const linkedin = pickLinkedInCompany([...linkedinHits, ...siteHits], name);
+    const website = hints.website ?? pickOfficialSite(clientHits, name);
+    const linkedin = hints.linkedin ?? pickLinkedInCompany([...linkedinHits, ...siteHits], name);
 
     // ── 2. Read the client's own pages. Free: a fetch, not a search. ─────────
     const clientPages = website
@@ -261,7 +307,7 @@ export async function researchViaSearch(input: ResearchInput, given: ResearchDep
     if (compEvidence) {
       const r = await deps.model(
         SYSTEM,
-        `Search results about ${name}${industry ? ` (${industry})` : ""} and its market in ${where}:\n\n${compEvidence}\n\nList up to ${MAX_COMPETITORS} companies from these results that compete with ${name} in the same business. Company names only, spelled exactly as in the results. Not ${name} itself, not directories, news sites or job boards.\nJSON: {"competitors": ["..."]}`,
+        `Search results about ${name}${industry ? ` (${industry})` : ""} and its market in ${where}:\n\n${compEvidence}${deskSays}\n\nList up to ${MAX_COMPETITORS} companies from these results that compete with ${name} in the same business. Company names only, spelled exactly as in the results. Not ${name} itself, not directories, news sites or job boards.\nJSON: {"competitors": ["..."]}`,
         600,
       );
       if (r.ok) competitors = groundedCompetitors(list(parseJsonObject(r.text)?.competitors), compEvidence, name);
@@ -368,7 +414,7 @@ export async function researchViaSearch(input: ResearchInput, given: ResearchDep
     const [clientAnswer, compAnswer, bench] = await Promise.all([
       deps.model(
         SYSTEM,
-        `Client: ${name}${industry ? ` — ${industry}` : ""}. Role being hired: ${input.title}. Market: ${where}.
+        `Client: ${name}${industry ? ` — ${industry}` : ""}. Role being hired: ${input.title}. Market: ${where}.${deskSays}
 
 Evidence:
 ${blockOf(clientIds)}

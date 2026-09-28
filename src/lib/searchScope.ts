@@ -40,7 +40,7 @@ export function searchScopeFor(pathname: string): SearchScope {
   const opening = path.match(/^\/openings\/[^/]+(\/.*)?$/);
   if (opening && opening[1]) {
     const sub = opening[1];
-    const filters = ["post", "minExp", "maxNotice", "location", "mine", "company", "past", "skill", "school", "industry", "title", "nationality", "sort", "band"];
+    const filters = ["post", "minExp", "maxExp", "maxNotice", "location", "mine", "company", "past", "skill", "school", "industry", "title", "nationality", "sort", "band"];
     if (/^\/pipeline\/[^/]+$/.test(sub)) return same(path, "Search candidates in this stage", filters);
     if (sub === "/database") return same(path, "Search matched candidates", filters);
     if (sub === "/linkedin-job") return same(path, "Search applicants", filters);

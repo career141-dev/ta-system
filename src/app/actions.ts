@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { can, isDeskWide, type Capability } from "@/lib/auth";
+import { can, isDeskWide, isReadOnly, type Capability } from "@/lib/auth";
+import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
 import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
@@ -52,7 +53,7 @@ import { findDatabaseMatches } from "@/lib/dbMatch";
 import { clearMatching, markMatching, matchFailureText } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
-import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
+import { convexAction, convexActorForEmail, convexMutation, convexQuery } from "@/lib/convexServer";
 import * as backend from "@/data/convex/backend";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
@@ -1248,7 +1249,7 @@ export async function addJobPost(formData: FormData) {
     const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
     if (!linkedinJobId(externalUrl) && !linkedinProjectId(externalUrl)) {
       await fail(
-        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
       );
     }
   }
@@ -1290,7 +1291,7 @@ export async function updatePost(formData: FormData) {
     const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
     if (url && !linkedinJobId(url) && !linkedinProjectId(url)) {
       await fail(
-        "That LinkedIn link has no job or project number. Copy the \"View applicant\" link from one of this job's application emails, or the job's LinkedIn page link.",
+        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
       );
     }
     patch.externalUrl = url || null;
@@ -1692,6 +1693,8 @@ export async function updateClient(formData: FormData) {
   const industry = String(formData.get("industry") ?? "").trim() || "Other";
   const status = String(formData.get("status") ?? "active") as "active" | "dormant" | "archived";
   const esaSignedAt = esa ? new Date(esa).getTime() : null;
+  // Only when the form carries the box, so a form without it never blanks it.
+  const researchNotes = formData.has("researchNotes") ? String(formData.get("researchNotes") ?? "").trim() : undefined;
 
   const { isConvex } = await import("@/data/mode");
   if (isConvex()) {
@@ -1704,6 +1707,7 @@ export async function updateClient(formData: FormData) {
       industry,
       status,
       esaSignedAt,
+      ...(researchNotes !== undefined && { researchNotes }),
     });
   } else {
     repo.updateClient(clientId, {
@@ -1711,6 +1715,7 @@ export async function updateClient(formData: FormData) {
       industry,
       status,
       esaSignedAt,
+      ...(researchNotes !== undefined && { researchNotes }),
     });
   }
   revalidatePath("/clients");
@@ -1723,23 +1728,32 @@ export async function deleteClient(formData: FormData) {
   const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
 
-  const { isConvex } = await import("@/data/mode");
-  let res: { ok: boolean; openings?: number } = { ok: true };
-  if (isConvex()) {
-    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
-    const actor = await convexActorForEmail(user.email);
-    res = await freshAfter(convexMutation<{ ok: boolean; openings?: number }>)("ta/clients:remove", {
-      actorId: actor?._id,
-      clientId,
-    });
-  } else {
-    res = repo.deleteClient(clientId);
-  }
+  // Into the Bin for seven days, not gone (28 Sep) — see src/lib/bin.ts.
+  const res = await binClientNamed(user, clientId);
   revalidatePath("/clients");
   revalidatePath("/openings/new");
+  revalidatePath("/bin");
   // Refused because work is filed under it — the page says so rather than
   // pretending the press did nothing.
   if (!res.ok) redirect(`/clients?held=${res.openings}`);
+  redirect(`/clients?msg=${encodeURIComponent(`${res.name} moved to the Bin. It will be deleted for good on ${purgeDateLabel(res.binnedAt)}.`)}&tone=ok`);
+}
+
+/** Move one client to the Bin, in whichever store is behind the app. */
+async function binClientNamed(
+  user: User,
+  clientId: string,
+): Promise<{ ok: true; name: string; binnedAt: number } | { ok: false; openings: number }> {
+  if (isConvex()) {
+    const { convexActorForEmail } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    const r = await freshAfter(
+      convexMutation<{ ok: true; name: string; purgeAt: number } | { ok: false; openings: number; missing?: boolean }>,
+    )("ta/bin:binClient", { actorId: actor?._id, clientId });
+    return r.ok ? { ok: true, name: r.name, binnedAt: r.purgeAt - BIN_MS } : { ok: false, openings: r.openings };
+  }
+  const r = repo.binClient(clientId, user.id);
+  return r.ok ? { ok: true, name: r.name, binnedAt: r.purgeAt - BIN_MS } : r;
 }
 
 /** Contacts arrive as parallel arrays from the repeatable rows. */
@@ -1779,29 +1793,39 @@ export async function saveContacts(formData: FormData) {
 
 export async function deleteOpening(formData: FormData) {
   await primeStore({ allApplications: true });
+  // A lead or above, or a recruiter on this opening ("opening.manage"). Only
+  // leads could while Delete was final; into the Bin it can be undone for
+  // seven days, so TAs may bin their own openings (owner, 28 Sep).
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  // Deleting a whole role and everything under it is a desk decision, not one
-  // recruiter's.
-  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
   const openingId = String(formData.get("openingId"));
-  let title = repo.opening(openingId)?.title ?? "The opening";
+  // Into the Bin for seven days, not gone (28 Sep): it leaves every list and
+  // stops following up at once, and anyone can restore it from the Bin.
+  const r = await binOpeningNamed(user, openingId);
+  if (!r.ok) await fail(r.message);
   if (isConvex()) {
-    // The opening and all its data are removed in the backend, in batches
-    // (convex/ta/openingDelete.ts). Its candidates stay in the database.
-    try {
-      const r = await convexMutation<{ ok: true; title: string }>("ta/openingDelete:start", { actorId: user.id, openingId });
-      title = r.title;
-    } catch (e) {
-      await fail(backendMessage(e, "The opening could not be deleted."));
-    }
     const { resetStore } = await import("@/data/prime");
     resetStore();
-  } else {
-    const r = repo.deleteOpening(openingId);
-    if (!r.ok) await fail(r.message);
   }
   revalidatePath("/", "layout");
-  redirect(`/openings?msg=${encodeURIComponent(`"${title}" deleted. Its candidates are still in the database.`)}`);
+  const { title, purgeAt } = r as { title: string; purgeAt: number };
+  redirect(
+    `/openings?msg=${encodeURIComponent(`"${title}" moved to the Bin. It will be deleted for good on ${purgeDateLabel(purgeAt - BIN_MS)}.`)}&tone=ok`,
+  );
+}
+
+/** Move one opening to the Bin, in whichever store is behind the app. */
+async function binOpeningNamed(
+  user: User,
+  openingId: string,
+): Promise<{ ok: true; title: string; purgeAt: number } | { ok: false; message: string }> {
+  if (isConvex()) {
+    try {
+      return await convexMutation<{ ok: true; title: string; purgeAt: number }>("ta/bin:binOpening", { actorId: user.id, openingId });
+    } catch (e) {
+      return { ok: false, message: backendMessage(e, "The opening could not be deleted.") };
+    }
+  }
+  return repo.binOpening(openingId, user.id);
 }
 
 /**
@@ -1939,8 +1963,8 @@ export async function addManyToOpening(formData: FormData) {
 export async function deleteOpenings(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
-  // The same rule as the one-at-a-time delete: a desk decision.
-  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
+  // The same rule as the one-at-a-time delete, checked per opening below: a
+  // lead or above, or a recruiter on that opening.
   const ids = formData.getAll("openingId").map(String);
   if (ids.length === 0) await fail("Tick at least one opening.");
   let deleted = 0;
@@ -1952,25 +1976,16 @@ export async function deleteOpenings(formData: FormData) {
       problems.push(`${title}: ${allowed.message}`);
       continue;
     }
-    if (isConvex()) {
-      try {
-        await convexMutation("ta/openingDelete:start", { actorId: user.id, openingId });
-        deleted++;
-      } catch (e) {
-        problems.push(`${title}: ${backendMessage(e, "could not be deleted")}`);
-      }
-    } else {
-      const r = repo.deleteOpening(openingId);
-      if (r.ok) deleted++;
-      else problems.push(`${title}: ${r.message}`);
-    }
+    const r = await binOpeningNamed(user, openingId);
+    if (r.ok) deleted++;
+    else problems.push(`${title}: ${r.message}`);
   }
   if (isConvex()) {
     const { resetStore } = await import("@/data/prime");
     resetStore();
   }
   revalidatePath("/", "layout");
-  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} deleted. Their candidates are still in the database.`;
+  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} moved to the Bin. They can be restored for ${BIN_DAYS} days.`;
   await (deleted ? (problems.length ? note : done) : fail)(problems.length ? `${said} Not deleted — ${problems.join("; ")}` : said);
 }
 
@@ -1979,16 +1994,13 @@ export async function deleteClients(formData: FormData) {
   const user = await authorize(formData, "client.manage");
   const ids = formData.getAll("clientId").map(String);
   if (ids.length === 0) await fail("Tick at least one client.");
-  const actor = isConvex() ? await (await import("@/lib/convexServer")).convexActorForEmail(user.email) : null;
   let deleted = 0;
   const kept: string[] = [];
   for (const clientId of ids) {
     const name = repo.client(clientId)?.name ?? "A client";
-    let res: { ok: boolean; openings?: number };
+    let res: { ok: true } | { ok: false; openings: number };
     try {
-      res = isConvex()
-        ? await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", { actorId: actor?._id, clientId })
-        : repo.deleteClient(clientId);
+      res = await binClientNamed(user, clientId);
     } catch (e) {
       kept.push(`${name} (${backendMessage(e, "could not be deleted")})`);
       continue;
@@ -1999,10 +2011,70 @@ export async function deleteClients(formData: FormData) {
   if (isConvex()) markTablesStale();
   revalidatePath("/clients");
   revalidatePath("/openings/new");
+  revalidatePath("/bin");
   // A client with work filed under it is kept, as the single delete does.
-  const said = `${deleted} ${deleted === 1 ? "client" : "clients"} deleted.`;
+  const said = `${deleted} ${deleted === 1 ? "client" : "clients"} moved to the Bin. They can be restored for ${BIN_DAYS} days.`;
   await (deleted ? (kept.length ? note : done) : fail)(
     kept.length ? `${said} Kept — they still have openings: ${kept.join(", ")}.` : said,
+  );
+}
+
+// ─── The Bin (28 Sep) ────────────────────────────────────────────────────────
+
+function binTarget(formData: FormData): { kind: "opening" | "client"; id: string } {
+  const kind = String(formData.get("kind")) === "client" ? "client" : "opening";
+  return { kind, id: String(formData.get("id") ?? "") };
+}
+
+/** Out of the Bin, as it was. Anyone on the desk may — undoing a delete loses nothing. */
+export async function restoreFromBin(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  if (isReadOnly(user) || user.role === "client") await fail("Only the desk can restore from the Bin.");
+  const { kind, id } = binTarget(formData);
+  let name = `The ${kind}`;
+  let withClient = false;
+  if (isConvex()) {
+    try {
+      const r = await convexMutation<{ ok: true; name: string; clientRestored?: boolean }>("ta/bin:restore", { actorId: user.id, kind, id });
+      name = r.name;
+      withClient = !!r.clientRestored;
+    } catch (e) {
+      await fail(backendMessage(e, "It could not be restored."));
+    }
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  } else {
+    const r = repo.restoreFromBin(kind, id);
+    if (!r.ok) await fail(r.message);
+    else name = r.name;
+  }
+  revalidatePath("/", "layout");
+  await done(`${kind === "opening" ? `"${name}"` : name} restored${withClient ? ", with its client" : ""}.`);
+}
+
+/** Skip the seven days. A desk decision, like deleting an opening. */
+export async function deleteFromBinNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete from the Bin early.");
+  const { kind, id } = binTarget(formData);
+  let name = `The ${kind}`;
+  if (isConvex()) {
+    try {
+      name = (await convexMutation<{ ok: true; name: string }>("ta/bin:deleteNow", { actorId: user.id, kind, id })).name;
+    } catch (e) {
+      await fail(backendMessage(e, "It could not be deleted."));
+    }
+  } else {
+    const r = repo.deleteFromBin(kind, id);
+    if (!r.ok) await fail(r.message);
+  }
+  revalidatePath("/bin");
+  await done(
+    kind === "opening"
+      ? `${name === "The opening" ? name : `"${name}"`} deleted for good. Its candidates are still in the database.`
+      : `${name} deleted for good.`,
   );
 }
 
@@ -2607,17 +2679,18 @@ export async function pickBenchmark(formData: FormData) {
  */
 type SourceRun = { found: number; scanned: number; queries: number; cost: number; rejected?: number; note?: string; error?: string };
 
-async function sourceFor(openingId: string, forUserId?: string): Promise<SourceRun> {
-  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId));
+/** `extraRound`: past the round limit — the rounds before were about the wrong company (correctClientAndRerun). */
+async function sourceFor(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
+  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId, extraRound));
 }
 
-async function sourceForNow(openingId: string, forUserId?: string): Promise<SourceRun> {
+async function sourceForNow(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
   const o = repo.opening(openingId);
   if (!o) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "no_opening" };
   const client = repo.client(o.clientId);
   const existing = repo.suggestions(openingId);
   const round = existing.length ? Math.max(...existing.map((s) => s.round)) + 1 : 1;
-  if (round > MAX_ROUNDS) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "rounds_spent" };
+  if (round > MAX_ROUNDS && !extraRound) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "rounds_spent" };
 
   const alreadyKnown = [
     ...repo.linkVault(openingId).map((l) => canonicalProfile(l.linkedinUrl)),
@@ -2629,6 +2702,7 @@ async function sourceForNow(openingId: string, forUserId?: string): Promise<Sour
       title: o.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
+      clientNotes: client?.researchNotes,
       jdText: withJobDetails(o),
       locations: o.locations,
       targetNationalities: o.targetNationalities,
@@ -2668,6 +2742,60 @@ export async function runSuggestions(formData: FormData) {
     );
   }
   await done(`${r.found} new ${r.found === 1 ? "profile" : "profiles"} to review · ${searched}.`);
+}
+
+/**
+ * "Wrong company?" on Research (28 Sep).
+ *
+ * The client "SQ" was researched as some other SQ: its website, overview,
+ * competitors and the people Suggestions went looking for were all somebody
+ * else's. Anyone sourcing the job can now say who the client really is — the
+ * website, the LinkedIn page, the full name, what they do — and it is saved on
+ * the CLIENT, so every job for them is researched right from then on.
+ *
+ * Saving new details buys one fresh run of both, past the once-per-job and
+ * three-round limits: the earlier runs were about the wrong company, and a
+ * correction nobody can act on is what makes people stop correcting. The same
+ * details twice are refused — that is a re-run, not a correction.
+ */
+export async function correctClientAndRerun(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  const o = repo.opening(openingId);
+  const client = o ? repo.client(o.clientId) : null;
+  if (!o || !client) await fail("This job has no client set. Set the client on the job first.");
+  const notes = String(formData.get("researchNotes") ?? "").trim().slice(0, 2000);
+  if (!notes) await fail("Write what you know about the client first — the website, the LinkedIn page or the full company name.");
+  if (notes === (client!.researchNotes ?? "").trim()) {
+    await fail("These are the details Research already has. Change or add something, then run again.");
+  }
+
+  if (isConvex()) {
+    const actor = await convexActorForEmail(user.email);
+    await freshAfter(convexMutation)("ta/clients:update", { actorId: actor?._id, clientId: client!.id, researchNotes: notes });
+  } else {
+    repo.updateClient(client!.id, { researchNotes: notes });
+  }
+
+  after(async () => {
+    // Benchmark rows name people at the wrong company's competitors, and
+    // Suggestions searches their employers first — they go before the re-run.
+    repo.replaceBenchmarks(openingId, []);
+    const res = await researchOpening(openingId, user.id, true).catch(() => null);
+    if (res?.ok) {
+      // Set aside, not deleted, and not marked "not relevant": nobody judged
+      // them, and that mark steers the next round away from people like them.
+      repo.dismissNewSuggestions(openingId);
+      await sourceFor(openingId, user.id, true).catch(() => undefined);
+    }
+    revalidatePath(`/openings/${openingId}`, "layout");
+  });
+  revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath("/clients");
+  await done(
+    `Saved on ${client!.name}. Research and Suggestions are running again with these details — it takes a few minutes; reload this page to see them.`,
+  );
 }
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
@@ -2914,6 +3042,7 @@ async function researchOpeningNow(
     title: c.title,
     // Who holds the role now — only worth finding for a senior or C-level role.
     benchmark: benchmarkByDefault(c.title),
+    clientNotes: repo.client(o.clientId)?.researchNotes,
   });
   if (!res.ok) return { ok: false, reason: res.reason, detail: res.detail };
   if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);

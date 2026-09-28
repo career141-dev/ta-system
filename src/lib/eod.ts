@@ -174,14 +174,16 @@ export function effortFromForm(formData: FormData, base: EffortRow): EffortRow {
 }
 
 /**
- * "DELMO - BRAND MANAGER - SET 2 - 3 CVs". The client stays in it: a reply is
+ * "SET 1 - DELMO - BRAND MANAGER - 3 CVs". The client stays in it: a reply is
  * matched by its subject, and two clients hiring the same title are told
  * apart by the client's name (lib/routing matchReviewReply).
  */
 export function subjectLine(clientName: string, title: string, setNumber: number | null = 1, cvCount = 1): string {
   const setPart = `SET ${setNumber ?? 1}`;
+  const clientPart = (clientName || "CLIENT").trim().toUpperCase();
+  const posPart = title.trim().toUpperCase();
   const cvPart = `${cvCount} ${cvCount === 1 ? "CV" : "CVs"}`;
-  return `${clientName.toUpperCase()} - ${title.toUpperCase()} - ${setPart} - ${cvPart}`;
+  return `${setPart} - ${clientPart} - ${posPart} - ${cvPart}`;
 }
 
 /**

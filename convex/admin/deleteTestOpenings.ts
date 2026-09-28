@@ -19,7 +19,8 @@
  * match, "Latest" and "Contest" do not. A real role such as "QA Test Engineer"
  * would match too — which is why step 2 takes the ids, not the rule.
  *
- * Each opening goes the way the Delete button sends it (ta/openingDelete.ts):
+ * Each opening goes straight to the batched delete (ta/openingDelete.ts), not
+ * to the Bin — these are dummies, not something anyone will want back:
  * marked at once, then removed in batches with everything under it. Its
  * candidates stay in the database.
  */
@@ -27,6 +28,7 @@ import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
+import { isGone } from "../../src/lib/bin";
 
 const isTest = (title: string) => /\btest\b/i.test(title);
 
@@ -41,7 +43,8 @@ export const run = internalMutation({
     const dryRun = args.dryRun !== false;
     // ponytail: every job read at once; the desk has hundreds, not tens of thousands.
     const jobs = await ctx.db.query("jobs").collect();
-    const matches = jobs.filter((j) => isTest(j.title) && !j.deletingAt);
+    // One already in the Bin is left to the Bin (ta/bin.ts).
+    const matches = jobs.filter((j) => isTest(j.title) && !isGone(j));
 
     const describe = async (j: Doc<"jobs">) => {
       const apps = await ctx.db.query("applications").withIndex("by_jobId", (q) => q.eq("jobId", j._id)).collect();
@@ -68,7 +71,7 @@ export const run = internalMutation({
     for (const id of args.openingIds) {
       const job = byId.get(id);
       if (!job) {
-        skipped.push({ id, reason: "not found, already being deleted, or no longer has TEST in its title" });
+        skipped.push({ id, reason: "not found, in the Bin, already being deleted, or no longer has TEST in its title" });
         continue;
       }
       await ctx.db.patch(job._id, { deletingAt: now, status: "cancelled", updatedAt: new Date(now).toISOString() });

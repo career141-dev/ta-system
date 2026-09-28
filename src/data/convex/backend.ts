@@ -22,7 +22,7 @@ import "server-only";
 
 import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
 import { mapProfile, type CandidateProfile, type RawProfile } from "@/lib/candidateProfile";
-import type { Application, Candidate, Client, Id, JobPost, Opening, User } from "@/data/types";
+import type { Application, BinItem, Candidate, Client, Id, JobPost, Opening, User } from "@/data/types";
 import {
   mapApplication,
   mapCandidateDoc,
@@ -717,4 +717,18 @@ export async function setMailboxEnabled(mailbox: string, enabled: boolean) {
 
 export async function syncMailboxNow(mailbox: string) {
   return convexMutation<{ ok: boolean }>("mailIntake/model:syncNow", { mailbox });
+}
+
+// ─── Bin ─────────────────────────────────────────────────────────────────────
+
+/** What is in the Bin (convex/ta/bin.ts), openings and clients together, newest first. */
+export async function binItems(actor: Actor): Promise<BinItem[]> {
+  const r = await convexQuery<{
+    openings: { id: string; title: string; clientName: string | null; binnedAt: number; binnedBy: string | null; purgeAt: number }[];
+    clients: { id: string; name: string; binnedAt: number; binnedBy: string | null; purgeAt: number }[];
+  }>("ta/bin:list", { actorId: actor.id ?? undefined });
+  return [
+    ...r.openings.map((o): BinItem => ({ kind: "opening", id: o.id, name: o.title, clientName: o.clientName ?? null, binnedAt: o.binnedAt, binnedBy: o.binnedBy, purgeAt: o.purgeAt })),
+    ...r.clients.map((c): BinItem => ({ kind: "client", id: c.id, name: c.name, clientName: null, binnedAt: c.binnedAt, binnedBy: c.binnedBy, purgeAt: c.purgeAt })),
+  ].sort((a, b) => b.binnedAt - a.binnedAt);
 }
