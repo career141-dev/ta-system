@@ -52,7 +52,7 @@ import { findDatabaseMatches } from "@/lib/dbMatch";
 import { clearMatching, markMatching, matchFailureText } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
-import { convexAction, convexMutation, convexQuery } from "@/lib/convexServer";
+import { convexAction, convexActorForEmail, convexMutation, convexQuery } from "@/lib/convexServer";
 import * as backend from "@/data/convex/backend";
 
 // ─── Authorization ───────────────────────────────────────────────────────────
@@ -1692,6 +1692,8 @@ export async function updateClient(formData: FormData) {
   const industry = String(formData.get("industry") ?? "").trim() || "Other";
   const status = String(formData.get("status") ?? "active") as "active" | "dormant" | "archived";
   const esaSignedAt = esa ? new Date(esa).getTime() : null;
+  // Only when the form carries the box, so a form without it never blanks it.
+  const researchNotes = formData.has("researchNotes") ? String(formData.get("researchNotes") ?? "").trim() : undefined;
 
   const { isConvex } = await import("@/data/mode");
   if (isConvex()) {
@@ -1704,6 +1706,7 @@ export async function updateClient(formData: FormData) {
       industry,
       status,
       esaSignedAt,
+      ...(researchNotes !== undefined && { researchNotes }),
     });
   } else {
     repo.updateClient(clientId, {
@@ -1711,6 +1714,7 @@ export async function updateClient(formData: FormData) {
       industry,
       status,
       esaSignedAt,
+      ...(researchNotes !== undefined && { researchNotes }),
     });
   }
   revalidatePath("/clients");
@@ -2607,17 +2611,18 @@ export async function pickBenchmark(formData: FormData) {
  */
 type SourceRun = { found: number; scanned: number; queries: number; cost: number; rejected?: number; note?: string; error?: string };
 
-async function sourceFor(openingId: string, forUserId?: string): Promise<SourceRun> {
-  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId));
+/** `extraRound`: past the round limit — the rounds before were about the wrong company (correctClientAndRerun). */
+async function sourceFor(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
+  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId, extraRound));
 }
 
-async function sourceForNow(openingId: string, forUserId?: string): Promise<SourceRun> {
+async function sourceForNow(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
   const o = repo.opening(openingId);
   if (!o) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "no_opening" };
   const client = repo.client(o.clientId);
   const existing = repo.suggestions(openingId);
   const round = existing.length ? Math.max(...existing.map((s) => s.round)) + 1 : 1;
-  if (round > MAX_ROUNDS) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "rounds_spent" };
+  if (round > MAX_ROUNDS && !extraRound) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "rounds_spent" };
 
   const alreadyKnown = [
     ...repo.linkVault(openingId).map((l) => canonicalProfile(l.linkedinUrl)),
@@ -2629,6 +2634,7 @@ async function sourceForNow(openingId: string, forUserId?: string): Promise<Sour
       title: o.title,
       clientName: client?.name ?? "the client",
       clientCompanyNames: [client?.name ?? ""].filter(Boolean),
+      clientNotes: client?.researchNotes,
       jdText: withJobDetails(o),
       locations: o.locations,
       targetNationalities: o.targetNationalities,
@@ -2668,6 +2674,60 @@ export async function runSuggestions(formData: FormData) {
     );
   }
   await done(`${r.found} new ${r.found === 1 ? "profile" : "profiles"} to review · ${searched}.`);
+}
+
+/**
+ * "Wrong company?" on Research (28 Sep).
+ *
+ * The client "SQ" was researched as some other SQ: its website, overview,
+ * competitors and the people Suggestions went looking for were all somebody
+ * else's. Anyone sourcing the job can now say who the client really is — the
+ * website, the LinkedIn page, the full name, what they do — and it is saved on
+ * the CLIENT, so every job for them is researched right from then on.
+ *
+ * Saving new details buys one fresh run of both, past the once-per-job and
+ * three-round limits: the earlier runs were about the wrong company, and a
+ * correction nobody can act on is what makes people stop correcting. The same
+ * details twice are refused — that is a re-run, not a correction.
+ */
+export async function correctClientAndRerun(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const openingId = String(formData.get("openingId"));
+  const o = repo.opening(openingId);
+  const client = o ? repo.client(o.clientId) : null;
+  if (!o || !client) await fail("This job has no client set. Set the client on the job first.");
+  const notes = String(formData.get("researchNotes") ?? "").trim().slice(0, 2000);
+  if (!notes) await fail("Write what you know about the client first — the website, the LinkedIn page or the full company name.");
+  if (notes === (client!.researchNotes ?? "").trim()) {
+    await fail("These are the details Research already has. Change or add something, then run again.");
+  }
+
+  if (isConvex()) {
+    const actor = await convexActorForEmail(user.email);
+    await freshAfter(convexMutation)("ta/clients:update", { actorId: actor?._id, clientId: client!.id, researchNotes: notes });
+  } else {
+    repo.updateClient(client!.id, { researchNotes: notes });
+  }
+
+  after(async () => {
+    // Benchmark rows name people at the wrong company's competitors, and
+    // Suggestions searches their employers first — they go before the re-run.
+    repo.replaceBenchmarks(openingId, []);
+    const res = await researchOpening(openingId, user.id, true).catch(() => null);
+    if (res?.ok) {
+      // Set aside, not deleted, and not marked "not relevant": nobody judged
+      // them, and that mark steers the next round away from people like them.
+      repo.dismissNewSuggestions(openingId);
+      await sourceFor(openingId, user.id, true).catch(() => undefined);
+    }
+    revalidatePath(`/openings/${openingId}`, "layout");
+  });
+  revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath("/clients");
+  await done(
+    `Saved on ${client!.name}. Research and Suggestions are running again with these details — it takes a few minutes; reload this page to see them.`,
+  );
 }
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
@@ -2914,6 +2974,7 @@ async function researchOpeningNow(
     title: c.title,
     // Who holds the role now — only worth finding for a senior or C-level role.
     benchmark: benchmarkByDefault(c.title),
+    clientNotes: repo.client(o.clientId)?.researchNotes,
   });
   if (!res.ok) return { ok: false, reason: res.reason, detail: res.detail };
   if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);

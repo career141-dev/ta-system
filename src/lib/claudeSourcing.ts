@@ -1,7 +1,7 @@
 import type { ProfileSuggestion } from "@/data/types";
 import { claudeSearchEnabled, jsonArrayIn, readStream, runClaude } from "./claudeSub";
 import { canonicalProfile, displayUrl } from "./serper";
-import type { SourcingRun, SourcingSpec } from "./sourcing";
+import { aboutClient, type SourcingRun, type SourcingSpec } from "./sourcing";
 
 /**
  * Suggestions by Claude — 24 Sep, at the owner's request: "I need people based
@@ -37,7 +37,7 @@ Find real people on LinkedIn we can approach for this job.
 
 THE JOB
 Position: ${s.title}
-Client: ${client}
+Client: ${client}${aboutClient(s)}
 Location: ${s.locations.join(", ") || market}
 Market: ${market}
 Nationalities the client wants: ${s.targetNationalities.join(", ") || "any"}

@@ -2536,6 +2536,15 @@ const rawRepo = {
     });
   },
 
+  /** Every suggestion nobody has acted on yet, set aside — they came from a run about the wrong company (28 Sep). */
+  dismissNewSuggestions(openingId: Id) {
+    mutate((db) => {
+      for (const s of db.suggestions) {
+        if (s.openingId === openingId && s.status === "new") s.status = "dismissed";
+      }
+    });
+  },
+
   setSuggestionStatus(
     id: Id,
     status: ProfileSuggestion["status"],

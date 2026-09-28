@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { ProjectHeader } from "../../ProjectHeader";
 import { Generate, Sources } from "@/components/hh/Generate";
-import { runResearchInline, pickBenchmark } from "@/app/actions";
+import { runResearchInline, pickBenchmark, correctClientAndRerun } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { BenchmarkButton } from "@/components/hh/BenchmarkButton";
 import { ResearchField } from "@/components/hh/ResearchField";
@@ -64,6 +64,59 @@ export default async function Page({
         err={err}
         hasResult={Boolean(report)}
       />
+
+      {/*
+        Which company Research took the client to be, and a way to say it was
+        the wrong one (28 Sep: "SQ" was researched as another SQ). What is
+        written here is saved on the client, so every job for them uses it.
+      */}
+      {client && (
+        <details className="mb-5 rounded-xl border border-rule bg-surface px-6 py-4" open={!report && !client.researchNotes}>
+          <summary className="cursor-pointer text-[12.5px]">
+            {report ? (
+              <>
+                Research took <span className="font-semibold">{client.name}</span> to be{" "}
+                {f.websiteLink ? (
+                  <a href={externalUrl(f.websiteLink) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                    {f.websiteLink.replace(/^https?:\/\/(www\.)?/, "")}
+                  </a>
+                ) : (
+                  <span className="text-ink-faint">a company with no website found</span>
+                )}
+                {f.socialMedia && (
+                  <>
+                    {" · "}
+                    <a href={externalUrl(f.socialMedia) ?? undefined} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                      LinkedIn
+                    </a>
+                  </>
+                )}
+                . <span className="font-medium">Wrong company? Correct it</span>
+              </>
+            ) : (
+              <span className="font-medium">Tell Research who {client.name} is</span>
+            )}
+          </summary>
+          <form action={correctClientAndRerun} className="mt-3">
+            <input type="hidden" name="openingId" value={id} />
+            <textarea
+              name="researchNotes"
+              defaultValue={client.researchNotes ?? ""}
+              rows={4}
+              maxLength={2000}
+              placeholder="Paste what you know: the website, the LinkedIn company page, the full company name, what they do, group companies…"
+              className="w-full rounded-lg border border-rule bg-surface px-3 py-2 text-[12.5px] outline-none focus:border-brand"
+            />
+            <p className="mt-1.5 text-[11.5px] text-ink-faint">
+              Saved on the client, so every job for {client.name} uses it. A website or LinkedIn link written here is used as-is.
+              Saving runs Research and a new Suggestions round again; suggestions nobody has acted on yet are set aside.
+            </p>
+            <SubmitButton className="mt-3 rounded bg-ink px-3.5 py-1.5 text-[12.5px] font-medium text-surface disabled:opacity-60">
+              Save and run again
+            </SubmitButton>
+          </form>
+        </details>
+      )}
 
       <section className="rounded-xl border border-rule bg-surface px-6 py-6">
         <div className="grid gap-5 sm:grid-cols-2">
