@@ -12,7 +12,7 @@ import { AutoRefresh } from "./AutoRefresh";
  * Settings — the admin panel's switches for the platform's background work.
  *
  * One tab so far: Mailboxes, the shared inboxes (linkedin@, cv@, job@) the TA
- * System reads CVs from. Admins only (user.manage), the same as People and roles.
+ * System reads CVs from, and each TA's own mailbox, read only for scoops. Admins only (user.manage), the same as People and roles.
  */
 const TABS = [{ id: "mailboxes", label: "Mailboxes" }] as const;
 
@@ -55,6 +55,83 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   }
   const openings = new Map(repo.openings().map((o) => [o.id, o]));
 
+  const mailboxCard = (m: MailIntakeStatus["mailboxes"][number]) => (
+    <div key={m.mailbox} className="rounded-2xl border border-rule bg-surface p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-[14px] font-semibold">{m.taName ?? m.mailbox}</p>
+          {m.taName && <p className="truncate text-[11.5px] text-ink-soft">{m.mailbox}</p>}
+          <p className="mt-0.5 text-[11.5px] text-ink-faint">
+            {m.enabled
+              ? m.lastSyncError
+                ? "Reading — last sync had a problem"
+                : m.synced
+                  ? `Reading · synced ${when(m.lastSyncAt)}`
+                  : "Starting · the first sync is under way"
+              : "Not read"}
+          </p>
+        </div>
+        <span
+          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+            !m.enabled ? "bg-tag text-ink-faint" : m.lastSyncError ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
+          }`}
+        >
+          {!m.enabled ? "Off" : m.lastSyncError ? "Problem" : "On"}
+        </span>
+      </div>
+
+      {m.lastSyncError && (
+        <p className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-[11.5px] leading-relaxed text-danger">{m.lastSyncError}</p>
+      )}
+
+      <dl className="mt-4 grid grid-cols-3 gap-y-3 text-center">
+        {[
+          ["Seen", m.totals.seen],
+          ["Filed", m.totals.filed],
+          ["Database", m.totals.database],
+          ["Already held", m.totals.duplicate],
+          ["No CV", m.totals.noCv + m.totals.skipped],
+          ["Failed", m.totals.failed],
+        ].map(([label, n]) => (
+          <div key={label as string}>
+            <dt className="text-[10.5px] uppercase tracking-wider text-ink-faint">{label}</dt>
+            <dd className="tabular text-[17px] font-semibold">{(n as number).toLocaleString()}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="mt-4 flex items-center gap-2 border-t border-rule pt-4">
+        <form action={setMailboxEnabled}>
+          <input type="hidden" name="mailbox" value={m.mailbox} />
+          {!m.enabled && <input type="hidden" name="enabled" value="on" />}
+          <SubmitButton
+            tone={m.enabled ? "dark" : "light"}
+            pendingLabel={m.enabled ? "Stopping…" : "Starting…"}
+            className={
+              m.enabled
+                ? "rounded-full border border-rule px-3.5 py-1.5 text-[12px] font-medium text-ink hover:border-ink-faint disabled:opacity-60"
+                : "rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+            }
+          >
+            {m.enabled ? "Stop reading" : "Start reading"}
+          </SubmitButton>
+        </form>
+        {m.enabled && (
+          <form action={syncMailboxNow}>
+            <input type="hidden" name="mailbox" value={m.mailbox} />
+            <SubmitButton
+              tone="dark"
+              pendingLabel="Syncing…"
+              className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand hover:bg-brand-soft disabled:opacity-60"
+            >
+              Sync now
+            </SubmitButton>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <main className="mx-auto max-w-[1180px] px-8 py-9">
       <h1 className="text-[24px] font-semibold tracking-tight">Settings</h1>
@@ -95,82 +172,20 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           {status && (
             <>
               <div className="grid gap-4 lg:grid-cols-3">
-                {status.mailboxes.map((m) => (
-                  <div key={m.mailbox} className="rounded-2xl border border-rule bg-surface p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-[14px] font-semibold">{m.mailbox}</p>
-                        <p className="mt-0.5 text-[11.5px] text-ink-faint">
-                          {m.enabled
-                            ? m.lastSyncError
-                              ? "Reading — last sync had a problem"
-                              : m.synced
-                                ? `Reading · synced ${when(m.lastSyncAt)}`
-                                : "Starting · the first sync is under way"
-                            : "Not read"}
-                        </p>
-                      </div>
-                      <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
-                          !m.enabled ? "bg-tag text-ink-faint" : m.lastSyncError ? "bg-danger-soft text-danger" : "bg-brand-soft text-brand"
-                        }`}
-                      >
-                        {!m.enabled ? "Off" : m.lastSyncError ? "Problem" : "On"}
-                      </span>
-                    </div>
-
-                    {m.lastSyncError && (
-                      <p className="mt-3 rounded-lg bg-danger-soft px-3 py-2 text-[11.5px] leading-relaxed text-danger">{m.lastSyncError}</p>
-                    )}
-
-                    <dl className="mt-4 grid grid-cols-3 gap-y-3 text-center">
-                      {[
-                        ["Seen", m.totals.seen],
-                        ["Filed", m.totals.filed],
-                        ["Database", m.totals.database],
-                        ["Already held", m.totals.duplicate],
-                        ["No CV", m.totals.noCv + m.totals.skipped],
-                        ["Failed", m.totals.failed],
-                      ].map(([label, n]) => (
-                        <div key={label as string}>
-                          <dt className="text-[10.5px] uppercase tracking-wider text-ink-faint">{label}</dt>
-                          <dd className="tabular text-[17px] font-semibold">{(n as number).toLocaleString()}</dd>
-                        </div>
-                      ))}
-                    </dl>
-
-                    <div className="mt-4 flex items-center gap-2 border-t border-rule pt-4">
-                      <form action={setMailboxEnabled}>
-                        <input type="hidden" name="mailbox" value={m.mailbox} />
-                        {!m.enabled && <input type="hidden" name="enabled" value="on" />}
-                        <SubmitButton
-                          tone={m.enabled ? "dark" : "light"}
-                          pendingLabel={m.enabled ? "Stopping…" : "Starting…"}
-                          className={
-                            m.enabled
-                              ? "rounded-full border border-rule px-3.5 py-1.5 text-[12px] font-medium text-ink hover:border-ink-faint disabled:opacity-60"
-                              : "rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-60"
-                          }
-                        >
-                          {m.enabled ? "Stop reading" : "Start reading"}
-                        </SubmitButton>
-                      </form>
-                      {m.enabled && (
-                        <form action={syncMailboxNow}>
-                          <input type="hidden" name="mailbox" value={m.mailbox} />
-                          <SubmitButton
-                            tone="dark"
-                            pendingLabel="Syncing…"
-                            className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12px] font-medium text-brand hover:bg-brand-soft disabled:opacity-60"
-                          >
-                            Sync now
-                          </SubmitButton>
-                        </form>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                {status.mailboxes.filter((m) => m.kind !== "ta").map(mailboxCard)}
               </div>
+
+              {status.mailboxes.some((m) => m.kind === "ta") && (
+                <div className="mt-8">
+                  <h3 className="text-[13.5px] font-semibold">TA mailboxes — scoops</h3>
+                  <p className="mt-1 max-w-[80ch] text-[12.5px] leading-relaxed text-ink-soft">
+                    CVs the Director, a TA Lead or Ops email to a TA are scoops. They go on that TA&rsquo;s job and are counted on
+                    their end-of-day SCOOP. Only those emails are read; the rest of the TA&rsquo;s mail is never logged, marked
+                    read or moved. When the email does not say which job, nothing is filed and the TA is told.
+                  </p>
+                  <div className="mt-4 grid gap-4 lg:grid-cols-3">{status.mailboxes.filter((m) => m.kind === "ta").map(mailboxCard)}</div>
+                </div>
+              )}
 
               <div className="mt-8 overflow-hidden rounded-2xl border border-rule bg-surface">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-rule px-5 py-3">

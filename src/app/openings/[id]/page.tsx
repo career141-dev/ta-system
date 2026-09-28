@@ -73,10 +73,8 @@ export default async function OverviewPage({
     },
     openSet && {
       title: `Set ${openSet.setNumber} has ${openSet.count} so far`,
-      sub:
-        openSet.count >= 5
-          ? "It goes to the Director tonight, and tomorrow starts the next set"
-          : `It goes to the Director tonight as it is, and carries on as set ${openSet.setNumber} tomorrow`,
+      // Open means no day has sent five yet (convex/lib/sets.ts), so it carries on.
+      sub: `It goes to the Director tonight as it is, and carries on as set ${openSet.setNumber} until a day you send five or more`,
       href: `/openings/${id}/eod`,
       action: "End of day",
     },

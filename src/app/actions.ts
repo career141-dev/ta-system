@@ -585,6 +585,18 @@ export async function removeLeadNote(formData: FormData) {
   await done("Note removed.");
 }
 
+/** The Add-on tag on an Excel Tables row, by hand (28 Sep). */
+export async function toggleLinkAddOn(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const on = String(formData.get("on")) === "1";
+  repo.setLinkAddOn(entryId, on);
+  revalidatePath(`/openings/${openingId}/hh/links`);
+  await done(on ? "Marked as an add-on." : "No longer an add-on.");
+}
+
 export async function toggleEyeMark(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
@@ -1392,6 +1404,24 @@ export async function toggleAddOn(formData: FormData) {
   revalidatePath(`/openings/${openingId}`, "layout");
   // Toggled silently before; only the tick changing gave it away (21 Sep).
   await done(on ? "Marked as an add-on — you and the lead are notified." : "No longer an add-on.");
+}
+
+/**
+ * The Backup tag by hand (28 Sep). Shortlisting tags one on its own when the
+ * role already has someone at interview or offer; this puts it on or takes it
+ * off, and the end-of-day BACK-UP count follows.
+ */
+export async function toggleBackup(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  const on = String(formData.get("on")) === "1";
+  if (!repo.setBackup(appId, on)) {
+    await fail("Could not mark as a backup — nobody on this role is at interview or offer yet.");
+  }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  await done(on ? "Marked as a backup." : "No longer a backup.");
 }
 
 // ─── Link vault (spec §4.5) ──────────────────────────────────────────────────
@@ -4558,6 +4588,10 @@ export async function runSuggestionsInline(_: ActionResult | null, formData: For
   return inline(() => runSuggestions(formData));
 }
 
+export async function toggleLinkAddOnInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => toggleLinkAddOn(formData));
+}
+
 export async function toggleEyeMarkInline(_: ActionResult | null, formData: FormData) {
   return inline(() => toggleEyeMark(formData));
 }
@@ -4592,6 +4626,10 @@ export async function deleteLinkInline(_: ActionResult | null, formData: FormDat
 
 export async function toggleAddOnInline(_: ActionResult | null, formData: FormData) {
   return inline(() => toggleAddOn(formData));
+}
+
+export async function toggleBackupInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => toggleBackup(formData));
 }
 
 export async function scheduleInterviewInline(_: ActionResult | null, formData: FormData) {

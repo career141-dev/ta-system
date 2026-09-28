@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { repo, setsForOpening } from "@/data/store";
+import { repo, setsForOpening, SET_SIZE } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
@@ -54,7 +54,8 @@ export default async function EodPage({
 
   // This TA's own sets — each recruiter numbers their own.
   const sets = setsForOpening(id, user.id);
-  const openSet = sets.find((s) => s.status === "open");
+  // The newest one, full or not: a set is closed the moment it has five.
+  const latestSet = sets.length ? sets.reduce((a, b) => (b.setNumber > a.setNumber ? b : a)) : undefined;
 
   // Everyone still waiting on this reviewer, whichever email they went out in.
   const waiting = repo.waitingOn(id, kind);
@@ -79,8 +80,8 @@ export default async function EodPage({
   const historyPage = pageFrom(sp, matchingHistory.length, PAGE_SIZE);
   const history = slicePage(matchingHistory, historyPage, PAGE_SIZE);
 
-  // Determine the set number for today's submission
-  const nextSetNumber = openSet?.setNumber ?? (sets.length ? Math.max(...sets.map((s) => s.setNumber)) + 1 : 1);
+  // The set tonight's CVs went into — the same figure as the SETS column.
+  const nextSetNumber = latestSet?.setNumber ?? 1;
   const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
 
   return (
@@ -238,10 +239,10 @@ export default async function EodPage({
         senderName={user.name}
         alreadyOut={!!awaiting}
         openSetNote={
-          openSet
-            ? openSet.count >= 5
-              ? `This is set ${openSet.setNumber}, at ${openSet.count}. It has reached five, so tomorrow starts set ${openSet.setNumber + 1}.`
-              : `This is set ${openSet.setNumber}, at ${openSet.count}. It goes as it is and carries on as set ${openSet.setNumber} tomorrow.`
+          latestSet
+            ? latestSet.status === "closed"
+              ? `Set ${latestSet.setNumber} is complete with ${latestSet.count} CVs. Set ${latestSet.setNumber + 1} starts the next day you shortlist.`
+              : `Set ${latestSet.setNumber} has ${latestSet.count} ${latestSet.count === 1 ? "CV" : "CVs"} so far. It is complete on a day you send ${SET_SIZE} or more.`
             : null
         }
       />

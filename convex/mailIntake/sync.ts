@@ -44,6 +44,11 @@ export const syncMailbox = internalAction({
         `?$select=subject,from,receivedDateTime,hasAttachments` +
         `&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}`;
 
+    // A TA's own mailbox is theirs: only a CV the Director, a TA Lead or Ops
+    // sent them (a scoop, 27 Sep) is logged. The rest of their mail never is.
+    const scoopFrom: Set<string> | null =
+      box.kind === "ta" ? new Set(await ctx.runQuery(internal.mailIntake.model.scoopSenderEmails, {})) : null;
+
     let recorded = 0;
     let pages = 0;
     try {
@@ -86,7 +91,8 @@ export const syncMailbox = internalAction({
             fromAddress: (m.from?.emailAddress?.address ?? "").toLowerCase(),
             hasAttachments: Boolean(m.hasAttachments),
           }))
-          .filter((m) => m.receivedAt >= box.backfillFrom);
+          .filter((m) => m.receivedAt >= box.backfillFrom)
+          .filter((m) => !scoopFrom || (m.hasAttachments && scoopFrom.has(m.fromAddress)));
         if (messages.length) {
           const { added } = await ctx.runMutation(internal.mailIntake.model.recordMessages, { mailbox: args.mailbox, messages });
           recorded += added;

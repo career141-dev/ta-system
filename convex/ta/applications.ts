@@ -9,8 +9,9 @@
 //   ownership and then writing in two steps is how two recruiters both end up
 //   thinking they own somebody.
 //
-//   Sets. Five or more shortlisted closes a set, counted per recruiter per
-//   opening, because each recruiter sends their own end-of-day email.
+//   Sets. Five or more shortlisted in one day closes a set, counted per
+//   recruiter per opening, because each recruiter sends their own end-of-day
+//   email (convex/lib/sets.ts).
 //
 // Stage changes go through the backend's own state machine rather than
 // patching `currentStage` here, so the follow-up sequence, the stage counters,
@@ -23,10 +24,12 @@ import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
+import { nextSetFor } from "../lib/sets";
+import { backupPrimary } from "../lib/backup";
+import { workingStageKey } from "../../src/lib/workingStage";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 import { isGone } from "../../src/lib/bin";
 
-const SET_SIZE = 5;
 
 
 export const listForOpening = internalQuery({
@@ -144,9 +147,19 @@ export async function claimForTa(ctx: MutationCtx, user: Doc<"users">, app: Doc<
     return { ok: true as const, alreadyMine: true, setNumber: app.setNumber ?? null };
   }
 
-  const setNumber = await nextSetNumber(ctx, app.jobId, user._id);
   const now = Date.now();
-  await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
+  const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
+  // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
+  const addOn = !app.isAddOn && (await workingStageOf(ctx, app.jobId, user._id)) === "Add-on";
+  // With someone already at interview or offer, it is a backup (convex/lib/backup).
+  const primary = app.backupForApplicationId ? null : await backupPrimaryOn(ctx, app.jobId, appId);
+  await ctx.db.patch(appId, {
+    ownerTaId: user._id,
+    shortlistedAt: now,
+    setNumber,
+    ...(addOn ? { isAddOn: true, addedOnAt: now } : {}),
+    ...(primary ? { backupForApplicationId: primary } : {}),
+  });
 
   // Shortlisting is what sends somebody to Follow-up on this desk.
   // A TA's shortlist is TA Follow-up — a database match or a new CV the TA
@@ -173,31 +186,57 @@ export async function claimForTa(ctx: MutationCtx, user: Doc<"users">, app: Doc<
 }
 
 /**
- * The set a newly shortlisted person joins.
- *
- * A set closes on the day it reaches five, so anybody shortlisted today joins
- * the set that was open this morning even if that takes it to seven. Counted
- * per recruiter per opening.
+ * The set a newly shortlisted person joins. The rule is in convex/lib/sets.ts
+ * (the desk, 28 September): a set stays open across days until five or more
+ * are sent in one Colombo day. Counted per recruiter per opening; the local
+ * store in src/data/store.ts calls the same rule.
  */
 async function nextSetNumber(
   ctx: { db: any },
   jobId: Id<"jobs">,
   taId: Id<"users">,
+  now: number,
 ): Promise<number> {
   const all: Doc<"applications">[] = await ctx.db
     .query("applications")
     .withIndex("by_jobId", (q: any) => q.eq("jobId", jobId))
     .collect();
-  const mine = all.filter((a) => a.ownerTaId === taId && a.setNumber != null);
-  if (mine.length === 0) return 1;
+  return nextSetFor(all.filter((a) => a.ownerTaId === taId && a.setNumber != null), now);
+}
 
-  const top = Math.max(...mine.map((a) => a.setNumber as number));
-  const startOfToday = new Date();
-  startOfToday.setUTCHours(0, 0, 0, 0);
-  const beforeToday = mine.filter(
-    (a) => a.setNumber === top && (a.shortlistedAt ?? 0) < startOfToday.getTime(),
-  ).length;
-  return beforeToday >= SET_SIZE ? top + 1 : top;
+/** The job's candidate a new shortlist would back up, if anyone is at interview or offer. */
+async function backupPrimaryOn(
+  ctx: { db: any },
+  jobId: Id<"jobs">,
+  selfId: Id<"applications">,
+): Promise<Id<"applications"> | null> {
+  const all: Doc<"applications">[] = await ctx.db
+    .query("applications")
+    .withIndex("by_jobId", (q: any) => q.eq("jobId", jobId))
+    .collect();
+  const id = backupPrimary(
+    all.map((a) => ({ id: a._id as string, stage: toTaStage(a.currentStage) })),
+    selfId,
+  );
+  return id as Id<"applications"> | null;
+}
+
+/**
+ * A TA's working stage on a job: on their assignment, or in the TA settings
+ * for someone working it without being on the team (convex/ta/openings.ts
+ * setWorkingStage writes both). "100%" when never set.
+ */
+async function workingStageOf(ctx: { db: any }, jobId: Id<"jobs">, userId: Id<"users">): Promise<string> {
+  const assignment = await ctx.db
+    .query("jobAssignments")
+    .withIndex("by_jobId_userId", (q: any) => q.eq("jobId", jobId).eq("userId", userId))
+    .first();
+  if (assignment?.isActive) return assignment.workingStage ?? "100%";
+  const held = await ctx.db
+    .query("taSettings")
+    .withIndex("by_key", (q: any) => q.eq("key", workingStageKey(jobId, userId)))
+    .first();
+  return held?.value ?? "100%";
 }
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */

@@ -258,6 +258,8 @@ export function mapApplication(a: BackendApplication): Application {
     addedOnAt: numOrNull(a.addedOnAt),
     scoopBy: typeof a.scoopBy === "string" ? a.scoopBy : null,
     scoopAt: numOrNull(a.scoopAt),
+    scoopFrom: typeof a.scoopFrom === "string" ? a.scoopFrom : null,
+    scoopReceivedAt: numOrNull(a.scoopReceivedAt),
     backupForApplicationId: typeof a.backupForApplicationId === "string" ? a.backupForApplicationId : null,
     offerDeclinedAt: numOrNull(a.offerDeclinedAt),
     offerDeclineReason: typeof a.offerDeclineReason === "string" ? a.offerDeclineReason : null,

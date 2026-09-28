@@ -6,6 +6,7 @@ import { can, isDeskWide } from "@/lib/auth";
 import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
+import { LINK_VIEWS, inLinkView } from "@/lib/linkViews";
 
 const PAGE_SIZE = 25;
 
@@ -22,12 +23,15 @@ export function LinkVaultTable({
   openingId,
   user,
   q = "",
+  view = "",
   page = 1,
 }: {
   openingId: string;
   user: User;
   /** The header search, narrowing the table. */
   q?: string;
+  /** All links, add-ons or shortlisted (LINK_VIEWS). */
+  view?: string;
   page?: number;
 }) {
   const users = repo.users();
@@ -39,7 +43,16 @@ export function LinkVaultTable({
   const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
   // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
   const canNote = can(user, "link.note").ok;
-  const matching = everyRow.filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber));
+  const matching = everyRow.filter(
+    ({ row: r }) => inLinkView(r, view) && matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber),
+  );
+  const keep = (next: string) => {
+    const params: Record<string, string> = {};
+    if (q) params.q = q;
+    if (next) params.view = next;
+    const qs = new URLSearchParams(params).toString();
+    return `/openings/${openingId}/hh/links${qs ? `?${qs}` : ""}`;
+  };
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const scoped = slicePage(matching, current, PAGE_SIZE);
@@ -49,10 +62,33 @@ export function LinkVaultTable({
     <>
       <AddLinkForm openingId={openingId} canNote={canNote} />
 
+      <nav aria-label="Show" className="mb-3 flex flex-wrap items-center gap-2">
+        {LINK_VIEWS.map((v) => {
+          const on = (view || "") === v.key;
+          const n = everyRow.filter(({ row }) => inLinkView(row, v.key)).length;
+          return (
+            <a
+              key={v.key || "all"}
+              href={keep(v.key)}
+              aria-current={on ? "page" : undefined}
+              className={`rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors ${
+                on ? "border-brand bg-brand-soft font-medium text-brand" : "border-rule text-ink-soft hover:border-ink-faint hover:text-ink"
+              }`}
+            >
+              {v.label} <span className="tabular-nums text-ink-faint">{n}</span>
+            </a>
+          );
+        })}
+      </nav>
+
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">
-        {rows.length === 0 && q && everyRow.length > 0 ? (
+        {rows.length === 0 && (q || view) && everyRow.length > 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
-            Nobody in this table matches that search.
+            {view === "addons" && !q
+              ? "No add-ons in this table yet. Links added while your stage is Add-on are tagged, or tag one with its Add-on button."
+              : view === "shortlisted" && !q
+                ? "Nobody here is shortlisted yet."
+                : "Nobody in this table matches that search."}
           </p>
         ) : rows.length === 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
@@ -94,7 +130,7 @@ export function LinkVaultTable({
         page={current}
         pageSize={PAGE_SIZE}
         total={matching.length}
-        href={pageLink(`/openings/${openingId}/hh/links`, q ? { q } : {})}
+        href={pageLink(`/openings/${openingId}/hh/links`, { ...(q ? { q } : {}), ...(view ? { view } : {}) })}
       />
     </>
   );

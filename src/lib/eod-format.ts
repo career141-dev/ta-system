@@ -24,7 +24,7 @@ export interface EffortRow {
   assignee: string;
   /** What the day was: a full hunt, follow-up, or add-ons (plan 6.1). */
   hundredOrFollowUp: string;
-  /** Profiles approached (100% / Add-on) or CVs (Follow-up) — see effortColumns. */
+  /** Profiles scouted (100% / Add-on) or CVs (Follow-up) — see effortColumns. */
   lEffort: number | null;
   sets: string | number | null;
   da: number | null;
@@ -61,7 +61,7 @@ export const SHORTLIST_COLUMNS = [
 
 /**
  * Table two's columns for a given kind of day. The fourth counts links
- * (profiles approached) on a full hunt or an add-on day, and CVs on a
+ * (profiles scouted) on a full hunt or an add-on day, and CVs on a
  * follow-up day (plan 6.2).
  */
 export function effortColumns(kind: string): { key: string; label: string }[] {
@@ -86,10 +86,36 @@ export const EFFORT_COLUMNS = [
 ] as const;
 
 /**
- * Columns with no figure behind them. Empty since 21 Sep: POST, ADD-ONS and
- * BACK-UP are counted from the records, and the TA can correct any of them.
+ * The columns the TA types in; the records give the rest. None since the
+ * desk's breakdown (28 Sep): BACK-UP is counted from the Backup tag like the
+ * others. Kept so a column can go back to typed without touching the sheet.
+ * The TA can still correct any figure before sending.
  */
-export const UNDEFINED_COLUMNS = new Set<string>();
+export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>();
+
+/** The columns each of the day's CVs is counted in — exactly one of them. */
+export const CV_COLUMNS: EffortKey[] = ["da", "scoop", "l", "post", "addOns", "backUp"];
+
+/**
+ * The CVs the day brought, beside the set (the desk, 28 Sep): the columns
+ * added up. That used to count an add-on twice — it was also a DA or an L —
+ * so the total was taken from the records instead. Now each CV sits in one
+ * column (lib/eod effortBucket: backup, then add-on, then where it came
+ * from), so the sum is the day, and a figure the TA corrects — a WhatsApp
+ * scoop the system never saw — carries straight into the total.
+ */
+export function dayTotal(values: Partial<Record<EffortKey, number | string | null | undefined>>): number {
+  return CV_COLUMNS.reduce((sum, k) => {
+    const n = Number(values[k] ?? 0);
+    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+}
+
+/** The SETS cell as sent: "2 · 14 CVs" — the set, then the day's total. */
+export function setsCell(sets: number | string | null | undefined, total: number): string {
+  const cvs = `${total} ${total === 1 ? "CV" : "CVs"}`;
+  return sets === null || sets === undefined || sets === "" ? cvs : `${sets} · ${cvs}`;
+}
 
 /** Who is copied on every end-of-day email, until it is changed on the People page. */
 export const DEFAULT_EOD_CC = "azim@career141.com";
@@ -137,6 +163,7 @@ export function eodEmailHtml(input: {
   const effort = table(
     cols.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
     `<tr>${cols.map((c) => {
+      if (c.key === "sets") return `<td ${td.replace('"', '"white-space:nowrap;')}>${esc(setsCell(input.effort.sets, dayTotal(input.effort)))}</td>`;
       const v = input.effort[c.key as keyof EffortRow];
       return `<td ${td}>${v === null || v === undefined || typeof v === "object" ? "" : esc(v)}</td>`;
     }).join("")}</tr>` +

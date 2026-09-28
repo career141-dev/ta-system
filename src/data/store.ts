@@ -87,6 +87,8 @@ import { isConvex } from "./mode";
 import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
 import { WORKING_STAGES, workingStageKey } from "@/lib/workingStage";
+import { SET_SIZE, nextSetFor, setClosed } from "../../convex/lib/sets";
+import { backupPrimary } from "../../convex/lib/backup";
 
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
@@ -473,20 +475,12 @@ function localNationalityOf(country: string): string {
 const JD_NOT_APPROVED =
   "This job cannot go live until its JD is approved. Approve the JD first, then set the advert live.";
 
-/** A set closes on the day it reaches this many. */
-export const SET_SIZE = 5;
+export { SET_SIZE };
 
 /**
- * The set a newly shortlisted person joins.
- *
- * The desk's rule, as the user put it on 13 September: the end-of-day email
- * goes out every day, even with fewer than five. Set 1 with three CVs today is
- * still Set 1 tomorrow. Only a day on which the set reaches five — or passes
- * it — finishes the set, and the next working day starts Set 2.
- *
- * So a set is closed when five or more of its members were shortlisted before
- * today. Anybody shortlisted today joins the set that is open this morning,
- * even if that takes it to seven.
+ * The set a newly shortlisted person joins — the rule is in convex/lib/sets.ts
+ * (the desk, 28 September: five sent in one day closes a set), shared with
+ * convex/ta/applications.ts, which numbers the live shortlists.
  *
  * Counted per recruiter per opening: each TA sends their own end-of-day email,
  * so Shamra's Set 1 and Azma's Set 1 on the same job are different sets.
@@ -495,13 +489,7 @@ function nextSetNumber(db: Database, openingId: Id, taId: Id, now = Date.now()):
   const mine = db.applications.filter(
     (a) => a.openingId === openingId && a.ownerTaId === taId && a.setNumber !== null,
   );
-  if (mine.length === 0) return 1;
-  const top = Math.max(...mine.map((a) => a.setNumber as number));
-  const today = colomboDayStart(now);
-  const beforeToday = mine.filter(
-    (a) => a.setNumber === top && a.shortlistedAt !== null && a.shortlistedAt < today,
-  ).length;
-  return beforeToday >= SET_SIZE ? top + 1 : top;
+  return nextSetFor(mine, now);
 }
 
 /**
@@ -863,14 +851,25 @@ const rawRepo = {
     const to: Stage = claimable ? "ta_follow_up" : from;
 
     let setNumber: number | null = app.setNumber;
+    // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
+    const addOnDay = this.workingStage(app.openingId, taId) === "Add-on";
+    // With someone already at interview or offer, it is a backup (convex/lib/backup).
+    const primary = app.backupForApplicationId
+      ? null
+      : backupPrimary(db.applications.filter((x) => x.openingId === app.openingId), app.id);
     mutate((d) => {
       const a = d.applications.find((x) => x.id === applicationId);
       if (!a) return;
       const now = Date.now();
       a.ownerTaId = taId;
       a.shortlistedAt = now;
+      if (addOnDay && !a.isAddOn) {
+        a.isAddOn = true;
+        a.addedOnAt = now;
+      }
+      if (primary) a.backupForApplicationId = primary;
       if (a.setNumber === null) {
-        a.setNumber = nextSetNumber(d, a.openingId, taId, now);
+        a.setNumber = nextSetNumber(d, a.openingId, taId);
         setNumber = a.setNumber;
       }
       if (to !== from) {
@@ -1309,6 +1308,26 @@ const rawRepo = {
       a.isAddOn = on;
       a.addedOnAt = on ? Date.now() : null;
     });
+  },
+
+  /**
+   * The Backup tag, by hand (28 Sep): on, it backs up the role's candidate
+   * furthest along, or the one given; off, it clears. False when there is
+   * nobody at interview or offer to back up.
+   */
+  setBackup(appId: Id, on: boolean, forApplicationId: Id | null = null): boolean {
+    const db = load();
+    const app = db.applications.find((x) => x.id === appId);
+    if (!app) return false;
+    const primary = on
+      ? forApplicationId ?? backupPrimary(db.applications.filter((x) => x.openingId === app.openingId), appId)
+      : null;
+    if (on && !primary) return false;
+    mutate((d) => {
+      const a = d.applications.find((x) => x.id === appId);
+      if (a) a.backupForApplicationId = primary;
+    });
+    return true;
   },
 
   promoteBackup(appId: Id, forApplicationId: Id) {
@@ -1869,7 +1888,11 @@ const rawRepo = {
   updateLink(entryId: Id, patch: Partial<LinkVaultEntry>) {
     mutate((db) => {
       const e = db.linkVault.find((l) => l.id === entryId);
-      if (e) Object.assign(e, patch);
+      if (!e) return;
+      // A changed outcome is dated, so the day's L EFFORT can count it.
+      const moved = patch.outcome !== undefined && patch.outcome !== e.outcome;
+      Object.assign(e, patch);
+      if (moved) e.outcomeAt = Date.now();
     });
   },
 
@@ -1878,7 +1901,7 @@ const rawRepo = {
       const e = db.linkVault.find((l) => l.id === entryId);
       if (!e) return;
       e.conversationLog.push({ at: Date.now(), channel, note, by });
-      if (e.outcome === "no_contact") e.outcome = "contacted";
+      if (e.outcome === "no_contact") { e.outcome = "contacted"; e.outcomeAt = Date.now(); }
     });
   },
 
@@ -2021,8 +2044,10 @@ const rawRepo = {
         statusB: null,
         rankTier: null,
         rankWeight: null,
-        isAddOn: false,
-        addedOnAt: null,
+        // An add-on row stays an add-on in the pipeline and on the end-of-day
+        // sheet; it was always false, so the tag was lost here (28 Sep).
+        isAddOn: !!e.isAddOn,
+        addedOnAt: e.isAddOn ? now : null,
         backupForApplicationId: null,
         offerDeclinedAt: null,
         offerDeclineReason: null,
@@ -2046,6 +2071,9 @@ const rawRepo = {
    */
   addLink(openingId: Id, url: string, addedBy: Id, name: string | null = null, outcome: LinkOutcome = "shortlisted"): Id {
     const id = `lv_${Math.random().toString(36).slice(2, 10)}`;
+    // Added on an Add-on day, it is an add-on — the TA filters for them
+    // rather than hunting through the whole table (the desk, 28 Sep).
+    const addOn = this.workingStage(openingId, addedBy) === "Add-on";
     mutate((db) => {
       db.linkVault.push({
         id,
@@ -2063,9 +2091,18 @@ const rawRepo = {
         candidateId: null,
         conversationLog: [],
         createdAt: Date.now(),
+        ...(addOn ? { isAddOn: true } : {}),
       });
     });
     return id;
+  },
+
+  /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */
+  setLinkAddOn(entryId: Id, on: boolean) {
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (e) e.isAddOn = on;
+    });
   },
 
   // ─── Assignments — what someone is on an opening ──────────────────────────
@@ -4116,19 +4153,14 @@ function buildVocabulary(db: Database): Vocabulary {
 // ─── Derived values ──────────────────────────────────────────────────────────
 
 /**
- * Spec §7 — a set closes at five or more; an open set carries across days.
- * Counted per Opening, across whichever TAs are working it (Q2).
- */
-/**
  * The sets on an opening, one list across every recruiter on it.
  *
  * A set belongs to the TA who built it (see `nextSetNumber`), so two TAs each
  * have a Set 1. A set is closed when it is not that TA's newest, or when five
- * or more of it were shortlisted before today — the same test that decides
- * where tomorrow's shortlist goes, so the screen and the numbering agree.
+ * of it went on one day — the same test that decides where the next shortlist
+ * goes, so the screen and the numbering agree.
  */
-export function setsForOpening(openingId: Id, taId?: Id, now = Date.now()) {
-  const today = colomboDayStart(now);
+export function setsForOpening(openingId: Id, taId?: Id) {
   const apps = repo
     .applications(openingId)
     .filter((a) => a.setNumber !== null && a.ownerTaId && (!taId || a.ownerTaId === taId));
@@ -4142,8 +4174,7 @@ export function setsForOpening(openingId: Id, taId?: Id, now = Date.now()) {
     const bySet = new Map<number, Application[]>();
     for (const a of mine) bySet.set(a.setNumber!, [...(bySet.get(a.setNumber!) ?? []), a]);
     for (const [setNumber, members] of bySet) {
-      const beforeToday = members.filter((m) => (m.shortlistedAt ?? 0) < today).length;
-      const closed = setNumber < top || beforeToday >= SET_SIZE;
+      const closed = setClosed(setNumber, top, members);
       out.push({ taId: owner, setNumber, count: members.length, status: closed ? "closed" : "open" });
     }
   }
