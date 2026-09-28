@@ -3476,6 +3476,12 @@ export async function saveReviewDetails(formData: FormData) {
         noticeDays = Math.round(n);
       }
     }
+    // Only the days are stored on the live record, so words it cannot turn
+    // into days ("negotiable") would have saved as no notice at all and wiped
+    // what was on file (review of #72, 28 Sep). Ask again instead.
+    if (noticeDays === null) {
+      return fail("Write the notice period as days, weeks or months — for example 30 days, 2 months or Immediate.");
+    }
   }
 
   const labels = formData.getAll("customLabel").map(String);
