@@ -3585,7 +3585,9 @@ export async function saveReviewDetails(formData: FormData) {
     const amount = String(formData.get(field) ?? "").trim();
     const currency = String(formData.get(`${field}Currency`) ?? "").trim();
     if (!amount) return "";
-    if (currency && !new RegExp(`^${currency}\\b`, "i").test(amount)) {
+    // Only a figure takes the currency: "Not disclosed" and "Negotiable" are
+    // words, and "LKR Negotiable" is what the Director saw when they did (28 Sep).
+    if (currency && /^\d/.test(amount) && !new RegExp(`^${currency}\\b`, "i").test(amount)) {
       return `${currency} ${amount}`;
     }
     return amount;

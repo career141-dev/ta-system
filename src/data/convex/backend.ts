@@ -407,37 +407,6 @@ export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, 
   const out = new Map<Id, Candidate>();
   const docs = await candidateDocsByIds(actor, ids);
 
-  // If docs are missing free-text salary fields because remote getBatch stripped them,
-  // enrich them via getCandidate for small batches (e.g. candidate page or review).
-  const needsEnrich = docs
-    .filter((d) => (d.expectedSalary !== undefined && d.taExpectedSalaryText === undefined && d.expectedSalaryNote === undefined) || (d.currentSalary !== undefined && d.taCurrentSalaryText === undefined && d.currentSalaryNote === undefined))
-    .map((d) => d._id);
-
-  if (needsEnrich.length > 0 && needsEnrich.length <= 50) {
-    const rawDocs = await Promise.all(
-      needsEnrich.map(async (id) => {
-        try {
-          const res = await convexQuery<LiveCandidate | null>("candidates/candidates:getCandidate", {
-            id,
-          });
-          return res ? { id, candidate: res } : null;
-        } catch {
-          return null;
-        }
-      })
-    );
-    const profMap = new Map<string, LiveCandidate>();
-    for (const p of rawDocs) {
-      if (p) profMap.set(p.id, p.candidate);
-    }
-    for (let i = 0; i < docs.length; i++) {
-      const full = profMap.get(docs[i]._id);
-      if (full) {
-        docs[i] = { ...docs[i], ...full };
-      }
-    }
-  }
-
   const missingCvIds = docs.filter((d) => !d.cvFileName).map((d) => d._id);
   const cvNameMap = new Map<string, string>();
   if (missingCvIds.length > 0) {
