@@ -73,6 +73,9 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     skills: Array.isArray(c.skills) ? c.skills.map((s: unknown) => (typeof s === "object" && s && "value" in (s as object) ? String((s as { value: unknown }).value) : String(s))) : [],
     industries: Array.isArray(c.industries) ? c.industries.map(String) : c.sector ? [String(c.sector)] : [],
     noticePeriodDays: typeof c.noticePeriodDays === "number" ? c.noticePeriodDays : null,
+    // The notice as said ("Not disclosed", "2 months"), read back so a save
+    // through the store keeps it (convex/ta/model/tables.ts).
+    noticePeriod: typeof c.noticePeriod === "string" && c.noticePeriod.trim() ? c.noticePeriod : null,
     // The words a candidate gave ("250k plus car") win over the number read from them.
     currentSalary: (typeof c.taCurrentSalaryText === "string" && c.taCurrentSalaryText) || money(c.currentSalary, c.currentSalaryCurrency),
     expectedSalary: (typeof c.taExpectedSalaryText === "string" && c.taExpectedSalaryText) || money(c.expectedSalary, c.expectedSalaryCurrency),

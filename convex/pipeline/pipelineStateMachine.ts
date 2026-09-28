@@ -6,6 +6,7 @@ import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "./followUpHelper";
 import { adjustJobStageStat } from "../jobs/stats";
 import { adjustGlobalStat } from "../stats/statsHelper";
+import { expectedSalaryOnFile, noticePeriodOnFile } from "../ta/stages";
 
 export const PIPELINE_STAGES = [
   "new_cvs",
@@ -106,12 +107,13 @@ export async function executeStageTransition(
     const hasCV =
       app.followUpCvReceived === true ||
       (app.followUpCvReceived === undefined && (!!candidate.cvUploadId || !!app.cvFileId));
+    // Words count ("Not disclosed", "Negotiable"): ta/stages.ts, 28 Sep.
     const hasExpectedSalary =
       app.followUpExpectedSalary === true ||
-      (app.followUpExpectedSalary === undefined && candidate.expectedSalary !== undefined);
+      (app.followUpExpectedSalary === undefined && expectedSalaryOnFile(candidate));
     const hasNoticePeriod =
       app.followUpNoticePeriod === true ||
-      (app.followUpNoticePeriod === undefined && (candidate.noticePeriodDays !== undefined || (candidate as any).noticePeriod !== undefined));
+      (app.followUpNoticePeriod === undefined && noticePeriodOnFile(candidate));
 
     if (!(hasCV && hasExpectedSalary && hasNoticePeriod)) {
       // Name only what is actually missing for THIS candidate — not all

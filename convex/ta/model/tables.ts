@@ -332,6 +332,7 @@ export const TABLES: Record<string, TableModel> = {
         skills: r.skills ?? [],
         industries: r.industries ?? [],
         noticePeriodDays: u(r.noticePeriodDays as number | null),
+        noticePeriod: u(r.noticePeriod as string | null),
         taCurrentSalaryText: u(r.currentSalary as string | null),
         currentSalary: cur?.amount,
         currentSalaryCurrency: cur?.currency ?? undefined,
