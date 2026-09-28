@@ -1,3 +1,4 @@
+import Form from "next/form";
 import type { ListFilters } from "./CandidateList";
 
 /**
@@ -45,7 +46,7 @@ export function FilterPanel({
 }) {
   return (
     <aside className="hidden w-[244px] shrink-0 lg:block">
-      <form method="GET" action={basePath} className="rounded-xl border border-rule bg-surface p-5">
+      <Form action={basePath} className="rounded-xl border border-rule bg-surface p-5">
         {/*
           Carry the toolbar's fields through.
 
@@ -164,7 +165,7 @@ export function FilterPanel({
         <button className="mt-5 w-full rounded-full bg-brand py-2 text-[12.5px] font-medium text-white hover:opacity-90">
           Apply filters
         </button>
-      </form>
+      </Form>
     </aside>
   );
 }
