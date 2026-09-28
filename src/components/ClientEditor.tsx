@@ -167,6 +167,7 @@ export function ClientEditor({
   industry,
   status,
   esaSignedAt,
+  researchNotes,
   contacts,
   pane,
   onClose,
@@ -176,6 +177,7 @@ export function ClientEditor({
   industry: string;
   status: string;
   esaSignedAt: number | null;
+  researchNotes: string;
   contacts: Contact[];
   pane: Pane;
   onClose: () => void;
@@ -236,6 +238,17 @@ export function ClientEditor({
                 <option key={x.value} value={x.value}>{x.label}</option>
               ))}
             </select>
+          </label>
+          <label className="sm:col-span-2">
+            <span className="mb-1.5 block text-[11.5px] text-ink-soft">What we know about them — for Research</span>
+            <textarea
+              name="researchNotes"
+              defaultValue={researchNotes}
+              rows={3}
+              maxLength={2000}
+              placeholder="Website, LinkedIn company page, full company name, what they do…"
+              className={inputClass}
+            />
           </label>
         </fieldset>
         <div className="flex items-center gap-2.5">

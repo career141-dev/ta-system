@@ -27,6 +27,7 @@ export const list = internalQuery({
         esaSignedAt: c.esaSignedAt ?? null,
         status: c.status,
         createdAt: c.createdAt,
+        researchNotes: c.researchNotes ?? "",
       }))
       .sort((a, b) => a.name.localeCompare(b.name));
   },
@@ -87,12 +88,14 @@ export const update = internalMutation({
     industry: v.optional(v.string()),
     status: v.optional(v.union(v.literal("active"), v.literal("dormant"), v.literal("archived"))),
     esaSignedAt: v.optional(v.union(v.number(), v.null())),
+    researchNotes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const id = ctx.db.normalizeId("clients", args.clientId);
     if (!id) return { ok: false };
     const patch: Record<string, any> = {};
+    if (args.researchNotes !== undefined) patch.researchNotes = args.researchNotes.trim().slice(0, 2000);
     if (args.name !== undefined) {
       patch.name = args.name.trim();
       patch.nameKey = clientKey(args.name);

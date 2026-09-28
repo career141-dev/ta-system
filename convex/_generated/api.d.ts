@@ -166,6 +166,7 @@ import type * as ta_firstPost from "../ta/firstPost.js";
 import type * as ta_fixes2609 from "../ta/fixes2609.js";
 import type * as ta_followUp from "../ta/followUp.js";
 import type * as ta_guard from "../ta/guard.js";
+import type * as ta_hhUpload from "../ta/hhUpload.js";
 import type * as ta_inboxTest from "../ta/inboxTest.js";
 import type * as ta_ingestionTest from "../ta/ingestionTest.js";
 import type * as ta_intake from "../ta/intake.js";
@@ -358,6 +359,7 @@ declare const fullApi: ApiFromModules<{
   "ta/fixes2609": typeof ta_fixes2609;
   "ta/followUp": typeof ta_followUp;
   "ta/guard": typeof ta_guard;
+  "ta/hhUpload": typeof ta_hhUpload;
   "ta/inboxTest": typeof ta_inboxTest;
   "ta/ingestionTest": typeof ta_ingestionTest;
   "ta/intake": typeof ta_intake;

@@ -144,6 +144,7 @@ export default async function ClientsPage({
               name={c.name}
               status={c.status}
               esaSignedAt={c.esaSignedAt}
+              researchNotes={c.researchNotes ?? ""}
               contacts={c.contacts}
               canDelete={can(user, "client.manage").ok}
               selectForm={can(user, "client.manage").ok ? "bulk-clients" : undefined}

@@ -53,6 +53,12 @@ export interface Client {
   esaSignedAt: number | null;
   status: "active" | "dormant" | "archived";
   createdAt: number;
+  /**
+   * What the desk knows about who this client is — website, LinkedIn page,
+   * full name, what they do (28 Sep). Research and Suggestions read it, so a
+   * short name like "SQ" is not taken for some other company.
+   */
+  researchNotes?: string;
 }
 
 /** Spec §4.7 — target time-to-fill, from the workbook's `Guidelines` tab. */
