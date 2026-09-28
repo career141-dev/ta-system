@@ -18,6 +18,7 @@ const BULK_FORM = "bulk-applications";
 export type ListFilters = {
   q?: string;
   minExp?: string;
+  maxExp?: string;
   maxNotice?: string;
   location?: string;
   mine?: string;
@@ -49,6 +50,7 @@ export function applyFilters(apps: Application[], f: ListFilters, userId: string
     if (!c) return false;
     if (f.q && !matchesQuery(f.q, c.fullName, c.currentTitle, c.currentEmployer, c.location)) return false;
     if (f.minExp && (c.totalExperienceYears ?? 0) < Number(f.minExp)) return false;
+    if (f.maxExp && (c.totalExperienceYears ?? 0) > Number(f.maxExp)) return false;
     if (f.maxNotice && (c.noticePeriodDays ?? 999) > Number(f.maxNotice)) return false;
     if (f.location && c.location !== f.location) return false;
     if (f.mine === "1" && a.ownerTaId !== userId) return false;
@@ -190,7 +192,7 @@ export function CandidateList({
           <input key={k} type="hidden" name={k} value={v} />
         ))}
         {/* And the rail's fields, for the same reason — see FilterPanel. */}
-        {(["location", "company", "past", "skill", "school", "industry", "title", "nationality"] as const).map(
+        {(["location", "maxExp", "company", "past", "skill", "school", "industry", "title", "nationality"] as const).map(
           (k) => (filters[k] ? <input key={k} type="hidden" name={k} value={filters[k]} /> : null),
         )}
         <label className="relative min-w-[240px] flex-1 max-w-[320px]">
