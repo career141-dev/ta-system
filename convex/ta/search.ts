@@ -11,6 +11,7 @@
 // Plan step 7 is what puts this behind the existing Database screens. Until
 // then this is the seam, not the feature.
 
+import { liveFacts } from "../lib/candidateFacts";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -37,6 +38,8 @@ export const resultRows = internalQuery({
     for (const id of args.candidateIds.slice(0, 200)) {
       const c = (await ctx.db.get(id as Id<"candidates">)) as Doc<"candidates"> | null;
       if (!c) continue;
+      // Worked out as of today, as on the profile (lib/candidateFacts).
+      const facts = liveFacts(c, c.jobHistory ?? []);
       rows.push({
         id: c._id as string,
         fullName: c.fullName ?? null,
@@ -44,7 +47,10 @@ export const resultRows = internalQuery({
         currentEmployer: c.currentEmployer ?? null,
         location: c.location ?? null,
         locationStructured: c.locationStructured ?? null,
-        totalExperienceYears: c.totalExperienceYears ?? c.yearsOfExperience ?? null,
+        totalExperienceYears: facts.totalExperienceYears,
+        age: facts.age,
+        ageSource: facts.ageSource,
+        experienceNote: facts.experienceNote,
         skills: c.skills ?? [],
         industries: c.industries ?? (c.sector ? [c.sector] : []),
         educationDegree: c.educationDegree ?? null,

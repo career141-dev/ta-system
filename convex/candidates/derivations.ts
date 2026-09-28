@@ -1,3 +1,4 @@
+import { experienceOn } from "../lib/experience";
 export function deriveNoticePeriodDays(noticePeriod: string | null | undefined): number | undefined {
   if (!noticePeriod) return undefined;
 
@@ -94,7 +95,23 @@ export function deriveEducationFields(
   };
 }
 
+/**
+ * Years of experience from the job history, or the stated figure when the
+ * dates give none. The sum itself is lib/experience (28 Sep): it reads the
+ * ways CVs write dates, day first, and counts a year alone as a whole year.
+ * The figure stored here is only as of today; the desk's screens work it out
+ * again whenever they show it (ta/candidates), so a current job keeps counting.
+ */
 export function deriveTotalExperienceYears(
+  jobHistory: Array<{ startDate?: string | null; endDate?: string | null }> | null | undefined,
+  yearsOfExperience: number | null | undefined,
+  birthYear?: number | null,
+): number | undefined {
+  return experienceOn(jobHistory, new Date(), birthYear)?.years ?? yearsOfExperience ?? undefined;
+}
+
+/** The sum before 28 Sep, kept only so its replacement could be checked against it. */
+export function oldTotalExperienceYears(
   jobHistory: Array<{ startDate?: string | null; endDate?: string | null }> | null | undefined,
   yearsOfExperience: number | null | undefined
 ): number | undefined {

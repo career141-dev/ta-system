@@ -12,6 +12,7 @@
 // which of the two it found rather than returning an empty string, because
 // "no text" and "text lives in R2" need different handling upstream.
 
+import { liveFacts } from "../lib/candidateFacts";
 import { v } from "convex/values";
 import { internalMutation, internalQuery, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -42,9 +43,11 @@ async function withCareer(
     .withIndex("by_candidateId", (q) => q.eq("candidateId", id))
     .first();
   const career = (resume?.jobHistory?.length ? resume.jobHistory : candidate.jobHistory) ?? [];
+  // Age and experience as of today, with where each came from (lib/candidateFacts).
+  const facts = liveFacts(candidate, career);
   if (shape === "full") {
     const { rawText: _raw, ...rest } = candidate;
-    return { ...rest, jobHistory: career } as Doc<"candidates">;
+    return { ...rest, ...facts, jobHistory: career } as unknown as Doc<"candidates">;
   }
   /*
    * Lists get what the list mapper reads (src/lib/live/mapLive.ts) and nothing
@@ -57,6 +60,7 @@ async function withCareer(
     const value = (candidate as Record<string, unknown>)[field];
     if (value !== undefined) out[field] = value;
   }
+  Object.assign(out, facts);
   if (candidate.locationStructured?.raw_text) out.locationStructured = { raw_text: candidate.locationStructured.raw_text };
   if (Array.isArray(candidate.education) && candidate.education.length) out.education = [candidate.education[0]];
   return out as unknown as Doc<"candidates">;

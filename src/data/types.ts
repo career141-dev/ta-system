@@ -253,10 +253,16 @@ export interface Candidate {
   location: string | null;
   nationality: string | null;
   age: number | null;
+  /** Where the age came from — dob · nic · stated_age · entered (28 Sep). */
+  ageSource?: string | null;
+  /** When the CV's date of birth and its NIC disagree, or the age is only approximate. */
+  ageNote?: string | null;
   gender: string | null;
   currentEmployer: string | null;
   currentTitle: string | null;
   totalExperienceYears: number | null;
+  /** The CV's own claim disagrees with its dates, or some dates are years only. */
+  experienceNote?: string | null;
   educationDegree: string | null;
   educationInstitution: string | null;
   qualifications: string | null;

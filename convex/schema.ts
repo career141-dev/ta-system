@@ -844,6 +844,12 @@ export default defineSchema({
     // words are kept alongside the numbers the engines read.
     nationality: v.optional(v.string()),
     age: v.optional(v.number()),
+    // Read from the CV (convex/lib/candidateAge, 28 Sep): the age is worked
+    // out from this on the day it is shown, so it never goes stale.
+    dateOfBirth: v.optional(v.string()),
+    dateOfBirthSource: v.optional(v.string()),
+    // When the CV's stated date and its NIC disagree.
+    dateOfBirthNote: v.optional(v.string()),
     gender: v.optional(v.string()),
     englishLevel: v.optional(v.number()),
     cvFileName: v.optional(v.string()),
