@@ -113,6 +113,8 @@ export function directorReviewBlockers(
     cvUploadId?: unknown;
     currentSalary?: unknown;
     expectedSalary?: unknown;
+    taExpectedSalaryText?: unknown;
+    expectedSalaryNote?: unknown;
     noticePeriodDays?: unknown;
     noticePeriod?: unknown;
   } | null,
@@ -124,7 +126,23 @@ export function directorReviewBlockers(
 
   if (!has(app.followUpCvReceived, Boolean(candidate.cvUploadId || app.cvFileId))) blockers.push("a CV");
   // Current salary is not mandatory for Director review.
-  if (!has(app.followUpExpectedSalary, candidate.expectedSalary !== undefined)) blockers.push("expected salary");
-  if (!has(app.followUpNoticePeriod, candidate.noticePeriodDays !== undefined || candidate.noticePeriod !== undefined)) blockers.push("notice period");
+  if (!has(app.followUpExpectedSalary, expectedSalaryOnFile(candidate))) blockers.push("expected salary");
+  if (!has(app.followUpNoticePeriod, noticePeriodOnFile(candidate))) blockers.push("notice period");
   return blockers;
+}
+
+const said = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+
+/**
+ * An answer is an answer when it is words. A candidate who will not say their
+ * salary or notice has answered — "Not disclosed", "Negotiable" — and the TA
+ * types that; counting only a number kept them out of Director Review for
+ * good (owner, 28 Sep). Shared with pipeline/pipelineStateMachine.ts.
+ */
+export function expectedSalaryOnFile(c: { expectedSalary?: unknown; taExpectedSalaryText?: unknown; expectedSalaryNote?: unknown }): boolean {
+  return c.expectedSalary !== undefined || said(c.taExpectedSalaryText) || said(c.expectedSalaryNote);
+}
+
+export function noticePeriodOnFile(c: { noticePeriodDays?: unknown; noticePeriod?: unknown }): boolean {
+  return c.noticePeriodDays !== undefined || said(c.noticePeriod);
 }

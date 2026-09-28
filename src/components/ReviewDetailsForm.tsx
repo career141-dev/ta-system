@@ -232,14 +232,14 @@ export function ReviewDetailsForm({
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {money("currentSalary", cur, curAmount, "e.g. 250,000 / Not disclosed", "Current salary (optional)")}
-        {money("expectedSalary", exp, expAmount, "300,000 a month", "Expected salary")}
+        {money("expectedSalary", exp, expAmount, "e.g. 300,000 / Negotiable / Not disclosed", "Expected salary")}
         <label>
           <span className="mb-1 block text-[11.5px] text-ink-soft">Notice period</span>
           <input
             name="noticePeriod"
             type="text"
             defaultValue={noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : "")}
-            placeholder="e.g. 30 days, Immediate, 2 months"
+            placeholder="e.g. 30 days, 2 months, Immediate, Not disclosed"
             className={inputClass}
           />
         </label>

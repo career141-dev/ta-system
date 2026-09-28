@@ -1,3 +1,4 @@
+import Image from "next/image";
 import { Show, SignIn } from "@clerk/nextjs";
 import { clerkEmails, currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
@@ -26,6 +27,11 @@ export default async function SignInPage() {
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-[440px] flex-col justify-center px-6 py-16">
+      {/* Aura's lettering is white on transparent, so it sits on its own dark
+          panel whatever the page theme (28 Sep). */}
+      <div className="mb-7 flex justify-center rounded-2xl bg-[#0b0b12] px-10 py-8">
+        <Image src="/aura-logo-v1.png" alt="Aura — AI Unified Recruiter Agent" width={720} height={612} priority className="h-auto w-[220px]" />
+      </div>
       <div className="mb-7">
         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">
           Career141
