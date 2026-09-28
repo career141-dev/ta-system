@@ -20,6 +20,7 @@ import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
 import { candidateIdToPointId, candidateVectorPayload } from "../lib/vectorPayload";
 import { isGone } from "../../src/lib/bin";
+import { cvFileMissing } from "../../src/lib/cvMissing";
 
 /**
  * A candidate row with their career attached.
@@ -63,6 +64,7 @@ async function withCareer(
     if (value !== undefined) out[field] = value;
   }
   Object.assign(out, facts);
+  if (cvFileMissing(candidate)) out.cvFileMissing = true;
   if (candidate.locationStructured?.raw_text) out.locationStructured = { raw_text: candidate.locationStructured.raw_text };
   if (Array.isArray(candidate.education) && candidate.education.length) out.education = [candidate.education[0]];
   return out as unknown as Doc<"candidates">;
@@ -131,7 +133,7 @@ export const quickSearch = internalQuery({
       ctx.db.query("candidates").withSearchIndex("search_title", (s) => s.search("currentJobTitle", q)).take(limit),
     ]);
     const ids: string[] = [];
-    for (const c of [...byName, ...byTitle]) if (!ids.includes(c._id) && !(c as { mergedInto?: string }).mergedInto) ids.push(c._id);
+    for (const c of [...byName, ...byTitle]) if (!ids.includes(c._id) && !(c as { mergedInto?: string }).mergedInto && !cvFileMissing(c)) ids.push(c._id);
     return ids.slice(0, limit);
   },
 });

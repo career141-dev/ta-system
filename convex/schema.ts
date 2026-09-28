@@ -642,6 +642,7 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_fileHash", ["fileHash"])
     .index("by_batchId", ["batchId"])
+    .index("by_candidateId", ["candidateId"])
     .index("by_storageId", ["storageId"])
     .index("by_s3Key", ["s3Key"])
     .index("by_source_fileName", ["source", "fileName"])
@@ -783,6 +784,9 @@ export default defineSchema({
     fieldsNeedingReview: v.optional(v.array(v.string())),
     isDuplicateOf: v.optional(v.id("candidates")),
     mergedInto: v.optional(v.id("candidates")),
+    // The upload whose file was lost in the Convex Cloud move; while it is
+    // still `cvUploadId` the candidate is kept out of search (src/lib/cvMissing.ts).
+    cvMissingUploadId: v.optional(v.id("cvUploads")),
     vectorEmbeddingId: v.optional(v.string()),
     pastJobTitles: v.optional(v.array(v.string())),
     sector: v.optional(v.string()),

@@ -285,7 +285,8 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   const byId = new Map(docs.map((d) => [d._id, d]));
   const pool: Doc[] = ids.flatMap((id) => {
     const d = byId.get(id);
-    return d ? [{ ...d, vectorScore: vectorScore.get(id) ?? 0 }] : [];
+    // Anyone whose CV file was lost in the Cloud move is left out (src/lib/cvMissing.ts).
+    return d && !d.cvFileMissing ? [{ ...d, vectorScore: vectorScore.get(id) ?? 0 }] : [];
   });
   if (pool.length === 0) {
     return { interpretation: interpretationOf(req, intent !== null), hits: [] };

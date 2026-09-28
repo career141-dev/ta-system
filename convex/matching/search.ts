@@ -4,6 +4,7 @@ import { api, internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { logLLMUsage, OPENROUTER_PRIMARY_MODEL } from "../lib/llm";
 import { extractSearchRequirements, buildSearchTerms, type SearchRequirements } from "../lib/jdParser";
+import { cvFileMissing } from "../../src/lib/cvMissing";
 import { scoreCandidateAgainstRequirements, selectLlmPool, scoreWithLLM, scoreBatchWithLLM, buildDeterministicTaReason, distinct, type ScoredCandidate } from "../cvs/cvScoring";
 
 export const searchCandidates = query({
@@ -103,7 +104,17 @@ export const searchCandidates = query({
     let filtered = merged;
 
     filtered.sort((a, b) => (weight.get(b.candidateId) ?? 0) - (weight.get(a.candidateId) ?? 0));
-    return filtered.slice(0, limit).map(({ candidateId }) => ({ candidateId, score: weight.get(candidateId) ?? 0 }));
+
+    // No one whose CV file was lost in the Cloud move (src/lib/cvMissing.ts).
+    // Hits from CV text are only ids, so their row is read to check.
+    const docs = new Map<string, Doc<"candidates">>([...titleResults, ...skillsResults, ...summaryResults].map((c) => [c._id, c]));
+    const kept: typeof filtered = [];
+    for (const f of filtered) {
+      const c = docs.get(f.candidateId) ?? (await ctx.db.get(f.candidateId));
+      if (c && !cvFileMissing(c)) kept.push(f);
+      if (kept.length === limit) break;
+    }
+    return kept.map(({ candidateId }) => ({ candidateId, score: weight.get(candidateId) ?? 0 }));
   },
 });
 

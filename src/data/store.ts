@@ -1837,6 +1837,7 @@ const rawRepo = {
         .slice(0, 8),
       candidates: [...new Set([...ranked, ...db.candidates
         .filter((c) => `${c.fullName} ${c.currentEmployer ?? ""} ${c.currentTitle ?? ""}`.toLowerCase().includes(n))])]
+        .filter((c) => !c.cvFileMissing)
         .slice(0, 12)
         .map((c) => ({
           candidate: c,
@@ -2635,7 +2636,8 @@ const rawRepo = {
       byCandidate.set(a.candidateId, [...(byCandidate.get(a.candidateId) ?? []), a]);
     }
 
-    let pool = db.candidates;
+    // Not anyone whose CV file was lost in the Cloud move (src/lib/cvMissing.ts).
+    let pool = db.candidates.filter((c) => !c.cvFileMissing);
     if (opts.boolean) {
       const { node } = parseBoolean(opts.boolean);
       pool = node ? pool.filter((c) => evalBoolean(node, haystackFor(c))) : [];

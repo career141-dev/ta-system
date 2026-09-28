@@ -159,6 +159,7 @@ import type * as ta_candidates from "../ta/candidates.js";
 import type * as ta_clients from "../ta/clients.js";
 import type * as ta_commit from "../ta/commit.js";
 import type * as ta_cv from "../ta/cv.js";
+import type * as ta_cvFiles2809 from "../ta/cvFiles2809.js";
 import type * as ta_dispatch from "../ta/dispatch.js";
 import type * as ta_dispatchRecord from "../ta/dispatchRecord.js";
 import type * as ta_eodMail from "../ta/eodMail.js";
@@ -352,6 +353,7 @@ declare const fullApi: ApiFromModules<{
   "ta/clients": typeof ta_clients;
   "ta/commit": typeof ta_commit;
   "ta/cv": typeof ta_cv;
+  "ta/cvFiles2809": typeof ta_cvFiles2809;
   "ta/dispatch": typeof ta_dispatch;
   "ta/dispatchRecord": typeof ta_dispatchRecord;
   "ta/eodMail": typeof ta_eodMail;

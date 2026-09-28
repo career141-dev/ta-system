@@ -7,6 +7,7 @@ import { mapJobSeniorityTo10LevelRank, checkSeniorityConflict, scoreCandidateAga
 import { classifyJobRoleFamily, classifyCurrentRolesBatch } from "../lib/currentRoleClassifier";
 import { synthesizeJobRequirements } from "../lib/jobSynthesizer";
 import { candidateVectorPayload, upsertCandidateVector, queryCandidateVectors } from "../lib/qdrant";
+import { cvFileMissing } from "../../src/lib/cvMissing";
 
 /**
  * Helper to get vector embeddings from NVIDIA API
@@ -507,6 +508,8 @@ Return ONLY valid JSON matching this schema:
           candidateIds: allCandidateIds,
         });
         for (const c of candidates) {
+          // Not suggested while their CV file is lost (src/lib/cvMissing.ts).
+          if (cvFileMissing(c)) continue;
           candidatesMap.set(c._id.toString(), c);
         }
       }

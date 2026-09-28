@@ -80,6 +80,8 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     currentSalary: (typeof c.taCurrentSalaryText === "string" && c.taCurrentSalaryText) || money(c.currentSalary, c.currentSalaryCurrency),
     expectedSalary: (typeof c.taExpectedSalaryText === "string" && c.taExpectedSalaryText) || money(c.expectedSalary, c.expectedSalaryCurrency),
     cvFileName: typeof c.cvFileName === "string" ? c.cvFileName : null,
+    // Worked out by the backend (convex/ta/candidates.ts withCareer, src/lib/cvMissing.ts).
+    ...(c.cvFileMissing === true ? { cvFileMissing: true } : {}),
     workHistory: (history ?? [])
       .filter((h) => h && h.title)
       .map((h) => ({ title: String(h.title), employer: String(h.company ?? ""), fromYear: yearOf(h.startDate) ?? 0, toYear: yearOf(h.endDate) })),

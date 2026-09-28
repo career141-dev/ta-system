@@ -70,8 +70,10 @@ export const linkHistoricalCvFile = mutation({
       if (upload.candidateId) {
         const cand = await ctx.db.get(upload.candidateId);
         if (cand) {
+          // The file is back, so the candidate returns to search (src/lib/cvMissing.ts).
           await ctx.db.patch(cand._id, {
             cvUploadId: upload._id,
+            cvMissingUploadId: undefined,
           });
         }
       }
