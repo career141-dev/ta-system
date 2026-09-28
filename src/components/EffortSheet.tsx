@@ -133,8 +133,38 @@ export function EffortSheet({
         <tbody>
           <tr>
             {cols.map((c) => {
-              if (c.key === "date") return <td key={c.key} className={`${td} px-2.5`}>{effort.date}</td>;
-              if (c.key === "assignee") return <td key={c.key} className={`${td} px-2.5`}>{effort.assignee}</td>;
+              if (c.key === "date") {
+                return (
+                  <td key={c.key} className={td}>
+                    <input
+                      form={formId}
+                      name="effort_date"
+                      value={draft.values["date" as EffortKey] ?? effort.date}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDraft((d) => ({ ...d, values: { ...d.values, ["date" as EffortKey]: val } }));
+                      }}
+                      className={`${cell} min-w-[70px]`}
+                    />
+                  </td>
+                );
+              }
+              if (c.key === "assignee") {
+                return (
+                  <td key={c.key} className={td}>
+                    <input
+                      form={formId}
+                      name="effort_assignee"
+                      value={draft.values["assignee" as EffortKey] ?? effort.assignee}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setDraft((d) => ({ ...d, values: { ...d.values, ["assignee" as EffortKey]: val } }));
+                      }}
+                      className={`${cell} min-w-[80px]`}
+                    />
+                  </td>
+                );
+              }
               if (c.key === "hundredOrFollowUp") {
                 return (
                   <td key={c.key} className={td}>
@@ -177,11 +207,19 @@ export function EffortSheet({
                   <input
                     form={formId}
                     name={`effort_${k}`}
-                    inputMode="numeric"
+                    inputMode={k === "sets" ? "text" : "numeric"}
                     value={draft.values[k] ?? ""}
-                    onChange={(e) => setDraft({ ...draft, values: { ...draft.values, [k]: e.target.value.replace(/[^\d]/g, "") } })}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        values: {
+                          ...draft.values,
+                          [k]: k === "sets" ? e.target.value : e.target.value.replace(/[^\d]/g, ""),
+                        },
+                      })
+                    }
                     aria-label={c.label}
-                    className={cell}
+                    className={`${cell} ${k === "sets" ? "min-w-[75px]" : ""}`}
                   />
                 </td>
               );
@@ -195,18 +233,26 @@ export function EffortSheet({
               const k = c.key as EffortKey;
               const target = Number(draft.targets[k] ?? "");
               const value = Number(draft.values[k] ?? "");
-              const met = draft.targets[k] ? (value >= target ? "text-brand" : "text-warn") : "";
+              const met = draft.targets[k] && !Number.isNaN(target) && !Number.isNaN(value) ? (value >= target ? "text-brand" : "text-warn") : "";
               return (
                 <td key={c.key} className={td}>
                   <input
                     form={formId}
                     name={`target_${k}`}
-                    inputMode="numeric"
+                    inputMode={k === "sets" ? "text" : "numeric"}
                     placeholder="—"
                     value={draft.targets[k] ?? ""}
-                    onChange={(e) => setDraft({ ...draft, targets: { ...draft.targets, [k]: e.target.value.replace(/[^\d]/g, "") } })}
+                    onChange={(e) =>
+                      setDraft({
+                        ...draft,
+                        targets: {
+                          ...draft.targets,
+                          [k]: k === "sets" ? e.target.value : e.target.value.replace(/[^\d]/g, ""),
+                        },
+                      })
+                    }
                     aria-label={`${c.label} target`}
-                    className={`${cell} ${met}`}
+                    className={`${cell} ${k === "sets" ? "min-w-[75px]" : ""} ${met}`}
                   />
                 </td>
               );

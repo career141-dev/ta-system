@@ -16,7 +16,8 @@ import { invalidateCandidate, markTablesStale, withRealIds } from "@/data/primeS
 import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
-import type { EffortRow } from "@/lib/eod-format";
+import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
+import { noticePeriodToDays } from "@/lib/answered";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -3460,9 +3461,29 @@ export async function saveReviewDetails(formData: FormData) {
   };
   const currentSalary = withCurrency("currentSalary");
   const expectedSalary = withCurrency("expectedSalary");
-  const noticeRaw = String(formData.get("noticePeriodDays") ?? "").trim();
-  const notice = noticeRaw === "" ? null : Number(noticeRaw);
-  if (notice !== null && (!Number.isFinite(notice) || notice < 0)) return fail("Notice period is a number of days, 0 or more.");
+  const noticeRaw = String(formData.get("noticePeriod") ?? formData.get("noticePeriodDays") ?? "").trim();
+  let noticeDays: number | null = null;
+  let noticeText: string | null = null;
+
+  if (noticeRaw !== "") {
+    noticeText = noticeRaw;
+    const parsedDays = noticePeriodToDays(noticeRaw);
+    if (parsedDays !== null) {
+      noticeDays = parsedDays;
+    } else {
+      const n = Number(noticeRaw);
+      if (Number.isFinite(n) && n >= 0) {
+        noticeDays = Math.round(n);
+      }
+    }
+    // Only the days are stored on the live record, so words it cannot turn
+    // into days ("negotiable") would have saved as no notice at all and wiped
+    // what was on file (review of #72, 28 Sep). Ask again instead.
+    if (noticeDays === null) {
+      return fail("Write the notice period as days, weeks or months — for example 30 days, 2 months or Immediate.");
+    }
+  }
+
   const labels = formData.getAll("customLabel").map(String);
   const values = formData.getAll("customValue").map(String);
   const customNotes: string[] = [];
@@ -3476,7 +3497,8 @@ export async function saveReviewDetails(formData: FormData) {
   const patch = {
     currentSalary: currentSalary || null,
     expectedSalary: expectedSalary || null,
-    noticePeriodDays: notice !== null ? Math.round(notice) : null,
+    noticePeriodDays: noticeDays,
+    noticePeriod: noticeText || (noticeDays !== null ? (noticeDays === 0 ? "Immediate" : `${noticeDays} days`) : null),
   };
 
   try {
@@ -3839,8 +3861,13 @@ export async function sendEod(formData: FormData) {
   // still sent by operations and only recorded here.
   let sentNote = "";
   if (kind === "director") {
-    if (!isConvex()) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent("Sending needs the Convex store.")}`);
-    const effort = await import("@/lib/eod").then((m) => m.effortFromForm(formData, m.effortRow(openingId, user)));
+    const { effortFromForm, effortRow, shortlistRowsFromForm, shortlistRows } = await import("@/lib/eod");
+    const effort = effortFromForm(formData, effortRow(openingId, user));
+    const baseRows = shortlistRows(openingId, null, "director");
+    const editedRows = shortlistRowsFromForm(formData, baseRows);
+    const introText = formData.has("introText") ? String(formData.get("introText")) : undefined;
+    const outroText = formData.has("outroText") ? String(formData.get("outroText")) : undefined;
+
     if (effort.hundredOrFollowUp && ["100%", "Follow-up", "Add-on"].includes(effort.hundredOrFollowUp)) {
       if (isConvex()) {
         try {
@@ -3865,6 +3892,9 @@ export async function sendEod(formData: FormData) {
       subject: String(formData.get("subject") ?? ""),
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
+      rows: editedRows,
+      introText,
+      outroText,
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
@@ -3942,6 +3972,9 @@ async function emailEod(input: {
   to: string;
   subject: string;
   effort?: EffortRow;
+  rows?: ShortlistRow[];
+  introText?: string;
+  outroText?: string;
 }): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
   const opening = repo.opening(openingId);
@@ -3962,7 +3995,7 @@ async function emailEod(input: {
 
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
-  const byId = new Map(shortlistRows(openingId, null, "director").map((r) => [r.applicationId, r]));
+  const byId = new Map((input.rows ?? shortlistRows(openingId, null, "director")).map((r) => [r.applicationId, r]));
   const rows = input.applicationIds
     .map((id, i) => {
       const existing = byId.get(id);
@@ -4014,7 +4047,7 @@ async function emailEod(input: {
                 {
                   currentSalary: r.currentRemuneration,
                   expectedSalary: r.expectedRemuneration,
-                  notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+                  notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
                 },
                 undefined,
                 link.fileName ?? c.cvFileName
@@ -4047,7 +4080,7 @@ async function emailEod(input: {
           {
             currentSalary: r.currentRemuneration,
             expectedSalary: r.expectedRemuneration,
-            notes: r.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean),
+            notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
           },
         );
         pdfBytes = new Uint8Array(pdf);
@@ -4071,6 +4104,8 @@ async function emailEod(input: {
     rows,
     effort: input.effort ?? effortRow(openingId, user),
     senderName: user.name,
+    introText: input.introText,
+    outroText: input.outroText,
     attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
   });
 

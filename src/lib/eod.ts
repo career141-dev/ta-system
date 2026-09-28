@@ -101,7 +101,11 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
   const todays = mine.filter((a) => (a.shortlistedAt ?? 0) >= since);
   // The set going out tonight — this TA's newest.
   const mySets = setsForOpening(openingId, ta.id);
-  const tonight = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
+  const openSet = mySets.find((s) => s.status === "open");
+  const tonight = openSet?.setNumber ?? (mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : 1);
+  const shortlists = shortlistRows(openingId, ta.id);
+  const cvCount = shortlists.length || openSet?.count || 1;
+  const setDisplay = `${tonight} - ${cvCount}${cvCount === 1 ? "CV" : "CVs"}`;
 
   const approached = vault.filter((v) => v.addedBy === ta.id && v.outcome !== "no_contact" && v.createdAt >= since).length;
   const addOns = mine.filter((a) => a.isAddOn && (a.addedOnAt ?? 0) >= since).length;
@@ -115,7 +119,7 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
     hundredOrFollowUp: kind,
     // Profiles approached today on a hunt; on a follow-up day, CVs brought in.
     lEffort: kind === "Follow-up" ? todays.length : approached,
-    sets: tonight,
+    sets: setDisplay,
     da: todays.filter((a) => a.sourcingChannel === "DA").length,
     // Database picks shortlisted today, plus scoops: CVs this TA brought in on
     // someone else's candidate today (plan 6.4).
@@ -145,15 +149,68 @@ export function effortFromForm(formData: FormData, base: EffortRow): EffortRow {
     return Number.isFinite(n) && n >= 0 ? Math.round(n) : undefined;
   };
   const out: EffortRow = { ...base, targets: {} };
+  if (formData.has("effort_date")) {
+    const d = String(formData.get("effort_date") ?? "").trim();
+    if (d) out.date = d;
+  }
+  if (formData.has("effort_assignee")) {
+    const a = String(formData.get("effort_assignee") ?? "").trim();
+    if (a) out.assignee = a;
+  }
   const kind = String(formData.get("effort_kind") ?? "");
   if ((OUTREACH_TYPES as readonly string[]).includes(kind)) out.hundredOrFollowUp = kind;
   for (const k of EFFORT_NUMBERS) {
+    if (k === "sets") {
+      if (formData.has("effort_sets")) {
+        const raw = String(formData.get("effort_sets") ?? "").trim();
+        if (raw) out.sets = raw;
+      }
+      if (formData.has("target_sets")) {
+        const raw = String(formData.get("target_sets") ?? "").trim();
+        if (raw) out.targets!.sets = raw;
+      }
+      continue;
+    }
     const v = num(`effort_${k}`);
     if (v !== undefined) (out as unknown as Record<string, number | null>)[k] = v;
     const t = num(`target_${k}`);
     if (t !== undefined && t !== null) out.targets![k] = t;
   }
   return out;
+}
+
+/**
+ * Shortlist rows as edited by the TA in the composer: name, age, notice, notes, company, designation, remuneration.
+ */
+export function shortlistRowsFromForm(
+  formData: FormData,
+  baseRows: ShortlistRow[],
+): ShortlistRow[] {
+  return baseRows.map((r, i) => {
+    const id = r.applicationId;
+    const name = formData.has(`shortlist_${id}_name`) ? String(formData.get(`shortlist_${id}_name`)).trim() : r.name;
+    const age = formData.has(`shortlist_${id}_age`) ? String(formData.get(`shortlist_${id}_age`)).trim() : r.age;
+    const notice = formData.has(`shortlist_${id}_notice`) ? String(formData.get(`shortlist_${id}_notice`)).trim() : r.notice;
+    const notesRaw = formData.has(`shortlist_${id}_notes`) ? String(formData.get(`shortlist_${id}_notes`)) : r.notes.join("\n");
+    const notes = notesRaw.split("\n").map((n) => n.trim()).filter(Boolean);
+    const currentCompany = formData.has(`shortlist_${id}_currentCompany`) ? String(formData.get(`shortlist_${id}_currentCompany`)).trim() : r.currentCompany;
+    const currentDesignation = formData.has(`shortlist_${id}_currentDesignation`) ? String(formData.get(`shortlist_${id}_currentDesignation`)).trim() : r.currentDesignation;
+    const currentRemuneration = formData.has(`shortlist_${id}_currentRemuneration`) ? String(formData.get(`shortlist_${id}_currentRemuneration`)).trim() : r.currentRemuneration;
+    const expectedRemuneration = formData.has(`shortlist_${id}_expectedRemuneration`) ? String(formData.get(`shortlist_${id}_expectedRemuneration`)).trim() : r.expectedRemuneration;
+
+    return {
+      no: i + 1,
+      name: name || r.name,
+      age: age !== undefined ? age : r.age,
+      notice: notice !== undefined ? notice : r.notice,
+      notes: notes.length ? notes : r.notes,
+      currentCompany: currentCompany !== undefined ? currentCompany : r.currentCompany,
+      currentDesignation: currentDesignation !== undefined ? currentDesignation : r.currentDesignation,
+      currentRemuneration: currentRemuneration !== undefined ? currentRemuneration : r.currentRemuneration,
+      expectedRemuneration: expectedRemuneration !== undefined ? expectedRemuneration : r.expectedRemuneration,
+      applicationId: id,
+    };
+  });
 }
 
 /**

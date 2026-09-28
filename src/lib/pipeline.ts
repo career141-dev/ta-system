@@ -121,15 +121,16 @@ export function nextStages(from: Stage): Stage[] {
  * through, and the rare false miss just means one extra, informative refusal.
  */
 export function directorReviewBlockers(
-  candidate: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays">,
+  candidate: Pick<Candidate, "cvFileName" | "currentSalary" | "expectedSalary" | "noticePeriodDays"> & { noticePeriod?: string | null },
   app?: { cvFileName?: string | null; cvFileId?: string | null } | null,
 ): string[] {
   const blockers: string[] = [];
   const hasCv = Boolean(candidate.cvFileName || app?.cvFileName || app?.cvFileId);
   if (!hasCv) blockers.push("a CV");
-  if (!candidate.currentSalary?.trim()) blockers.push("current salary");
+  // Current salary is not mandatory for Director review.
   if (!candidate.expectedSalary?.trim()) blockers.push("expected salary");
-  if (candidate.noticePeriodDays === null || candidate.noticePeriodDays === undefined) blockers.push("notice period");
+  const hasNotice = candidate.noticePeriodDays !== null && candidate.noticePeriodDays !== undefined || Boolean(candidate.noticePeriod?.trim());
+  if (!hasNotice) blockers.push("notice period");
   return blockers;
 }
 
