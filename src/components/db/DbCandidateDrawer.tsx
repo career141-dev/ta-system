@@ -8,6 +8,7 @@ import { dateAt } from "@/lib/format";
 import type { Candidate } from "@/data/types";
 import { externalUrl } from "@/lib/url";
 import type { RowApp } from "./ResultRow";
+import { ageHint, ageText, experienceText } from "@/lib/ageExperience";
 
 /** The open candidate's CV file, as the results page found it. */
 export interface DrawerCv {
@@ -150,11 +151,22 @@ export function DbCandidateDrawer({
               <section className="rounded-2xl border border-rule bg-surface px-6 py-5">
                 <h3 className="mb-3 text-[13px] font-semibold">On file</h3>
                 <dl className="grid grid-cols-[150px_1fr] gap-x-4 gap-y-2.5 text-[13px]">
+                  {row("Age", ageText(c) && (
+                    <>
+                      {ageText(c)}
+                      {ageHint(c) && <span className="ml-1.5 text-[11.5px] text-ink-faint">{ageHint(c)}</span>}
+                    </>
+                  ))}
                   {row("Email", c.email && <a href={`mailto:${c.email}`} className="text-accent hover:underline">{c.email}</a>)}
                   {row("Phone", c.phone && <a href={`tel:${c.phone.replace(/[^\d+]/g, "")}`} className="text-accent hover:underline">{c.phone}</a>)}
                   {row(
                     "Experience",
-                    c.totalExperienceYears != null ? `${c.totalExperienceYears} years` : null
+                    experienceText(c) && (
+                      <>
+                        {experienceText(c)}
+                        {c.experienceNote && <span className="ml-1.5 text-[11.5px] text-warn">{c.experienceNote}</span>}
+                      </>
+                    )
                   )}
                   {row(
                     "Education",

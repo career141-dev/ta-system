@@ -54,7 +54,11 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     linkedinUrl: externalUrl(c.linkedinUrl),
     location: c.location ?? c.locationStructured?.raw_text ?? null,
     nationality: c.nationality ?? null,
+    // Worked out as of today by the backend (convex/lib/candidateFacts).
     age: typeof c.age === "number" ? c.age : null,
+    ageSource: typeof c.ageSource === "string" ? c.ageSource : null,
+    ageNote: typeof c.ageNote === "string" ? c.ageNote : null,
+    experienceNote: typeof c.experienceNote === "string" ? c.experienceNote : null,
     gender: c.gender ?? null,
     currentEmployer: c.currentEmployer ?? null,
     currentTitle: c.currentJobTitle || c.currentTitle || null,

@@ -12,6 +12,8 @@
 // which of the two it found rather than returning an empty string, because
 // "no text" and "text lives in R2" need different handling upstream.
 
+import { liveFacts } from "../lib/candidateFacts";
+import { linkedinVariants, phoneKey, profileSlug, samePerson } from "../lib/samePerson";
 import { v } from "convex/values";
 import { internalMutation, internalQuery, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -42,9 +44,11 @@ async function withCareer(
     .withIndex("by_candidateId", (q) => q.eq("candidateId", id))
     .first();
   const career = (resume?.jobHistory?.length ? resume.jobHistory : candidate.jobHistory) ?? [];
+  // Age and experience as of today, with where each came from (lib/candidateFacts).
+  const facts = liveFacts(candidate, career);
   if (shape === "full") {
     const { rawText: _raw, ...rest } = candidate;
-    return { ...rest, jobHistory: career } as Doc<"candidates">;
+    return { ...rest, ...facts, jobHistory: career } as unknown as Doc<"candidates">;
   }
   /*
    * Lists get what the list mapper reads (src/lib/live/mapLive.ts) and nothing
@@ -57,6 +61,7 @@ async function withCareer(
     const value = (candidate as Record<string, unknown>)[field];
     if (value !== undefined) out[field] = value;
   }
+  Object.assign(out, facts);
   if (candidate.locationStructured?.raw_text) out.locationStructured = { raw_text: candidate.locationStructured.raw_text };
   if (Array.isArray(candidate.education) && candidate.education.length) out.education = [candidate.education[0]];
   return out as unknown as Doc<"candidates">;
@@ -488,5 +493,110 @@ export const vectorPayloadPage = internalQuery({
       isDone: page.isDone,
       continueCursor: page.continueCursor,
     };
+  },
+});
+
+/**
+ * The candidate a LinkedIn profile belongs to, if we hold them — 28 Sep, so a
+ * headhunted person is matched to their existing CV instead of becoming a
+ * second record (lib/samePerson has the rules and why).
+ *
+ * Looked up across the whole database, not only the candidates an opening has
+ * loaded: by LinkedIn address in every way it is written, by email, by phone,
+ * and by name through the name search; each one found is then judged by
+ * samePerson with their whole career. Returns the certain match if there is
+ * one, else the best possible one for a TA to confirm, else null.
+ */
+export const findSamePerson = internalQuery({
+  args: {
+    actorId: v.optional(v.string()),
+    linkedinUrl: v.optional(v.string()),
+    name: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    company: v.optional(v.string()),
+    title: v.optional(v.string()),
+    location: v.optional(v.string()),
+    /** People a TA already said are someone else. */
+    notThese: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, a) => {
+    await optionalActor(ctx, a.actorId);
+    const found = new Map<string, Doc<"candidates">>();
+    const add = (c: Doc<"candidates"> | null) => {
+      if (c && !c.mergedInto && !c.isDuplicateOf) found.set(c._id, c);
+    };
+
+    const slug = profileSlug(a.linkedinUrl);
+    if (slug) {
+      for (const url of linkedinVariants(slug)) {
+        add(await ctx.db.query("candidates").withIndex("by_linkedinUrl", (q) => q.eq("linkedinUrl", url)).first());
+      }
+    }
+    const email = (a.email ?? "").trim().toLowerCase();
+    if (email) add(await ctx.db.query("candidates").withIndex("by_email", (q) => q.eq("email", email)).first());
+    const phone = phoneKey(a.phone);
+    if (phone) {
+      for (const p of [phone, `0${phone}`, `94${phone}`]) {
+        add(await ctx.db.query("candidates").withIndex("by_phoneClean", (q) => q.eq("phoneClean", p)).first());
+      }
+    }
+    if ((a.name ?? "").trim().length >= 3) {
+      for (const c of await ctx.db.query("candidates").withSearchIndex("search_name", (q) => q.search("fullName", a.name!)).take(15)) add(c);
+    }
+
+    const skip = new Set(a.notThese ?? []);
+    let best: { c: Doc<"candidates">; strength: "same" | "possible"; reasons: string[] } | null = null;
+    for (const c of found.values()) {
+      if (skip.has(c._id)) continue;
+      const resume = await ctx.db
+        .query("candidateResumes")
+        .withIndex("by_candidateId", (q) => q.eq("candidateId", c._id))
+        .first();
+      const career = (resume?.jobHistory?.length ? resume.jobHistory : c.jobHistory) ?? [];
+      const verdict = samePerson(
+        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location },
+        {
+          fullName: c.fullName,
+          linkedinUrl: c.linkedinUrl,
+          email: c.email,
+          phone: c.phone,
+          currentEmployer: c.currentEmployer,
+          currentTitle: c.currentJobTitle ?? c.currentTitle,
+          location: c.location ?? c.locationStructured?.raw_text,
+          employers: career.map((j) => j.company),
+        },
+      );
+      if (verdict.strength === "none") continue;
+      if (!best || (verdict.strength === "same" && best.strength === "possible")) best = { c, strength: verdict.strength, reasons: verdict.reasons };
+      if (best.strength === "same") break;
+    }
+    if (!best) return null;
+    const c = best.c;
+    return {
+      candidateId: c._id as string,
+      fullName: c.fullName ?? "",
+      currentTitle: c.currentJobTitle ?? c.currentTitle ?? null,
+      currentEmployer: c.currentEmployer ?? null,
+      strength: best.strength,
+      reasons: best.reasons,
+      hasCv: Boolean(c.cvUploadId || c.cvFileName || c.rawTextKey || c.rawText),
+    };
+  },
+});
+
+/**
+ * Their LinkedIn address, onto the record we matched them to, when it has
+ * none — so the next time this profile turns up it is matched at once.
+ * Never replaces an address already there.
+ */
+export const rememberLinkedin = internalMutation({
+  args: { actorId: v.optional(v.string()), candidateId: v.string(), linkedinUrl: v.string() },
+  handler: async (ctx, a) => {
+    await requireActor(ctx, a.actorId);
+    const c = await ctx.db.get(a.candidateId as Id<"candidates">);
+    if (!c || c.linkedinUrl || !profileSlug(a.linkedinUrl)) return { ok: true, changed: false };
+    await ctx.db.patch(c._id, { linkedinUrl: `https://www.linkedin.com/in/${profileSlug(a.linkedinUrl)}` });
+    return { ok: true, changed: true };
   },
 });

@@ -253,10 +253,16 @@ export interface Candidate {
   location: string | null;
   nationality: string | null;
   age: number | null;
+  /** Where the age came from — dob · nic · stated_age · entered (28 Sep). */
+  ageSource?: string | null;
+  /** When the CV's date of birth and its NIC disagree, or the age is only approximate. */
+  ageNote?: string | null;
   gender: string | null;
   currentEmployer: string | null;
   currentTitle: string | null;
   totalExperienceYears: number | null;
+  /** The CV's own claim disagrees with its dates, or some dates are years only. */
+  experienceNote?: string | null;
   educationDegree: string | null;
   educationInstitution: string | null;
   qualifications: string | null;
@@ -633,6 +639,8 @@ export interface LinkVaultEntry {
   sourcingChannel: SourcingChannel;
   outcome: LinkOutcome;
   candidateId: Id | null;
+  /** Who in the database this profile is, if anyone — see convex/lib/samePerson. */
+  cvMatch?: CvMatch | null;
   conversationLog: { at: number; channel: string; note: string; by: Id }[];
   createdAt: number;
   /** Present when the row came from, or was enriched by, the extension. */
@@ -640,6 +648,19 @@ export interface LinkVaultEntry {
   /** Feedback for the TA from a lead, director, admin or ops. Absent on rows
    *  nobody has left a note on. */
   leadNotes?: LeadNote[];
+}
+
+/** A LinkedIn row matched to a candidate we already hold (28 Sep). */
+export interface CvMatch {
+  candidateId: Id;
+  fullName: string;
+  /** "same" is linked already; "possible" waits for a TA. */
+  strength: "same" | "possible";
+  reasons: string[];
+  hasCv: boolean;
+  /** A TA's answer to a possible match. */
+  decided?: "same" | "different";
+  checkedAt: number;
 }
 
 /** A note left on an Excel Tables row for the TA working it. */

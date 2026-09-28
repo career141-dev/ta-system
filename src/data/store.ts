@@ -739,6 +739,8 @@ const rawRepo = {
     }
   },
 
+  /** One Excel Tables row, by its id. */
+  linkEntry: (entryId: Id): LinkVaultEntry | null => load().linkVault.find((l) => l.id === entryId) ?? null,
   linkVault: (openingId: Id): LinkVaultEntry[] =>
     load().linkVault.filter((l) => l.openingId === openingId),
 
@@ -1822,6 +1824,11 @@ const rawRepo = {
     if (e.outcome !== "shortlisted") return { ok: false, message: "Set the outcome to Shortlisted first." };
     const name = (e.name ?? e.capture?.fullName ?? "").trim();
     if (!name) return { ok: false, message: "Add their name first (Change outcome ⇕ → Name)." };
+    // A possible match unanswered: going ahead would make a second record for
+    // someone we may already hold, or use somebody else's CV (28 Sep).
+    if (e.cvMatch?.strength === "possible" && !e.cvMatch.decided && !e.candidateId) {
+      return { ok: false, message: `This may be ${e.cvMatch.fullName}, already in the database. Say on the row whether it is the same person first.` };
+    }
 
     const profile = (u: string | null | undefined) => (u ?? "").toLowerCase().replace(/^https?:\/\/(www\.)?/, "").replace(/[/?#].*$|\/+$/, "");
     const sameProfile = (c: Candidate) => {
@@ -1832,7 +1839,10 @@ const rawRepo = {
     const existingCandidate =
       (e.candidateId && db.candidates.find((c) => c.id === e.candidateId)) ||
       (profile(e.linkedinUrl).includes("linkedin.com/in") ? db.candidates.find(sameProfile) : undefined);
-    const candidateId = existingCandidate?.id ?? `ca_${Math.random().toString(36).slice(2, 10)}`;
+    // The row's own link wins even when that candidate is not loaded here: it
+    // was matched across the whole database (lib/cvMatch), and falling through
+    // to a new id made a second record for someone we already held (28 Sep).
+    const candidateId = existingCandidate?.id ?? e.candidateId ?? `ca_${Math.random().toString(36).slice(2, 10)}`;
     const onOpening = db.applications.find((a) => a.candidateId === candidateId && a.openingId === e.openingId);
     if (onOpening) {
       if (e.candidateId !== candidateId) mutate((d) => { const row = d.linkVault.find((l) => l.id === entryId); if (row) row.candidateId = candidateId; });
@@ -1844,7 +1854,7 @@ const rawRepo = {
     const now = Date.now();
     const applicationId = `app_${Math.random().toString(36).slice(2, 10)}`;
     mutate((d) => {
-      if (!existingCandidate) {
+      if (!existingCandidate && !e.candidateId) {
         const cap = e.capture ?? null;
         d.candidates.push({
           id: candidateId,

@@ -4,6 +4,7 @@ import { authorised, normaliseCapture, preflight, reply } from "@/lib/extension"
 import { can } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
 import { revalidatePath } from "next/cache";
+import { matchLink } from "@/lib/cvMatch";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +82,9 @@ export async function POST(req: Request) {
         : null,
     capture,
   });
+
+  // Someone we already hold? Linked now if certain, left to confirm if not (lib/cvMatch).
+  await matchLink(id, userId);
 
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
