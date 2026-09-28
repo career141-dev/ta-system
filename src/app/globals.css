@@ -1,7 +1,9 @@
 @import "tailwindcss";
 
-/* Palette sampled from the System-Design Figma file, not invented. */
-@theme inline {
+/* Palette sampled from the System-Design Figma file, not invented.
+   Not `@theme inline` (28 Sep): utilities read these as variables, so the dark
+   palette below can swap them. Light values are unchanged. */
+@theme {
   /* ATS — the green app */
   --color-brand: #165b42;
   --color-brand-line: #34705a;
@@ -29,6 +31,38 @@
   --color-warn-soft: #fdf3e0;
   --color-danger: #b3261e;
   --color-danger-soft: #fbeae8;
+}
+
+/* Dark mode — opt-in from the account menu (components/ThemeToggle.tsx), kept
+   in the `theme` cookie and set on <html> by the layout. Light stays the
+   default, so nobody's screen changes until they choose it. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-brand: #2a7a5a;
+  --color-brand-line: #4f9a7c;
+  --color-brand-soft: #1a2c25;
+  --color-ink: #e6e8ea;
+  --color-ink-soft: #aab2ba;
+  --color-ink-faint: #7d858d;
+  --color-paper: #131619;
+  --color-surface: #1b1f23;
+  --color-rule: #2e343a;
+  --color-rule-strong: #454d55;
+  --color-navactive: #2e3a44;
+  --color-tag: #262c32;
+  --color-accent: #7fa8dc;
+  --color-accent-soft: #1b2635;
+  --color-wi-paper: #131619;
+  --color-warn: #e0b35c;
+  --color-warn-soft: #2e2615;
+  --color-danger: #e05a52;
+  --color-danger-soft: #331b19;
+}
+/* The lockup is dark lettering on transparent; give it a light chip. */
+:root[data-theme="dark"] .c141-logo {
+  background: #f7f8fa;
+  border-radius: 8px;
+  padding: 2px 6px;
 }
 
 html,
@@ -152,7 +186,7 @@ body {
   button:focus-visible,
   a:focus-visible,
   summary:focus-visible {
-    outline: 2px solid #34705a; /* brand-line; @theme inline emits no variable */
+    outline: 2px solid var(--color-brand-line);
     outline-offset: 2px;
   }
   button:not(:disabled):active {

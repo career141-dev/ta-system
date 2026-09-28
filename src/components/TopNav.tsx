@@ -12,6 +12,7 @@ import { HEADER_H } from "@/lib/chrome";
 import { SearchIcon } from "./icons";
 import { searchScopeFor } from "@/lib/searchScope";
 import { NotificationBell } from "./NotificationBell";
+import { ThemeToggle } from "./ThemeToggle";
 
 const NAV = [
   { href: "/clients", label: "Clients" },
@@ -81,7 +82,7 @@ export function TopNav({
         strapline under YEARS is a few pixels tall at this size — nothing to
         gain on a 38KB file, and the fine print to lose.
       */}
-      <Link href="/" className="flex shrink-0 items-center">
+      <Link href="/" className="c141-logo flex shrink-0 items-center">
         <Image
           src="/career141-lockup-v2.png"
           alt="Career141 — 20 years of excellence"
@@ -166,6 +167,7 @@ export function TopNav({
                   Settings
                 </Link>
               )}
+              <ThemeToggle className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper" />
               <div className="border-t border-rule">
                 <SignOut className="block w-full px-3 py-2 text-left text-[12.5px] hover:bg-paper" />
                 <AppVersion className="block px-3 pb-2" />
