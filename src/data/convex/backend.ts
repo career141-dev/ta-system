@@ -639,7 +639,13 @@ async function findCvFile(
   if (!found) return { ok: false, reason: "no_cv", detail: "No CV file is on record for this candidate.", fileName: null };
   const fileName = found.fileName ?? null;
   if (!found.url) {
-    return { ok: false, reason: "file_missing", detail: found.message ?? "The CV is recorded but its file could not be found.", fileName };
+    // The backend's "Historical CV file pending Cloud to Self-Hosted migration"
+    // told a TA nothing they could act on (28 Sep): say what happened and
+    // what to do instead.
+    const detail = found.isMissingMigrationFile
+      ? `${fileName ?? "This CV"} was lost when the system moved to its new server and is being recovered. To use this candidate now, upload their CV again.`
+      : "The CV is recorded but its file could not be found.";
+    return { ok: false, reason: "file_missing", detail, fileName };
   }
   if (/^\/api\/r2-file\?key=/.test(found.url)) {
     // Asked, not tried: signing a link on a deployment without R2 fails inside
