@@ -364,10 +364,22 @@ let vocabularyCache: { at: number; value: ReturnType<typeof vocabulary> } | null
 // ─── Candidates ──────────────────────────────────────────────────────────────
 
 export async function candidate(actor: Actor, candidateId: Id): Promise<Candidate | null> {
-  const doc = await convexQuery<LiveCandidate | null>("ta/candidates:get", {
+  const directDoc = await convexQuery<LiveCandidate | null>("candidates/candidates:getCandidate", {
+    id: candidateId,
+  }).catch(() => null);
+
+  const prof = !directDoc
+    ? await convexQuery<LiveCandidate | null>("ta/candidates:profile", {
+        actorId: actor.id ?? undefined,
+        candidateId,
+      }).catch(() => null)
+    : null;
+
+  const doc = directDoc ?? prof ?? (await convexQuery<LiveCandidate | null>("ta/candidates:get", {
     actorId: actor.id ?? undefined,
     candidateId,
-  });
+  }).catch(() => null));
+
   if (!doc) return null;
   const mapped = mapCandidateDoc(doc);
   if (!mapped.cvFileName) {
@@ -394,6 +406,37 @@ export async function candidate(actor: Actor, candidateId: Id): Promise<Candidat
 export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, Candidate>> {
   const out = new Map<Id, Candidate>();
   const docs = await candidateDocsByIds(actor, ids);
+
+  // If docs are missing free-text salary fields because remote getBatch stripped them,
+  // enrich them via getCandidate for small batches (e.g. candidate page or review).
+  const needsEnrich = docs
+    .filter((d) => (d.expectedSalary !== undefined && d.taExpectedSalaryText === undefined && d.expectedSalaryNote === undefined) || (d.currentSalary !== undefined && d.taCurrentSalaryText === undefined && d.currentSalaryNote === undefined))
+    .map((d) => d._id);
+
+  if (needsEnrich.length > 0 && needsEnrich.length <= 50) {
+    const rawDocs = await Promise.all(
+      needsEnrich.map(async (id) => {
+        try {
+          const res = await convexQuery<LiveCandidate | null>("candidates/candidates:getCandidate", {
+            id,
+          });
+          return res ? { id, candidate: res } : null;
+        } catch {
+          return null;
+        }
+      })
+    );
+    const profMap = new Map<string, LiveCandidate>();
+    for (const p of rawDocs) {
+      if (p) profMap.set(p.id, p.candidate);
+    }
+    for (let i = 0; i < docs.length; i++) {
+      const full = profMap.get(docs[i]._id);
+      if (full) {
+        docs[i] = { ...docs[i], ...full };
+      }
+    }
+  }
 
   const missingCvIds = docs.filter((d) => !d.cvFileName).map((d) => d._id);
   const cvNameMap = new Map<string, string>();

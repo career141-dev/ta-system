@@ -75,8 +75,8 @@ const LIST_FIELDS = [
   "_id", "_creationTime", "fullName", "email", "phone", "linkedinUrl", "location", "nationality",
   "age", "gender", "currentEmployer", "currentJobTitle", "currentTitle", "totalExperienceYears",
   "yearsOfExperience", "educationDegree", "educationInstitution", "certifications", "languages",
-  "skills", "industries", "sector", "noticePeriodDays", "currentSalary", "currentSalaryCurrency",
-  "expectedSalary", "expectedSalaryCurrency",
+  "skills", "industries", "sector", "noticePeriodDays", "noticePeriod", "availability", "currentSalary", "currentSalaryCurrency",
+  "expectedSalary", "expectedSalaryCurrency", "taCurrentSalaryText", "taExpectedSalaryText", "currentSalaryNote", "expectedSalaryNote", "cvFileName",
 ] as const;
 
 export const getBatch = internalQuery({
@@ -111,9 +111,10 @@ export const get = internalQuery({
     // Only meaningful when a person was named; an unnamed caller holds the
     // admin key, which already permits everything here.
     if (user) assertFullAccess(user);
-    return await withCareer(ctx, args.candidateId as Id<"candidates">);
+    return await withCareer(ctx, args.candidateId as Id<"candidates">, "full");
   },
 });
+
 
 /**
  * The top-bar search: people by name first, then by job title — across the

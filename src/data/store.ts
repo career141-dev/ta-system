@@ -3406,6 +3406,33 @@ const rawRepo = {
     });
   },
 
+  readAlertIds(userId: Id): Set<string> {
+    const raw = this.setting(`read_alerts:${userId}`, "");
+    if (!raw) return new Set();
+    try {
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  },
+
+  markAlertsRead(userId: Id, alertIds: string[]): void {
+    const current = this.readAlertIds(userId);
+    for (const id of alertIds) current.add(id);
+    this.setSetting(`read_alerts:${userId}`, JSON.stringify([...current]));
+  },
+
+  markAlertsUnread(userId: Id, alertIds: string[]): void {
+    const current = this.readAlertIds(userId);
+    for (const id of alertIds) current.delete(id);
+    this.setSetting(`read_alerts:${userId}`, JSON.stringify([...current]));
+  },
+
+  clearReadAlerts(userId: Id): void {
+    this.setSetting(`read_alerts:${userId}`, "[]");
+  },
+
   /** The one box every shortlist reply is copied to. A director can change it
    *  here rather than waiting on a deploy — it is an address, not a code path. */
   /** Copied on every end-of-day email. Changed on the People page. */

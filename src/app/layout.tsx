@@ -10,6 +10,7 @@ import { ClerkProvider, Show } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
 import { NavigationProgress } from "@/components/NavigationProgress";
 import { primeStore } from "@/data/prime";
+import { repo } from "@/data/store";
 import { uiOnly } from "@/lib/uiOnly";
 import { cookies } from "next/headers";
 
@@ -43,7 +44,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // The badge counts the same alerts the Alerts page lists. It used to read a
   // stored count, which drifted: the 13 Sep audit found accounts showing one
   // where six were waiting.
-  const alertCount = user ? alertsFor(user.id).length : 0;
+  const readAlertIds = user ? repo.readAlertIds(user.id) : new Set<string>();
+  const alertCount = user ? alertsFor(user.id).filter((a) => !readAlertIds.has(a.id)).length : 0;
   /*
    * Microsoft Clarity — heatmaps, session replays, rage clicks (28 Sep). Off
    * unless CLARITY_PROJECT_ID is set on the server; read per request, so the

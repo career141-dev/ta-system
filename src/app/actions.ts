@@ -797,6 +797,8 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   }
 
   revalidatePath("/openings", "layout");
+  revalidatePath("/alerts");
+  revalidatePath("/api/notifications");
 
   const notifyTaIds = assigned.filter((id) => id !== user.id);
   if (notifyTaIds.length) {
@@ -1628,6 +1630,8 @@ export async function setOpeningTeam(formData: FormData) {
 
   repo.setAssignments(openingId, unique, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath("/alerts");
+  revalidatePath("/api/notifications");
 
   if (newlyAssigned.length) {
     const opening = repo.opening(openingId);
@@ -3577,11 +3581,14 @@ export async function saveReviewDetails(formData: FormData) {
   invalidateCandidate(app.candidateId);
   await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId });
   // A bare amount is saved with the currency picked beside it: "25,000" alone
-  // could not be read as a salary later (21 Sep).
   const withCurrency = (field: string) => {
     const amount = String(formData.get(field) ?? "").trim();
     const currency = String(formData.get(`${field}Currency`) ?? "").trim();
-    return amount && currency && /^[\d.,\s]+(k|m|l)?(\s*(a|per)\s*month)?$/i.test(amount) ? `${currency} ${amount}` : amount;
+    if (!amount) return "";
+    if (currency && !new RegExp(`^${currency}\\b`, "i").test(amount)) {
+      return `${currency} ${amount}`;
+    }
+    return amount;
   };
   const currentSalary = withCurrency("currentSalary");
   const expectedSalary = withCurrency("expectedSalary");
@@ -4793,4 +4800,96 @@ export async function verifyRefereeInline(_: ActionResult | null, formData: Form
 /** A saved report navigates to itself; a refusal answers beside Save. */
 export async function saveReportInline(_: ActionResult | null, formData: FormData) {
   return inline(() => saveReport(formData));
+}
+
+/**
+ * Marks one, many, or all alerts as read for the current user.
+ */
+export async function markAlertsAsRead(formData: FormData) {
+  await primeStore({ allApplications: true, followUps: true });
+  const user = await getCurrentUser();
+  if (!user) return fail("You must be signed in.");
+
+  const all = formData.get("all") === "true";
+  if (all) {
+    const { alertsFor, computeAlerts } = await import("@/lib/sla");
+    const canSwitchScope = user.role === "admin" || user.role === "ta_lead" || user.role === "director";
+    const isEveryone = formData.get("isEveryone") === "true" && canSwitchScope;
+    const targetAlerts = isEveryone ? computeAlerts() : alertsFor(user.id);
+    repo.markAlertsRead(user.id, targetAlerts.map((a) => a.id));
+
+    if (isConvex()) {
+      await convexMutation("ta/notifications:markAllRead", { userId: user.id }).catch(() => {});
+    }
+    revalidatePath("/alerts");
+    revalidatePath("/api/notifications");
+    return done("All alerts marked as read.");
+  }
+
+  let alertIds = formData.getAll("alertId").map(String).filter(Boolean);
+  if (alertIds.length === 0) {
+    const single = String(formData.get("alertId") ?? "").trim();
+    if (single) alertIds.push(single);
+  }
+
+  if (alertIds.length === 0) return fail("No alerts selected.");
+
+  repo.markAlertsRead(user.id, alertIds);
+
+  if (isConvex()) {
+    await Promise.all(
+      alertIds.map((id) =>
+        convexMutation("ta/notifications:markRead", { userId: user.id, notificationId: id }).catch(() => {}),
+      ),
+    );
+  }
+
+  revalidatePath("/alerts");
+  revalidatePath("/api/notifications");
+  return done(`${alertIds.length} ${alertIds.length === 1 ? "alert" : "alerts"} marked as read.`);
+}
+
+export async function markAlertsAsReadInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => markAlertsAsRead(formData));
+}
+
+export async function markAlertsAsUnread(formData: FormData) {
+  await primeStore({ allApplications: true, followUps: true });
+  const user = await getCurrentUser();
+  if (!user) return fail("You must be signed in.");
+
+  let alertIds = formData.getAll("alertId").map(String).filter(Boolean);
+  if (alertIds.length === 0) {
+    const single = String(formData.get("alertId") ?? "").trim();
+    if (single) alertIds.push(single);
+  }
+
+  if (alertIds.length === 0) return fail("No alerts selected.");
+
+  repo.markAlertsUnread(user.id, alertIds);
+
+  if (isConvex()) {
+    await Promise.all(
+      alertIds.map((id) =>
+        convexMutation("ta/notifications:markUnread", { userId: user.id, notificationId: id }).catch(() => {}),
+      ),
+    );
+  }
+
+  revalidatePath("/alerts");
+  revalidatePath("/api/notifications");
+  return done(`${alertIds.length} ${alertIds.length === 1 ? "alert" : "alerts"} marked as unread.`);
+}
+
+export async function markAlertsAsUnreadInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => markAlertsAsUnread(formData));
+}
+
+export async function clearReadAlertsAction(formData: FormData) {
+  await primeStore({});
+  const user = await getCurrentUser();
+  if (!user) return fail("You must be signed in.");
+  repo.clearReadAlerts(user.id);
+  revalidatePath("/alerts");
+  return done("Read alert history cleared.");
 }
