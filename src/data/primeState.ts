@@ -12,7 +12,6 @@
 
 import type { Database, Id } from "@/data/types";
 import type { Vocabulary } from "@/lib/query";
-import { invalidate } from "@/data/convex/snapshot";
 
 /** The empty shape, so a table nobody has migrated yet reads as absent rather
  *  than as undefined — the same rule the JSON store's backfill follows. */
@@ -124,8 +123,7 @@ export function missingCandidateMessage(id: Id): string {
 /**
  * Mark the working set stale, so the next prime refetches it.
  *
- * Called after every write, because the next read must see it. The cache in
- * front of the backend goes too — a stale row there would just repopulate this.
+ * Called after every write, because the next read must see it.
  *
  * It used to drop the rows outright (`state.snapshot = null`). This state is a
  * module-level global shared by every request the server is handling, so a save
@@ -147,7 +145,6 @@ export function resetStore(): void {
   state.openings = new Map();
   state.allAt = 0;
   state.version++;
-  invalidate();
 }
 
 // ─── Saving ──────────────────────────────────────────────────────────────────
@@ -180,13 +177,23 @@ export function bumpPrimed(): void {
  * The store names a new row before it is saved (`op_k2x9…`) and the database
  * gives it its real id when it is. Code that created the row still holds the
  * first name — to redirect to it, or to look it up again in the same action —
- * so every rename is remembered for the life of the process and resolved on
+ * so every rename is remembered (the newest 20,000 — below) and resolved on
  * the way back in (see withIdAliases in store.ts, and actions' redirect).
  */
 const aliases = new Map<string, string>();
 
+/** An old temporary id is only ever asked about seconds after its save, so the
+ *  oldest go once there are this many — the map used to grow for the life of
+ *  the process (28 Sep). */
+const MAX_ALIASES = 20_000;
+
 export function recordAliases(ids: Record<string, string>): void {
   for (const [from, to] of Object.entries(ids)) aliases.set(from, to);
+  // A Map iterates in insertion order, so the first keys are the oldest.
+  for (const old of aliases.keys()) {
+    if (aliases.size <= MAX_ALIASES) break;
+    aliases.delete(old);
+  }
 }
 
 export function realId<T>(value: T): T {
