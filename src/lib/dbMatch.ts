@@ -78,6 +78,8 @@ export function failsHardRules(
   minYears: number | null,
   now = Date.now(),
 ): string | null {
+  // Nobody is added whose CV file was lost in the Cloud move (src/lib/cvMissing.ts).
+  if (c.cvFileMissing) return "cv_missing";
   // A stated nationality excludes only someone whose nationality is known and
   // different; a blank one is thin data and stays in (13 September).
   if (o.targetNationalities.length && c.nationality && !o.targetNationalities.some((n) => n.toLowerCase() === c.nationality!.toLowerCase())) {

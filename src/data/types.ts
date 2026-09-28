@@ -282,6 +282,8 @@ export interface Candidate {
   currentSalary: string | null;
   expectedSalary: string | null;
   cvFileName: string | null;
+  /** Their CV file was lost in the Convex Cloud move; kept out of search and matching (src/lib/cvMissing.ts). */
+  cvFileMissing?: boolean;
   /** Spec §6D — the result row shows a career, not a single line. */
   workHistory: { title: string; employer: string; fromYear: number; toYear: number | null }[];
   createdAt: number;

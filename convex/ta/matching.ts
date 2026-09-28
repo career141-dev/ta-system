@@ -16,6 +16,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
+import { cvFileMissing } from "../../src/lib/cvMissing";
 
 export const runsForOpening = internalQuery({
   args: { actorId: v.optional(v.string()), openingId: v.string(), limit: v.optional(v.number()) },
@@ -100,9 +101,18 @@ export const reverseMatchResults = internalQuery({
     if (!job) return null;
 
     const floor = args.minScore ?? 0;
-    const results = (job.reverseMatchResults ?? []).filter(
+    const scored = (job.reverseMatchResults ?? []).filter(
       (r: { overallScore: number }) => r.overallScore >= floor,
     );
+    // Results saved before a CV was found lost stay on the job until the next
+    // run; they are not handed out meanwhile (src/lib/cvMissing.ts).
+    const people = await Promise.all(
+      scored.map((r) => {
+        const id = ctx.db.normalizeId("candidates", r.cvId);
+        return id ? ctx.db.get(id) : null;
+      }),
+    );
+    const results = scored.filter((_, i) => !(people[i] && cvFileMissing(people[i])));
 
     return {
       status: job.reverseMatchStatus ?? null,
