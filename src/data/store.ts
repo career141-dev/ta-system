@@ -797,12 +797,18 @@ const rawRepo = {
     const to: Stage = claimable ? "ta_follow_up" : from;
 
     let setNumber: number | null = app.setNumber;
+    // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
+    const addOnDay = this.workingStage(app.openingId, taId) === "Add-on";
     mutate((d) => {
       const a = d.applications.find((x) => x.id === applicationId);
       if (!a) return;
       const now = Date.now();
       a.ownerTaId = taId;
       a.shortlistedAt = now;
+      if (addOnDay && !a.isAddOn) {
+        a.isAddOn = true;
+        a.addedOnAt = now;
+      }
       if (a.setNumber === null) {
         a.setNumber = nextSetNumber(d, a.openingId, taId);
         setNumber = a.setNumber;
@@ -1736,7 +1742,11 @@ const rawRepo = {
   updateLink(entryId: Id, patch: Partial<LinkVaultEntry>) {
     mutate((db) => {
       const e = db.linkVault.find((l) => l.id === entryId);
-      if (e) Object.assign(e, patch);
+      if (!e) return;
+      // A changed outcome is dated, so the day's L EFFORT can count it.
+      const moved = patch.outcome !== undefined && patch.outcome !== e.outcome;
+      Object.assign(e, patch);
+      if (moved) e.outcomeAt = Date.now();
     });
   },
 
@@ -1745,7 +1755,7 @@ const rawRepo = {
       const e = db.linkVault.find((l) => l.id === entryId);
       if (!e) return;
       e.conversationLog.push({ at: Date.now(), channel, note, by });
-      if (e.outcome === "no_contact") e.outcome = "contacted";
+      if (e.outcome === "no_contact") { e.outcome = "contacted"; e.outcomeAt = Date.now(); }
     });
   },
 

@@ -8,8 +8,8 @@ import { setWorkingStage } from "@/app/actions";
 /**
  * The L-sheet, editable before it is sent (plan 6.1–6.3, 21 Sep).
  *
- * SETS and DA start from the records and can be corrected; the other columns
- * the TA types (MANUAL_EFFORT, 25 Sep). What kind of day it was (100% /
+ * Every column but BACK-UP starts from the records and can be corrected
+ * (MANUAL_EFFORT, 28 Sep). What kind of day it was (100% /
  * Follow-up / Add-on) is picked here, and switches the fourth column between
  * links approached and CVs. A target row is optional. The inputs belong to the
  * send form (`form=`), so what is sent is what is on screen. Edits are kept in
@@ -197,7 +197,7 @@ export function EffortSheet({
                   {k === "sets" && (
                     // The day's total beside the set, as the email sends it (27 Sep).
                     <span className="block whitespace-nowrap px-1 text-[11px] tabular-nums text-ink-soft">
-                      {setsCell(null, dayTotal(draft.values))}
+                      {setsCell(null, dayTotal(draft.values, effort.recorded))}
                     </span>
                   )}
                 </td>
@@ -233,9 +233,9 @@ export function EffortSheet({
       </table>
       <p className="mt-2 flex flex-wrap items-center gap-3 text-[11.5px] text-ink-faint">
         <span>
-          SETS and DA come from the records, and SCOOP counts CVs mailed to you by the Director, a TA Lead or Ops — add any
-          that came on WhatsApp. Type the other figures in. Under SETS is the day&rsquo;s total: DA, scoop, L, post, add-ons
-          and back-up. A shaded cell differs from the records. The fourth
+          Filled in from the records: L EFFORT and L from Excel Tables, POST from your adverts, SCOOP from CVs mailed to you
+          by the Director, a TA Lead or Ops (add any that came on WhatsApp), and ADD-ONS from the Add-on flag. Type BACK-UP.
+          Under SETS is the number of CVs you sent today, each counted once. A shaded cell differs from the records. The fourth
           column is {draft.kind === "Follow-up" ? "CVs brought in" : "profiles approached"} for a {draft.kind} day. Targets are
           optional — green once met.
         </span>

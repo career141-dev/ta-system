@@ -91,48 +91,60 @@ export function shortlistRows(
 }
 
 /**
- * Table 2 — the L-sheet line for today.
+ * Table 2 — the L-sheet line for today. Everything but BACK-UP comes from the
+ * records (the desk, 28 Sep); the TA can correct any figure before sending.
  *
- * Only SETS and DA come from the records. The rest the TA types in the
- * composer (the desk, 25 September): L EFFORT and L are the LinkedIn searches
- * they ran on the job, and scoops — CVs the Director, Ops or another TA send
- * them for the job — arrive on WhatsApp or email, outside the system. POST,
- * ADD-ONS and BACK-UP are theirs to state too. Until then these were counted
- * from the records, and SCOOP counted database picks, which the desk calls
- * TBR, not scoops.
+ *   L EFFORT  LinkedIn profiles this TA worked today in Excel Tables — added
+ *             and contacted, an approach logged, or the outcome moved. On a
+ *             Follow-up day the column is CVs instead (effortColumns).
+ *   SETS      the set this TA's latest CV went into (convex/lib/sets.ts).
+ *   DA        direct applicants this TA shortlisted today.
+ *   SCOOP     scoops mailed to the TA by the Director, a TA Lead or Ops
+ *             (convex/mailIntake); the TA adds WhatsApp ones on top.
+ *   L         headhunted people this TA shortlisted today — Excel Tables rows
+ *             set to Shortlisted become L applications.
+ *   POST      adverts for this job this TA put live today.
+ *   ADD-ONS   CVs this TA flagged Add-on today.
+ *   BACK-UP   typed, for now.
  *
- * SCOOP is counted again from 27 Sep, but only scoops that reached the TA's
- * own mailbox from the Director, a TA Lead or Ops (convex/mailIntake). Blank
- * when there were none, and the TA adds WhatsApp ones on top.
- *
- * ADD-ONS is counted again from 28 Sep: the CVs this TA flagged Add-on today.
- * BACK-UP stays typed for now.
+ * Database CVs are TBR, not scoops. From 25 to 28 Sep most of these were
+ * typed; the desk asked for them back once Excel Tables carried the work.
  */
 export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow {
   // Today in Colombo, whatever the server's clock is set to.
   const since = colomboDayStart(date.getTime());
   const apps = repo.applications(openingId);
-  const todays = apps.filter((a) => a.ownerTaId === ta.id && (a.shortlistedAt ?? 0) >= since);
-  const mailedScoops = apps.filter((a) => a.ownerTaId === ta.id && (a.scoopReceivedAt ?? 0) >= since).length;
-  // The set this TA's latest CV went into — sets fill to five and move on.
+  const mine = apps.filter((a) => a.ownerTaId === ta.id);
+  const todays = mine.filter((a) => (a.shortlistedAt ?? 0) >= since);
+  const mailed = mine.filter((a) => (a.scoopReceivedAt ?? 0) >= since);
+  const flagged = mine.filter((a) => a.isAddOn && (a.addedOnAt ?? 0) >= since);
+  const worked = repo.linkVault(openingId).filter(
+    (v) =>
+      (v.addedBy === ta.id && v.createdAt >= since && v.outcome !== "no_contact") ||
+      (v.addedBy === ta.id && (v.outcomeAt ?? 0) >= since) ||
+      v.conversationLog.some((l) => l.by === ta.id && l.at >= since),
+  ).length;
+  const kind = repo.workingStage(openingId, ta.id);
+  // The set this TA's latest CV went into.
   const mySets = setsForOpening(openingId, ta.id);
   const latest = mySets.length ? Math.max(...mySets.map((s) => s.setNumber)) : null;
+  const distinct = new Set([...todays, ...mailed, ...flagged].map((a) => a.id)).size;
 
   return {
     date: date.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" }),
     assignee: ta.name,
     // The TA's working stage for this opening (100% / Follow-up / Add-on),
     // set manually in the sticky bar or defaulting to "100%".
-    hundredOrFollowUp: repo.workingStage(openingId, ta.id),
-    lEffort: null,
+    hundredOrFollowUp: kind,
+    lEffort: kind === "Follow-up" ? todays.length : worked,
     sets: latest,
     da: todays.filter((a) => a.sourcingChannel === "DA").length,
-    scoop: mailedScoops || null,
-    l: null,
-    post: null,
-    // Only CVs the TA flagged Add-on today (28 September).
-    addOns: apps.filter((a) => a.ownerTaId === ta.id && a.isAddOn && (a.addedOnAt ?? 0) >= since).length || null,
+    scoop: mailed.length || null,
+    l: todays.filter((a) => a.sourcingChannel === "L").length,
+    post: repo.jobPosts(openingId).filter((p) => (p.postedAt ?? 0) >= since && (!p.assignedTaId || p.assignedTaId === ta.id)).length,
+    addOns: flagged.length || null,
     backUp: null,
+    recorded: { cvs: distinct, scoop: mailed.length },
   };
 }
 

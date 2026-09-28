@@ -33,6 +33,9 @@ export interface EffortRow {
   post: number | null;
   addOns: number | null;
   backUp: number | null;
+  /** What the records hold for the day, for the total beside SETS: distinct
+   *  CVs, and the scoops among them that came by email (28 Sep). */
+  recorded?: { cvs: number; scoop: number };
   /** The day's targets, typed by the TA; shown as a TARGET row when any is set. */
   targets?: Partial<Record<EffortKey, number | null>>;
 }
@@ -86,23 +89,29 @@ export const EFFORT_COLUMNS = [
 ] as const;
 
 /**
- * The columns the TA types in; the records give SETS and DA (the desk,
- * 25 Sep — see effortRow in lib/eod). These start blank in the composer.
- * SCOOP left this list on 27 Sep: scoops mailed to the TA are counted, and
- * the TA adds the ones that came on WhatsApp. ADD-ONS left it on 28 Sep: the
- * CVs flagged Add-on today are counted.
+ * The columns the TA types in; the records give the rest. BACK-UP is the only
+ * one left (28 Sep): L EFFORT and L are read off Excel Tables, POST off the
+ * adverts, SCOOP off mailed scoops and ADD-ONS off the Add-on flag. The TA
+ * can still correct any figure before sending.
  */
-export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["lEffort", "l", "post", "backUp"]);
+export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["backUp"]);
 
-/** The CVs the day brought, whatever the route — summed beside the set (the desk, 27 Sep). */
-export const DAY_TOTAL_KEYS: EffortKey[] = ["da", "scoop", "l", "post", "addOns", "backUp"];
-
-/** DA + SCOOP + L + POST + ADD-ONS + BACK-UP; a blank counts as none. */
-export function dayTotal(values: Partial<Record<EffortKey, number | string | null | undefined>>): number {
-  return DAY_TOTAL_KEYS.reduce((sum, k) => {
-    const n = Number(values[k] ?? 0);
-    return sum + (Number.isFinite(n) && n > 0 ? n : 0);
-  }, 0);
+/**
+ * The CVs the day brought, beside the set: each CV once (the desk, 28 Sep).
+ *
+ * Adding the columns counted an add-on twice — it is also a DA or an L — and
+ * counted adverts as CVs. So it is the records' distinct CVs, plus any scoops
+ * the TA typed over the mailed ones (WhatsApp scoops the system never saw).
+ * Without the records' figure it can only be the typed SCOOP.
+ */
+export function dayTotal(
+  values: Partial<Record<EffortKey, number | string | null | undefined>>,
+  recorded?: { cvs: number; scoop: number },
+): number {
+  const typed = Number(values.scoop ?? 0);
+  const scoop = Number.isFinite(typed) && typed > 0 ? typed : 0;
+  if (!recorded) return scoop;
+  return recorded.cvs + Math.max(0, scoop - recorded.scoop);
 }
 
 /** The SETS cell as sent: "2 · 14 CVs" — the set, then the day's total. */
@@ -155,7 +164,7 @@ export function eodEmailHtml(input: {
   const effort = table(
     cols.map((c) => `<th ${th}>${esc(c.label)}</th>`).join(""),
     `<tr>${cols.map((c) => {
-      if (c.key === "sets") return `<td ${td.replace('"', '"white-space:nowrap;')}>${esc(setsCell(input.effort.sets, dayTotal(input.effort)))}</td>`;
+      if (c.key === "sets") return `<td ${td.replace('"', '"white-space:nowrap;')}>${esc(setsCell(input.effort.sets, dayTotal(input.effort, input.effort.recorded)))}</td>`;
       const v = input.effort[c.key as keyof EffortRow];
       return `<td ${td}>${v === null || v === undefined || typeof v === "object" ? "" : esc(v)}</td>`;
     }).join("")}</tr>` +

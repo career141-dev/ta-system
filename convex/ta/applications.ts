@@ -25,6 +25,7 @@ import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./g
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
 import { nextSetFor } from "../lib/sets";
+import { workingStageKey } from "../../src/lib/workingStage";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 
 
@@ -128,7 +129,14 @@ export const shortlist = internalMutation({
 
     const now = Date.now();
     const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
-    await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
+    // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
+    const addOn = !app.isAddOn && (await workingStageOf(ctx, app.jobId, user._id)) === "Add-on";
+    await ctx.db.patch(appId, {
+      ownerTaId: user._id,
+      shortlistedAt: now,
+      setNumber,
+      ...(addOn ? { isAddOn: true, addedOnAt: now } : {}),
+    });
 
     // Shortlisting is what sends somebody to Follow-up on this desk.
     // A TA's shortlist is TA Follow-up — a database match or a new CV the TA
@@ -172,6 +180,24 @@ async function nextSetNumber(
     .withIndex("by_jobId", (q: any) => q.eq("jobId", jobId))
     .collect();
   return nextSetFor(all.filter((a) => a.ownerTaId === taId && a.setNumber != null), now);
+}
+
+/**
+ * A TA's working stage on a job: on their assignment, or in the TA settings
+ * for someone working it without being on the team (convex/ta/openings.ts
+ * setWorkingStage writes both). "100%" when never set.
+ */
+async function workingStageOf(ctx: { db: any }, jobId: Id<"jobs">, userId: Id<"users">): Promise<string> {
+  const assignment = await ctx.db
+    .query("jobAssignments")
+    .withIndex("by_jobId_userId", (q: any) => q.eq("jobId", jobId).eq("userId", userId))
+    .first();
+  if (assignment?.isActive) return assignment.workingStage ?? "100%";
+  const held = await ctx.db
+    .query("taSettings")
+    .withIndex("by_key", (q: any) => q.eq("key", workingStageKey(jobId, userId)))
+    .first();
+  return held?.value ?? "100%";
 }
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */

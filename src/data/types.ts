@@ -646,6 +646,9 @@ export interface LinkVaultEntry {
   cvMatch?: CvMatch | null;
   conversationLog: { at: number; channel: string; note: string; by: Id }[];
   createdAt: number;
+  /** When the outcome last changed (28 Sep) — the end-of-day L EFFORT counts a
+   *  row worked today. Absent on rows not touched since. */
+  outcomeAt?: number;
   /** Present when the row came from, or was enriched by, the extension. */
   capture?: ProfileCapture | null;
   /** Feedback for the TA from a lead, director, admin or ops. Absent on rows
