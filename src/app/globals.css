@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* `dark:` follows the account-menu switch, not the OS setting (28 Sep). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 /* Palette sampled from the System-Design Figma file, not invented.
    Not `@theme inline` (28 Sep): utilities read these as variables, so the dark
    palette below can swap them. Light values are unchanged. */
@@ -57,6 +60,20 @@
   --color-warn-soft: #2e2615;
   --color-danger: #e05a52;
   --color-danger-soft: #331b19;
+  /* The Database picture and loading scenes (db/Illustration, LoadingScenes)
+     and the report series (reports/charts). Light values are the fallbacks
+     written where they are used. */
+  --c141-sky: #1a2a24;
+  --c141-slate: #62766d;
+  --c141-grey: #3a4742;
+  --c141-grey-2: #2e3935;
+  --c141-paper: #d9dfdc;
+  --c141-cloud: #2c3b35;
+  --c141-trunk: #56655e;
+  --c141-series-1: #3fa37a;
+  --c141-series-2: #7cc4a2;
+  --c141-series-3: #9fb3c6;
+  --c141-series-4: #d2bb82;
 }
 /* The lockup is dark lettering on transparent; give it a light chip. */
 :root[data-theme="dark"] .c141-logo {
