@@ -150,6 +150,8 @@ async function main() {
   eq("a follow-up day counts CVs in the fourth column", followUpDay.includes("NO. OF CVs") && !followUpDay.includes("NO.OF L EFFORT"), true);
   eq("targets go out as a row", followUpDay.includes("<i>Target</i>") && followUpDay.includes(">5<"), true);
   eq("add-ons are a figure, not a blank", followUpDay.includes(">1<"), true);
+  // SETS carries the day's total beside the set: the day's CVs, each once (28 Sep).
+  eq("the SETS cell carries the set and the day's total", body.includes(">2 · 4 CVs<"), true);
 
   // ── A queued message that should no longer go ─────────────────────────────
   eq("pending, in Follow-up → send", followUpCancelledReason({ deliveryStatus: "pending" }, { currentStage: "follow_up" }), null);

@@ -50,18 +50,18 @@ if (matchedOpening) {
   eq("a database match moves to TA Follow-up", rm.ok && rm.stage, "ta_follow_up");
 }
 
-console.log("\nsets: the day rule, per TA");
+console.log("\nsets: five sent in one day closes a set, per TA");
 fresh();
 {
-  const o = repo.openings()[0];
-  const me = repo.users().find((u) => u.role === "ta")!;
-  const other = repo.users().filter((u) => u.role === "ta")[1]!;
+  const o = [...repo.openings()].sort((x, y) => repo.applications(y.id).length - repo.applications(x.id).length)[0];
+  const [me, other, third] = repo.users().filter((u) => u.role === "ta");
   // Clear the seeded numbering on this opening so the rule is tested alone.
   const apps = repo.applications(o.id);
   const raw = JSON.parse(fs.readFileSync(dbFile, "utf8"));
   for (const a of raw.applications) if (a.openingId === o.id) { a.setNumber = null; a.ownerTaId = null; a.shortlistedAt = null; a.stage = "new_cv"; }
   fs.writeFileSync(dbFile, JSON.stringify(raw));
   const ids = apps.map((a) => a.id);
+  eq("the opening has enough people to test with", ids.length >= 23, true);
   const setOf = (id: string) => repo.application(id)!.setNumber;
   const backdate = (id: string, days: number) => {
     const d = JSON.parse(fs.readFileSync(dbFile, "utf8"));
@@ -69,19 +69,35 @@ fresh();
     a.shortlistedAt -= days * DAY;
     fs.writeFileSync(dbFile, JSON.stringify(d));
   };
-  // Yesterday: three into set 1.
-  for (const id of ids.slice(0, 3)) { repo.shortlist(id, me.id); backdate(id, 1); }
-  // Today: four more — still set 1, because it had only three this morning.
-  for (const id of ids.slice(3, 7)) repo.shortlist(id, me.id);
-  eq("under five yesterday, today's still join set 1", ids.slice(3, 7).map(setOf), [1, 1, 1, 1]);
-  eq("set 1 can pass five on the day", setsForOpening(o.id, me.id).find((s) => s.setNumber === 1)?.count, 7);
-  for (const id of ids.slice(3, 7)) backdate(id, 1);
-  repo.shortlist(ids[7], me.id);
-  eq("the next day starts set 2", setOf(ids[7]), 2);
-  if (other && ids[8]) {
-    repo.shortlist(ids[8], other.id);
-    eq("another TA on the same opening has their own set 1", setOf(ids[8]), 1);
-  }
+  const statusOf = (n: number) => setsForOpening(o.id, me.id).find((s) => s.setNumber === n)?.status;
+  // The desk's example (28 Sep). Day 1: four CVs, set 1.
+  for (const id of ids.slice(0, 4)) { repo.shortlist(id, me.id); backdate(id, 3); }
+  eq("day 1's four are set 1", ids.slice(0, 4).map(setOf), [1, 1, 1, 1]);
+  // Day 2: three more — still set 1, and still open.
+  for (const id of ids.slice(4, 7)) { repo.shortlist(id, me.id); backdate(id, 2); }
+  eq("day 2's three are still set 1", ids.slice(4, 7).map(setOf), [1, 1, 1]);
+  eq("seven across two days do not close it", statusOf(1), "open");
+  // Day 3: six — all set 1, and that day closes it.
+  for (const id of ids.slice(7, 13)) repo.shortlist(id, me.id);
+  eq("day 3's six all join set 1", ids.slice(7, 13).map(setOf), [1, 1, 1, 1, 1, 1]);
+  eq("five in a day closes the set that day", statusOf(1), "closed");
+  for (const id of ids.slice(7, 13)) backdate(id, 1);
+  // Day 4: set 2 from zero.
+  repo.shortlist(ids[13], me.id);
+  eq("day 4 starts set 2", setOf(ids[13]), 2);
+  eq("set 2 is open", statusOf(2), "open");
+
+  repo.shortlist(ids[14], other.id);
+  eq("another TA on the same opening has their own set 1", setOf(ids[14]), 1);
+
+  // A set numbered under an older rule keeps its number: seven sent on one
+  // day is a full day, so the next CV starts set 2.
+  const legacy = JSON.parse(fs.readFileSync(dbFile, "utf8"));
+  for (const a of legacy.applications) if (ids.slice(15, 22).includes(a.id)) { a.ownerTaId = third.id; a.setNumber = 1; a.shortlistedAt = Date.now() - DAY; a.stage = "ta_follow_up"; }
+  fs.writeFileSync(dbFile, JSON.stringify(legacy));
+  const spare = repo.applications(o.id).find((a) => !a.ownerTaId)!;
+  repo.shortlist(spare.id, third.id);
+  eq("an old set of seven sent in a day is full: the next CV starts set 2", setOf(spare.id), 2);
 }
 
 console.log("\nintake files itself");

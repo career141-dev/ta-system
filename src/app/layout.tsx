@@ -12,6 +12,7 @@ import { NavigationProgress } from "@/components/NavigationProgress";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { uiOnly } from "@/lib/uiOnly";
+import { cookies } from "next/headers";
 
 // Every page depends on who is signed in and reads the database, so nothing is
 // rendered at build time. Without this, `next build` pre-rendered the 404 page,
@@ -24,7 +25,9 @@ export const metadata: Metadata = {
   description: "Recruitment platform for the Career141 TA desk",
   // Without an icon the browser asked for /favicon.ico, which does not exist,
   // and the request fell through to a page render.
-  icons: { icon: "/career141-logo.png" },
+  // The Aura mark (28 Sep), on a dark square so it reads on light and dark
+  // browser tabs. Versioned filename: browsers cache icons hard.
+  icons: { icon: "/aura-icon-v1.png", apple: "/aura-icon-v1.png" },
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
@@ -57,8 +60,10 @@ export default async function RootLayout({ children }: { children: React.ReactNo
    */
   const clarityId = (process.env.CLARITY_PROJECT_ID ?? "").trim();
   const clarity = /^[a-z0-9]{6,20}$/i.test(clarityId) ? clarityId : null;
+  // Dark mode is opt-in per browser (components/ThemeToggle.tsx).
+  const dark = (await cookies()).get("theme")?.value === "dark";
   return (
-    <html lang="en">
+    <html lang="en" {...(dark ? { "data-theme": "dark" } : {})}>
       {/*
         No web fonts here. The app is set in the system face; the six families
         the snippet card is drawn in load on the snippets page, which is the only

@@ -188,7 +188,7 @@ export function PostManager({
                         // Loud on purpose: without the link a CV is filed by title alone, and
                         // the same title on two openings files it to both (24 September).
                         <span className="rounded-md bg-warn-soft px-2 py-[3px] text-[11.5px] font-medium text-warn">
-                          No LinkedIn link — paste the View applicant link, or CVs may go to the wrong job
+                          No LinkedIn link — paste the job's LinkedIn Recruiter link, or CVs may go to the wrong job
                         </span>
                       )
                     )}
@@ -349,13 +349,13 @@ export function PostManager({
                     <span className="mb-2 block text-[12.5px] font-medium">
                       LinkedIn link
                       <span className="ml-2 font-normal text-[11.5px] text-ink-faint">
-                        the surest match — copy the &ldquo;View applicant&rdquo; link from any application email for this job
+                        the surest match — the job's LinkedIn Recruiter link (talent/hire/…), from the job's page in Recruiter
                       </span>
                     </span>
                     <input
                       name="externalUrl"
                       defaultValue={p.externalUrl ?? ""}
-                      placeholder="https://www.linkedin.com/talent/redirect/batchReview?project=1528413625&…"
+                      placeholder="https://www.linkedin.com/talent/hire/1528413625/overview"
                       className={inputClass}
                     />
                   </label>

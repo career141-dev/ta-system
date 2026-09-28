@@ -273,7 +273,7 @@ export function ReviewDetailsForm({
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
         {money("currentSalary", curCurrency, setCurCurrency, curVal, setCurVal, "e.g. 250,000 / 250k / Not disclosed", "Current salary (optional)")}
-        {money("expectedSalary", expCurrency, setExpCurrency, expVal, setExpVal, "e.g. 300,000 / 300k / Open to discuss", "Expected salary")}
+        {money("expectedSalary", expCurrency, setExpCurrency, expVal, setExpVal, "e.g. 300,000 / 300k / Negotiable / Open to discuss", "Expected salary")}
         <label>
           <span className="mb-1 block text-[11.5px] text-ink-soft">Notice period</span>
           <input
@@ -281,7 +281,7 @@ export function ReviewDetailsForm({
             type="text"
             value={npVal}
             onChange={(e) => setNpVal(e.target.value)}
-            placeholder="e.g. 30 days, 5 days, Immediate, 2 months"
+            placeholder="e.g. 30 days, 5 days, Immediate, 2 months, Not disclosed"
             className={inputClass}
           />
         </label>
@@ -331,7 +331,7 @@ export function ReviewDetailsForm({
                   type="button"
                   onClick={() => removeField(idx)}
                   title="Remove this detail"
-                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600"
+                  className="mb-[1px] flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-lg border border-rule text-ink-faint transition-colors hover:bg-tag hover:text-red-600 dark:text-red-400"
                 >
                   <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

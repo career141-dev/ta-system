@@ -54,9 +54,12 @@ export function packageLine(c: {
 /**
  * Where a candidate came from, as the badge beside their name. A person
  * headhunted through Excel Tables (channel L) read "Applicant", as if they had
- * applied (21 Sep).
+ * applied (21 Sep) — and then everyone who applied to a LinkedIn post read
+ * "Headhunted", since they carry L too; `source` (lib/cvSource) tells them
+ * apart (28 Sep).
  */
-export function channelTag(channel: string | null | undefined): string {
+export function channelTag(channel: string | null | undefined, source?: string): string {
+  if (source === "post") return channel === "L" ? "LinkedIn post" : "Applicant";
   if (channel === "L") return "Headhunted";
   if (channel === "HH") return "Sourced";
   if (channel === "SCOOP") return "Database";
