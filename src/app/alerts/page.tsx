@@ -5,6 +5,7 @@ import { alertsFor, computeAlerts, isWorkingDay } from "@/lib/sla";
 import { inHours } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
+import { AlertsScopeToggle } from "@/components/AlertsScopeToggle";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 
 const PAGE_SIZE = 25;
@@ -34,10 +35,11 @@ export default async function AlertsPage({
   const { all, q = "" } = sp;
   await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
-  const everyones = all === "1";
+  const canSwitchScope = user.role === "admin" || user.role === "ta_lead" || user.role === "director";
+  const everyones = canSwitchScope && all === "1";
   const users = repo.users();
-  // The header search, on this page, narrows the alerts: what it says, the
-  // kind, the opening, or whose it is.
+  // For admin and TA lead, allow viewing everyone's alerts if selected.
+  // For a specific TA, only their own alerts are ever visible.
   const alerts = (everyones ? computeAlerts() : alertsFor(user.id)).filter((a) =>
     matchesQuery(
       q,
@@ -119,13 +121,11 @@ export default async function AlertsPage({
             or inbox yet.
           </p>
         </div>
-        {(user.role === "ta_lead" || user.role === "director" || user.role === "admin") && (
-          <Link
-            href={everyones ? (q ? `/alerts?q=${encodeURIComponent(q)}` : "/alerts") : `/alerts?all=1${q ? `&q=${encodeURIComponent(q)}` : ""}`}
-            className="rounded-full border border-rule-strong px-4 py-2 text-[12.5px] font-medium text-ink transition-colors hover:border-ink-faint"
-          >
-            {everyones ? "Just mine" : "Everyone's"}
-          </Link>
+        {canSwitchScope && (
+          <AlertsScopeToggle
+            isEveryone={everyones}
+            q={q}
+          />
         )}
       </div>
 
