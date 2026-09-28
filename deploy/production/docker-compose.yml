@@ -28,9 +28,10 @@ services:
       QDRANT_URL: http://qdrant:6333
       LIVEKIT_URL: http://livekit:7880
     # The pipeline (deploy/scripts/remote-app.sh) waits for "healthy" before it
-    # keeps a new image, and rolls back if it never gets there.
+    # keeps a new image, and rolls back if it never gets there. /api/health
+    # fails only when the database cannot be read (src/app/api/health/route.ts).
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/signin').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3

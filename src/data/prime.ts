@@ -130,15 +130,35 @@ export function primeStore(scope: PrimeScope = {}): Promise<void> {
   // The load in flight is captured now: read inside the callback, `loading`
   // would already be this call's own promise, and it would wait on itself.
   const before = loading;
-  const mine = safe.then(() => before.catch(() => {})).then(() => loadInto(scope));
+  const queued = performance.now();
+  const mine = safe.then(() => before.catch(() => {})).then(() => loadInto(scope, queued));
   loading = mine.catch(() => {});
   return mine;
 }
 
-async function loadInto(scope: PrimeScope): Promise<void> {
+/*
+ * A load slower than this is logged, with how much of it was spent waiting
+ * behind other loads (28 Sep). Every page waits in the one queue above, so
+ * "the desk is slow" is either the backend or the queue, and the log line says
+ * which. Ids and counts only — never a name or a search.
+ */
+const SLOW_PRIME_MS = 2_000;
+
+async function loadInto(scope: PrimeScope, queued: number): Promise<void> {
+  const started = performance.now();
   try {
     await refresh(scope);
   } finally {
+    const done = performance.now();
+    if (done - queued > SLOW_PRIME_MS) {
+      const what = [
+        scope.openingId && `opening=${scope.openingId}`,
+        scope.candidateIds?.length && `candidates=${scope.candidateIds.length}`,
+        scope.allApplications && "allApplications",
+        scope.followUps && "followUps",
+      ].filter(Boolean).join(" ") || "tables";
+      console.warn(`[prime] slow: ${Math.round(done - queued)}ms (waited ${Math.round(started - queued)}ms in queue) ${what}`);
+    }
     // Whatever changed, derived indexes must rebuild. Cheap to over-bump: an
     // index is rebuilt on the next read, not here.
     state.version++;

@@ -3,6 +3,7 @@ import "./globals.css";
 import { TopNav } from "@/components/TopNav";
 import { Flash } from "@/components/Flash";
 import { Suspense } from "react";
+import Script from "next/script";
 import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
 import { ClerkProvider, Show } from "@clerk/nextjs";
@@ -40,6 +41,20 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // stored count, which drifted: the 13 Sep audit found accounts showing one
   // where six were waiting.
   const alertCount = user ? alertsFor(user.id).length : 0;
+  /*
+   * Microsoft Clarity — heatmaps, session replays, rage clicks (28 Sep). Off
+   * unless CLARITY_PROJECT_ID is set on the server; read per request, so the
+   * one image serves with or without it.
+   *
+   * Every screen of this app is candidate data — names, phones, salaries — and
+   * a replay would send it to Microsoft. So the whole body is masked HERE
+   * (data-clarity-mask), not only in Clarity's dashboard setting, where one
+   * click could undo it: replays show where people click and get stuck, as
+   * grey blocks, never what the page said. The only thing we name is the
+   * viewer's role, to filter replays by lead / TA.
+   */
+  const clarityId = (process.env.CLARITY_PROJECT_ID ?? "").trim();
+  const clarity = /^[a-z0-9]{6,20}$/i.test(clarityId) ? clarityId : null;
   return (
     <html lang="en">
       {/*
@@ -52,7 +67,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         nothing on any page subscribes, so the provider only opened a WebSocket
         and shipped the client library to every visitor for no reader.
       */}
-      <body suppressHydrationWarning>
+      <body suppressHydrationWarning {...(clarity ? { "data-clarity-mask": "True" } : {})}>
+        {clarity ? (
+          <Script id="clarity" strategy="afterInteractive">
+            {`(function(c,l,a,r,i,t,y){c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);})(window,document,"clarity","script",${JSON.stringify(clarity)});` +
+              (user ? `window.clarity("set","role",${JSON.stringify(user.role)});` : "")}
+          </Script>
+        ) : null}
         {uiOnly() ? (
           // Laptop screen work without a sign-in service (lib/uiOnly.ts).
           <>

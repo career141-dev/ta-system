@@ -73,6 +73,7 @@ if (typeof (globalThis as any).DOMMatrix === "undefined") {
   (globalThis as any).DOMMatrix = DOMMatrixPolyfill;
 }
 
+import { findBirth } from "../lib/candidateAge";
 import { Jimp } from "jimp";
 
 import { v } from "convex/values";
@@ -1281,8 +1282,14 @@ export async function runCvExtraction(
       const safeExtracted = nullToUndefined(extracted);
 
       const noticePeriodDays = deriveNoticePeriodDays(extracted.noticePeriod);
-      // We pass undefined for yearsOfExperience since we rely on derivation
-      const totalExperienceYears = deriveTotalExperienceYears(extracted.jobHistory, undefined);
+      // The birth date from the CV's own words (lib/candidateAge, 28 Sep), and
+      // the experience sum with it: a "job" before 15 is schooling.
+      const birth = findBirth(cleanedText, new Date());
+      const totalExperienceYears = deriveTotalExperienceYears(
+        extracted.jobHistory,
+        undefined,
+        birth ? Number(birth.date.slice(0, 4)) : undefined,
+      );
       const seniorityLevel = deriveSeniorityLevel(totalExperienceYears, extracted.currentTitle) ?? safeExtracted.seniorityLevel;
       const { educationDegree, educationInstitution, educationYear } = deriveEducationFields(extracted.education);
       const { derivedEmployer, derivedTitle } = deriveCurrentRole(extracted.jobHistory, extracted.currentEmployer, extracted.currentTitle);
@@ -1327,6 +1334,7 @@ export async function runCvExtraction(
         educationInstitution,
         educationYear,
         totalExperienceYears,
+        ...(birth ? { dateOfBirth: birth.date, dateOfBirthSource: birth.source, ...(birth.mismatch ? { dateOfBirthNote: birth.mismatch } : {}) } : {}),
         fileHash,
         skills: formattedSkills,
         parsingConfidence,

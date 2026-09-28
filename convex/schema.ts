@@ -844,6 +844,12 @@ export default defineSchema({
     // words are kept alongside the numbers the engines read.
     nationality: v.optional(v.string()),
     age: v.optional(v.number()),
+    // Read from the CV (convex/lib/candidateAge, 28 Sep): the age is worked
+    // out from this on the day it is shown, so it never goes stale.
+    dateOfBirth: v.optional(v.string()),
+    dateOfBirthSource: v.optional(v.string()),
+    // When the CV's stated date and its NIC disagree.
+    dateOfBirthNote: v.optional(v.string()),
     gender: v.optional(v.string()),
     englishLevel: v.optional(v.number()),
     cvFileName: v.optional(v.string()),
@@ -2346,6 +2352,18 @@ export default defineSchema({
     sourcingChannel: v.string(),
     outcome: v.string(),
     candidateId: v.optional(v.union(v.id("candidates"), v.null())),
+    // Who in the database this profile is, if anyone (lib/samePerson, 28 Sep).
+    // "same" rows are linked through candidateId as well; "possible" waits for
+    // a TA, who answers same or different.
+    cvMatch: v.optional(v.union(v.null(), v.object({
+      candidateId: v.id("candidates"),
+      fullName: v.string(),
+      strength: v.string(),
+      reasons: v.array(v.string()),
+      hasCv: v.boolean(),
+      decided: v.optional(v.string()),
+      checkedAt: v.number(),
+    }))),
     conversationLog: v.array(v.object({
       at: v.number(),
       channel: v.string(),

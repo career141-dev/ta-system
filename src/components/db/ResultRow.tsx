@@ -12,6 +12,7 @@ import { BUTTON } from "@/components/buttonStyles";
 import type { Score } from "@/lib/scoring";
 import type { CandidateSignal } from "@/lib/match";
 import type { Candidate } from "@/data/types";
+import { ageHint, ageText } from "@/lib/ageExperience";
 
 export interface RowApp {
   id: string;
@@ -127,8 +128,15 @@ export function ResultRow({
           </p>
 
           <dl className="mt-3.5 grid grid-cols-[96px_1fr] gap-x-4 gap-y-2.5">
+            {c.age != null && (
+              <Line label="Age">
+                {ageText(c)}
+                {ageHint(c) && <span className="ml-1.5 text-[11.5px] text-ink-faint">{ageHint(c)}</span>}
+              </Line>
+            )}
             <Line label="Experience">
               <span className="text-ink-soft">{c.totalExperienceYears} years, currently as a {c.currentTitle}</span>
+              {c.experienceNote && <span className="block text-[11.5px] text-warn">{c.experienceNote}</span>}
               <div className="mt-1 flex flex-col gap-0.5">
                 {roles.map((r, i) => (
                   <span key={i}>

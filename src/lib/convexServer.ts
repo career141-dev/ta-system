@@ -55,6 +55,17 @@ function config(): { url: string; adminKey: string } {
 
 type Kind = "query" | "mutation" | "action";
 
+/*
+ * How long a READ may take before it is given up (28 Sep).
+ *
+ * There was no limit. Page loads queue behind one another in primeStore, so one
+ * query the backend never answered froze every page for everyone, with no
+ * error to show. Reads only: a mutation or action abandoned here may still
+ * finish on the backend, and the caller retrying it would do it twice.
+ * The biggest read, every application, takes a few seconds; 30 is far past it.
+ */
+const QUERY_TIMEOUT_MS = Number(process.env.C141_QUERY_TIMEOUT_MS ?? "") || 30_000;
+
 async function call<T>(kind: Kind, path: string, args: Record<string, unknown>): Promise<T> {
   const { url, adminKey } = config();
 
@@ -71,6 +82,7 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
       },
       body: JSON.stringify({ path, args, format: "json" }),
       cache: "no-store",
+      signal: kind === "query" ? AbortSignal.timeout(QUERY_TIMEOUT_MS) : undefined,
     });
   } catch (e) {
     // Next.js signals "this page must render per request" by THROWING from
@@ -79,6 +91,11 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
     // page that loads data. Control-flow errors pass through untouched.
     if (e && typeof e === "object" && "digest" in e) throw e;
     const err = e as Error;
+    // Worded so RETRYABLE below does not match it: four more waits of the same
+    // length would be two minutes of a frozen desk.
+    if (err.name === "TimeoutError") {
+      throw new ConvexCallError(`The backend did not answer ${path} within ${Math.round(QUERY_TIMEOUT_MS / 1000)} seconds.`);
+    }
     const cause = (err as unknown as { cause?: Error | string })?.cause;
     const causeMsg = cause ? ` - ${typeof cause === "object" && "message" in cause ? cause.message : cause}` : "";
     throw new ConvexCallError(`Could not reach the Convex backend (${err.message}${causeMsg}).`);

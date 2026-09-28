@@ -5,7 +5,7 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, type Capability } from "@/lib/auth";
 import { headers } from "next/headers";
-import type { FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
+import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
@@ -43,6 +43,7 @@ import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type 
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
 import { profileLink } from "@/lib/url";
+import { matchLink, decideMatch } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
@@ -464,6 +465,30 @@ export async function logCall(formData: FormData) {
   await back("Call logged.");
 }
 
+/** What the match found, as the start of the message after adding a profile. */
+function heldLine(m: CvMatch | null): string {
+  if (!m) return "";
+  if (m.strength === "possible") return `This may be ${m.fullName}, already in the database — confirm on the row. `;
+  return `${m.fullName} is already in the database${m.hasCv ? " with a CV" : ""}, and the row is linked to them. `;
+}
+
+/**
+ * A TA's answer to a possible match on an Excel Tables row (28 Sep): the same
+ * person — the row then uses their record and CV — or someone else.
+ */
+export async function decideCvMatch(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const decision = String(formData.get("decision")) === "same" ? "same" : "different";
+  const e = repo.linkEntry(entryId);
+  if (!e || e.openingId !== openingId) await fail("That row no longer exists. Reload the page.");
+  if (!(await decideMatch(entryId, decision, user.id))) await fail("There is no match on that row to answer.");
+  revalidateLinks(openingId);
+  await done(decision === "same" ? `Linked to ${e!.cvMatch!.fullName}'s record.` : "Noted: a different person. The row stays on its own.");
+}
+
 export async function addLink(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
@@ -494,8 +519,12 @@ export async function addLink(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim() || guessedName;
   const id = repo.addLink(openingId, url, user.id, name);
   if (leadNote) repo.addLeadNote(id, user.id, user.role, leadNote);
+  // Is this someone we already hold? (lib/cvMatch, 28 Sep.) Asked now, so
+  // the row says so the moment it appears.
+  const held = await matchLink(id, user.id);
   revalidateLinks(openingId);
   await done(
+    heldLine(held) +
     (name
       ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
       : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.") +
@@ -1368,7 +1397,7 @@ export async function toggleAddOn(formData: FormData) {
 export async function updateLink(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
+  const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
   const entryId = String(formData.get("entryId"));
   const outcome = String(formData.get("outcome") ?? "") as import("@/data/types").LinkOutcome;
   const phoneNumber = String(formData.get("phoneNumber") ?? "").trim() || null;
@@ -1377,11 +1406,13 @@ export async function updateLink(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim() || null;
   const company = String(formData.get("company") ?? "").trim() || null;
   repo.updateLink(entryId, { outcome, phoneNumber, phoneSource, name, company });
+  // A name, company or number typed in can make a match the bare link could not.
+  const held = await matchLink(entryId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
   // It saved silently; testers could not tell it had (21 Sep).
-  await done(`Saved — ${LINK_OUTCOME_LABEL[outcome] ?? outcome}.`);
+  await done(`${held && held.checkedAt > Date.now() - 60_000 ? heldLine(held) : ""}Saved — ${LINK_OUTCOME_LABEL[outcome] ?? outcome}.`);
 }
 
 const LINK_OUTCOME_LABEL: Record<string, string> = {
@@ -2648,12 +2679,14 @@ export async function keepSuggestion(formData: FormData) {
   const s = repo.suggestions(openingId).find((x) => x.id === id);
   if (!s) await fail("That suggestion is no longer there — the list may have been regenerated.");
   repo.setSuggestionStatus(id, "kept", "more_like_this", user.id);
+  let held: CvMatch | null = null;
   if (s!.linkedinUrl) {
     const entryId = repo.addLink(openingId, s!.linkedinUrl, user.id);
     repo.updateLink(entryId, { name: s!.name, title: s!.headline, company: s!.company });
+    held = await matchLink(entryId, user.id);
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
-  await back(`${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
+  await back(`${heldLine(held)}${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
 }
 
 export async function dismissSuggestion(formData: FormData) {
@@ -4367,6 +4400,10 @@ export async function runSuggestionsInline(_: ActionResult | null, formData: For
 
 export async function toggleEyeMarkInline(_: ActionResult | null, formData: FormData) {
   return inline(() => toggleEyeMark(formData));
+}
+
+export async function decideCvMatchInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => decideCvMatch(formData));
 }
 
 export async function updateLinkInline(_: ActionResult | null, formData: FormData) {

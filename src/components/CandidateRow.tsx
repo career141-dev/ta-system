@@ -14,6 +14,7 @@ import type { Score } from "@/lib/scoring";
 import { FollowUpActions } from "./FollowUpActions";
 import { repo } from "@/data/store";
 import { isConvex } from "@/data/mode";
+import { ageHint, ageText } from "@/lib/ageExperience";
 
 export function CandidateRow({
   app,
@@ -110,10 +111,17 @@ export function CandidateRow({
         {score && <FitReason score={score} />}
 
         <dl className="mt-4 grid grid-cols-[96px_1fr] gap-x-6 gap-y-3">
+          {candidate.age != null && (
+            <Field label="Age">
+              {ageText(candidate)}
+              {ageHint(candidate) && <span className="ml-1.5 text-[11.5px] text-ink-faint">{ageHint(candidate)}</span>}
+            </Field>
+          )}
           <Field label="Experience">
             {candidate.currentTitle} at {candidate.currentEmployer} · 2023 – Present
             <br />
             <span className="text-ink-soft">{candidate.totalExperienceYears} years total</span>
+            {candidate.experienceNote && <span className="block text-[11.5px] text-warn">{candidate.experienceNote}</span>}
           </Field>
           <Field label="Education">
             {candidate.educationDegree}, {candidate.educationInstitution}
