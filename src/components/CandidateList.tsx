@@ -1,3 +1,4 @@
+import Form from "next/form";
 import { repo } from "@/data/store";
 import type { Application, Candidate, User } from "@/data/types";
 import { CandidateRow } from "./CandidateRow";
@@ -8,6 +9,7 @@ import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { Pager } from "./Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { passesFilters } from "@/lib/listFilters";
 import { BulkBar, BulkConfirm, DownloadCvsButton } from "./BulkSelect";
 import { SubmitButton } from "./Submit";
 import { confirmShortlist, removeApplications } from "@/app/actions";
@@ -49,28 +51,8 @@ export function applyFilters(apps: Application[], f: ListFilters, userId: string
     const c = repo.candidate(a.candidateId);
     if (!c) return false;
     if (f.q && !matchesQuery(f.q, c.fullName, c.currentTitle, c.currentEmployer, c.location)) return false;
-    if (f.minExp && (c.totalExperienceYears ?? 0) < Number(f.minExp)) return false;
-    if (f.maxExp && (c.totalExperienceYears ?? 0) > Number(f.maxExp)) return false;
-    if (f.maxNotice && (c.noticePeriodDays ?? 999) > Number(f.maxNotice)) return false;
-    if (f.location && c.location !== f.location) return false;
     if (f.mine === "1" && a.ownerTaId !== userId) return false;
-
-    // Substring and case-insensitive: a TA types "cargills", not the registered
-    // name, and a filter that only matches an exact string is a filter nobody
-    // uses twice.
-    const has = (hay: string | null | undefined, needle?: string) =>
-      !needle || (hay ?? "").toLowerCase().includes(needle.toLowerCase());
-    const hasAny = (hay: string[], needle?: string) =>
-      !needle || hay.some((x) => x.toLowerCase().includes(needle.toLowerCase()));
-
-    if (!has(c.currentEmployer, f.company)) return false;
-    if (!has(c.currentTitle, f.title)) return false;
-    if (!has(c.educationInstitution, f.school)) return false;
-    if (!has(c.nationality, f.nationality)) return false;
-    if (!hasAny(c.skills, f.skill)) return false;
-    if (!hasAny(c.industries, f.industry)) return false;
-    if (!hasAny(c.workHistory.map((w) => w.employer), f.past)) return false;
-    return true;
+    return passesFilters(c, f);
   });
 }
 
@@ -183,8 +165,9 @@ export function CandidateList({
 
   return (
     <section className="rounded-xl border border-rule bg-surface">
-      <form
-        method="GET"
+      {/* next/form: Apply updates the list in place instead of reloading the
+          whole page — header, rail and matching banner included (28 Sep). */}
+      <Form
         action={basePath}
         className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-rule px-8 py-5"
       >
@@ -281,7 +264,7 @@ export function CandidateList({
             <span className="text-ink-faint"> · {assessment.message}</span>
           )}
         </span>
-      </form>
+      </Form>
 
 
       {shown.length === 0 ? (
