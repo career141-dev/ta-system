@@ -1393,6 +1393,31 @@ export default defineSchema({
     durationMins: v.optional(v.number()),
     /** Set when the candidate confirms, which is what stops the escalation. */
     confirmedAt: v.optional(v.number()),
+    // Several interviews per candidate (28 Sep): each has a name, keeps every
+    // reschedule and status change, and one feedback entry per person.
+    title: v.optional(v.string()),
+    taHistory: v.optional(v.array(v.object({
+      at: v.number(),
+      byUserId: v.string(),
+      kind: v.union(v.literal("rescheduled"), v.literal("status"), v.literal("edited")),
+      detail: v.string(),
+      reason: v.optional(v.string()),
+    }))),
+    taFeedback: v.optional(v.array(v.object({
+      byUserId: v.string(),
+      interviewer: v.string(),
+      technical: v.optional(v.number()),
+      communication: v.optional(v.number()),
+      behaviour: v.optional(v.number()),
+      performance: v.optional(v.number()),
+      overall: v.optional(v.number()),
+      recommendation: v.optional(v.union(
+        v.literal("hire"), v.literal("next_round"), v.literal("hold"), v.literal("reject"),
+      )),
+      comments: v.optional(v.string()),
+      at: v.number(),
+      updatedAt: v.number(),
+    }))),
   })
     .index("by_applicationId", ["applicationId"])
     .index("by_jobId", ["jobId"])

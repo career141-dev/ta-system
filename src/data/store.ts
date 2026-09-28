@@ -46,6 +46,7 @@ import type {
   AssignmentRole,
   WorkingStage,
   Interview,
+  InterviewFeedback,
   IntakeItem,
   IntakeSource,
   IntakeStatus,
@@ -67,6 +68,7 @@ import type {
 } from "./types";
 import { RETIRED_STAGES } from "./types";
 import { buildSeed } from "./seed";
+import { INTERVIEW_STATUS_LABEL, interviewStatus, whenLabel } from "@/lib/interviews";
 import { canMove, eventTypeFor } from "@/lib/pipeline";
 import { colomboDayStart } from "@/lib/calendar";
 import { evalBoolean, haystackFor, parseBoolean, type Vocabulary } from "@/lib/query";
@@ -1009,6 +1011,7 @@ const rawRepo = {
    */
   scheduleInterview(input: {
     applicationId: Id;
+    title: string | null;
     scheduledAt: number;
     timezone: string;
     location: string;
@@ -1027,26 +1030,20 @@ const rawRepo = {
     if (app.stage !== "client_shortlist" && app.stage !== "interview") {
       return { ok: false, message: "Only a candidate on the client's shortlist can be booked for an interview." };
     }
-    const all = load().interviews.filter((i) => i.applicationId === input.applicationId);
-    const existing = all.filter((i) => i.outcome === "pending");
-    // A new round once the previous one has happened; a re-booking keeps its
-    // round. Counting pending ones numbered a second interview as round 1
-    // again (audit finding 15).
-    const happened = all.filter((i) => i.outcome === "attended" || i.outcome === "no_show");
-    const round = existing.length > 0 ? existing[0].round : happened.length + 1;
+    // Each booking is its own interview (28 Sep): a technical and an HR round
+    // can both be pending, each with its own reminders. Moving one is
+    // rescheduleInterview, which keeps its history — booking used to cancel
+    // whatever was pending instead, losing the old time.
+    const round = load().interviews.filter(
+      (i) => i.applicationId === input.applicationId && i.outcome !== "cancelled",
+    ).length + 1;
     const id = `iv_${Math.random().toString(36).slice(2, 10)}`;
 
     mutate((db) => {
-      // Re-booking supersedes rather than stacks: one pending interview per
-      // application, or the reminders fire twice.
-      for (const i of db.interviews) {
-        if (i.applicationId === input.applicationId && i.outcome === "pending") {
-          i.outcome = "cancelled";
-        }
-      }
       db.interviews.push({
         id,
         applicationId: input.applicationId,
+        title: input.title,
         scheduledAt: input.scheduledAt,
         timezone: input.timezone,
         location: input.location,
@@ -1060,18 +1057,110 @@ const rawRepo = {
         result: "pending",
         clientRating: null,
         clientFeedback: null,
+        history: [],
+        feedback: [],
         createdAt: Date.now(),
       });
     });
 
-    this.moveStage(
-      input.applicationId,
-      "interview",
-      input.byUserId,
-      `${new Date(input.scheduledAt).toISOString()} · ${input.location}`,
-      { eventType: existing.length ? "interview_rescheduled" : "interview_scheduled", force: true },
-    );
+    const note = `${input.title ?? `Round ${round}`} · ${new Date(input.scheduledAt).toISOString()} · ${input.location}`;
+    if (app.stage === "interview") {
+      // Already interviewing: another interview is a fact, not a stage move —
+      // moving would restart the stage clock.
+      this.logEvent({
+        applicationId: app.id, openingId: app.openingId, eventType: "interview_scheduled",
+        fromStage: null, toStage: null, actorType: "user", actorId: input.byUserId, note,
+      });
+    } else {
+      this.moveStage(input.applicationId, "interview", input.byUserId, note, { eventType: "interview_scheduled", force: true });
+    }
     return { ok: true, id };
+  },
+
+  /**
+   * A new time for the same interview. The old time goes into its history
+   * rather than being overwritten, and the attendance confirmation is cleared:
+   * the candidate agreed to the old time, not this one. A cancelled or no-show
+   * interview can be rescheduled too — that is how it is put back on.
+   */
+  rescheduleInterview(
+    interviewId: Id,
+    input: { scheduledAt: number; location: string; mode: Interview["mode"]; reason: string | null; byUserId: Id },
+  ): { ok: true } | { ok: false; message: string } {
+    const iv = load().interviews.find((x) => x.id === interviewId);
+    if (!iv) return { ok: false, message: "That interview no longer exists." };
+    if (iv.outcome === "attended") {
+      return { ok: false, message: "That interview has already happened. Book a new one instead." };
+    }
+    const moved: string[] = [];
+    if (iv.scheduledAt !== input.scheduledAt) moved.push(`from ${whenLabel(iv.scheduledAt)} to ${whenLabel(input.scheduledAt)}`);
+    if (iv.location !== input.location) moved.push(`place "${iv.location || "—"}" → "${input.location || "—"}"`);
+    if (iv.mode !== input.mode) moved.push(`${iv.mode.replace(/_/g, " ")} → ${input.mode.replace(/_/g, " ")}`);
+    if (!moved.length && iv.outcome === "pending") return { ok: false, message: "Nothing changed — pick a new date or time." };
+
+    mutate((db) => {
+      const i = db.interviews.find((x) => x.id === interviewId);
+      if (!i) return;
+      const was = i.outcome !== "pending" ? ` (was ${INTERVIEW_STATUS_LABEL[interviewStatus(i)].toLowerCase()})` : "";
+      i.history = [...(i.history ?? []), {
+        at: Date.now(), byUserId: input.byUserId, kind: "rescheduled",
+        detail: `Moved ${moved.join("; ") || `back on for ${whenLabel(input.scheduledAt)}`}${was}`,
+        reason: input.reason,
+      }];
+      i.scheduledAt = input.scheduledAt;
+      i.location = input.location;
+      i.mode = input.mode;
+      i.outcome = "pending";
+      i.confirmedAt = null;
+    });
+    const app = load().applications.find((a) => a.id === iv.applicationId);
+    if (app) {
+      this.logEvent({
+        applicationId: app.id, openingId: app.openingId, eventType: "interview_rescheduled",
+        fromStage: null, toStage: null, actorType: "user", actorId: input.byUserId,
+        note: `${iv.title ?? `Round ${iv.round}`} → ${whenLabel(input.scheduledAt)}${input.reason ? ` · ${input.reason}` : ""}`,
+      });
+    }
+    return { ok: true };
+  },
+
+  /** Name, panel, length and notes. Time and place go through rescheduleInterview so they leave history. */
+  editInterview(
+    interviewId: Id,
+    patch: Pick<Interview, "title" | "interviewers" | "durationMins" | "notes">,
+    byUserId: Id,
+  ) {
+    mutate((db) => {
+      const i = db.interviews.find((x) => x.id === interviewId);
+      if (!i) return;
+      const changed: string[] = [];
+      if ((i.title ?? "") !== (patch.title ?? "")) changed.push(`name "${i.title ?? "—"}" → "${patch.title ?? "—"}"`);
+      const was = i.interviewers.join(", "), now = patch.interviewers.join(", ");
+      if (was !== now) changed.push(`interviewers "${was || "—"}" → "${now || "—"}"`);
+      if (i.durationMins !== patch.durationMins) changed.push(`length ${i.durationMins ?? "—"} → ${patch.durationMins ?? "—"} min`);
+      if ((i.notes ?? "") !== (patch.notes ?? "")) changed.push("notes");
+      if (!changed.length) return;
+      Object.assign(i, patch);
+      i.history = [...(i.history ?? []), { at: Date.now(), byUserId, kind: "edited", detail: `Changed ${changed.join("; ")}`, reason: null }];
+    });
+  },
+
+  /**
+   * One entry per person: saving again replaces that person's, never anyone
+   * else's. A lead correcting someone's entry passes that person's byUserId;
+   * the action checks they may (lib/interviews mayChangeFeedback).
+   */
+  saveInterviewFeedback(interviewId: Id, input: Omit<InterviewFeedback, "at" | "updatedAt">) {
+    mutate((db) => {
+      const i = db.interviews.find((x) => x.id === interviewId);
+      if (!i) return;
+      const list = [...(i.feedback ?? [])];
+      const at = list.findIndex((f) => f.byUserId === input.byUserId);
+      const now = Date.now();
+      if (at >= 0) list[at] = { ...input, at: list[at].at, updatedAt: now };
+      else list.push({ ...input, at: now, updatedAt: now });
+      i.feedback = list;
+    });
   },
 
   confirmInterview(interviewId: Id) {
@@ -1091,10 +1180,17 @@ const rawRepo = {
     });
   },
 
-  setInterviewOutcome(interviewId: Id, outcome: Interview["outcome"]) {
+  setInterviewOutcome(interviewId: Id, outcome: Interview["outcome"], byUserId: Id | null = null, reason: string | null = null) {
     mutate((db) => {
       const i = db.interviews.find((x) => x.id === interviewId);
-      if (i) i.outcome = outcome;
+      if (!i || i.outcome === outcome) return;
+      const label = (o: Interview["outcome"]) => INTERVIEW_STATUS_LABEL[interviewStatus({ outcome: o, history: i.history ?? [] })];
+      if (byUserId) {
+        i.history = [...(i.history ?? []), {
+          at: Date.now(), byUserId, kind: "status", detail: `${label(i.outcome)} → ${label(outcome)}`, reason,
+        }];
+      }
+      i.outcome = outcome;
     });
   },
 

@@ -21,7 +21,7 @@ import { ChevronIcon, CloseIcon } from "@/components/icons";
 import { ClosingPanel } from "@/components/ClosingPanel";
 import { Timeline } from "@/components/Timeline";
 import { pageLink } from "@/lib/paging";
-import { InterviewPanel } from "@/components/InterviewPanel";
+import { Interviews } from "@/components/InterviewPanel";
 import { ScreeningPanel } from "@/components/ScreeningPanel";
 import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
@@ -95,11 +95,10 @@ export default async function CandidateDrawer({
     }
   }
 
-  // The most recent interview, whatever state it is in — a finished one still
-  // needs its result recording, and only showing pending ones is why there was
-  // nowhere to record it.
-  const interviews = repo.interviews(appId).sort((a, b) => b.scheduledAt - a.scheduledAt);
-  const interview = interviews.find((i) => i.outcome === "pending") ?? interviews[0];
+  // Every interview, soonest first — a finished one still needs its result
+  // and feedback, so none are hidden (28 Sep: several per candidate).
+  const interviews = repo.interviews(appId).sort((a, b) => a.scheduledAt - b.scheduledAt);
+  const interview = interviews.find((i) => i.outcome === "pending") ?? interviews.at(-1);
 
   // Prev / next within the same stage, in the order the list shows them.
   const siblings = repo.applications(id).filter((a) => a.stage === app.stage);
@@ -300,7 +299,16 @@ export default async function CandidateDrawer({
 
 
       {/* Attendance and result, which nothing could record before. */}
-      {interview && <InterviewPanel interview={interview} openingId={opening.id} locked={locked} />}
+      <Interviews
+        interviews={interviews}
+        appId={app.id}
+        openingId={opening.id}
+        canBook={app.stage === "client_shortlist" || app.stage === "interview"}
+        locked={locked}
+        canFeedback={allows(user, "interview.feedback", { openingId: id, assignment })}
+        user={user}
+        nameOf={(uid) => repo.user(uid)?.name ?? "Someone"}
+      />
 
       {/* The offer, once a candidate is far enough along for it to mean
           anything. Its own band rather than a tab: an offer out is a fact

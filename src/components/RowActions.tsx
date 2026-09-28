@@ -247,7 +247,12 @@ export function RowActions({
             time, so the stage cannot be entered without it.
           </p>
 
-          <div className="mt-3 grid grid-cols-2 gap-2.5">
+          <label className="mt-3 block">
+            <span className="mb-1 block text-[11.5px] text-ink-soft">Interview name</span>
+            <input name="title" placeholder="Technical interview" className={inputClass} />
+          </label>
+
+          <div className="mt-2.5 grid grid-cols-2 gap-2.5">
             <label>
               <span className="mb-1 block text-[11.5px] text-ink-soft">Date</span>
               <input name="date" type="date" required className={inputClass} />

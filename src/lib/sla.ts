@@ -292,12 +292,14 @@ function computeAlertsAt(now: number): LiveAlert[] {
       const c = repo.candidate(a.candidateId);
       // Reached about THIS interview: a call logged after it was booked. An
       // earlier confirmation for an earlier or since-moved interview does not
-      // confirm this one (audit finding 44).
+      // confirm this one (audit finding 44). A reschedule counts as a new
+      // booking: the call agreed the old time (28 Sep).
+      const bookedAt = Math.max(iv.createdAt, ...(iv.history ?? []).filter((h) => h.kind === "rescheduled").map((h) => h.at));
       const contacted =
         !!iv.confirmedAt ||
         repo
           .callFeedback(a.id)
-          .some((f) => f.kind === "pre_interview" && f.outcome === "reached" && f.recordedAt >= iv.createdAt);
+          .some((f) => f.kind === "pre_interview" && f.outcome === "reached" && f.recordedAt >= bookedAt);
       const sameDay = colomboDayStart(iv.scheduledAt) === colomboDayStart(now);
 
       if (sameDay && !contacted) {
