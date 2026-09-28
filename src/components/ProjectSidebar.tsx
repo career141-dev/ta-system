@@ -249,7 +249,7 @@ export function ProjectSidebar({
                     <input
                       name="externalUrl"
                       type="url"
-                      placeholder="Job link (e.g. LinkedIn URL)..."
+                      placeholder="LinkedIn Recruiter link (talent/hire/…)"
                       className="w-full rounded border border-rule bg-paper px-2 py-1 text-[12px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand"
                     />
                     <div className="flex items-center justify-end gap-1.5">
