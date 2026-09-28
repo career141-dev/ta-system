@@ -200,7 +200,8 @@ try {
   check("P2-10c", "a post cannot go live before the JD is approved", !early.ok, (early as { message?: string }).message ?? "was allowed");
 
   // ── P2-04 delete a client with openings ────────────────────────────────────
-  const held = await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", { clientId });
+  // Delete moves a client to the Bin (ta/bin.ts), and refuses while openings are filed under it.
+  const held = await convexMutation<{ ok: boolean; openings?: number }>("ta/bin:binClient", { actorId: lead.id, clientId });
   check("P2-04", "deleting a client with openings is refused with the count", !held.ok && (held.openings ?? 0) >= 1, JSON.stringify(held));
 
   // ── P2-11 status ───────────────────────────────────────────────────────────

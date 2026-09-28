@@ -19,6 +19,7 @@ import { firstPostFor } from "../lib/firstPost";
 import { SCORE_AFTER_APPROVAL_MS } from "../lib/jdGate";
 import { internal } from "../_generated/api";
 import { workingStageKey } from "../../src/lib/workingStage";
+import { isGone } from "../../src/lib/bin";
 
 
 export const list = internalQuery({
@@ -40,8 +41,8 @@ export const list = internalQuery({
             .withIndex("by_status", (q) => q.eq("status", args.status as Doc<"jobs">["status"]))
             .collect()
         : await ctx.db.query("jobs").collect()
-    // An opening being deleted (ta/openingDelete.ts) has already left the desk.
-    ).filter((j) => !j.deletingAt);
+    // An opening in the Bin (ta/bin.ts) or being deleted has left the desk.
+    ).filter((j) => !isGone(j));
 
     // "Only mine" is a question about a person, so it cannot be answered
     // without one. Refusing beats returning everything, which would look like
@@ -70,7 +71,7 @@ export const get = internalQuery({
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const job = await ctx.db.get(args.openingId as Id<"jobs">);
-    if (!job || job.deletingAt) return null;
+    if (!job || isGone(job)) return null;
 
     const posts = await ctx.db
       .query("jobPosts")

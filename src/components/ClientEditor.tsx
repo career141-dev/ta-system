@@ -114,7 +114,7 @@ export function ClientMenu({
                   <input type="hidden" name="clientId" value={clientId} />
                   <Confirm
                     label="Delete this client"
-                    question={`Delete ${name}?`}
+                    question={`Delete ${name}? It moves to the Bin and can be restored for 7 days.`}
                     className="text-[12.5px] text-danger hover:underline"
                   />
                 </form>
@@ -150,7 +150,7 @@ export function ClientDeleteButton({ clientId, name, openingCount }: { clientId:
       <input type="hidden" name="clientId" value={clientId} />
       <Confirm
         label="Delete"
-        question={`Delete ${name}? This cannot be undone.`}
+        question={`Delete ${name}? It moves to the Bin and can be restored for 7 days.`}
         confirmLabel="Delete client"
         className={`${pill} text-ink-soft hover:border-danger/40 hover:text-danger`}
       />

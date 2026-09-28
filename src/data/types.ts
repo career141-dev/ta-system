@@ -1351,6 +1351,36 @@ export interface Database {
   matchRuns: MatchRun[];
   matchExclusions: MatchExclusion[];
   liveMirror: LiveMirrorRow[];
+  bin: BinEntry[];
+}
+
+/**
+ * Something deleted, kept seven days in case it was a mistake (src/lib/bin.ts).
+ * The JSON store lifts the rows off the desk into here; Convex stamps them in
+ * place (convex/ta/bin.ts). Either way the Bin page reads `BinItem`.
+ */
+export interface BinEntry {
+  id: Id;
+  kind: "opening" | "client";
+  itemId: Id;
+  binnedAt: number;
+  binnedBy: Id | null;
+  /** The rows taken off the desk with it, put back as they were on Restore. */
+  rows: Partial<Database>;
+  /** CVs that came in for the opening: they stay, and get it back on Restore. */
+  intake: { id: Id; openingId: Id | null; jobPostId: Id | null }[];
+}
+
+/** One row on the Bin page. */
+export interface BinItem {
+  kind: "opening" | "client";
+  id: Id;
+  name: string;
+  /** The opening's client; null for a client. */
+  clientName: string | null;
+  binnedAt: number;
+  binnedBy: string | null;
+  purgeAt: number;
 }
 
 /**

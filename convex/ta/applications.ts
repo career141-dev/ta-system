@@ -24,6 +24,7 @@ import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./g
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
+import { isGone } from "../../src/lib/bin";
 
 const SET_SIZE = 5;
 
@@ -39,6 +40,8 @@ export const listForOpening = internalQuery({
   handler: async (ctx, args) => {
     await optionalActor(ctx, args.actorId);
     const jobId = args.openingId as Id<"jobs">;
+    const job = await ctx.db.get(jobId);
+    if (!job || isGone(job)) return [];
 
     const apps = await ctx.db
       .query("applications")
@@ -75,8 +78,13 @@ export const listAll = internalQuery({
       numItems: Math.min(args.limit ?? 2000, 2000),
       cursor: args.cursor ?? null,
     });
+    // Applications on an opening in the Bin stay out of the dashboards until
+    // it is restored. The Bin is a handful of rows, read through its index.
+    const binned = new Set(
+      (await ctx.db.query("jobs").withIndex("by_binnedAt", (q) => q.gt("binnedAt", 0)).collect()).map((j) => j._id as string),
+    );
     return {
-      applications: page.page.map(projectApplication),
+      applications: page.page.filter((a) => !binned.has(a.jobId as string)).map(projectApplication),
       isDone: page.isDone,
       continueCursor: page.continueCursor,
     };
@@ -89,6 +97,8 @@ export const get = internalQuery({
     await optionalActor(ctx, args.actorId);
     const app = await ctx.db.get(args.applicationId as Id<"applications">);
     if (!app) return null;
+    const job = await ctx.db.get(app.jobId);
+    if (!job || isGone(job)) return null;
     const candidate = await ctx.db.get(app.candidateId);
     return {
       ...projectApplication(app),

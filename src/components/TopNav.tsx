@@ -33,6 +33,8 @@ const NAV = [
   { href: "/reports", label: "Reports" },
   // Practice calls with the AI screening agent (as the CV platform's Aura page).
   { href: "/voice", label: "Voice agent" },
+  // Deleted clients and openings, restorable for seven days (28 Sep).
+  { href: "/bin", label: "Bin" },
 ];
 
 

@@ -16,6 +16,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
+import { isGone } from "../../src/lib/bin";
 
 /**
  * Candidate rows for a set of ids, in result order.
@@ -101,6 +102,7 @@ export const pipelineSignals = internalQuery({
       const rows = [];
       for (const a of apps) {
         const job = await ctx.db.get(a.jobId);
+        if (job && isGone(job)) continue;
         rows.push({
           stage: a.currentStage,
           openingId: a.jobId as string,

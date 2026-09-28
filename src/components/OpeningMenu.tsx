@@ -90,18 +90,18 @@ export function OpeningMenu({
               <input type="hidden" name="openingId" value={openingId} />
               <p className="text-[12.5px] font-medium leading-snug">Delete &ldquo;{title}&rdquo;?</p>
               <p className="mt-1.5 text-[12px] leading-relaxed text-ink-soft">
-                The opening and all its data go: posts, the pipeline, calls, messages, reviews and offers.
+                It moves to the Bin: it leaves every list and follow-ups stop. Anyone can restore it
+                for 7 days, then it is deleted for good with its posts, pipeline, calls and messages.
                 {candidates > 0
-                  ? ` Its ${candidates} candidate${candidates === 1 ? "" : "s"} ${candidates === 1 ? "is" : "are"} not deleted — they stay in the database.`
-                  : " No candidates are deleted."}{" "}
-                This cannot be undone.
+                  ? ` Its ${candidates} candidate${candidates === 1 ? "" : "s"} ${candidates === 1 ? "is" : "are"} never deleted.`
+                  : ""}
               </p>
               <div className="mt-3 flex items-center gap-3">
                 <button
                   disabled={pending}
                   className="rounded-full bg-danger px-3.5 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
-                  {pending ? "Deleting…" : "Delete opening"}
+                  {pending ? "Moving…" : "Move to the Bin"}
                 </button>
                 <button
                   type="button"
