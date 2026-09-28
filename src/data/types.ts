@@ -432,6 +432,12 @@ export interface CallFeedback {
 export interface Interview {
   id: Id;
   applicationId: Id;
+  /**
+   * What this interview is — "Technical interview", "HR round". A candidate can
+   * have several on one opening (28 Sep), and "round 2" alone did not say
+   * which one the feedback was about. Null on interviews booked before then.
+   */
+  title: string | null;
   /** Spec §12.2a — a time, not just a date, because the escalation fires at an hour. */
   scheduledAt: number;
   timezone: string;
@@ -458,7 +464,34 @@ export interface Interview {
   /** Out of 5, as the client gave it. */
   clientRating: number | null;
   clientFeedback: string | null;
+  /** Every reschedule, status change and edit, oldest first, with what it was before. */
+  history: InterviewChange[];
+  /** One entry per person who gave feedback; saving again updates your own. */
+  feedback: InterviewFeedback[];
   createdAt: number;
+}
+
+export interface InterviewChange {
+  at: number;
+  byUserId: Id;
+  kind: "rescheduled" | "status" | "edited";
+  /** Plain words: "Moved from 3 Oct, 10:00 to 5 Oct, 14:00". Keeps the previous value readable forever. */
+  detail: string;
+  reason: string | null;
+}
+
+export type InterviewRatingKey = "technical" | "communication" | "behaviour" | "performance" | "overall";
+
+export interface InterviewFeedback {
+  byUserId: Id;
+  /** Whose view it is — the interviewer, who may not have a login; a TA can enter it for them. */
+  interviewer: string;
+  /** 1–5 each; null when not rated. */
+  ratings: Record<InterviewRatingKey, number | null>;
+  recommendation: "hire" | "next_round" | "hold" | "reject" | null;
+  comments: string | null;
+  at: number;
+  updatedAt: number;
 }
 
 /**

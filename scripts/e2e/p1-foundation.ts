@@ -176,6 +176,7 @@ try {
   check("P1-09a", "a forced move to client shortlist is stored", toClient.ok && repo.application(appId)?.stage === "client_shortlist", JSON.stringify(toClient));
   const iv = repo.scheduleInterview({
     applicationId: appId,
+    title: "Phase 1 test interview",
     scheduledAt: Date.now() + 3 * 86_400_000,
     timezone: "Asia/Colombo",
     location: "Test room",

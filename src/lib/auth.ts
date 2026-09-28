@@ -53,7 +53,9 @@ export type Capability =
   /** Start a new opening. */
   | "opening.create"
   /** Work an incoming CV that has not been filed against an opening yet. */
-  | "intake.handle";
+  | "intake.handle"
+  /** Give or update feedback on an interview — the interviewer's view of the candidate. */
+  | "interview.feedback";
 
 /** Everything a decision needs to know, resolved by the caller. */
 export interface AuthContext {
@@ -209,6 +211,13 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       return isDeskWide(user)
         ? ALLOW
         : deny("Only a TA Lead, Director, Admin or Ops can leave notes.");
+
+    case "interview.feedback":
+      // Wider than opening.act on purpose (28 Sep): the client's interviewer
+      // sits in a client seat and is the one person whose view this is. The
+      // collision lock does not apply — feedback is not working the candidate.
+      if (isDeskWide(user)) return ALLOW;
+      return ctx.assignment ? ALLOW : deny("You are not on this opening.");
   }
 }
 

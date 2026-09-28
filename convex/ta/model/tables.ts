@@ -53,6 +53,9 @@ export interface TableModel {
 /** null in the app, absent in an optional stored field. */
 const u = <T>(v: T | null | undefined): T | undefined => (v === null || v === undefined ? undefined : v);
 const nul = <T>(v: T | null | undefined): T | null => (v === undefined ? null : v);
+const clean = (o: Row): Row => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+/** An interview feedback entry's scores, stored flat on the entry. */
+const RATING_KEYS = ["technical", "communication", "behaviour", "performance", "overall"] as const;
 const iso = (ms: number) => new Date(ms).toISOString();
 const msOf = (v: unknown, fallback = 0): number => {
   if (typeof v === "number" && Number.isFinite(v)) return v;
@@ -464,6 +467,17 @@ export const TABLES: Record<string, TableModel> = {
       result: (d.taResult as string | undefined) ?? (d.outcome === "passed" || d.outcome === "failed" ? d.outcome : "pending"),
       clientRating: nul(d.clientRating as number | undefined),
       clientFeedback: nul(d.clientFeedback as string | undefined),
+      title: nul(d.title as string | undefined),
+      history: ((d.taHistory as Row[] | undefined) ?? []).map((h) => ({ ...h, reason: nul(h.reason) })),
+      feedback: ((d.taFeedback as Row[] | undefined) ?? []).map((f) => ({
+        byUserId: f.byUserId,
+        interviewer: f.interviewer,
+        ratings: Object.fromEntries(RATING_KEYS.map((k) => [k, nul(f[k] as number | undefined)])),
+        recommendation: nul(f.recommendation),
+        comments: nul(f.comments),
+        at: f.at,
+        updatedAt: f.updatedAt,
+      })),
       createdAt: d.createdAt,
     }),
     toDoc: async (r, cx, insert) => {
@@ -487,6 +501,19 @@ export const TABLES: Record<string, TableModel> = {
         interviewers: r.interviewers ?? [],
         durationMins: u(r.durationMins as number | null),
         confirmedAt: u(r.confirmedAt as number | null),
+        title: u(r.title as string | null),
+        // Nested nulls are stripped here: the commit only cleans the top level,
+        // and the validator takes a missing field, not a null one.
+        taHistory: ((r.history as Row[] | undefined) ?? []).map((h) => clean({ ...h, reason: u(h.reason) })),
+        taFeedback: ((r.feedback as Row[] | undefined) ?? []).map((f) => clean({
+          byUserId: f.byUserId,
+          interviewer: f.interviewer,
+          ...Object.fromEntries(RATING_KEYS.map((k) => [k, u((f.ratings as Row | undefined)?.[k] as number | null)])),
+          recommendation: u(f.recommendation),
+          comments: u(f.comments),
+          at: f.at,
+          updatedAt: f.updatedAt,
+        })),
       };
       if (insert) {
         const app = await cx.get(String(r.applicationId));

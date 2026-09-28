@@ -499,6 +499,9 @@ for (const opening of openings) {
         interviews.push({
           id: `iv_${app.id}`,
           applicationId: app.id,
+          title: "First interview",
+          history: [],
+          feedback: [],
           scheduledAt: scheduled,
           timezone: "Asia/Colombo",
           location: "Client office, Colombo",
