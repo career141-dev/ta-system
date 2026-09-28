@@ -695,7 +695,8 @@ export type AlertKind =
   | "advert_quiet"
   | "cv_waiting"
   | "followup_due"
-  | "review_reply_received";
+  | "review_reply_received"
+  | "opening_assigned";
 
 /** Spec §12.3 — only urgent kinds push outside working days. */
 export const URGENT_ALERTS: AlertKind[] = [
@@ -703,6 +704,7 @@ export const URGENT_ALERTS: AlertKind[] = [
   "interview_confirmation_escalation",
   "interview_followup",
   "review_reply_received",
+  "opening_assigned",
 ];
 
 export interface Alert {

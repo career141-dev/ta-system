@@ -88,8 +88,14 @@ export function ReviewDetailsForm({
 }) {
   const router = useRouter();
   const save = useInline(saveReviewDetailsInline);
-  const [cur, curAmount] = split(currentSalary, defaultCurrency);
-  const [exp, expAmount] = split(expectedSalary, defaultCurrency);
+  const [cur, initialCurAmount] = split(currentSalary, defaultCurrency);
+  const [exp, initialExpAmount] = split(expectedSalary, defaultCurrency);
+
+  const [curCurrency, setCurCurrency] = useState(cur);
+  const [curVal, setCurVal] = useState(initialCurAmount);
+  const [expCurrency, setExpCurrency] = useState(exp);
+  const [expVal, setExpVal] = useState(initialExpAmount);
+  const [npVal, setNpVal] = useState(noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : ""));
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [upload, setUpload] = useState<{
@@ -106,18 +112,38 @@ export function ReviewDetailsForm({
   }, [hasCv]);
 
   useEffect(() => {
+    const [c, ca] = split(currentSalary, defaultCurrency);
+    setCurCurrency(c);
+    setCurVal(ca);
+  }, [currentSalary, defaultCurrency]);
+
+  useEffect(() => {
+    const [e, ea] = split(expectedSalary, defaultCurrency);
+    setExpCurrency(e);
+    setExpVal(ea);
+  }, [expectedSalary, defaultCurrency]);
+
+  useEffect(() => {
+    setNpVal(noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : ""));
+  }, [noticePeriod, noticePeriodDays]);
+
+  useEffect(() => {
+    setCustomFields(parseInitialDetails(notes));
+  }, [notes]);
+
+  useEffect(() => {
     if (save.result?.ok) {
       router.refresh();
     }
   }, [save.result, router]);
 
   const hasCvNow = Boolean(hasCv || cvOnFile);
-  const hasNotice = noticePeriodDays != null || Boolean(noticePeriod?.trim());
+  const hasNotice = noticePeriodDays != null || Boolean(noticePeriod?.trim()) || Boolean(npVal.trim());
 
   // Current salary is not mandatory for Director review.
   const missing = [
     !hasCvNow && "CV",
-    !expectedSalary?.trim() && "expected salary",
+    !expectedSalary?.trim() && !expVal.trim() && "expected salary",
     !hasNotice && "notice period",
   ].filter(Boolean) as string[];
 
@@ -187,13 +213,22 @@ export function ReviewDetailsForm({
     setCustomFields((prev) => prev.filter((_, i) => i !== idx));
   };
 
-  const money = (name: string, currency: string, amount: string, placeholder: string, label: string) => (
+  const money = (
+    name: string,
+    currencyVal: string,
+    onCurrencyChange: (v: string) => void,
+    amountVal: string,
+    onAmountChange: (v: string) => void,
+    placeholder: string,
+    label: string
+  ) => (
     <label>
       <span className="mb-1 block text-[11.5px] text-ink-soft">{label}</span>
       <div className="flex">
         <select
           name={`${name}Currency`}
-          defaultValue={currency}
+          value={currencyVal}
+          onChange={(e) => onCurrencyChange(e.target.value)}
           aria-label={`${label} currency`}
           className="rounded-l-lg border border-r-0 border-rule bg-paper px-2 text-[12.5px] outline-none focus:border-brand"
         >
@@ -202,7 +237,13 @@ export function ReviewDetailsForm({
             <option key={c}>{c}</option>
           ))}
         </select>
-        <input name={name} defaultValue={amount} placeholder={placeholder} className={`${inputClass} rounded-l-none`} />
+        <input
+          name={name}
+          value={amountVal}
+          onChange={(e) => onAmountChange(e.target.value)}
+          placeholder={placeholder}
+          className={`${inputClass} rounded-l-none`}
+        />
       </div>
     </label>
   );
@@ -231,15 +272,16 @@ export function ReviewDetailsForm({
         </span>
       </div>
       <div className="mt-3 grid gap-3 sm:grid-cols-3">
-        {money("currentSalary", cur, curAmount, "e.g. 250,000 / Not disclosed", "Current salary (optional)")}
-        {money("expectedSalary", exp, expAmount, "300,000 a month", "Expected salary")}
+        {money("currentSalary", curCurrency, setCurCurrency, curVal, setCurVal, "e.g. 250,000 / 250k / Not disclosed", "Current salary (optional)")}
+        {money("expectedSalary", expCurrency, setExpCurrency, expVal, setExpVal, "e.g. 300,000 / 300k / Open to discuss", "Expected salary")}
         <label>
           <span className="mb-1 block text-[11.5px] text-ink-soft">Notice period</span>
           <input
             name="noticePeriod"
             type="text"
-            defaultValue={noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : "")}
-            placeholder="e.g. 30 days, Immediate, 2 months"
+            value={npVal}
+            onChange={(e) => setNpVal(e.target.value)}
+            placeholder="e.g. 30 days, 5 days, Immediate, 2 months"
             className={inputClass}
           />
         </label>

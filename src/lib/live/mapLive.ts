@@ -73,9 +73,10 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     skills: Array.isArray(c.skills) ? c.skills.map((s: unknown) => (typeof s === "object" && s && "value" in (s as object) ? String((s as { value: unknown }).value) : String(s))) : [],
     industries: Array.isArray(c.industries) ? c.industries.map(String) : c.sector ? [String(c.sector)] : [],
     noticePeriodDays: typeof c.noticePeriodDays === "number" ? c.noticePeriodDays : null,
-    // The words a candidate gave ("250k plus car") win over the number read from them.
-    currentSalary: (typeof c.taCurrentSalaryText === "string" && c.taCurrentSalaryText) || money(c.currentSalary, c.currentSalaryCurrency),
-    expectedSalary: (typeof c.taExpectedSalaryText === "string" && c.taExpectedSalaryText) || money(c.expectedSalary, c.expectedSalaryCurrency),
+    noticePeriod: typeof c.noticePeriod === "string" ? c.noticePeriod : typeof c.availability === "string" ? c.availability : typeof c.noticePeriodDays === "number" ? `${c.noticePeriodDays} days` : null,
+    // The words a candidate gave ("250k", "300k", "250k plus car") win over the number read from them.
+    currentSalary: (typeof c.taCurrentSalaryText === "string" && c.taCurrentSalaryText) || (typeof c.currentSalary === "string" && c.currentSalary) || (typeof c.currentSalaryNote === "string" && c.currentSalaryNote) || money(c.currentSalary, c.currentSalaryCurrency),
+    expectedSalary: (typeof c.taExpectedSalaryText === "string" && c.taExpectedSalaryText) || (typeof c.expectedSalary === "string" && c.expectedSalary) || (typeof c.expectedSalaryNote === "string" && c.expectedSalaryNote) || money(c.expectedSalary, c.expectedSalaryCurrency),
     cvFileName: typeof c.cvFileName === "string" ? c.cvFileName : null,
     workHistory: (history ?? [])
       .filter((h) => h && h.title)

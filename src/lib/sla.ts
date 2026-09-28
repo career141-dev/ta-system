@@ -1,6 +1,6 @@
 import { repo, setsForOpening } from "@/data/store";
 import { colomboDayStart } from "@/lib/calendar";
-import { PRIORITY_TARGET, URGENT_ALERTS, type AlertKind, type Id } from "@/data/types";
+import { ASSIGNMENT_LABEL, PRIORITY_TARGET, URGENT_ALERTS, type AlertKind, type Id } from "@/data/types";
 import { hasWorkingHours, isWorkingDay, workingHoursBetween } from "./calendar";
 import { extractReplyText, readNumbers } from "./reviewReply";
 
@@ -283,6 +283,33 @@ function computeAlertsAt(now: number): LiveAlert[] {
         dueAt: round.returnedAt!,
         assignedTo: [...new Set([round.sentBy, o.taLeadId, ...o.assignedTaIds])],
       });
+    }
+
+    // 4c. Role assignment alert — informs the TA that they were assigned to this opening.
+    // Active for recently assigned roles (within 7 days) while the opening is open.
+    for (const as of repo.assignments(o.id)) {
+      if (as.role === "director" || as.role === "client_contact") continue;
+      const assignedAt = as.assignedAt || o.assignedAt || o.createdAt;
+      if (assignedAt && now - assignedAt <= 7 * DAY) {
+        const assigner = as.assignedBy ? repo.user(as.assignedBy) : (o.taLeadId ? repo.user(o.taLeadId) : null);
+        const roleLabel = ASSIGNMENT_LABEL[as.role] || "recruiter";
+        const isUrgent = now - assignedAt <= 2 * DAY;
+
+        out.push({
+          id: `as_${o.id}_${as.userId}`,
+          kind: "opening_assigned",
+          urgent: isUrgent,
+          openingId: o.id,
+          subjectId: o.id,
+          detail: assigner
+            ? `${assigner.name} added you to ${o.title} as ${roleLabel}.`
+            : `You were assigned to ${o.title} as ${roleLabel}.`,
+          action: "Open role",
+          href: `/openings/${o.id}`,
+          dueAt: assignedAt,
+          assignedTo: [as.userId],
+        });
+      }
     }
 
     // 5 & 6. Interview confirmation, and the escalation if nobody has called.

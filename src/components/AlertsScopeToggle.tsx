@@ -12,9 +12,11 @@ import { useRouter } from "next/navigation";
 export function AlertsScopeToggle({
   isEveryone,
   q = "",
+  view,
 }: {
   isEveryone: boolean;
   q?: string;
+  view?: string;
 }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -24,10 +26,12 @@ export function AlertsScopeToggle({
     if ((target === "everyone" && isEveryone) || (target === "mine" && !isEveryone)) {
       return;
     }
-    const targetHref =
-      target === "everyone"
-        ? `/alerts?all=1${q ? `&q=${encodeURIComponent(q)}` : ""}`
-        : `/alerts${q ? `?q=${encodeURIComponent(q)}` : ""}`;
+    const params = new URLSearchParams();
+    if (target === "everyone") params.set("all", "1");
+    if (view && view !== "all") params.set("view", view);
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    const targetHref = qs ? `/alerts?${qs}` : "/alerts";
 
     setPendingTarget(target);
     startTransition(() => {
