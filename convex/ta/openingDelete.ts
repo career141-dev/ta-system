@@ -2,8 +2,9 @@
 //
 // Deleting an opening, and everything filed under it — but never a candidate.
 //
-// Pressed from the three-dots menu on an opening. The opening is marked as
-// being deleted at once (so it leaves every list straight away), then its data
+// Since 28 Sep the Delete button moves an opening to the Bin (ta/bin.ts), and
+// this runs seven days later — from the daily clean-up, or from "Delete now"
+// in the Bin. The opening is marked as being deleted at once (so it leaves every list straight away), then its data
 // is removed in batches, because a large opening carries thousands of rows —
 // applications, and under each one its calls, messages, events, reviews,
 // interviews and offers — more than one transaction may write.
@@ -89,31 +90,6 @@ export const preview = internalQuery({
       applications: apps.length,
       candidates: new Set(apps.map((a) => a.candidateId as string)).size,
     };
-  },
-});
-
-/** Mark the opening as being deleted and start removing its data. */
-export const start = internalMutation({
-  args: { actorId: v.string(), openingId: v.string() },
-  handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    if (!MAY_DELETE_OPENINGS.includes(user.role)) {
-      throw new Error("Only an admin, TA manager, director or ops can delete an opening. Close it instead.");
-    }
-    const jobId = ctx.db.normalizeId("jobs", args.openingId);
-    const job = jobId ? await ctx.db.get(jobId) : null;
-    if (!job) throw new Error("That opening no longer exists.");
-    if (job.deletingAt) return { ok: true as const, alreadyDeleting: true, title: job.title };
-
-    const now = Date.now();
-    await ctx.db.patch(job._id, {
-      deletingAt: now,
-      deletingBy: user._id,
-      status: "cancelled",
-      updatedAt: new Date(now).toISOString(),
-    });
-    await ctx.scheduler.runAfter(0, internal.ta.openingDelete.step, { jobId: job._id });
-    return { ok: true as const, alreadyDeleting: false, title: job.title };
   },
 });
 

@@ -209,7 +209,7 @@ export default async function OpeningsPage({
               <BulkConfirm
                 label="Delete"
                 noun={["opening", "openings"]}
-                warning="Each goes with its posts, pipeline, calls, messages and offers. Their candidates stay in the database. This cannot be undone."
+                warning="They move to the Bin and can be restored for 7 days, then are deleted for good. Their candidates are never deleted."
               />
             </BulkBar>
           )}

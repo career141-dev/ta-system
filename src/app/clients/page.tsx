@@ -127,7 +127,7 @@ export default async function ClientsPage({
             <BulkConfirm
               label="Delete"
               noun={["client", "clients"]}
-              warning="A client with openings filed under it is kept, and named."
+              warning="They move to the Bin and can be restored for 7 days. A client with openings filed under it is kept, and named."
             />
           </BulkBar>
         )}

@@ -19,6 +19,7 @@ import { internalMutation, internalQuery, type QueryCtx } from "../_generated/se
 import { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertFullAccess, optionalActor} from "./guard";
 import { candidateIdToPointId, candidateVectorPayload } from "../lib/vectorPayload";
+import { isGone } from "../../src/lib/bin";
 
 /**
  * A candidate row with their career attached.
@@ -149,6 +150,8 @@ export const applicationsFor = internalQuery({
     const out = [];
     for (const a of apps) {
       const job = await ctx.db.get(a.jobId);
+      // An opening in the Bin is not part of their history until it is restored.
+      if (job && isGone(job)) continue;
       out.push({
         id: a._id as string,
         openingId: a.jobId as string,
@@ -434,7 +437,11 @@ export const profile = internalQuery({
       candidate.cvUploadId ? ctx.db.get(candidate.cvUploadId) : Promise.resolve(null),
     ]);
 
-    const jobs = await Promise.all(applications.map((a) => ctx.db.get(a.jobId)));
+    const all = await Promise.all(applications.map((a) => ctx.db.get(a.jobId)));
+    // Matches on an opening in the Bin stay hidden until it is restored.
+    const kept = applications.map((a, i) => ({ a, job: all[i] })).filter(({ job }) => !(job && isGone(job)));
+    const shown = kept.map((k) => k.a);
+    const jobs = kept.map((k) => k.job);
 
     const cvTextInDb =
       (resume?.rawText && resume.rawText.trim().length >= 30 ? resume.rawText : null) ??
@@ -452,7 +459,7 @@ export const profile = internalQuery({
         email: r.email ?? null,
         relationship: r.relationship ?? null,
       })),
-      matches: applications.map((a, i) => ({
+      matches: shown.map((a, i) => ({
         applicationId: a._id as string,
         jobId: a.jobId as string,
         jobTitle: jobs[i]?.title ?? null,

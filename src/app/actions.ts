@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { can, isDeskWide, type Capability } from "@/lib/auth";
+import { can, isDeskWide, isReadOnly, type Capability } from "@/lib/auth";
+import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
 import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
@@ -1723,23 +1724,32 @@ export async function deleteClient(formData: FormData) {
   const user = await authorize(formData, "client.manage");
   const clientId = String(formData.get("clientId"));
 
-  const { isConvex } = await import("@/data/mode");
-  let res: { ok: boolean; openings?: number } = { ok: true };
-  if (isConvex()) {
-    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
-    const actor = await convexActorForEmail(user.email);
-    res = await freshAfter(convexMutation<{ ok: boolean; openings?: number }>)("ta/clients:remove", {
-      actorId: actor?._id,
-      clientId,
-    });
-  } else {
-    res = repo.deleteClient(clientId);
-  }
+  // Into the Bin for seven days, not gone (28 Sep) — see src/lib/bin.ts.
+  const res = await binClientNamed(user, clientId);
   revalidatePath("/clients");
   revalidatePath("/openings/new");
+  revalidatePath("/bin");
   // Refused because work is filed under it — the page says so rather than
   // pretending the press did nothing.
   if (!res.ok) redirect(`/clients?held=${res.openings}`);
+  redirect(`/clients?msg=${encodeURIComponent(`${res.name} moved to the Bin. It will be deleted for good on ${purgeDateLabel(res.binnedAt)}.`)}&tone=ok`);
+}
+
+/** Move one client to the Bin, in whichever store is behind the app. */
+async function binClientNamed(
+  user: User,
+  clientId: string,
+): Promise<{ ok: true; name: string; binnedAt: number } | { ok: false; openings: number }> {
+  if (isConvex()) {
+    const { convexActorForEmail } = await import("@/lib/convexServer");
+    const actor = await convexActorForEmail(user.email);
+    const r = await freshAfter(
+      convexMutation<{ ok: true; name: string; purgeAt: number } | { ok: false; openings: number; missing?: boolean }>,
+    )("ta/bin:binClient", { actorId: actor?._id, clientId });
+    return r.ok ? { ok: true, name: r.name, binnedAt: r.purgeAt - BIN_MS } : { ok: false, openings: r.openings };
+  }
+  const r = repo.binClient(clientId, user.id);
+  return r.ok ? { ok: true, name: r.name, binnedAt: r.purgeAt - BIN_MS } : r;
 }
 
 /** Contacts arrive as parallel arrays from the repeatable rows. */
@@ -1784,24 +1794,34 @@ export async function deleteOpening(formData: FormData) {
   // recruiter's.
   if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete an opening. Close it instead.");
   const openingId = String(formData.get("openingId"));
-  let title = repo.opening(openingId)?.title ?? "The opening";
+  // Into the Bin for seven days, not gone (28 Sep): it leaves every list and
+  // stops following up at once, and anyone can restore it from the Bin.
+  const r = await binOpeningNamed(user, openingId);
+  if (!r.ok) await fail(r.message);
   if (isConvex()) {
-    // The opening and all its data are removed in the backend, in batches
-    // (convex/ta/openingDelete.ts). Its candidates stay in the database.
-    try {
-      const r = await convexMutation<{ ok: true; title: string }>("ta/openingDelete:start", { actorId: user.id, openingId });
-      title = r.title;
-    } catch (e) {
-      await fail(backendMessage(e, "The opening could not be deleted."));
-    }
     const { resetStore } = await import("@/data/prime");
     resetStore();
-  } else {
-    const r = repo.deleteOpening(openingId);
-    if (!r.ok) await fail(r.message);
   }
   revalidatePath("/", "layout");
-  redirect(`/openings?msg=${encodeURIComponent(`"${title}" deleted. Its candidates are still in the database.`)}`);
+  const { title, purgeAt } = r as { title: string; purgeAt: number };
+  redirect(
+    `/openings?msg=${encodeURIComponent(`"${title}" moved to the Bin. It will be deleted for good on ${purgeDateLabel(purgeAt - BIN_MS)}.`)}&tone=ok`,
+  );
+}
+
+/** Move one opening to the Bin, in whichever store is behind the app. */
+async function binOpeningNamed(
+  user: User,
+  openingId: string,
+): Promise<{ ok: true; title: string; purgeAt: number } | { ok: false; message: string }> {
+  if (isConvex()) {
+    try {
+      return await convexMutation<{ ok: true; title: string; purgeAt: number }>("ta/bin:binOpening", { actorId: user.id, openingId });
+    } catch (e) {
+      return { ok: false, message: backendMessage(e, "The opening could not be deleted.") };
+    }
+  }
+  return repo.binOpening(openingId, user.id);
 }
 
 /**
@@ -1952,25 +1972,16 @@ export async function deleteOpenings(formData: FormData) {
       problems.push(`${title}: ${allowed.message}`);
       continue;
     }
-    if (isConvex()) {
-      try {
-        await convexMutation("ta/openingDelete:start", { actorId: user.id, openingId });
-        deleted++;
-      } catch (e) {
-        problems.push(`${title}: ${backendMessage(e, "could not be deleted")}`);
-      }
-    } else {
-      const r = repo.deleteOpening(openingId);
-      if (r.ok) deleted++;
-      else problems.push(`${title}: ${r.message}`);
-    }
+    const r = await binOpeningNamed(user, openingId);
+    if (r.ok) deleted++;
+    else problems.push(`${title}: ${r.message}`);
   }
   if (isConvex()) {
     const { resetStore } = await import("@/data/prime");
     resetStore();
   }
   revalidatePath("/", "layout");
-  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} deleted. Their candidates are still in the database.`;
+  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} moved to the Bin. They can be restored for ${BIN_DAYS} days.`;
   await (deleted ? (problems.length ? note : done) : fail)(problems.length ? `${said} Not deleted — ${problems.join("; ")}` : said);
 }
 
@@ -1979,16 +1990,13 @@ export async function deleteClients(formData: FormData) {
   const user = await authorize(formData, "client.manage");
   const ids = formData.getAll("clientId").map(String);
   if (ids.length === 0) await fail("Tick at least one client.");
-  const actor = isConvex() ? await (await import("@/lib/convexServer")).convexActorForEmail(user.email) : null;
   let deleted = 0;
   const kept: string[] = [];
   for (const clientId of ids) {
     const name = repo.client(clientId)?.name ?? "A client";
-    let res: { ok: boolean; openings?: number };
+    let res: { ok: true } | { ok: false; openings: number };
     try {
-      res = isConvex()
-        ? await convexMutation<{ ok: boolean; openings?: number }>("ta/clients:remove", { actorId: actor?._id, clientId })
-        : repo.deleteClient(clientId);
+      res = await binClientNamed(user, clientId);
     } catch (e) {
       kept.push(`${name} (${backendMessage(e, "could not be deleted")})`);
       continue;
@@ -1999,10 +2007,70 @@ export async function deleteClients(formData: FormData) {
   if (isConvex()) markTablesStale();
   revalidatePath("/clients");
   revalidatePath("/openings/new");
+  revalidatePath("/bin");
   // A client with work filed under it is kept, as the single delete does.
-  const said = `${deleted} ${deleted === 1 ? "client" : "clients"} deleted.`;
+  const said = `${deleted} ${deleted === 1 ? "client" : "clients"} moved to the Bin. They can be restored for ${BIN_DAYS} days.`;
   await (deleted ? (kept.length ? note : done) : fail)(
     kept.length ? `${said} Kept — they still have openings: ${kept.join(", ")}.` : said,
+  );
+}
+
+// ─── The Bin (28 Sep) ────────────────────────────────────────────────────────
+
+function binTarget(formData: FormData): { kind: "opening" | "client"; id: string } {
+  const kind = String(formData.get("kind")) === "client" ? "client" : "opening";
+  return { kind, id: String(formData.get("id") ?? "") };
+}
+
+/** Out of the Bin, as it was. Anyone on the desk may — undoing a delete loses nothing. */
+export async function restoreFromBin(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  if (isReadOnly(user) || user.role === "client") await fail("Only the desk can restore from the Bin.");
+  const { kind, id } = binTarget(formData);
+  let name = `The ${kind}`;
+  let withClient = false;
+  if (isConvex()) {
+    try {
+      const r = await convexMutation<{ ok: true; name: string; clientRestored?: boolean }>("ta/bin:restore", { actorId: user.id, kind, id });
+      name = r.name;
+      withClient = !!r.clientRestored;
+    } catch (e) {
+      await fail(backendMessage(e, "It could not be restored."));
+    }
+    const { resetStore } = await import("@/data/prime");
+    resetStore();
+  } else {
+    const r = repo.restoreFromBin(kind, id);
+    if (!r.ok) await fail(r.message);
+    else name = r.name;
+  }
+  revalidatePath("/", "layout");
+  await done(`${kind === "opening" ? `"${name}"` : name} restored${withClient ? ", with its client" : ""}.`);
+}
+
+/** Skip the seven days. A desk decision, like deleting an opening. */
+export async function deleteFromBinNow(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  if (!isDeskWide(user)) await fail("Only a lead, director or admin can delete from the Bin early.");
+  const { kind, id } = binTarget(formData);
+  let name = `The ${kind}`;
+  if (isConvex()) {
+    try {
+      name = (await convexMutation<{ ok: true; name: string }>("ta/bin:deleteNow", { actorId: user.id, kind, id })).name;
+    } catch (e) {
+      await fail(backendMessage(e, "It could not be deleted."));
+    }
+  } else {
+    const r = repo.deleteFromBin(kind, id);
+    if (!r.ok) await fail(r.message);
+  }
+  revalidatePath("/bin");
+  await done(
+    kind === "opening"
+      ? `${name === "The opening" ? name : `"${name}"`} deleted for good. Its candidates are still in the database.`
+      : `${name} deleted for good.`,
   );
 }
 

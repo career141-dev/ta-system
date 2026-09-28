@@ -17,6 +17,8 @@ export const list = internalQuery({
     await optionalActor(ctx, args.actorId);
     const rows = await ctx.db.query("clients").collect();
     return rows
+      // A client in the Bin (ta/bin.ts) has left the desk until it is restored.
+      .filter((c) => !c.binnedAt)
       .map((c) => ({
         id: c._id as string,
         name: c.name,
@@ -59,6 +61,9 @@ export const add = internalMutation({
       .withIndex("by_nameKey", (q) => q.eq("nameKey", key))
       .first();
     if (existing) {
+      // Adding a client that is in the Bin brings that one back rather than
+      // making a second record the Bin would later leave orphaned.
+      if (existing.binnedAt) await ctx.db.patch(existing._id, { binnedAt: undefined, binnedBy: undefined });
       return existing._id as string;
     }
     const id = await ctx.db.insert("clients", {
@@ -114,26 +119,7 @@ export const update = internalMutation({
   },
 });
 
-export const remove = internalMutation({
-  args: {
-    actorId: v.optional(v.string()),
-    clientId: v.string(),
-  },
-  handler: async (ctx, args) => {
-    await optionalActor(ctx, args.actorId);
-    const id = ctx.db.normalizeId("clients", args.clientId);
-    if (!id) return { ok: false, openings: 0 };
-    const openings = await ctx.db
-      .query("jobs")
-      .filter((q) => q.eq(q.field("clientId"), id))
-      .collect();
-    if (openings.length > 0) {
-      return { ok: false, openings: openings.length };
-    }
-    await ctx.db.delete(id);
-    return { ok: true, openings: 0 };
-  },
-});
+// Deleting a client moves it to the Bin — see ta/bin.ts `binClient`.
 
 export const saveContacts = internalMutation({
   args: {

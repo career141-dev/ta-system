@@ -154,6 +154,7 @@ import type * as ta_actor from "../ta/actor.js";
 import type * as ta_ageExperience from "../ta/ageExperience.js";
 import type * as ta_applications from "../ta/applications.js";
 import type * as ta_backfill from "../ta/backfill.js";
+import type * as ta_bin from "../ta/bin.js";
 import type * as ta_candidates from "../ta/candidates.js";
 import type * as ta_clients from "../ta/clients.js";
 import type * as ta_commit from "../ta/commit.js";
@@ -345,6 +346,7 @@ declare const fullApi: ApiFromModules<{
   "ta/ageExperience": typeof ta_ageExperience;
   "ta/applications": typeof ta_applications;
   "ta/backfill": typeof ta_backfill;
+  "ta/bin": typeof ta_bin;
   "ta/candidates": typeof ta_candidates;
   "ta/clients": typeof ta_clients;
   "ta/commit": typeof ta_commit;
