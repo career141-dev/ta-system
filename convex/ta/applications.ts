@@ -9,8 +9,9 @@
 //   ownership and then writing in two steps is how two recruiters both end up
 //   thinking they own somebody.
 //
-//   Sets. Five or more shortlisted closes a set, counted per recruiter per
-//   opening, because each recruiter sends their own end-of-day email.
+//   Sets. Five or more shortlisted in one day closes a set, counted per
+//   recruiter per opening, because each recruiter sends their own end-of-day
+//   email (convex/lib/sets.ts).
 //
 // Stage changes go through the backend's own state machine rather than
 // patching `currentStage` here, so the follow-up sequence, the stage counters,
@@ -23,9 +24,9 @@ import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
+import { nextSetFor } from "../lib/sets";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 
-const SET_SIZE = 5;
 
 
 export const listForOpening = internalQuery({
@@ -125,8 +126,8 @@ export const shortlist = internalMutation({
       return { ok: true as const, alreadyMine: true, setNumber: app.setNumber ?? null };
     }
 
-    const setNumber = await nextSetNumber(ctx, app.jobId, user._id);
     const now = Date.now();
+    const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
     await ctx.db.patch(appId, { ownerTaId: user._id, shortlistedAt: now, setNumber });
 
     // Shortlisting is what sends somebody to Follow-up on this desk.
@@ -155,30 +156,22 @@ export const shortlist = internalMutation({
 });
 
 /**
- * The set a newly shortlisted person joins.
- *
- * A set is five CVs, whatever the day (the desk, 25 September): the sixth
- * starts the next set. This replaced the 13 September rule, under which a set
- * took everyone shortlisted on the day it filled and could reach seven — and
- * which measured "today" from UTC midnight, not Colombo's. Sets numbered under
- * it are left alone: one already past five is simply full. Counted per
- * recruiter per opening; mirrored in src/data/store.ts.
+ * The set a newly shortlisted person joins. The rule is in convex/lib/sets.ts
+ * (the desk, 28 September): a set stays open across days until five or more
+ * are sent in one Colombo day. Counted per recruiter per opening; the local
+ * store in src/data/store.ts calls the same rule.
  */
 async function nextSetNumber(
   ctx: { db: any },
   jobId: Id<"jobs">,
   taId: Id<"users">,
+  now: number,
 ): Promise<number> {
   const all: Doc<"applications">[] = await ctx.db
     .query("applications")
     .withIndex("by_jobId", (q: any) => q.eq("jobId", jobId))
     .collect();
-  const mine = all.filter((a) => a.ownerTaId === taId && a.setNumber != null);
-  if (mine.length === 0) return 1;
-
-  const top = Math.max(...mine.map((a) => a.setNumber as number));
-  const inTop = mine.filter((a) => a.setNumber === top).length;
-  return inTop >= SET_SIZE ? top + 1 : top;
+  return nextSetFor(all.filter((a) => a.ownerTaId === taId && a.setNumber != null), now);
 }
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */

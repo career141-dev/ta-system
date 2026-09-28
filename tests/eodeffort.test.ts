@@ -1,6 +1,7 @@
 /**
- * The end-of-day L-sheet line (the desk, 25 Sep): SETS and DA come from the
- * records, every other column is the TA's to type.
+ * The end-of-day L-sheet line: SETS and DA come from the records (the desk,
+ * 25 Sep), SCOOP from mailed scoops (27 Sep) and ADD-ONS from the Add-on flag
+ * (28 Sep). L EFFORT, L, POST and BACK-UP are the TA's to type.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -20,7 +21,7 @@ const eq = (l: string, got: unknown, want: unknown) => {
 };
 const dbFile = () => path.join(tmp, ".data", "db.json");
 
-console.log("\neffortRow: only SETS and DA are counted");
+console.log("\neffortRow: SETS and DA are counted, the typed columns start blank");
 repo.reset();
 {
   const o = [...repo.openings()].sort((x, y) => repo.applications(y.id).length - repo.applications(x.id).length)[0];
@@ -42,7 +43,7 @@ repo.reset();
   for (const id of ids) repo.shortlist(id, ta.id);
 
   const row = effortRow(o.id, ta);
-  eq("SETS is the set the latest CV went into", row.sets, 2);
+  eq("seven sent in one day are all set 1", row.sets, 1);
   eq("DA counts today's WhatsApp shortlists", row.da, 2);
   eq(
     "the typed columns start blank",
@@ -63,7 +64,7 @@ repo.reset();
     [sent.lEffort, sent.scoop, sent.l, sent.post, sent.addOns, sent.backUp],
     [30, 3, 12, 1, null, 2],
   );
-  eq("SETS and DA keep the records' figures when not typed over", [sent.sets, sent.da], [2, 2]);
+  eq("SETS and DA keep the records' figures when not typed over", [sent.sets, sent.da], [1, 2]);
 
   // The day's total beside the set (the desk, 27 Sep): DA 2 + scoop 3 + L 12 + post 1 + back-up 2.
   eq("the day's total adds DA, scoop, L, post, add-ons and back-up", dayTotal(sent), 20);
@@ -99,6 +100,36 @@ repo.reset();
   for (const a of none.applications) if (a.openingId === o.id) a.scoopReceivedAt = null;
   fs.writeFileSync(dbFile(), JSON.stringify(none));
   eq("none mailed: SCOOP stays blank for the TA to type", effortRow(o.id, ta).scoop, null);
+}
+
+console.log("\neffortRow: ADD-ONS counts CVs flagged Add-on today");
+repo.reset();
+{
+  const o = [...repo.openings()].sort((x, y) => repo.applications(y.id).length - repo.applications(x.id).length)[0];
+  const ta = repo.users().find((u) => u.role === "ta")!;
+  const other = repo.users().find((u) => u.role === "ta" && u.id !== ta.id);
+  const [a1, a2, a3, a4, a5] = repo.applications(o.id).slice(0, 5).map((a) => a.id);
+  const raw = JSON.parse(fs.readFileSync(dbFile(), "utf8"));
+  for (const a of raw.applications) {
+    if (a.openingId !== o.id) continue;
+    a.isAddOn = false; a.addedOnAt = null;
+    if (a.id === a1 || a.id === a2) { a.ownerTaId = ta.id; a.isAddOn = true; a.addedOnAt = Date.now(); }
+    // Flagged yesterday: yesterday's add-on.
+    if (a.id === a3) { a.ownerTaId = ta.id; a.isAddOn = true; a.addedOnAt = Date.now() - 36 * 3_600_000; }
+    // Shortlisted today but not flagged: not an add-on.
+    if (a.id === a4) { a.ownerTaId = ta.id; a.shortlistedAt = Date.now(); }
+    // Another TA's add-on is theirs.
+    if (a.id === a5 && other) { a.ownerTaId = other.id; a.isAddOn = true; a.addedOnAt = Date.now(); }
+  }
+  fs.writeFileSync(dbFile(), JSON.stringify(raw));
+  const row = effortRow(o.id, ta);
+  eq("today's Add-on flags, this TA's only", row.addOns, 2);
+  eq("BACK-UP still starts blank for the TA to type", row.backUp, null);
+
+  const none = JSON.parse(fs.readFileSync(dbFile(), "utf8"));
+  for (const a of none.applications) if (a.openingId === o.id) { a.isAddOn = false; a.addedOnAt = null; }
+  fs.writeFileSync(dbFile(), JSON.stringify(none));
+  eq("none flagged: ADD-ONS is blank", effortRow(o.id, ta).addOns, null);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

@@ -50,7 +50,7 @@ if (matchedOpening) {
   eq("a database match moves to TA Follow-up", rm.ok && rm.stage, "ta_follow_up");
 }
 
-console.log("\nsets: five to a set, whatever the day, per TA");
+console.log("\nsets: five sent in one day closes a set, per TA");
 fresh();
 {
   const o = [...repo.openings()].sort((x, y) => repo.applications(y.id).length - repo.applications(x.id).length)[0];
@@ -61,7 +61,7 @@ fresh();
   for (const a of raw.applications) if (a.openingId === o.id) { a.setNumber = null; a.ownerTaId = null; a.shortlistedAt = null; a.stage = "new_cv"; }
   fs.writeFileSync(dbFile, JSON.stringify(raw));
   const ids = apps.map((a) => a.id);
-  eq("the opening has enough people to test with", ids.length >= 19, true);
+  eq("the opening has enough people to test with", ids.length >= 23, true);
   const setOf = (id: string) => repo.application(id)!.setNumber;
   const backdate = (id: string, days: number) => {
     const d = JSON.parse(fs.readFileSync(dbFile, "utf8"));
@@ -69,28 +69,35 @@ fresh();
     a.shortlistedAt -= days * DAY;
     fs.writeFileSync(dbFile, JSON.stringify(d));
   };
-  // The desk's example (25 Sep). Yesterday: four into set 1.
-  for (const id of ids.slice(0, 4)) { repo.shortlist(id, me.id); backdate(id, 1); }
-  eq("yesterday's four are set 1", ids.slice(0, 4).map(setOf), [1, 1, 1, 1]);
-  // Today: six more — one fills set 1, the other five are set 2.
-  for (const id of ids.slice(4, 10)) repo.shortlist(id, me.id);
-  eq("today's six: one finishes set 1, five make set 2", ids.slice(4, 10).map(setOf), [1, 2, 2, 2, 2, 2]);
-  eq("set 1 stops at five", setsForOpening(o.id, me.id).find((s) => s.setNumber === 1)?.count, 5);
-  eq("a set with five is closed the same day", setsForOpening(o.id, me.id).map((s) => s.status), ["closed", "closed"]);
-  repo.shortlist(ids[10], me.id);
-  eq("the next CV starts set 3", setOf(ids[10]), 3);
-  eq("set 3 is open", setsForOpening(o.id, me.id).find((s) => s.setNumber === 3)?.status, "open");
+  const statusOf = (n: number) => setsForOpening(o.id, me.id).find((s) => s.setNumber === n)?.status;
+  // The desk's example (28 Sep). Day 1: four CVs, set 1.
+  for (const id of ids.slice(0, 4)) { repo.shortlist(id, me.id); backdate(id, 3); }
+  eq("day 1's four are set 1", ids.slice(0, 4).map(setOf), [1, 1, 1, 1]);
+  // Day 2: three more — still set 1, and still open.
+  for (const id of ids.slice(4, 7)) { repo.shortlist(id, me.id); backdate(id, 2); }
+  eq("day 2's three are still set 1", ids.slice(4, 7).map(setOf), [1, 1, 1]);
+  eq("seven across two days do not close it", statusOf(1), "open");
+  // Day 3: six — all set 1, and that day closes it.
+  for (const id of ids.slice(7, 13)) repo.shortlist(id, me.id);
+  eq("day 3's six all join set 1", ids.slice(7, 13).map(setOf), [1, 1, 1, 1, 1, 1]);
+  eq("five in a day closes the set that day", statusOf(1), "closed");
+  for (const id of ids.slice(7, 13)) backdate(id, 1);
+  // Day 4: set 2 from zero.
+  repo.shortlist(ids[13], me.id);
+  eq("day 4 starts set 2", setOf(ids[13]), 2);
+  eq("set 2 is open", statusOf(2), "open");
 
-  repo.shortlist(ids[11], other.id);
-  eq("another TA on the same opening has their own set 1", setOf(ids[11]), 1);
+  repo.shortlist(ids[14], other.id);
+  eq("another TA on the same opening has their own set 1", setOf(ids[14]), 1);
 
-  // A set numbered under the old day rule can hold seven; it is simply full.
+  // A set numbered under an older rule keeps its number: seven sent on one
+  // day is a full day, so the next CV starts set 2.
   const legacy = JSON.parse(fs.readFileSync(dbFile, "utf8"));
-  for (const a of legacy.applications) if (ids.slice(12, 19).includes(a.id)) { a.ownerTaId = third.id; a.setNumber = 1; a.shortlistedAt = Date.now() - DAY; a.stage = "ta_follow_up"; }
+  for (const a of legacy.applications) if (ids.slice(15, 22).includes(a.id)) { a.ownerTaId = third.id; a.setNumber = 1; a.shortlistedAt = Date.now() - DAY; a.stage = "ta_follow_up"; }
   fs.writeFileSync(dbFile, JSON.stringify(legacy));
   const spare = repo.applications(o.id).find((a) => !a.ownerTaId)!;
   repo.shortlist(spare.id, third.id);
-  eq("an old set of seven is full: the next CV starts set 2", setOf(spare.id), 2);
+  eq("an old set of seven sent in a day is full: the next CV starts set 2", setOf(spare.id), 2);
 }
 
 console.log("\nintake files itself");

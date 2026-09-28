@@ -104,6 +104,9 @@ export function shortlistRows(
  * SCOOP is counted again from 27 Sep, but only scoops that reached the TA's
  * own mailbox from the Director, a TA Lead or Ops (convex/mailIntake). Blank
  * when there were none, and the TA adds WhatsApp ones on top.
+ *
+ * ADD-ONS is counted again from 28 Sep: the CVs this TA flagged Add-on today.
+ * BACK-UP stays typed for now.
  */
 export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow {
   // Today in Colombo, whatever the server's clock is set to.
@@ -127,7 +130,8 @@ export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow
     scoop: mailedScoops || null,
     l: null,
     post: null,
-    addOns: null,
+    // Only CVs the TA flagged Add-on today (28 September).
+    addOns: apps.filter((a) => a.ownerTaId === ta.id && a.isAddOn && (a.addedOnAt ?? 0) >= since).length || null,
     backUp: null,
   };
 }

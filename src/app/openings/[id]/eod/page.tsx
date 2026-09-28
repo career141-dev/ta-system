@@ -240,9 +240,9 @@ export default async function EodPage({
         alreadyOut={!!awaiting}
         openSetNote={
           latestSet
-            ? latestSet.count >= SET_SIZE
-              ? `Set ${latestSet.setNumber} has its five. The next CV you shortlist starts set ${latestSet.setNumber + 1}.`
-              : `Set ${latestSet.setNumber} has ${latestSet.count} of ${SET_SIZE}. The next CVs go into set ${latestSet.setNumber} until it reaches five.`
+            ? latestSet.status === "closed"
+              ? `Set ${latestSet.setNumber} is complete with ${latestSet.count} CVs. Set ${latestSet.setNumber + 1} starts the next day you shortlist.`
+              : `Set ${latestSet.setNumber} has ${latestSet.count} ${latestSet.count === 1 ? "CV" : "CVs"} so far. It is complete on a day you send ${SET_SIZE} or more.`
             : null
         }
       />

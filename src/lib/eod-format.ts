@@ -89,9 +89,10 @@ export const EFFORT_COLUMNS = [
  * The columns the TA types in; the records give SETS and DA (the desk,
  * 25 Sep — see effortRow in lib/eod). These start blank in the composer.
  * SCOOP left this list on 27 Sep: scoops mailed to the TA are counted, and
- * the TA adds the ones that came on WhatsApp.
+ * the TA adds the ones that came on WhatsApp. ADD-ONS left it on 28 Sep: the
+ * CVs flagged Add-on today are counted.
  */
-export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["lEffort", "l", "post", "addOns", "backUp"]);
+export const MANUAL_EFFORT: ReadonlySet<EffortKey> = new Set<EffortKey>(["lEffort", "l", "post", "backUp"]);
 
 /** The CVs the day brought, whatever the route — summed beside the set (the desk, 27 Sep). */
 export const DAY_TOTAL_KEYS: EffortKey[] = ["da", "scoop", "l", "post", "addOns", "backUp"];
