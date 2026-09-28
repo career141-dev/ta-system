@@ -1,6 +1,6 @@
 import { parseResearch } from "@/lib/headhunt";
 import { webEngine } from "@/lib/ai";
-import { groundedCompetitors, parseJsonObject, pickLinkedInCompany, pickOfficialSite, researchViaSearch, type ResearchDeps } from "@/lib/researchSearch";
+import { clientHints, groundedCompetitors, parseJsonObject, pickLinkedInCompany, pickOfficialSite, researchViaSearch, type ResearchDeps } from "@/lib/researchSearch";
 
 let passed = 0;
 let failed = 0;
@@ -118,6 +118,31 @@ console.log("\nresearch by search: a whole run, with the web faked");
     { ...deps, search: async () => ({ hits: [], credits: 1 }) },
   );
   eq("a search that simply found nothing still says nothing_found", !empty.ok && empty.reason, "nothing_found");
+
+  // 28 Sep: "SQ" was researched as another SQ. What the desk writes on the
+  // client wins over what the search guesses.
+  console.log("\nthe desk's notes on who the client is");
+  eq(
+    "links pulled out of free text",
+    clientHints("SQ Solutions (Pvt) Ltd, sqsolutions.lk — https://lk.linkedin.com/company/sq-solutions/about. IT services."),
+    {
+      website: "https://sqsolutions.lk",
+      linkedin: "https://www.linkedin.com/company/sq-solutions",
+      text: "SQ Solutions (Pvt) Ltd, sqsolutions.lk — https://lk.linkedin.com/company/sq-solutions/about. IT services.",
+    },
+  );
+  eq("Pvt.Ltd and e.g. are not websites", clientHints("SQ Pvt.Ltd, e.g. software").website, null);
+  eq("a directory is not their website", clientHints("https://www.crunchbase.com/organization/sq").website, null);
+
+  const told = await researchViaSearch(
+    { clientName: "SQ", industry: "IT", where: "Colombo", title: "CFO", clientNotes: "https://www.sqsolutions.lk and https://www.linkedin.com/company/sq-solutions" },
+    { ...deps, search: async (q) => (queries.push(q), { hits: [], credits: 1 }) },
+  );
+  eq("a website the desk gave is used, even when the search finds nothing", told.ok && [told.fields.websiteLink, told.fields.socialMedia], [
+    "https://www.sqsolutions.lk",
+    "https://www.linkedin.com/company/sq-solutions",
+  ]);
+  eq("and the searches carry its domain", queries.some((q) => q.startsWith('"SQ" sqsolutions.lk')), true);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

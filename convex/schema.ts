@@ -2217,6 +2217,8 @@ export default defineSchema({
     esaSignedAt: v.optional(v.union(v.number(), v.null())),
     status: v.union(v.literal("active"), v.literal("dormant"), v.literal("archived")),
     createdAt: v.number(),
+    /** The desk's notes on who the client is, for Research and Suggestions (28 Sep). */
+    researchNotes: v.optional(v.string()),
   })
     .index("by_nameKey", ["nameKey"])
     .index("by_status", ["status"]),

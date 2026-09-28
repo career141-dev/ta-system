@@ -32,11 +32,19 @@ import type { BenchmarkEntry, ProfileSuggestion } from "@/data/types";
  *   broad one — and at a tenth of a cent each, being stingy costs candidates.
  */
 
+/** The desk's notes on who the client is, as a line under the client's name — "SQ" alone is a dozen companies. */
+export function aboutClient(s: Pick<SourcingSpec, "clientNotes">): string {
+  const notes = (s.clientNotes ?? "").trim();
+  return notes ? `\nAbout the client, from the recruitment desk: ${notes.slice(0, 800)}` : "";
+}
+
 export interface SourcingSpec {
   title: string;
   clientName: string;
   /** Never surfaced. You do not headhunt from the company paying you. */
   clientCompanyNames: string[];
+  /** What the desk wrote about the client (28 Sep) — who they are, when the name alone is ambiguous. */
+  clientNotes?: string;
   jdText: string;
   locations: string[];
   targetNationalities: string[];
@@ -99,7 +107,7 @@ const PLAN_PROMPT = (s: SourcingSpec) => {
 
 THE ROLE
 Title: ${s.title}
-Client: ${s.clientName}
+Client: ${s.clientName}${aboutClient(s)}
 Location: ${s.locations.join(", ") || market}
 Market: ${market}
 Nationalities this role targets: ${sources}
@@ -545,7 +553,7 @@ const RANK_PROMPT = (spec: SourcingSpec, rows: string[]) => {
   return `You are building a sourcing longlist for Career141, a recruitment firm placing candidates across South Asia and the Gulf.
 
 THE ROLE
-${spec.title} — ${spec.clientName} — ${spec.locations.join(", ")} — ${spec.salaryNote}
+${spec.title} — ${spec.clientName} — ${spec.locations.join(", ")} — ${spec.salaryNote}${aboutClient(spec)}
 ${hard.length ? `\nHARD REQUIREMENTS FROM THE CLIENT — these override every other consideration:\n${hard.map((h) => `- ${h}`).join("\n")}\n` : ""}
 
 FULL SPECIFICATION
@@ -874,7 +882,7 @@ export interface BenchmarkRun {
 const BENCH_SORT_PROMPT = (s: SourcingSpec, rows: string[], competitors: string[]) => `You are sorting search results for a recruitment benchmark.
 
 ROLE: ${s.title}
-CLIENT: ${s.clientName}
+CLIENT: ${s.clientName}${aboutClient(s)}
 COMPETITORS: ${competitors.join("; ") || "(none listed)"}
 
 Each numbered line below is a LinkedIn search result: headline and snippet. Decide for each whether the person is:

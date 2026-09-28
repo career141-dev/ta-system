@@ -60,6 +60,7 @@ export function ClientCard({
   name,
   status,
   esaSignedAt,
+  researchNotes,
   contacts,
   canDelete,
   industry,
@@ -74,6 +75,7 @@ export function ClientCard({
   name: string;
   status: string;
   esaSignedAt: number | null;
+  researchNotes: string;
   contacts: Contact[];
   canDelete: boolean;
   industry: string;
@@ -227,6 +229,7 @@ export function ClientCard({
           industry={industry}
           status={status}
           esaSignedAt={esaSignedAt}
+          researchNotes={researchNotes}
           contacts={contacts}
           pane={pane}
           onClose={() => setPane(null)}
