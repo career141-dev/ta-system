@@ -67,6 +67,15 @@ export const state = {
    */
   version: 0,
   /*
+   * Bumped by every save — a commit from the store, or a write the backend
+   * made (resetStore). A load compares it before and after its fetch: if a
+   * save landed while the rows were on their way, those rows may predate it,
+   * and installing them would put back what was just deleted until the next
+   * refresh 30 s later (the desk, 29 Sep: "I delete something and it is not
+   * gone until I refresh").
+   */
+  writes: 0,
+  /*
    * The words the database contains, which is a different question from which
    * rows this page primed.
    *
@@ -145,6 +154,7 @@ export function resetStore(): void {
   state.openings = new Map();
   state.allAt = 0;
   state.version++;
+  state.writes++;
 }
 
 // ─── Saving ──────────────────────────────────────────────────────────────────
@@ -169,6 +179,7 @@ export function getCommitter(): typeof committer {
 /** Mark the working set changed, so derived indexes rebuild. */
 export function bumpPrimed(): void {
   state.version++;
+  state.writes++;
 }
 
 // ─── Temporary ids ───────────────────────────────────────────────────────────
