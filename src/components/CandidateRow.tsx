@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { Application, Candidate, User } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 import { RowActions } from "./RowActions";
-import { directorReviewBlockers } from "@/lib/pipeline";
+import { cameFromTables, directorReviewBlockers } from "@/lib/pipeline";
 import { claimCandidate } from "@/app/actions";
 import { SubmitButton } from "./Submit";
 import { RowCheck } from "./BulkSelect";
@@ -183,6 +183,7 @@ export function CandidateRow({
             isBackup={!!app.backupForApplicationId}
             canDecideDirector={canDecideDirector}
             canDecideClient={canDecideClient}
+            backToTables={cameFromTables(app, repo.linkVault(openingId))}
           />
         )}
 

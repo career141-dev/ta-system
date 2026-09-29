@@ -34,6 +34,7 @@ import { VerifyReferee } from "@/components/VerifyReferee";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { primeStore } from "@/data/prime";
+import { cameFromTables } from "@/lib/pipeline";
 
 /**
  * Finding 23 — Chat Log was a tab that explained why it was empty. A TA clicks
@@ -288,6 +289,7 @@ export default async function CandidateDrawer({
                   isBackup={!!app.backupForApplicationId}
                   canDecideDirector={canDecideDirector}
                   canDecideClient={canDecideClient}
+                  backToTables={cameFromTables(app, repo.linkVault(id))}
                 />
               )}
               <span className="text-[12px] text-ink-faint">In {(STAGE_LABEL[app.stage] ?? app.stage ?? "").toLowerCase()}{app.setNumber ? ` · set ${app.setNumber}` : ""}</span>
