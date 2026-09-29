@@ -7,7 +7,6 @@ import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
-import { LinkLevelHeader } from "./LinkLevelHeader";
 
 const PAGE_SIZE = 25;
 
@@ -98,15 +97,8 @@ export function LinkVaultTable({
       <AddLinkForm openingId={openingId} canNote={canNote} />
 
       {level > 0 && (
-        <LinkLevelHeader
-          openingId={openingId}
-          n={level}
-          label={mine ? levelLabel(mine) : `L${level}`}
-          name={mine?.name ?? ""}
-          rows={everyRow.filter(({ row }) => row.level === level && row.addedBy === user.id).length}
-          own={!!mine}
-          allHref={keep({ level: 0 })}
-        />
+        // Which L this is; rename and delete are on its ⋯ in the sidebar.
+        <h2 className="mb-2 text-[14px] font-semibold">{mine ? levelLabel(mine) : `L${level}`}</h2>
       )}
       <nav aria-label="Interest" className="mb-3 flex flex-wrap items-center gap-2">
         {INTEREST_TABS.map((t) => (

@@ -7,6 +7,7 @@ import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { addJobPost, addLinkLevel, deleteJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
 import { SubmitButton } from "./Submit";
+import { LinkLevelItem } from "./LinkLevelItem";
 import { RAIL_TOP } from "@/lib/chrome";
 
 export interface SidebarPost {
@@ -45,12 +46,15 @@ export function ProjectSidebar({
   openingId,
   posts,
   levels = [],
+  nextLevel = 1,
   canSeeSourcing = true,
 }: {
   openingId: string;
   posts: SidebarPost[];
   /** The viewer's L's under Excel Tables, started with its + (29 Sep). */
-  levels?: { n: number; label: string; count: number }[];
+  levels?: { n: number; label: string; name: string; count: number }[];
+  /** What the + starts next — numbers are not reused after a delete. */
+  nextLevel?: number;
   /** A client contact gets the pipeline from their shortlist on, and none of
    *  the machinery that produced it. */
   canSeeSourcing?: boolean;
@@ -163,8 +167,8 @@ export function ProjectSidebar({
                     <form action={addLinkLevel}>
                       <input type="hidden" name="openingId" value={openingId} />
                       <SubmitButton
-                        title={`Start L${levels.length + 1}`}
-                        aria-label={`Start L${levels.length + 1}`}
+                        title={`Start L${nextLevel}`}
+                        aria-label={`Start L${nextLevel}`}
                         pendingLabel="…"
                         className={`grid h-5 w-5 place-items-center rounded-md border text-[13px] font-semibold leading-none transition-all ${
                           path.startsWith(i.href) && !search.get("level")
@@ -178,16 +182,19 @@ export function ProjectSidebar({
                   </div>
                   {levels.length > 0 && (
                     <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
-                      {levels.map((l) => (
-                        <Link
-                          key={l.n}
-                          href={`${i.href}?level=${l.n}`}
-                          className={sub(path.startsWith(i.href) && search.get("level") === String(l.n)) + " justify-between"}
-                        >
-                          <span>{l.label}</span>
-                          <span className="tabular-nums text-ink-faint">{l.count}</span>
-                        </Link>
-                      ))}
+                      {levels.map((l) => {
+                        const on = path.startsWith(i.href) && search.get("level") === String(l.n);
+                        return (
+                          <LinkLevelItem
+                            key={l.n}
+                            openingId={openingId}
+                            href={`${i.href}?level=${l.n}`}
+                            level={l}
+                            active={on}
+                            className={sub(on)}
+                          />
+                        );
+                      })}
                     </div>
                   )}
                 </Fragment>

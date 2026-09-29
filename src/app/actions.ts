@@ -1686,6 +1686,10 @@ export async function deleteLinkLevel(formData: FormData) {
   redirect(`/openings/${openingId}/hh/links?msg=${encodeURIComponent(msg)}&tone=ok`);
 }
 
+export async function renameLinkLevelInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => renameLinkLevel(formData));
+}
+
 export async function setLinkInterestInline(_: ActionResult | null, formData: FormData) {
   return inline(() => setLinkInterest(formData));
 }

@@ -41,6 +41,7 @@ export default async function OpeningLayout({
     ? repo.linkLevels(id, user.id).map((l) => ({
         n: l.n,
         label: levelLabel(l),
+        name: l.name ?? "",
         count: mine.filter((r) => r.level === l.n).length,
       }))
     : [];
@@ -51,7 +52,7 @@ export default async function OpeningLayout({
       <div className="flex">
         {/* The rail reads ?post= to know which job post is showing. */}
         <Suspense fallback={<div className="w-[238px] shrink-0 border-r border-rule" />}>
-          <ProjectSidebar openingId={id} posts={posts} levels={levels} canSeeSourcing={seat.canSeeSourcing} />
+          <ProjectSidebar openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing} />
         </Suspense>
         <main className="min-w-0 flex-1 px-8 py-7">{children}</main>
       </div>
