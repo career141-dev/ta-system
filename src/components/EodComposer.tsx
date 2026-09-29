@@ -24,6 +24,8 @@ export function EodComposer({
   ccEmail,
   trackedAt,
   eodCc,
+  fixedCc,
+  canAddRecipients,
   rows: initialRows,
   effort,
   senderName,
@@ -41,6 +43,10 @@ export function EodComposer({
   trackedAt: string | null;
   /** Copied on every end-of-day email (People page). */
   eodCc: string | null;
+  /** Always copied on the Director's email; the TA cannot take these off. */
+  fixedCc: string[];
+  /** The Director's email lets the TA add more To and Cc addresses. */
+  canAddRecipients: boolean;
   rows: ShortlistRow[];
   effort: EffortRow;
   senderName: string;
@@ -57,6 +63,8 @@ export function EodComposer({
   const [introText, setIntroText] = useState(defaultIntro);
   const [outroText, setOutroText] = useState(defaultOutro);
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
+  const [extraTo, setExtraTo] = useState("");
+  const [extraCc, setExtraCc] = useState("");
 
   // Restore draft from localStorage on mount
   useEffect(() => {
@@ -72,6 +80,8 @@ export function EodComposer({
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
+        if (typeof saved.extraTo === "string") setExtraTo(saved.extraTo);
+        if (typeof saved.extraCc === "string") setExtraCc(saved.extraCc);
       }
     } catch {
       /* storage disabled */
@@ -83,12 +93,12 @@ export function EodComposer({
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ subject, baseSubject: initialSubject, introText, outroText, shortlistDraft }),
+        JSON.stringify({ subject, baseSubject: initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc }),
       );
     } catch {
       /* storage disabled */
     }
-  }, [draftKey, subject, initialSubject, introText, outroText, shortlistDraft]);
+  }, [draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc]);
 
   // Clear draft on send
   useEffect(() => {
@@ -156,6 +166,12 @@ export function EodComposer({
                 {eodCc}
               </span>
             )}
+            {fixedCc.length > 0 && (
+              <span>
+                <span className="text-ink-faint">Cc </span>
+                {fixedCc.join(", ")}
+              </span>
+            )}
             {trackedAt && (
               <span>
                 <span className="text-ink-faint">Cc </span>
@@ -170,6 +186,32 @@ export function EodComposer({
               Nothing about what they see changes. One box for the whole desk: the subject line
               above already says which client and which role, so the reply places itself.
             </p>
+          )}
+          {canAddRecipients && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-center gap-3">
+                <span className="w-[74px] shrink-0 text-[12.5px] font-medium text-ink-faint">Also To</span>
+                <input
+                  form="eod-send"
+                  name="extraTo"
+                  value={extraTo}
+                  onChange={(e) => setExtraTo(e.target.value)}
+                  placeholder="more addresses, separated by commas"
+                  className={`${inputClass} flex-1`}
+                />
+              </label>
+              <label className="flex items-center gap-3">
+                <span className="w-[74px] shrink-0 text-[12.5px] font-medium text-ink-faint">Also Cc</span>
+                <input
+                  form="eod-send"
+                  name="extraCc"
+                  value={extraCc}
+                  onChange={(e) => setExtraCc(e.target.value)}
+                  placeholder="more addresses, separated by commas"
+                  className={`${inputClass} flex-1`}
+                />
+              </label>
+            </div>
           )}
           <label className="flex items-center gap-3">
             <span className="text-[12.5px] font-medium text-ink-faint">Subject</span>

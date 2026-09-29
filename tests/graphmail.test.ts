@@ -1,5 +1,5 @@
 import { addressList, followUpCancelledReason, GRAPH_BASE, sendFollowUpMail, sendMailPayload } from "../convex/lib/graphMail";
-import { eodEmailHtml, DEFAULT_EOD_CC } from "../src/lib/eod-format";
+import { eodEmailHtml, DEFAULT_EOD_CC, EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "../src/lib/eod-format";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -131,6 +131,33 @@ async function main() {
   r = await sendFollowUpMail(eod, token, g.fetchImpl);
   eq("lock: only allow-listed copies", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["azim@career141.com"]);
   eq("address list de-duplicates", addressList(["A@b.co", "a@b.co", "", "x"]), ["a@b.co"]);
+
+  // ── End of day, 29 Sep: the desk's To and Cc, and what the TA adds ───────
+  eq("the desk's To", EOD_TO, "joborders@career141.com");
+  eq("the desk's fixed Cc", [...EOD_CC_DEFAULTS], ["shamra@career141.com", "asma@career141.com", "opsteam@career141.com", "cv@career141.com"]);
+  eq("typed addresses: split, lower-cased, once each", parseAddressList("A@b.co; c@d.lk,\n a@b.co"), { ok: ["a@b.co", "c@d.lk"], bad: [] });
+  eq("a typo is reported, not dropped", parseAddressList("good@x.com, oops"), { ok: ["good@x.com"], bad: ["oops"] });
+  eq("empty box adds nobody", parseAddressList("  "), { ok: [], bad: [] });
+  const desk = {
+    ...eod,
+    to: EOD_TO,
+    alsoTo: ["Boss@career141.com", EOD_TO, "bad"],
+    cc: [...EOD_CC_DEFAULTS, "extra@career141.com", "boss@career141.com", "shortlists@career141.com"],
+  };
+  env({ OUTREACH_LIVE: "true" });
+  g = fakeGraph();
+  r = await sendFollowUpMail(desk, token, g.fetchImpl);
+  eq("live: To is the job-orders box then the added address, once each", g.calls[0].payload.message.toRecipients.map((x: any) => x.emailAddress.address), ["joborders@career141.com", "boss@career141.com"]);
+  eq("live: the desk's Cc, the TA's, and the reply inbox — nobody twice", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["shamra@career141.com", "asma@career141.com", "opsteam@career141.com", "cv@career141.com", "extra@career141.com", "shortlists@career141.com"]);
+  eq("the result says who was on To", r.ok && r.alsoTo, ["boss@career141.com"]);
+  env({ OUTREACH_TEST_EMAIL: "qa@career141.com" });
+  g = fakeGraph();
+  r = await sendFollowUpMail(desk, token, g.fetchImpl);
+  eq("test mode: only the test mailbox, no added To or Cc", [g.calls[0].payload.message.toRecipients.length, g.calls[0].payload.message.ccRecipients], [1, undefined]);
+  env({ OUTREACH_LIVE: "true", C141_OUTBOUND_LOCK: "true", C141_OUTBOUND_ALLOW_EMAILS: "joborders@career141.com,boss@career141.com,cv@career141.com" });
+  g = fakeGraph();
+  r = await sendFollowUpMail(desk, token, g.fetchImpl);
+  eq("lock: only allow-listed To and Cc", [g.calls[0].payload.message.toRecipients.map((x: any) => x.emailAddress.address), g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address)], [["joborders@career141.com", "boss@career141.com"], ["cv@career141.com"]]);
 
   const body = eodEmailHtml({
     rows: [{ no: 1, name: "Nimal <Perera>", age: "34", notice: "30 days", notes: [">Currently at Hayleys"], currentCompany: "Hayleys", currentDesignation: "CFO", currentRemuneration: "LKR 450,000", expectedRemuneration: "LKR 600,000", applicationId: "a1" }],

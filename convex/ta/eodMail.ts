@@ -5,9 +5,9 @@
 // Sending the end-of-day email through Microsoft Graph.
 //
 // The TA System builds the email (src/app/actions.ts `sendEod`): from the TA's
-// own mailbox, to the Director, copying the TA Lead, the desk's end-of-day copy
-// (azim@career141.com until changed on the People page) and the shortlist
-// inbox that watches for the reply, with the day's two tables and the prepared
+// own mailbox, to the job-orders box (plus anyone the TA adds), copying the
+// desk's fixed Cc list (lib/eod-format EOD_CC_DEFAULTS), anyone the TA adds, and
+// the shortlist inbox that watches for the reply, with the day's two tables and the prepared
 // CVs attached. This only carries it, through the one Graph sender every email
 // uses (lib/graphMail.ts), so the test-mode and outbound-lock gates apply here
 // too. The Graph credentials live on the backend, which is why this is here and
@@ -22,6 +22,7 @@ export const send = internalAction({
   args: {
     from: v.string(),
     to: v.string(),
+    alsoTo: v.optional(v.array(v.string())),
     cc: v.array(v.string()),
     replyTo: v.array(v.string()),
     subject: v.string(),
@@ -35,6 +36,7 @@ export const send = internalAction({
         from: args.from,
         fallbackFrom: systemInbox,
         to: args.to,
+        alsoTo: args.alsoTo,
         cc: args.cc,
         replyTo: args.replyTo,
         subject: args.subject,
@@ -46,7 +48,7 @@ export const send = internalAction({
     );
     console.log(
       result.ok
-        ? `[End of day] Sent via Microsoft Graph from ${result.from} to ${result.to}, cc ${result.cc.join(", ") || "nobody"}${result.note}`
+        ? `[End of day] Sent via Microsoft Graph from ${result.from} to ${[result.to, ...(result.alsoTo ?? [])].join(", ")}, cc ${result.cc.join(", ") || "nobody"}${result.note}`
         : `[End of day] Not sent: ${result.error}`,
     );
     return result;
