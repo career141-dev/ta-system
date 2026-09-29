@@ -78,10 +78,11 @@ export async function POST(req: NextRequest) {
       fileType: file.type || "application/octet-stream",
     });
 
-    // Auto-extract references from the uploaded CV
+    // Referees from the new CV only for someone with none on file: the ones
+    // the desk has may have been checked or called (29 Sep).
     try {
       const { extractAndSaveReferees } = await import("@/lib/refereeExtractor");
-      await extractAndSaveReferees(app.candidateId, fileBuffer, file.type);
+      await extractAndSaveReferees(app.candidateId, fileBuffer, file.type, true);
     } catch (refErr) {
       console.warn("[cv upload] Referee extraction skipped:", refErr);
     }

@@ -12,13 +12,14 @@
  */
 
 import { blockSize, findPlacement, type Box } from "./placement";
+import { BOX, boxItems, clampBox, layoutBox, noticeText, roughMeasure } from "./preparedCv";
 
 const GREEN = { r: 0.047, g: 0.478, b: 0.047 }; // #0C7A0C
 const PAGE = { w: 595.28, h: 841.89 }; // A4 points
 
 export interface CvAnnotation {
-  currentSalary: string;
-  expectedSalary: string;
+  currentSalary?: string | null;
+  expectedSalary?: string | null;
   noticePeriod?: string | number | null;
   notes: string[];
 }
@@ -151,9 +152,6 @@ function wrap(text: string, maxChars: number): string[] {
   return lines;
 }
 
-/** Every line wraps at the block width — a package line like
- *  "BASIC RS 610K + FUEL + DRIVER ALLOWANCE 50K" runs off the page otherwise. */
-const BLOCK_CHARS = 46;
 
 export function isSystemNote(note: string): boolean {
   const t = (note ?? "").trim();
@@ -168,43 +166,25 @@ export function isSystemNote(note: string): boolean {
   );
 }
 
+/**
+ * The box's lines before wrapping (lib/preparedCv). Only what is known: an
+ * empty salary is left out rather than printed as "NOT DISCLOSED" (29 Sep).
+ */
+export function annotationItems(a: CvAnnotation): string[] {
+  const np = a.noticePeriod == null ? "" : String(a.noticePeriod).trim();
+  return boxItems({
+    currentSalary: a.currentSalary?.trim() || null,
+    expectedSalary: a.expectedSalary?.trim() || null,
+    noticePeriod: np ? noticeText({ noticePeriod: np, noticePeriodDays: null }) : null,
+    notes: (a.notes || [])
+      .map((n) => n.replace(/^[->•*]\s*/, "").trim())
+      .filter((n) => n.length > 0 && !isSystemNote(n)),
+  });
+}
+
+/** The wrapped lines, measured roughly — for the hand-built fallback PDF. */
 export function buildAnnotationLines(a: CvAnnotation): string[] {
-  const lines = ["CAREER141 CANDIDATE"];
-
-  const labelled = (label: string, value: string) => {
-    const parts = wrap(`${label} - ${value}`, BLOCK_CHARS);
-    lines.push(parts[0]);
-    for (const p of parts.slice(1)) lines.push(`  ${p}`);
-  };
-
-  labelled("CURRENT SALARY", a.currentSalary || "NOT DISCLOSED");
-  labelled("EXPECTED SALARY", a.expectedSalary || "OPEN TO DISCUSS");
-
-  if (a.noticePeriod !== undefined && a.noticePeriod !== null && String(a.noticePeriod).trim() !== "") {
-    const np = String(a.noticePeriod).trim();
-    const npFormatted =
-      np === "0" || np.toLowerCase() === "immediate"
-        ? "Immediate"
-        : /^\d+$/.test(np)
-          ? `${np} Days`
-          : np;
-    labelled("NOTICE PERIOD", npFormatted);
-  }
-
-  const validNotes = (a.notes || [])
-    .map((n) => n.trim())
-    .filter((n) => n.length > 0 && !isSystemNote(n));
-
-  if (validNotes.length) {
-    lines.push("NOTE:-");
-    for (const n of validNotes) {
-      const clean = n.replace(/^[->•*]\s*/, "").trim();
-      const parts = wrap(clean, BLOCK_CHARS - 2);
-      lines.push(`- ${parts[0]}`);
-      for (const p of parts.slice(1)) lines.push(`  ${p}`);
-    }
-  }
-  return lines;
+  return layoutBox(annotationItems(a), roughMeasure).lines.map((l) => l.text);
 }
 
 export function extractCareer141BoxFromText(rawText: string | null | undefined): {
@@ -305,12 +285,66 @@ export async function extractCareer141BoxFromPdfBuffer(
  * original intact without stamping duplicate "NOT DISCLOSED" banners.
  * If no box exists, it stamps it at the top right.
  */
+type TextItem = { str?: unknown; transform: number[]; width?: unknown };
+
+/**
+ * How much of the page an old, printed Career141 box takes up, from its
+ * heading (items[at]) down through its own lines — salary, notice, notes —
+ * in the heading's column, while each line is within a line or two of the
+ * last. The new box is drawn over all of it: drawn only over the heading, the
+ * old salary showed under the new one (the desk, 29 Sep). PDF y runs upward.
+ */
+export function printedBoxExtent(items: TextItem[], at: number): { width: number; height: number } {
+  const x0 = items[at].transform[4];
+  const y0 = items[at].transform[5];
+  let bottom = y0;
+  let right = x0;
+  for (let j = at; j < items.length && j < at + 80; j++) {
+    const it = items[j];
+    if (typeof it.str !== "string" || !it.str.trim()) continue;
+    const ix = it.transform[4];
+    const iy = it.transform[5];
+    if (Math.abs(ix - x0) > 60) continue;
+    if (iy > bottom + 2 || bottom - iy > 24) {
+      if (iy < bottom) break;
+      continue;
+    }
+    bottom = Math.min(bottom, iy);
+    right = Math.max(right, ix + (Number(it.width) || 0));
+  }
+  // From just above the heading to just below the last line, padded both sides.
+  return { height: y0 + 14 - (bottom - 6), width: right - x0 + 16 };
+}
+
 export async function stampPdfWithCareer141Box(
   basePdfBuffer: ArrayBuffer | Buffer,
   annotation: CvAnnotation,
   override?: { x: number; y: number },
   fileName?: string | null,
 ): Promise<Uint8Array> {
+  return (await stampCareer141Box(basePdfBuffer, annotation, override, fileName)).bytes;
+}
+
+/** Where the box went, from the page's top-left, for the Prepared CV editor. */
+export interface StampedBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  lines: { text: string; bold: boolean }[];
+}
+
+/**
+ * The stamp, and where it landed — the editor shows the box at exactly this
+ * spot and size, so dragging starts from what prints. `box` is null when there
+ * was nothing to stamp.
+ */
+export async function stampCareer141Box(
+  basePdfBuffer: ArrayBuffer | Buffer,
+  annotation: CvAnnotation,
+  override?: { x: number; y: number },
+  fileName?: string | null,
+): Promise<{ bytes: Uint8Array; box: StampedBox | null; page: { width: number; height: number } }> {
   const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
   const doc = await PDFDocument.load(basePdfBuffer, { ignoreEncryption: true });
   if (doc.getPageCount() === 0) throw new Error("PDF has no pages");
@@ -324,6 +358,9 @@ export async function stampPdfWithCareer141Box(
   let foundBoxWidth: number | null = null;
   let foundBoxHeight: number | null = null;
   let hasExistingBox = false;
+  // A box printed into the page's text (not an annotation): its heading was
+  // found, and the new box must cover the heading AND the lines under it.
+  let foundInText = false;
 
   // 1. First check if there is an existing FreeText / text annotation on page 0
   const annots = page.node.Annots();
@@ -368,24 +405,34 @@ export async function stampPdfWithCareer141Box(
       if (pdfDoc.numPages >= 1) {
         const p1 = await pdfDoc.getPage(1);
         const tc = await p1.getTextContent();
+        let at = -1;
         for (let i = 0; i < tc.items.length; i++) {
           const it = tc.items[i];
           if (!("str" in it) || typeof it.str !== "string") continue;
-          if (/CAREER\s*141/i.test(it.str)) {
+          const next = tc.items[i + 1];
+          if (
+            /CAREER\s*141/i.test(it.str) ||
+            (/CAREER/i.test(it.str) && next && "str" in next && typeof next.str === "string" && /141/i.test(next.str))
+          ) {
             hasExistingBox = true;
+            foundInText = true;
             foundX = it.transform[4];
             foundY = it.transform[5];
+            at = i;
             break;
           }
-          if (/CAREER/i.test(it.str) && i + 1 < tc.items.length) {
-            const next = tc.items[i + 1];
-            if ("str" in next && typeof next.str === "string" && /141/i.test(next.str)) {
-              hasExistingBox = true;
-              foundX = it.transform[4];
-              foundY = it.transform[5];
-              break;
-            }
-          }
+        }
+        /*
+         * The old box's own lines — salary, notice, notes — sit under its
+         * heading. They were left showing below the new box, which was drawn
+         * upward from the heading, so an edited salary appeared next to the
+         * old one (the desk, 29 Sep). Follow the lines down from the heading,
+         * in its column, while each is within a line or two of the last.
+         */
+        if (at >= 0) {
+          const extent = printedBoxExtent(tc.items, at);
+          foundBoxHeight = extent.height;
+          foundBoxWidth = extent.width;
         }
       }
     } catch {
@@ -398,19 +445,13 @@ export async function stampPdfWithCareer141Box(
     (fileName && /CAREER\s*141/i.test(fileName))
   );
 
-  const hasRealUserSalaries = Boolean(
-    (annotation.currentSalary && !/^NOT\s+DISCLOSED$/i.test(annotation.currentSalary.trim())) ||
-    (annotation.expectedSalary && !/^OPEN\s+TO\s+DISCUSS$/i.test(annotation.expectedSalary.trim())) ||
-    (annotation.noticePeriod != null && String(annotation.noticePeriod).trim() !== "")
-  );
+  const items = annotationItems(annotation);
+  const pageSize = { width: pageWidth, height: pageHeight };
 
-  const customNotes = (annotation.notes || []).filter((n) => !isSystemNote(n));
-
-  // If no user-edited details or override were provided,
-  // do NOT stamp a dummy/empty box — preserve the original PDF cleanly as-is.
-  // The box will only appear when Director review details are filled and saved.
-  if (!hasRealUserSalaries && !override && customNotes.length === 0) {
-    return new Uint8Array(basePdfBuffer);
+  // Nothing recorded for them: no box at all, the original PDF as it is. A
+  // typed "Not disclosed" is an answer and counts; an empty field does not.
+  if (items.length <= 1) {
+    return { bytes: new Uint8Array(basePdfBuffer), box: null, page: pageSize };
   }
 
   // If re-stamping on a PDF that had a FreeText annotation, strip the old annotation so it does not collide
@@ -428,29 +469,29 @@ export async function stampPdfWithCareer141Box(
     page.node.set(doc.context.obj("Annots"), doc.context.obj(remainingRefs));
   }
 
-  const lines = buildAnnotationLines(annotation);
-  const padding = 8;
-  const lineHeight = 12.5;
-  const longest = Math.max(...lines.map((l) => l.length), 1);
-  const boxWidth = Math.max(
-    foundBoxWidth ?? 0,
-    Math.min(320, Math.max(250, longest * 5.2 + padding * 2 + 10))
-  );
-  const boxHeight = Math.max(
-    foundBoxHeight ?? 0,
-    padding * 2 + lines.length * lineHeight + 4
-  );
+  // One width and one font size (lib/preparedCv BOX): more text makes the box
+  // taller, never the text smaller or bigger. Wrapped with the font's metrics.
+  const layout = layoutBox(items, (t, size, bold) => (bold ? fontBold : font).widthOfTextAtSize(t, size));
+  const { padding, lineHeight } = BOX;
+  // Wide enough to cover a box already on the CV, never narrower than ours.
+  const boxWidth = Math.max(foundBoxWidth ?? 0, layout.width);
+  const boxHeight = Math.max(foundBoxHeight ?? 0, layout.height);
 
   let x: number;
   let y: number;
 
   if (override && Number.isFinite(override.x) && Number.isFinite(override.y)) {
-    x = override.x;
-    y = pageHeight - override.y - boxHeight;
+    // The TA's spot, measured from the top-left and kept inside the page.
+    const at = clampBox(override, { width: boxWidth, height: boxHeight }, pageSize);
+    x = at.x;
+    y = pageHeight - at.y - boxHeight;
   } else if (foundX !== null && foundY !== null) {
-    // Found existing Career141 box: place the updated box right over it
-    x = Math.max(15, Math.min(pageWidth - boxWidth - 15, foundX));
-    y = Math.max(15, Math.min(pageHeight - boxHeight - 15, foundY));
+    // Found existing Career141 box: place the updated box right over it.
+    // A printed box is covered from just above its heading down; an
+    // annotation's rectangle already starts at its bottom edge.
+    x = Math.max(15, Math.min(pageWidth - boxWidth - 15, foundX - (foundInText ? padding : 0)));
+    const bottom = foundInText ? foundY + 14 - boxHeight : foundY;
+    y = Math.max(15, Math.min(pageHeight - boxHeight - 15, bottom));
   } else {
     // Default top-right placement
     x = Math.max(15, pageWidth - boxWidth - 25);
@@ -470,19 +511,22 @@ export async function stampPdfWithCareer141Box(
   });
 
   let textY = y + boxHeight - padding - 10;
-  for (let i = 0; i < lines.length; i++) {
-    const isHeader = i === 0;
-    page.drawText(lines[i], {
+  for (const line of layout.lines) {
+    page.drawText(line.text, {
       x: x + padding,
       y: textY,
-      size: isHeader ? 9.5 : 8.5,
-      font: isHeader ? fontBold : font,
+      size: line.bold ? BOX.headerSize : BOX.bodySize,
+      font: line.bold ? fontBold : font,
       color: rgb(GREEN.r, GREEN.g, GREEN.b),
     });
     textY -= lineHeight;
   }
 
-  return await doc.save();
+  return {
+    bytes: await doc.save(),
+    box: { x, y: pageHeight - y - boxHeight, width: boxWidth, height: boxHeight, lines: layout.lines },
+    page: pageSize,
+  };
 }
 
 function textBlock(
@@ -527,7 +571,7 @@ export function buildPreparedCv(
   const yTop = override?.y ?? placement.box.y;
   const y = PAGE.h - yTop - 12;
 
-  const content = [page.content, textBlock(lines, x, y, 10, 11.2, GREEN)].join("\n");
+  const content = [page.content, textBlock(lines, x, y, BOX.bodySize, BOX.lineHeight, GREEN)].join("\n");
 
   const objects: string[] = [
     "<< /Type /Catalog /Pages 2 0 R >>",

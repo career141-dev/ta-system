@@ -280,6 +280,7 @@ export const TABLES: Record<string, TableModel> = {
         setNumber: nul(r.setNumber as number | null),
         rating: nul(r.rating as number | null),
         taNotes: r.notes ?? [],
+        taPreparedCvBox: u(r.preparedCvBox as { x: number; y: number } | null),
         reviewNotes: (r.reviewNotes as unknown[] | undefined) ?? [],
         statusA: nul(r.statusA as string | null),
         statusB: nul(r.statusB as string | null),

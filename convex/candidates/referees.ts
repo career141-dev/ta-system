@@ -34,6 +34,7 @@ export const saveExtractedReferees = mutation({
         notes: v.optional(v.string()),
       })
     ),
+    onlyIfNone: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     // A re-read that found nobody leaves what is on file alone. It used to
@@ -44,6 +45,9 @@ export const saveExtractedReferees = mutation({
       .query("referees")
       .withIndex("by_candidateId", (q) => q.eq("candidateId", args.candidateId))
       .collect();
+    // A replaced CV adds referees only to someone who has none (29 Sep): the
+    // ones on file may have been checked, called or typed in by the desk.
+    if (args.onlyIfNone && existing.length > 0) return [];
 
     for (const ref of existing) {
       await ctx.db.delete(ref._id);

@@ -6,6 +6,7 @@ import { api } from "../_generated/api";
 import { checkAndAdvanceFollowUp, updateFollowUpFlags } from "../pipeline/followUpHelper";
 import { requireFullAccess } from "../lib/permissions";
 import { answersById } from "../lib/followUpScope";
+import { CV_FILE_KEYS, fillBlanksOnly } from "../lib/fillBlanks";
 
 export const listCandidates = query({
   args: {
@@ -453,9 +454,15 @@ export const updateCandidateFields = mutation({
     extractionModel: v.optional(v.string()),
     gender: v.optional(v.string()),
     genderSource: v.optional(v.string()),
+    /**
+     * The TA replaced this candidate's CV (ta/cv.ts attach, 29 Sep): the new
+     * file only fills what is empty. Nothing the desk holds is overwritten or
+     * cleared, and the candidate is not merged with anyone — the TA chose them.
+     */
+    fillBlanksOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { candidateId, rawText, rawTextKey, jobHistory, embedding, hasEmbedding, ...candidateArgs } = args;
+    const { candidateId, rawText, rawTextKey, jobHistory, embedding, hasEmbedding, fillBlanksOnly: keepDetails, ...candidateArgs } = args;
 
     let pastJobTitles: string[] | undefined = undefined;
     if (jobHistory && jobHistory.length > 0) {
@@ -501,8 +508,11 @@ export const updateCandidateFields = mutation({
           .first()
       : null;
 
-    const survivor = [lookupByEmail, lookupByPhone, lookupByLinkedin, lookupByFileHash]
-      .find((c) => c && c._id !== candidateId);
+    // A replaced CV belongs to the candidate the TA replaced it on; matching
+    // it to someone else by phone or email would delete this one as a ghost.
+    const survivor = keepDetails
+      ? undefined
+      : [lookupByEmail, lookupByPhone, lookupByLinkedin, lookupByFileHash].find((c) => c && c._id !== candidateId);
 
     if (survivor) {
       console.log(
@@ -555,9 +565,14 @@ export const updateCandidateFields = mutation({
     }
 
     // Filter out undefined values to only update provided fields
-    const definedPatches = Object.fromEntries(
+    let definedPatches = Object.fromEntries(
       Object.entries(patches).filter(([_, v]) => v !== undefined)
     );
+    if (keepDetails) {
+      // Only the file and what was empty; the status is not reset either.
+      delete definedPatches.status;
+      definedPatches = fillBlanksOnly((await ctx.db.get(targetId)) as Record<string, unknown> | null, definedPatches, CV_FILE_KEYS);
+    }
 
     await ctx.db.patch(targetId, definedPatches);
 
@@ -573,7 +588,8 @@ export const updateCandidateFields = mutation({
         const resumeUpdates: Record<string, any> = {};
         if (rawText !== undefined) resumeUpdates.rawText = rawText;
         if (rawTextKey !== undefined) resumeUpdates.rawTextKey = rawTextKey;
-        if (jobHistory !== undefined) resumeUpdates.jobHistory = jobHistory;
+        // Work history the desk already has stays when a CV is replaced.
+        if (jobHistory !== undefined && !(keepDetails && existingResume.jobHistory?.length)) resumeUpdates.jobHistory = jobHistory;
         if (updatedEmbedding !== undefined) {
           resumeUpdates.embedding = updatedEmbedding;
         }

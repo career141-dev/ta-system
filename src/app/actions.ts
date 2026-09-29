@@ -1432,6 +1432,35 @@ export async function declineOffer(formData: FormData) {
   );
 }
 
+/**
+ * Where the CAREER141 box sits on the Prepared CV (29 Sep): the TA drags it on
+ * the Prepared CV tab and it stays there for the download and the end-of-day
+ * attachment. Points from page 1's top-left; "reset" goes back to automatic.
+ */
+export async function savePreparedCvBox(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  if (String(formData.get("reset")) === "1") {
+    repo.setPreparedCvBox(appId, null);
+  } else {
+    const x = Number(formData.get("x"));
+    const y = Number(formData.get("y"));
+    // A page is at most a few thousand points; anything else is not a drag.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 5000 || y > 5000) {
+      await fail("That position could not be read. Drag the box again.");
+    }
+    repo.setPreparedCvBox(appId, { x: Math.round(x), y: Math.round(y) });
+  }
+  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
+  await done(String(formData.get("reset")) === "1" ? "Box back in its automatic place." : "Box position saved.");
+}
+
+export async function savePreparedCvBoxInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => savePreparedCvBox(formData));
+}
+
 export async function toggleAddOn(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
@@ -4266,6 +4295,28 @@ export async function sendEod(formData: FormData) {
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
+
+    // What the TA corrected on the email goes onto the candidate too, so their
+    // CV's box, profile and Director review read the same (the desk, 29 Sep).
+    // Only after it went, and a detail that cannot be saved does not undo the
+    // send — it is said.
+    const { eodDetailChanges } = await import("@/lib/eod");
+    let unsaved = 0;
+    for (const edited of editedRows) {
+      if (!fresh.includes(edited.applicationId)) continue;
+      const base = baseRows.find((b) => b.applicationId === edited.applicationId);
+      const app = repo.application(edited.applicationId);
+      const change = base && app ? eodDetailChanges(base, edited) : null;
+      if (!change || !app) continue;
+      try {
+        repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
+        invalidateCandidate(app.candidateId);
+      } catch (e) {
+        unsaved++;
+        console.warn("[eod] details not saved to the candidate:", (e as Error).message);
+      }
+    }
+    if (unsaved) sentNote += ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`;
   }
 
   // Anyone sent to the Director straight out of a finished follow-up moves to
@@ -4360,11 +4411,13 @@ async function emailEod(input: {
 
   const { shortlistRows, effortRow } = await import("@/lib/eod");
   const { eodEmailHtml } = await import("@/lib/eod-format");
-  const { buildPreparedCv, preparedCvFileName } = await import("@/lib/pdf");
+  const { preparedCvFileName } = await import("@/lib/pdf");
 
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
   const byId = new Map((input.rows ?? shortlistRows(openingId, null, "director")).map((r) => [r.applicationId, r]));
+  // The rows as built from the records, before the TA's edits on the page.
+  const baseById = new Map(shortlistRows(openingId, null, "director").map((r) => [r.applicationId, r]));
   const rows = input.applicationIds
     .map((id, i) => {
       const existing = byId.get(id);
@@ -4401,59 +4454,17 @@ async function emailEod(input: {
     const c = app ? repo.candidate(app.candidateId) : null;
     if (!app || !c) continue;
     try {
-      let pdfBytes: Uint8Array | null = null;
-      const { isConvex } = await import("@/data/mode");
-      if (isConvex()) {
-        try {
-          const link = await backend.cvLink({ id: null }, c.id, false);
-          if (link.ok && link.url) {
-            const cvRes = await fetch(link.url);
-            if (cvRes.ok) {
-              const baseBuf = await cvRes.arrayBuffer();
-              const { stampPdfWithCareer141Box } = await import("@/lib/pdf");
-              pdfBytes = await stampPdfWithCareer141Box(
-                baseBuf,
-                {
-                  currentSalary: r.currentRemuneration,
-                  expectedSalary: r.expectedRemuneration,
-                  notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
-                },
-                undefined,
-                link.fileName ?? c.cvFileName
-              );
-            }
-          }
-        } catch {
-          /* Fallback */
-        }
-      }
-
-      if (!pdfBytes) {
-        const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
-        const { pdf } = buildPreparedCv(
-          {
-            fullName: c.fullName,
-            currentTitle: c.currentTitle,
-            currentEmployer: c.currentEmployer,
-            location: c.location,
-            totalExperienceYears: c.totalExperienceYears,
-            educationDegree: c.educationDegree,
-            educationInstitution: c.educationInstitution,
-            summary: profile?.summary ?? null,
-            career: profile?.career ?? [],
-            education: profile?.education ?? [],
-            skills: c.skills ?? [],
-            languages: profile?.languages ?? [],
-            certifications: profile?.certifications ?? [],
-          },
-          {
-            currentSalary: r.currentRemuneration,
-            expectedSalary: r.expectedRemuneration,
-            notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
-          },
-        );
-        pdfBytes = new Uint8Array(pdf);
-      }
+      // The same file as the drawer's Prepared CV (lib/preparedCvFile, 29 Sep):
+      // what the desk holds, with the box where the TA put it — and whatever
+      // the TA changed on this email, so the attachment says what the email
+      // says. A field they did not touch comes from the record, so the table's
+      // own "Not disclosed" for an unknown salary never reaches the CV.
+      const { preparedCvFile } = await import("@/lib/preparedCvFile");
+      const { boxContent } = await import("@/lib/preparedCv");
+      const { boxOverrides, eodDetailChanges } = await import("@/lib/eod-format");
+      const base = baseById.get(r.applicationId);
+      const annotation = { ...boxContent(app, c, opening), ...(base ? boxOverrides(eodDetailChanges(base, r)) : {}) };
+      const pdfBytes = (await preparedCvFile(app, c, opening, { annotation })).bytes;
 
       const base64 = Buffer.from(pdfBytes).toString("base64");
       if (used + base64.length > EOD_ATTACHMENT_BUDGET) {

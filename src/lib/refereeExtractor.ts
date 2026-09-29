@@ -307,7 +307,9 @@ export function parseRefereesRegex(text: string): ExtractedReferee[] {
 export async function extractAndSaveReferees(
   candidateId: string,
   buffer: Buffer,
-  fileType?: string
+  fileType?: string,
+  /** Only add referees when the candidate has none — a replaced CV (29 Sep). */
+  onlyIfNone = false,
 ): Promise<ExtractedReferee[]> {
   try {
     const rawText = await extractRawText(buffer, fileType);
@@ -320,6 +322,7 @@ export async function extractAndSaveReferees(
       await convexMutation("candidates/referees:saveExtractedReferees", {
         candidateId,
         referees,
+        ...(onlyIfNone ? { onlyIfNone: true } : {}),
       });
       console.log(`[refereeExtractor] Successfully saved ${referees.length} referees to database for candidate ${candidateId}`);
     } else {

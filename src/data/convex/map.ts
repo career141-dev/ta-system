@@ -183,6 +183,12 @@ function statusToPosition(status: string): Opening["positionStatus"] {
   return "active";
 }
 
+/** A saved Prepared CV box position, or null when it is not a usable one. */
+function validBox(v: unknown): { x: number; y: number } | null {
+  const b = v as { x?: unknown; y?: unknown } | null | undefined;
+  return b && Number.isFinite(b.x) && Number.isFinite(b.y) ? { x: Number(b.x), y: Number(b.y) } : null;
+}
+
 function numOrNull(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
@@ -244,6 +250,7 @@ export function mapApplication(a: BackendApplication): Application {
     setNumber: a.setNumber,
     rating: numOrNull(a.rating),
     notes: Array.isArray(a.notes) ? (a.notes as string[]) : [],
+    preparedCvBox: validBox(a.preparedCvBox),
     reviewNotes: Array.isArray(a.reviewNotes) ? (a.reviewNotes as never) : [],
 
     statusA: typeof a.statusA === "string" ? a.statusA : null,

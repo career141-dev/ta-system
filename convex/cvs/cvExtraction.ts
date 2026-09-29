@@ -985,6 +985,9 @@ export async function runCvExtraction(
 
   // Check if upload is still valid/running, abort if already marked cancelled
   const cvUpload = await ctx.runQuery(internal.candidates.candidates.getCvUpload, { cvUploadId });
+  // The TA replaced this candidate's CV (ta/cv.ts attach): the file changes,
+  // the details on file do not — the new CV only fills what is empty (29 Sep).
+  const keepDetails = !!cvUpload?.replaceKeepDetails;
   if (!cvUpload || cvUpload.status === "cancelled") {
     console.log(`[CvExtraction] Aborting extraction for upload ${cvUploadId} because status is: ${cvUpload?.status}`);
     return null;
@@ -1172,6 +1175,7 @@ export async function runCvExtraction(
         fileHash,
         cvUploadId,
         extractionModel,
+        ...(keepDetails ? { fillBlanksOnly: true } : {}),
       });
     } else {
       createdStub = true;
@@ -1360,6 +1364,7 @@ export async function runCvExtraction(
         extractionModel: extractionModel || OPENROUTER_PRIMARY_MODEL,
         gender: genderRead?.gender,
         genderSource: genderRead?.source,
+        ...(keepDetails ? { fillBlanksOnly: true } : {}),
       });
 
       if (updateRes?.targetCandidateId) {
@@ -1383,6 +1388,7 @@ export async function runCvExtraction(
           await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
             candidateId,
             referees: validReferees,
+            ...(keepDetails ? { onlyIfNone: true } : {}),
           });
         }
       }
@@ -1441,6 +1447,9 @@ export async function runCvExtraction(
     } else if (postRoutingOn() && isEmailChannel(sourceChannel)) {
       // No post matched the email: the person stays in the database. The
       // guess below put people on jobs they never applied for (22 September).
+    } else if (keepDetails) {
+      // A replaced CV is a new file for someone already on their jobs, not an
+      // applicant to match against every open job.
     } else {
       // Tier 3 Fallback: If Subject & Body matching didn't yield a jobId during ingestion,
       // match the extracted candidate details against all active jobs after CV extraction.
@@ -1505,7 +1514,9 @@ export async function runCvExtraction(
     }
 
     // Otherwise NEVER delete the candidate stub. Preserve the candidate and application in New CVs so no applicant is lost!
-    if (candidateId) {
+    // A replaced CV's candidate is a real, named person already on file: a
+    // failed read must not rename them after the file (29 Sep).
+    if (candidateId && !keepDetails) {
       const fallbackName = cvUpload?.fileName
         ? cvUpload.fileName.replace(/\.[^/.]+$/, "").replace(/[_\-]/g, " ")
         : "Applicant";

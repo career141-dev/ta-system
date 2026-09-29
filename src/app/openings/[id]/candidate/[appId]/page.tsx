@@ -35,6 +35,7 @@ import { VerifyReferee } from "@/components/VerifyReferee";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { primeStore } from "@/data/prime";
+import { PreparedCvEditor } from "@/components/PreparedCvEditor";
 import { cameFromTables } from "@/lib/pipeline";
 
 /**
@@ -42,11 +43,11 @@ import { cameFromTables } from "@/lib/pipeline";
  * it repeatedly and gets the same paragraph. It comes back the day the WhatsApp
  * ingestion is connected and has threads to show.
  */
-const TABS = ["cv", "history", "call", "chat", "reference", "company_refs"] as const;
+const TABS = ["cv", "prepared", "history", "call", "chat", "reference", "company_refs"] as const;
 const TAB_LABEL: Record<(typeof TABS)[number], string> = {
   // Calls and messages stay apart: one is a TA's account of a conversation,
   // the other is the conversation.
-  cv: "CV", history: "History", call: "Call Log", chat: "Chat", reference: "Reference", company_refs: "Company Reference",
+  cv: "CV", prepared: "Prepared CV", history: "History", call: "Call Log", chat: "Chat", reference: "Reference", company_refs: "Company Reference",
 };
 
 export default async function CandidateDrawer({
@@ -153,6 +154,7 @@ export default async function CandidateDrawer({
   // Counted off the real records now, not from the application's shape.
   const COUNTS: Record<(typeof TABS)[number], number | null> = {
     cv: null,
+    prepared: null,
     history: repo.events(app.id).length + 1,
     call: calls.length + repo.outreach(app.id).filter((m) => m.channel === "ai_call").length,
     chat: repo.outreach(app.id).filter((m) => m.channel !== "ai_call").length,
@@ -162,7 +164,7 @@ export default async function CandidateDrawer({
 
   // The candidate's own CV file, looked up only when the tab shows it.
   const cvFile =
-    tab === "cv" && isConvex()
+    (tab === "cv" || tab === "prepared") && isConvex()
       ? await backend.cvFile(c.id).catch((e) => ({
           ok: false as const,
           reason: "storage_unavailable" as const,
@@ -463,6 +465,17 @@ export default async function CandidateDrawer({
               )}
             </div>
           </>
+        )}
+
+        {/* The CV as the Director and client get it, with the CAREER141 box the
+            TA can drag into place (29 Sep). */}
+        {tab === "prepared" && (
+          <PreparedCvEditor
+            appId={app.id}
+            openingId={opening.id}
+            pdfSrc={cvFile?.ok && (cvIsPdf || cvIsWord) ? (cvIsWord ? `${cvHref}&view=pdf` : cvHref) : null}
+            canEdit={!locked}
+          />
         )}
 
         {tab === "history" && (

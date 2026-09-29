@@ -1398,6 +1398,14 @@ const rawRepo = {
   },
 
   /** Spec §12.1 — an add-on notifies the TA and the lead. */
+  /** Where the TA put the CAREER141 box on the Prepared CV; null goes back to automatic. */
+  setPreparedCvBox(appId: Id, box: { x: number; y: number } | null) {
+    mutate((db) => {
+      const a = db.applications.find((x) => x.id === appId);
+      if (a) a.preparedCvBox = box;
+    });
+  },
+
   setAddOn(appId: Id, on: boolean) {
     mutate((db) => {
       const a = db.applications.find((x) => x.id === appId);
@@ -1757,12 +1765,13 @@ const rawRepo = {
   saveReviewDetails(
     applicationId: Id,
     candidateId: Id,
-    notes: string[],
-    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays">>,
+    /** The TA's notes; null leaves them as they are. */
+    notes: string[] | null,
+    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">>,
   ) {
     mutate((db) => {
       const a = db.applications.find((x) => x.id === applicationId);
-      if (a) {
+      if (a && notes) {
         const systemNotes = (a.notes ?? []).filter((n) => /^Matched from the database/i.test(n) || /^>Historical/i.test(n));
         a.notes = [...systemNotes, ...notes];
       }
