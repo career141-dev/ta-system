@@ -6,7 +6,7 @@ import { can, isDeskWide } from "@/lib/auth";
 import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
-import { INTEREST_TABS, dayLabel, dayOf, interestOf, linkDays } from "@/lib/linkViews";
+import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
 
 const PAGE_SIZE = 25;
 
@@ -24,7 +24,7 @@ export function LinkVaultTable({
   user,
   q = "",
   status = "",
-  day = 0,
+  level = 0,
   addons = false,
   page = 1,
 }: {
@@ -34,8 +34,8 @@ export function LinkVaultTable({
   q?: string;
   /** Pending, interested or not interested (INTEREST_TABS); "" is all. */
   status?: string;
-  /** The L number — the day the rows were added; 0 is every day. */
-  day?: number;
+  /** The L (started with + in the sidebar); 0 is every L. */
+  level?: number;
   /** Add-ons only. */
   addons?: boolean;
   page?: number;
@@ -49,39 +49,40 @@ export function LinkVaultTable({
   const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
   // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
   const canNote = can(user, "link.note").ok;
-  // Each row's application here, its interest and its L number, worked out
-  // once: the tabs, their counts and the rows all read the same answer.
-  const days = linkDays(everyRow.map((x) => x.row));
+  // Each row's application here and its interest, worked out once: the tabs,
+  // their counts and the rows all read the same answer.
   const facts = new Map(
     everyRow.map(({ row: r }) => {
       const app = r.candidateId
         ? (repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId) ?? null)
         : null;
-      return [r.id, { app, interest: interestOf(r, app), day: dayOf(r, days) }] as const;
+      return [r.id, { app, interest: interestOf(r, app) }] as const;
     }),
   );
-  const pass = (r: (typeof everyRow)[number]["row"], f: { status: string; day: number; addons: boolean }) => {
+  const pass = (r: (typeof everyRow)[number]["row"], f: { status: string; level: number; addons: boolean }) => {
     const x = facts.get(r.id)!;
-    return (!f.status || x.interest === f.status) && (!f.day || x.day === f.day) && (!f.addons || !!r.isAddOn);
+    return (!f.status || x.interest === f.status) && (!f.level || r.level === f.level) && (!f.addons || !!r.isAddOn);
   };
   const searched = everyRow.filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber));
-  const matching = searched.filter(({ row }) => pass(row, { status, day, addons }));
-  const params = (next: Partial<{ status: string; day: number; addons: boolean }>) => {
-    const f = { status, day, addons, ...next };
+  const matching = searched.filter(({ row }) => pass(row, { status, level, addons }));
+  const params = (next: Partial<{ status: string; level: number; addons: boolean }>) => {
+    const f = { status, level, addons, ...next };
     const out: Record<string, string> = {};
     if (q) out.q = q;
     if (f.status) out.status = f.status;
-    if (f.day) out.day = String(f.day);
+    if (f.level) out.level = String(f.level);
     if (f.addons) out.addons = "1";
     return out;
   };
-  const keep = (next: Partial<{ status: string; day: number; addons: boolean }>) => {
+  const keep = (next: Partial<{ status: string; level: number; addons: boolean }>) => {
     const qs = new URLSearchParams(params(next)).toString();
     return `/openings/${openingId}/hh/links${qs ? `?${qs}` : ""}`;
   };
   // A tab's count is what pressing it would show, with the other filters kept.
-  const count = (next: Partial<{ status: string; day: number; addons: boolean }>) =>
-    searched.filter(({ row }) => pass(row, { status, day, addons, ...next })).length;
+  const count = (next: Partial<{ status: string; level: number; addons: boolean }>) =>
+    searched.filter(({ row }) => pass(row, { status, level, addons, ...next })).length;
+  // The viewer's own L's, for the name of the one being looked at.
+  const started = repo.linkLevels(openingId, user.id)[level - 1];
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const scoped = slicePage(matching, current, PAGE_SIZE);
@@ -95,36 +96,34 @@ export function LinkVaultTable({
     <>
       <AddLinkForm openingId={openingId} canNote={canNote} />
 
-      <nav aria-label="Interest" className="mb-2 flex flex-wrap items-center gap-2">
+      {level > 0 && (
+        <p className="mb-2 flex items-center gap-2 text-[13px]">
+          <span className="font-semibold">{started ? levelLabel(level, started) : `L${level}`}</span>
+          <a href={keep({ level: 0 })} className="text-[12px] text-ink-soft hover:text-ink hover:underline">
+            Show all Ls
+          </a>
+        </p>
+      )}
+      <nav aria-label="Interest" className="mb-3 flex flex-wrap items-center gap-2">
         {INTEREST_TABS.map((t) => (
           <a key={t.key || "all"} href={keep({ status: t.key })} aria-current={status === t.key ? "page" : undefined} className={pill(status === t.key)}>
             {t.label} <span className="tabular-nums text-ink-faint">{count({ status: t.key })}</span>
           </a>
         ))}
-      </nav>
-      <nav aria-label="Day added" className="mb-3 flex flex-wrap items-center gap-1.5">
-        {[0, ...days.map((_, i) => i + 1)].map((n) => (
-          <a
-            key={n}
-            href={keep({ day: n })}
-            aria-current={day === n ? "page" : undefined}
-            className={`${pill(day === n)} px-3 py-1 text-[12px]`}
-          >
-            {n ? dayLabel(n, days[n - 1]) : "All Ls"} <span className="tabular-nums text-ink-faint">{count({ day: n })}</span>
-          </a>
-        ))}
         <span aria-hidden className="mx-1 h-4 w-px bg-rule" />
-        <a href={keep({ addons: !addons })} aria-current={addons ? "page" : undefined} className={`${pill(addons)} px-3 py-1 text-[12px]`}>
+        <a href={keep({ addons: !addons })} aria-current={addons ? "page" : undefined} className={pill(addons)}>
           Add-ons only <span className="tabular-nums text-ink-faint">{count({ addons: true })}</span>
         </a>
       </nav>
 
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">
-        {rows.length === 0 && (q || status || day || addons) && everyRow.length > 0 ? (
+        {rows.length === 0 && (q || status || level || addons) && everyRow.length > 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
             {q
               ? "Nobody in this table matches that search."
-              : addons && !status && !day
+              : level && !status && !addons
+                ? `Nothing in L${level} yet. Links you add now go into your latest L.`
+                : addons && !status && !level
                 ? "No add-ons in this table yet. Links added while your stage is Add-on are tagged, or tag one with its Add-on button."
                 : "Nobody here matches those filters."}
           </p>
@@ -151,7 +150,6 @@ export function LinkVaultTable({
                     addedByName={userNames[r.addedBy] ?? "—"}
                     onPipeline={facts.get(r.id)!.app}
                     interest={facts.get(r.id)!.interest}
-                    day={facts.get(r.id)!.day}
                     userNames={userNames}
                     canNote={canNote}
                     viewerId={user.id}

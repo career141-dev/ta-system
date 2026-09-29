@@ -1644,6 +1644,20 @@ export async function setLinkInterest(formData: FormData) {
   return done("Interest status updated — Not interested.");
 }
 
+/**
+ * The + beside Excel Tables in the sidebar (the desk, 29 Sep): starts this
+ * TA's next L on the opening — L1, then L2 — and opens it. Links they add
+ * from now on go into it.
+ */
+export async function addLinkLevel(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const n = repo.addLinkLevel(openingId, user.id);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  redirect(`/openings/${openingId}/hh/links?level=${n}`);
+}
+
 export async function setLinkInterestInline(_: ActionResult | null, formData: FormData) {
   return inline(() => setLinkInterest(formData));
 }

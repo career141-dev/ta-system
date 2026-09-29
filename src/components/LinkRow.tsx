@@ -66,7 +66,6 @@ export function LinkRow({
   userNames,
   onPipeline = null,
   interest = "pending",
-  day = 0,
   canNote = false,
   viewerId = "",
 }: {
@@ -78,8 +77,6 @@ export function LinkRow({
   onPipeline?: Pick<Application, "id" | "stage"> | null;
   /** Pending, Interested or Not interested (lib/linkViews interestOf). */
   interest?: Interest;
-  /** L number: the day it was added, 1 for the first day on this opening. */
-  day?: number;
   /** A lead, director, admin or ops: may leave notes for the TA. */
   canNote?: boolean;
   /** Who is looking — the author of a note may remove it. */
@@ -187,11 +184,11 @@ export function LinkRow({
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}
                 </span>
-                {day > 0 && (
-                  <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium tabular-nums text-ink-soft" title="The day it was added">
-                    L{day}
+                {r.level ? (
+                  <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium tabular-nums text-ink-soft" title="The L it was added under">
+                    L{r.level}
                   </span>
-                )}
+                ) : null}
                 <span
                   className={`rounded px-1.5 py-[3px] text-[10.5px] font-medium ${
                     interest === "interested" ? "bg-brand-soft text-brand" : interest === "not_interested" ? "bg-danger-soft text-danger" : "bg-warn-soft text-ink-soft"

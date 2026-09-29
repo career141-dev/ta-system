@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
+import { levelLabel } from "@/lib/linkViews";
 
 export default async function OpeningLayout({
   children,
@@ -34,6 +35,15 @@ export default async function OpeningLayout({
     status: p.status,
     count: apps.filter((a) => a.jobPostId === p.id).length,
   }));
+  // The L's this person started under Excel Tables, with how many rows each holds.
+  const mine = seat.canSeeSourcing ? repo.linkVault(id).filter((r) => r.addedBy === user.id) : [];
+  const levels = seat.canSeeSourcing
+    ? repo.linkLevels(id, user.id).map((at, i) => ({
+        n: i + 1,
+        label: levelLabel(i + 1, at),
+        count: mine.filter((r) => r.level === i + 1).length,
+      }))
+    : [];
 
   return (
     <>
@@ -41,7 +51,7 @@ export default async function OpeningLayout({
       <div className="flex">
         {/* The rail reads ?post= to know which job post is showing. */}
         <Suspense fallback={<div className="w-[238px] shrink-0 border-r border-rule" />}>
-          <ProjectSidebar openingId={id} posts={posts} canSeeSourcing={seat.canSeeSourcing} />
+          <ProjectSidebar openingId={id} posts={posts} levels={levels} canSeeSourcing={seat.canSeeSourcing} />
         </Suspense>
         <main className="min-w-0 flex-1 px-8 py-7">{children}</main>
       </div>

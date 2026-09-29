@@ -1,9 +1,9 @@
 /**
- * Excel Tables by interest and by day (the desk, 29 Sep): All / Pending /
- * Interested / Not interested over the same rows, L1, L2… by the day a row was
- * added, and the pipeline moving with the row — Interested is on the pipeline,
- * Not interested is Rejected there. Nobody is deleted or copied. Uses the same
- * store calls the setLinkInterest action makes, on a disposable seed.
+ * Excel Tables by interest and by L (the desk, 29 Sep): All / Pending /
+ * Interested / Not interested over the same rows, L1, L2… as each TA starts
+ * them with the sidebar's +, and the pipeline moving with the row — Interested
+ * is on the pipeline, Not interested is Rejected there. Nobody is deleted or
+ * copied. Uses the same store calls the actions make, on a disposable seed.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -12,7 +12,7 @@ import path from "node:path";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-interest-"));
 process.chdir(tmp);
 const { repo } = await import("@/data/store");
-const { interestOf, linkDays, dayOf, dayLabel, readLinkFilters } = await import("@/lib/linkViews");
+const { interestOf, levelLabel, readLinkFilters } = await import("@/lib/linkViews");
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -20,9 +20,8 @@ const eq = (l: string, got: unknown, want: unknown) => {
   ok ? pass++ : fail++;
   console.log(`${ok ? "  ok  " : "  FAIL"} ${l}${ok ? "" : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
 };
-const DAY = 86_400_000;
 
-const ta = repo.users().find((u) => u.role === "ta")!;
+const [ta, other] = repo.users().filter((u) => u.role === "ta");
 const o = repo.openings()[0];
 const appOf = (entryId: string) => {
   const e = repo.linkEntry(entryId)!;
@@ -69,26 +68,31 @@ console.log("\nPending → Interested → Not interested, one person throughout"
   eq("one application for them here", repo.applicationsForCandidate(repo.linkEntry(a)!.candidateId!).filter((x) => x.openingId === o.id).length, 1);
 }
 
-console.log("\nL1, L2, L3: the days rows were added");
+console.log("\nL1, L2, L3: started with + by each TA");
 {
-  const rows = [{ createdAt: Date.UTC(2026, 8, 26, 5) }, { createdAt: Date.UTC(2026, 8, 26, 12) }, { createdAt: Date.UTC(2026, 8, 28, 5) }, { createdAt: Date.UTC(2026, 8, 27, 5) }];
-  const days = linkDays(rows);
-  eq("three working days", days.length, 3);
-  eq("the first day is L1, whatever order the rows come in", rows.map((r) => dayOf(r, days)), [1, 1, 3, 2]);
-  eq("labelled with the day it stands for", /^L2 · 27 Sept?$/.test(dayLabel(2, days[1])), true);
-  // A late-evening row in Colombo is that Colombo day, not the UTC one.
-  eq("days are Colombo days", dayOf({ createdAt: Date.UTC(2026, 8, 26, 20) }, linkDays([{ createdAt: Date.UTC(2026, 8, 26, 20) }, { createdAt: Date.UTC(2026, 8, 27, 5) }])), 1);
+  const before = repo.addLink(o.id, "https://linkedin.com/in/before-any-l", ta.id, "Before Any");
+  eq("before their first +, a row is in no L", repo.linkEntry(before)!.level ?? null, null);
+  eq("+ starts L1", repo.addLinkLevel(o.id, ta.id), 1);
+  const one = repo.addLink(o.id, "https://linkedin.com/in/in-l-one", ta.id, "In One");
+  eq("a row added now is in L1", repo.linkEntry(one)!.level, 1);
+  eq("+ again starts L2", repo.addLinkLevel(o.id, ta.id), 2);
+  const two = repo.addLink(o.id, "https://linkedin.com/in/in-l-two", ta.id, "In Two");
+  eq("and rows go into the latest", repo.linkEntry(two)!.level, 2);
+  eq("L1 keeps its row", repo.linkEntry(one)!.level, 1);
+  eq("the TA has two L's", repo.linkLevels(o.id, ta.id).length, 2);
+  eq("another TA has none of them", repo.linkLevels(o.id, other.id).length, 0);
+  eq("another TA's first + is their own L1", repo.addLinkLevel(o.id, other.id), 1);
+  eq("labelled with the day it was started", /^L2 · \d{1,2} \w{3,4}$/.test(levelLabel(2, repo.linkLevels(o.id, ta.id)[1])), true);
 
-  // All Ls → Interested gathers every day's; L2 + Interested only that day's.
+  // All Ls → Interested gathers every L's; L2 + Interested only L2's.
   const table = [
-    { createdAt: 0, s: "interested" }, { createdAt: 0, s: "pending" },
-    { createdAt: DAY, s: "interested" }, { createdAt: DAY, s: "not_interested" },
-    { createdAt: 2 * DAY, s: "interested" }, { createdAt: 2 * DAY, s: "pending" },
+    { level: 1, s: "interested" }, { level: 1, s: "pending" },
+    { level: 2, s: "interested" }, { level: 2, s: "not_interested" },
+    { level: 3, s: "interested" }, { level: null, s: "pending" },
   ];
-  const d = linkDays(table);
-  const pick = (status: string, day: number) => table.filter((r) => (!status || r.s === status) && (!day || dayOf(r, d) === day)).length;
-  eq("All Ls → Interested: every day's", pick("interested", 0), 3);
-  eq("All Ls → Pending: every day's", pick("pending", 0), 2);
+  const pick = (status: string, level: number) => table.filter((r) => (!status || r.s === status) && (!level || r.level === level)).length;
+  eq("All Ls → Interested: every L's", pick("interested", 0), 3);
+  eq("All Ls → Pending, including rows in no L", pick("pending", 0), 2);
   eq("All Ls → Not interested", pick("not_interested", 0), 1);
   eq("L2 only", pick("", 2), 2);
   eq("L2 + Interested", pick("interested", 2), 1);
@@ -96,9 +100,9 @@ console.log("\nL1, L2, L3: the days rows were added");
 }
 
 console.log("\nthe address bar");
-eq("status and day are read", readLinkFilters({ status: "not_interested", day: "2" }), { status: "not_interested", day: 2, addons: false });
+eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, addons: false });
 eq("a made-up status is All", readLinkFilters({ status: "maybe" }).status, "");
-eq("a bad day is All Ls", readLinkFilters({ day: "x" }).day, 0);
+eq("a bad L is All Ls", readLinkFilters({ level: "x" }).level, 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

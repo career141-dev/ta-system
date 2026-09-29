@@ -2425,6 +2425,8 @@ export default defineSchema({
     outcomeAt: v.optional(v.number()),
     /** An add-on row: added on an Add-on day, or tagged by the TA (28 Sep). */
     isAddOn: v.optional(v.boolean()),
+    /** The TA's L it was added under (1 = L1), started with + (29 Sep). */
+    level: v.optional(v.union(v.number(), v.null())),
     /** What the browser extension read off a profile the TA had open. One at a
      *  time, by a person — there is no crawl here and must never be one. */
     capture: v.optional(v.union(v.any(), v.null())),

@@ -15,7 +15,7 @@ export default async function LinksPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string; view?: string; status?: string; day?: string; addons?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; status?: string; level?: string; addons?: string; page?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;

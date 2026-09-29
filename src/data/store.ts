@@ -2171,6 +2171,8 @@ const rawRepo = {
     // Added on an Add-on day, it is an add-on — the TA filters for them
     // rather than hunting through the whole table (the desk, 28 Sep).
     const addOn = this.workingStage(openingId, addedBy) === "Add-on";
+    // It goes into the TA's latest L; before their first + it is in none.
+    const level = this.linkLevels(openingId, addedBy).length;
     mutate((db) => {
       db.linkVault.push({
         id,
@@ -2189,6 +2191,7 @@ const rawRepo = {
         conversationLog: [],
         createdAt: Date.now(),
         ...(addOn ? { isAddOn: true } : {}),
+        ...(level ? { level } : {}),
       });
     });
     return id;
@@ -3404,6 +3407,27 @@ const rawRepo = {
         d.settings.push({ key, value, updatedAt: Date.now() });
       }
     });
+  },
+
+  /**
+   * A TA's L's on an opening's Excel Tables — when each was started with the
+   * sidebar's +, oldest first, so index 0 is L1 (the desk, 29 Sep). Each TA
+   * numbers their own; rows they add go into their latest.
+   */
+  linkLevels(openingId: Id, userId: Id): number[] {
+    try {
+      const arr = JSON.parse(this.setting(`link_levels:${openingId}:${userId}`, "[]"));
+      return Array.isArray(arr) ? arr.filter((n): n is number => typeof n === "number") : [];
+    } catch {
+      return [];
+    }
+  },
+
+  /** A new L for this TA on this opening; returns its number. */
+  addLinkLevel(openingId: Id, userId: Id): number {
+    const levels = [...this.linkLevels(openingId, userId), Date.now()];
+    this.setSetting(`link_levels:${openingId}:${userId}`, JSON.stringify(levels));
+    return levels.length;
   },
 
   readAlertIds(userId: Id): Set<string> {

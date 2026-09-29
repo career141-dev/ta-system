@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
-import { addJobPost, deleteJobPost } from "@/app/actions";
+import { addJobPost, addLinkLevel, deleteJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
 import { SubmitButton } from "./Submit";
 import { RAIL_TOP } from "@/lib/chrome";
@@ -44,10 +44,13 @@ function Chevron({ open }: { open: boolean }) {
 export function ProjectSidebar({
   openingId,
   posts,
+  levels = [],
   canSeeSourcing = true,
 }: {
   openingId: string;
   posts: SidebarPost[];
+  /** The viewer's L's under Excel Tables, started with its + (29 Sep). */
+  levels?: { n: number; label: string; count: number }[];
   /** A client contact gets the pipeline from their shortlist on, and none of
    *  the machinery that produced it. */
   canSeeSourcing?: boolean;
@@ -144,11 +147,52 @@ export function ProjectSidebar({
             <Link href={`${base}/hh`} className={row(path === `${base}/hh`)}>
               Overview
             </Link>
-            {hhItems.map((i) => (
-              <Link key={i.href} href={i.href} className={row(path.startsWith(i.href))}>
-                {i.label}
-              </Link>
-            ))}
+            {hhItems.map((i) =>
+              i.label !== "Excel Tables" ? (
+                <Link key={i.href} href={i.href} className={row(path.startsWith(i.href))}>
+                  {i.label}
+                </Link>
+              ) : (
+                <Fragment key={i.href}>
+                  {/* Excel Tables, with + to start the TA's next L (L1, then
+                      L2…) and their L's listed under it (the desk, 29 Sep). */}
+                  <div className={row(path.startsWith(i.href) && !search.get("level")) + " flex items-center justify-between"}>
+                    <Link href={i.href} className="flex-1">
+                      {i.label}
+                    </Link>
+                    <form action={addLinkLevel}>
+                      <input type="hidden" name="openingId" value={openingId} />
+                      <SubmitButton
+                        title={`Start L${levels.length + 1}`}
+                        aria-label={`Start L${levels.length + 1}`}
+                        pendingLabel="…"
+                        className={`grid h-5 w-5 place-items-center rounded-md border text-[13px] font-semibold leading-none transition-all ${
+                          path.startsWith(i.href) && !search.get("level")
+                            ? "border-white/30 bg-white/20 text-white hover:bg-white/30"
+                            : "border-rule bg-surface text-ink shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:border-brand hover:bg-brand hover:text-white"
+                        }`}
+                      >
+                        +
+                      </SubmitButton>
+                    </form>
+                  </div>
+                  {levels.length > 0 && (
+                    <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
+                      {levels.map((l) => (
+                        <Link
+                          key={l.n}
+                          href={`${i.href}?level=${l.n}`}
+                          className={sub(path.startsWith(i.href) && search.get("level") === String(l.n)) + " justify-between"}
+                        >
+                          <span>{l.label}</span>
+                          <span className="tabular-nums text-ink-faint">{l.count}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </Fragment>
+              ),
+            )}
           </>
         ) : (
           <>
