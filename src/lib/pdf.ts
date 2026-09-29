@@ -285,6 +285,37 @@ export async function extractCareer141BoxFromPdfBuffer(
  * original intact without stamping duplicate "NOT DISCLOSED" banners.
  * If no box exists, it stamps it at the top right.
  */
+type TextItem = { str?: unknown; transform: number[]; width?: unknown };
+
+/**
+ * How much of the page an old, printed Career141 box takes up, from its
+ * heading (items[at]) down through its own lines — salary, notice, notes —
+ * in the heading's column, while each line is within a line or two of the
+ * last. The new box is drawn over all of it: drawn only over the heading, the
+ * old salary showed under the new one (the desk, 29 Sep). PDF y runs upward.
+ */
+export function printedBoxExtent(items: TextItem[], at: number): { width: number; height: number } {
+  const x0 = items[at].transform[4];
+  const y0 = items[at].transform[5];
+  let bottom = y0;
+  let right = x0;
+  for (let j = at; j < items.length && j < at + 80; j++) {
+    const it = items[j];
+    if (typeof it.str !== "string" || !it.str.trim()) continue;
+    const ix = it.transform[4];
+    const iy = it.transform[5];
+    if (Math.abs(ix - x0) > 60) continue;
+    if (iy > bottom + 2 || bottom - iy > 24) {
+      if (iy < bottom) break;
+      continue;
+    }
+    bottom = Math.min(bottom, iy);
+    right = Math.max(right, ix + (Number(it.width) || 0));
+  }
+  // From just above the heading to just below the last line, padded both sides.
+  return { height: y0 + 14 - (bottom - 6), width: right - x0 + 16 };
+}
+
 export async function stampPdfWithCareer141Box(
   basePdfBuffer: ArrayBuffer | Buffer,
   annotation: CvAnnotation,
@@ -327,6 +358,9 @@ export async function stampCareer141Box(
   let foundBoxWidth: number | null = null;
   let foundBoxHeight: number | null = null;
   let hasExistingBox = false;
+  // A box printed into the page's text (not an annotation): its heading was
+  // found, and the new box must cover the heading AND the lines under it.
+  let foundInText = false;
 
   // 1. First check if there is an existing FreeText / text annotation on page 0
   const annots = page.node.Annots();
@@ -371,24 +405,34 @@ export async function stampCareer141Box(
       if (pdfDoc.numPages >= 1) {
         const p1 = await pdfDoc.getPage(1);
         const tc = await p1.getTextContent();
+        let at = -1;
         for (let i = 0; i < tc.items.length; i++) {
           const it = tc.items[i];
           if (!("str" in it) || typeof it.str !== "string") continue;
-          if (/CAREER\s*141/i.test(it.str)) {
+          const next = tc.items[i + 1];
+          if (
+            /CAREER\s*141/i.test(it.str) ||
+            (/CAREER/i.test(it.str) && next && "str" in next && typeof next.str === "string" && /141/i.test(next.str))
+          ) {
             hasExistingBox = true;
+            foundInText = true;
             foundX = it.transform[4];
             foundY = it.transform[5];
+            at = i;
             break;
           }
-          if (/CAREER/i.test(it.str) && i + 1 < tc.items.length) {
-            const next = tc.items[i + 1];
-            if ("str" in next && typeof next.str === "string" && /141/i.test(next.str)) {
-              hasExistingBox = true;
-              foundX = it.transform[4];
-              foundY = it.transform[5];
-              break;
-            }
-          }
+        }
+        /*
+         * The old box's own lines — salary, notice, notes — sit under its
+         * heading. They were left showing below the new box, which was drawn
+         * upward from the heading, so an edited salary appeared next to the
+         * old one (the desk, 29 Sep). Follow the lines down from the heading,
+         * in its column, while each is within a line or two of the last.
+         */
+        if (at >= 0) {
+          const extent = printedBoxExtent(tc.items, at);
+          foundBoxHeight = extent.height;
+          foundBoxWidth = extent.width;
         }
       }
     } catch {
@@ -442,9 +486,12 @@ export async function stampCareer141Box(
     x = at.x;
     y = pageHeight - at.y - boxHeight;
   } else if (foundX !== null && foundY !== null) {
-    // Found existing Career141 box: place the updated box right over it
-    x = Math.max(15, Math.min(pageWidth - boxWidth - 15, foundX));
-    y = Math.max(15, Math.min(pageHeight - boxHeight - 15, foundY));
+    // Found existing Career141 box: place the updated box right over it.
+    // A printed box is covered from just above its heading down; an
+    // annotation's rectangle already starts at its bottom edge.
+    x = Math.max(15, Math.min(pageWidth - boxWidth - 15, foundX - (foundInText ? padding : 0)));
+    const bottom = foundInText ? foundY + 14 - boxHeight : foundY;
+    y = Math.max(15, Math.min(pageHeight - boxHeight - 15, bottom));
   } else {
     // Default top-right placement
     x = Math.max(15, pageWidth - boxWidth - 25);

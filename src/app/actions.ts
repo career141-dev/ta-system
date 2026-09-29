@@ -4295,6 +4295,28 @@ export async function sendEod(formData: FormData) {
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
+
+    // What the TA corrected on the email goes onto the candidate too, so their
+    // CV's box, profile and Director review read the same (the desk, 29 Sep).
+    // Only after it went, and a detail that cannot be saved does not undo the
+    // send — it is said.
+    const { eodDetailChanges } = await import("@/lib/eod");
+    let unsaved = 0;
+    for (const edited of editedRows) {
+      if (!fresh.includes(edited.applicationId)) continue;
+      const base = baseRows.find((b) => b.applicationId === edited.applicationId);
+      const app = repo.application(edited.applicationId);
+      const change = base && app ? eodDetailChanges(base, edited) : null;
+      if (!change || !app) continue;
+      try {
+        repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
+        invalidateCandidate(app.candidateId);
+      } catch (e) {
+        unsaved++;
+        console.warn("[eod] details not saved to the candidate:", (e as Error).message);
+      }
+    }
+    if (unsaved) sentNote += ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`;
   }
 
   // Anyone sent to the Director straight out of a finished follow-up moves to
@@ -4394,6 +4416,8 @@ async function emailEod(input: {
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
   const byId = new Map((input.rows ?? shortlistRows(openingId, null, "director")).map((r) => [r.applicationId, r]));
+  // The rows as built from the records, before the TA's edits on the page.
+  const baseById = new Map(shortlistRows(openingId, null, "director").map((r) => [r.applicationId, r]));
   const rows = input.applicationIds
     .map((id, i) => {
       const existing = byId.get(id);
@@ -4430,12 +4454,17 @@ async function emailEod(input: {
     const c = app ? repo.candidate(app.candidateId) : null;
     if (!app || !c) continue;
     try {
-      // The same file as the drawer's Prepared CV: what the desk holds, with
-      // the box where the TA put it (lib/preparedCvFile, 29 Sep). It used to
-      // add its own "Total Experience" / "Currently at" lines and print
-      // "Not disclosed" for an unknown salary.
+      // The same file as the drawer's Prepared CV (lib/preparedCvFile, 29 Sep):
+      // what the desk holds, with the box where the TA put it — and whatever
+      // the TA changed on this email, so the attachment says what the email
+      // says. A field they did not touch comes from the record, so the table's
+      // own "Not disclosed" for an unknown salary never reaches the CV.
       const { preparedCvFile } = await import("@/lib/preparedCvFile");
-      const pdfBytes = (await preparedCvFile(app, c, opening)).bytes;
+      const { boxContent } = await import("@/lib/preparedCv");
+      const { boxOverrides, eodDetailChanges } = await import("@/lib/eod-format");
+      const base = baseById.get(r.applicationId);
+      const annotation = { ...boxContent(app, c, opening), ...(base ? boxOverrides(eodDetailChanges(base, r)) : {}) };
+      const pdfBytes = (await preparedCvFile(app, c, opening, { annotation })).bytes;
 
       const base64 = Buffer.from(pdfBytes).toString("base64");
       if (used + base64.length > EOD_ATTACHMENT_BUDGET) {

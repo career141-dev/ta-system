@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SHORTLIST_COLUMNS, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
+import { SHORTLIST_COLUMNS, boxOverrides, eodDetailChanges, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { sendEod } from "@/app/actions";
@@ -134,6 +134,18 @@ export function EodComposer({
   };
 
   const effectiveRows = initialRows.map(getCandidateRow);
+  /** The attachment's preview: the record, plus only what was changed on this page. */
+  const previewHref = (r: ShortlistRow) => {
+    const base = initialRows.find((b) => b.applicationId === r.applicationId);
+    const over = base ? boxOverrides(eodDetailChanges(base, r)) : {};
+    const q = new URLSearchParams();
+    if ("currentSalary" in over) q.set("current", over.currentSalary ?? "");
+    if ("expectedSalary" in over) q.set("expected", over.expectedSalary ?? "");
+    if ("noticePeriod" in over) q.set("notice", over.noticePeriod ?? "");
+    if (over.notes) q.set("notes", over.notes.join("\n"));
+    const s = q.toString();
+    return `/api/prepared-cv/${r.applicationId}${s ? `?${s}` : ""}`;
+  };
 
   const th =
     "whitespace-nowrap border border-rule bg-tag px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-[0.04em] text-ink-soft";
@@ -432,8 +444,9 @@ export function EodComposer({
                 <a
                   key={r.applicationId}
                   // The file that is attached: the Prepared CV as the desk holds
-                  // it, box where the TA put it — not this table's text (29 Sep).
-                  href={`/api/prepared-cv/${r.applicationId}`}
+                  // it, with only what the TA changed on this email laid over it
+                  // (lib/eod-format boxOverrides, 29 Sep).
+                  href={previewHref(r)}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-2.5 text-[12.5px] text-brand hover:underline"

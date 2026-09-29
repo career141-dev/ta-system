@@ -69,8 +69,10 @@ export function shortlistRows(
         age: c.age ? String(c.age) : "",
         // Zero days is "immediate", which is the best answer there is — it was
         // printed as a blank (audit finding 28).
+        // As said first ("2 months", "Not disclosed"), which has no days.
         notice:
-          c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : "",
+          c.noticePeriod?.trim() ||
+          (c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : ""),
         notes: HOUSE_NOTE(c, a),
         currentCompany: c.currentEmployer ?? "",
         currentDesignation: c.currentTitle ?? "",
@@ -264,6 +266,9 @@ export function shortlistRowsFromForm(
     };
   });
 }
+
+// Moved to eod-format (29 Sep) so the composer can use it in the browser too.
+export { eodDetailChanges } from "./eod-format";
 
 /**
  * "SET 1 - DELMO - BRAND MANAGER - 3 CVs". The client stays in it: a reply is

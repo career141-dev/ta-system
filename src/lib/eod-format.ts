@@ -1,4 +1,5 @@
-import type { Id } from "@/data/types";
+import type { Candidate, Id } from "@/data/types";
+import { noticePeriodToDays } from "./answered";
 
 /**
  * The shape and column names of the end-of-day email, with no data access —
@@ -229,4 +230,61 @@ ${effort}
 ${input.attachmentNote ? `<p style="color:#6b736d">${esc(input.attachmentNote)}</p>` : ""}
 ${outro}
 </div>`;
+}
+/** The lines the table writes itself (HOUSE_NOTE), not the TA's own notes. */
+const isHouseLine = (n: string) => /^>?\s*(Total Experience - |Currently at )/i.test(n.trim());
+const taNotes = (notes: string[]) => notes.filter((n) => !isHouseLine(n)).map((n) => n.replace(/^>/, "").trim()).filter(Boolean);
+
+/**
+ * What the TA changed on the Director's email that belongs on the candidate
+ * (the desk, 29 Sep): salaries, notice and their own notes — the same details
+ * as the CV's box and the Director review form. Saved when the email goes, so
+ * the CV, the profile and the next email say what this one said. Null when
+ * nothing of these was changed. Name, age, company and designation are the
+ * email's wording only and stay there.
+ */
+export function eodDetailChanges(
+  base: ShortlistRow,
+  edited: ShortlistRow,
+): {
+  patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">>;
+  notes: string[] | null;
+} | null {
+  const patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">> = {};
+  if (edited.currentRemuneration.trim() !== base.currentRemuneration.trim()) {
+    patch.currentSalary = edited.currentRemuneration.trim() || null;
+  }
+  if (edited.expectedRemuneration.trim() !== base.expectedRemuneration.trim()) {
+    patch.expectedSalary = edited.expectedRemuneration.trim() || null;
+  }
+  if (edited.notice.trim() !== base.notice.trim()) {
+    const text = edited.notice.trim();
+    patch.noticePeriod = text || null;
+    patch.noticePeriodDays = text ? noticePeriodToDays(text) : null;
+  }
+  const before = taNotes(base.notes);
+  const after = taNotes(edited.notes);
+  const notes = JSON.stringify(before) === JSON.stringify(after) ? null : after;
+  return Object.keys(patch).length || notes ? { patch, notes } : null;
+}
+
+/**
+ * The box's lines the TA changed on the email, over what the desk holds
+ * (29 Sep): the attachment and its preview say what the email says, and a
+ * field the TA did not touch comes from the record — so the table's own
+ * "Not disclosed" for an unknown salary never reaches the CV.
+ */
+export function boxOverrides(change: ReturnType<typeof eodDetailChanges>): {
+  currentSalary?: string | null;
+  expectedSalary?: string | null;
+  noticePeriod?: string | null;
+  notes?: string[];
+} {
+  if (!change) return {};
+  const out: ReturnType<typeof boxOverrides> = {};
+  if ("currentSalary" in change.patch) out.currentSalary = change.patch.currentSalary ?? null;
+  if ("expectedSalary" in change.patch) out.expectedSalary = change.patch.expectedSalary ?? null;
+  if ("noticePeriod" in change.patch) out.noticePeriod = change.patch.noticePeriod ?? null;
+  if (change.notes) out.notes = change.notes;
+  return out;
 }

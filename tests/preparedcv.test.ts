@@ -70,6 +70,22 @@ eq("empty fields are filled", [kept.languages, kept.location], [["English"], "Ka
 eq("a name on file stays", "fullName" in kept, false);
 eq("the file's own text always updates", kept.rawTextKey, "k2");
 
+console.log("\nthe end-of-day attachment says what the email says");
+{
+  const { boxOverrides, eodDetailChanges } = await import("@/lib/eod-format");
+  const row = {
+    no: 1, name: "A", age: "", notice: "", notes: [">Total Experience - 10yr", ">Available now"], currentCompany: "", currentDesignation: "",
+    currentRemuneration: "Not disclosed", expectedRemuneration: "Open to discuss", applicationId: "a1",
+  };
+  eq("nothing changed on the email → the record, no table defaults", boxOverrides(eodDetailChanges(row, row)), {});
+  const edited = { ...row, expectedRemuneration: "LKR 300,000", notice: "2 months" };
+  eq("changed fields reach the box", boxOverrides(eodDetailChanges(row, edited)), { expectedSalary: "LKR 300,000", noticePeriod: "2 months" });
+  const held = { currentSalary: null, expectedSalary: null, noticePeriod: null, notes: ["Available now"] };
+  const items = annotationItems({ ...held, ...boxOverrides(eodDetailChanges(row, edited)) });
+  eq("the untouched 'Not disclosed' is not printed", items.some((l) => /DISCLOSED|Not disclosed/i.test(l)), false);
+  eq("the edited expected salary is", items.includes("EXPECTED SALARY - LKR 300,000"), true);
+}
+
 console.log("\nthe saved spot is stored and read back");
 {
   const m = TABLES.applications;
