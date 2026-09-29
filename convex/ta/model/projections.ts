@@ -102,6 +102,7 @@ export function projectApplication(a: Doc<"applications">) {
     scoopReceivedAt: a.scoopReceivedAt ?? null,
     rating: x.rating ?? null,
     notes: x.taNotes ?? [],
+    reviewNotes: a.reviewNotes ?? [],
     statusA: a.statusA ?? null,
     statusB: a.statusB ?? null,
     rankTier: a.rankTier ?? null,

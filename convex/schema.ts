@@ -1075,6 +1075,15 @@ export default defineSchema({
     // TA System — a recruiter's rating and running notes on this application.
     rating: v.optional(v.union(v.number(), v.null())),
     taNotes: v.optional(v.array(v.string())),
+    // Notes left on this person in Director review by a TA, lead, director or
+    // admin (29 Sep). `byRole` is the role at the time, as on link-vault notes.
+    reviewNotes: v.optional(v.array(v.object({
+      id: v.string(),
+      at: v.number(),
+      note: v.string(),
+      by: v.id("users"),
+      byRole: v.string(),
+    }))),
   })
     .index("by_jobId", ["jobId"])
     .index("by_job_stage", ["jobId", "currentStage"])
