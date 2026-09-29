@@ -587,6 +587,39 @@ export async function removeLeadNote(formData: FormData) {
   await done("Note removed.");
 }
 
+/**
+ * A note on a person in Director review. Anyone on the opening may leave one:
+ * the TA, the lead, the director, an admin (29 Sep). The byline shows whose it is.
+ */
+export async function addReviewNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  const appId = String(formData.get("appId"));
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
+  const text = String(formData.get("note") ?? "").trim();
+  if (!text) await fail("Write the note first.");
+  if (text.length > LEAD_NOTE_MAX) await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
+  if (!repo.addReviewNote(appId, user.id, user.role, text)) await fail("That application no longer exists.");
+  markTablesStale();
+  revalidatePath(`/openings/${openingId}`, "layout");
+  await done("Note added.");
+}
+
+export async function removeReviewNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  const appId = String(formData.get("appId"));
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
+  const noteId = String(formData.get("noteId") ?? "");
+  const target = repo.application(appId)?.reviewNotes?.find((n) => n.id === noteId);
+  if (!target) await fail("That note is already gone.");
+  if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
+  repo.removeReviewNote(appId, noteId);
+  markTablesStale();
+  revalidatePath(`/openings/${openingId}`, "layout");
+  await done("Note removed.");
+}
+
 /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */
 export async function toggleLinkAddOn(formData: FormData) {
   const openingId = String(formData.get("openingId"));
@@ -4905,6 +4938,14 @@ export async function logOutreachInline(_: ActionResult | null, formData: FormDa
 
 export async function addLeadNoteInline(_: ActionResult | null, formData: FormData) {
   return inline(() => addLeadNote(formData));
+}
+
+export async function addReviewNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addReviewNote(formData));
+}
+
+export async function removeReviewNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeReviewNote(formData));
 }
 
 export async function removeLeadNoteInline(_: ActionResult | null, formData: FormData) {

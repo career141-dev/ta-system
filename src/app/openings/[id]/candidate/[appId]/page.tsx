@@ -27,6 +27,7 @@ import { CallLog, Chat } from "@/components/Dossier";
 import { FollowUpPanel } from "@/components/FollowUpPanel";
 import { ReviewDetailsForm } from "@/components/ReviewDetailsForm";
 import { extractCareer141BoxFromText, isSystemNote } from "@/lib/pdf";
+import { ReviewNotes } from "@/components/ReviewNotes";
 import { LiveFollowUp } from "@/components/LiveFollowUp";
 import { AuraCallButton } from "@/components/AuraCallButton";
 import { WebCallResults } from "@/components/WebCallResults";
@@ -361,6 +362,19 @@ export default async function CandidateDrawer({
           noticePeriod={c.noticePeriod}
           hasCv={Boolean(c.cvFileName || cvFile?.ok)}
           notes={app.notes?.filter((n) => !isSystemNote(n))}
+        />
+      )}
+
+      {/* Anyone on the opening can leave a note while the person is in Director
+          review; it stays readable afterwards (29 Sep). */}
+      {(app.stage === "director_review" || (app.reviewNotes?.length ?? 0) > 0) && (
+        <ReviewNotes
+          appId={app.id}
+          openingId={id}
+          notes={app.reviewNotes ?? []}
+          userNames={Object.fromEntries(repo.users().map((u) => [u.id, u.name]))}
+          meId={user.id}
+          canAdd={app.stage === "director_review" && allows(user, "review.note", { openingId: id, assignment })}
         />
       )}
 

@@ -380,6 +380,9 @@ export interface Application {
   setNumber: number | null;
   rating: number | null;
   notes: string[];
+  /** Notes on this person in Director review, from anyone on the opening (29 Sep).
+   *  Apart from `notes`, which the prepared CV prints for the Director and the client. */
+  reviewNotes?: LeadNote[];
 
   /** Q18 — parked. Free text, no behaviour attached. */
   statusA: string | null;
