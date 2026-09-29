@@ -627,6 +627,12 @@ export default defineSchema({
      *  once the extraction has filed it on `assignToJob`, it is claimed by this
      *  TA into TA Follow-up and flagged HH. */
     headhuntedBy: v.optional(v.id("users")),
+    /** Set when a TA uploads a scoop CV from the opening's Scoops page
+     *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
+     *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`
+     *  is the lead who sent it, when the TA said. */
+    scoopedBy: v.optional(v.id("users")),
+    scoopFromUserId: v.optional(v.id("users")),
     status: v.string(),
     errorMessage: v.optional(v.string()),
     candidateId: v.optional(v.id("candidates")),

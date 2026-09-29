@@ -1,10 +1,10 @@
 // convex/lib/scoopMail.ts
 //
-// Scoops by email (the desk, 27 September): the Director, a TA Lead or Ops
-// mail CVs for a job straight to a TA's own mailbox. The mail intake reads
-// those mailboxes for that and nothing else. These are the two decisions it
-// makes — whose mail counts, and which of the TA's jobs it is for — kept pure
-// so they can be tested without Graph or a database.
+// Scoops (the desk, 27 September): the Director, a TA Lead or Ops send CVs for
+// a job to a TA. Until 29 September the mail intake read each TA's mailbox for
+// them; now the TA uploads them on the opening's Scoops page. What is left is
+// kept pure so it can be tested without Graph or a database: who counts as a
+// sender, and what an upload writes on the application.
 
 /** The roles whose CVs count as a scoop. Another TA's do not (the desk, 27 Sep). */
 const SENDER_ROLES = new Set(["director", "ops", "ta_manager", "senior_ta"]);
@@ -17,42 +17,22 @@ export function isScoopSender(user: { role?: string | null; taRole?: string | nu
   return SENDER_ROLES.has(user.role ?? "");
 }
 
-export type ScoopOpening = { id: string; title: string; clientName?: string | null };
-
-const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-
 /**
- * Which of the TA's open jobs a scoop is for.
+ * What a scoop upload writes on the application (the Scoops page, 29 Sep).
  *
- * One open job: that one — there is nothing else it could be. Otherwise the
- * subject and body have to name the job title; where two jobs share a title,
- * the client's name has to be there too. Anything short of one clear answer is
- * null, and the TA is told to place the CVs by hand rather than have them
- * filed on the wrong job.
+ * The flag is `scoopReceivedAt` (+ `scoopFromUserId` when the TA named the
+ * lead): that is what the end-of-day SCOOP column reads. The owner is left
+ * alone — the TA's own Shortlist claims the person, gives them a set number and
+ * moves them on. A scoop already marked keeps its first date and sender unless
+ * the sender was blank and is now given.
  */
-export function pickScoopOpening(openings: ScoopOpening[], subject: string, body: string): ScoopOpening | null {
-  if (openings.length === 0) return null;
-  if (openings.length === 1) return openings[0];
-
-  const text = ` ${norm(`${subject} ${body}`)} `;
-  const named = (s: string | null | undefined) => {
-    const n = s ? norm(s) : "";
-    return n.length > 0 && text.includes(` ${n} `);
-  };
-  const byTitle = openings.filter((o) => named(o.title));
-  if (byTitle.length === 1) return byTitle[0];
-  if (byTitle.length === 0) return null;
-
-  // "Brand Manager" and "Senior Brand Manager" both named: the longer title is the one meant.
-  const longest = Math.max(...byTitle.map((o) => norm(o.title).length));
-  const longer = byTitle.filter((o) => norm(o.title).length === longest);
-  if (longer.length === 1 && longer.some((o) => byTitle.every((b) => norm(o.title).includes(norm(b.title))))) return longer[0];
-
-  const byClient = byTitle.filter((o) => named(o.clientName));
-  return byClient.length === 1 ? byClient[0] : null;
+export function scoopFlag<Id extends string>(
+  app: { scoopReceivedAt?: number | null; scoopFromUserId?: Id | null },
+  now: number,
+  fromUserId?: Id | null,
+): { scoopReceivedAt?: number; scoopFromUserId?: Id } | null {
+  const patch: { scoopReceivedAt?: number; scoopFromUserId?: Id } = {};
+  if (!app.scoopReceivedAt) patch.scoopReceivedAt = now;
+  if (fromUserId && !app.scoopFromUserId) patch.scoopFromUserId = fromUserId;
+  return Object.keys(patch).length ? patch : null;
 }
