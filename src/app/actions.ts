@@ -1658,6 +1658,34 @@ export async function addLinkLevel(formData: FormData) {
   redirect(`/openings/${openingId}/hh/links?level=${n}`);
 }
 
+/** A name for one of your L's on Excel Tables; blank puts the date back. */
+export async function renameLinkLevel(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const n = Math.floor(Number(formData.get("level")));
+  const name = String(formData.get("name") ?? "");
+  if (!repo.renameLinkLevel(openingId, user.id, n, name)) return fail(`L${n} is not one of yours here.`);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  return done(name.trim() ? `Renamed L${n} to ${name.trim().slice(0, 40)}.` : `L${n} shows its date again.`);
+}
+
+/**
+ * One of your L's gone from the sidebar. Nothing else is: its rows stay in
+ * the table under All, in no L, and the other L's keep their numbers.
+ */
+export async function deleteLinkLevel(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const n = Math.floor(Number(formData.get("level")));
+  const moved = repo.deleteLinkLevel(openingId, user.id, n);
+  if (moved === null) return fail(`L${n} is not one of yours here.`);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  const msg = moved ? `Deleted L${n}. Its ${moved === 1 ? "row is" : `${moved} rows are`} still here, under All.` : `Deleted L${n}.`;
+  redirect(`/openings/${openingId}/hh/links?msg=${encodeURIComponent(msg)}&tone=ok`);
+}
+
 export async function setLinkInterestInline(_: ActionResult | null, formData: FormData) {
   return inline(() => setLinkInterest(formData));
 }

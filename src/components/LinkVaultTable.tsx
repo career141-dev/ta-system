@@ -7,6 +7,7 @@ import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
+import { LinkLevelHeader } from "./LinkLevelHeader";
 
 const PAGE_SIZE = 25;
 
@@ -81,8 +82,8 @@ export function LinkVaultTable({
   // A tab's count is what pressing it would show, with the other filters kept.
   const count = (next: Partial<{ status: string; level: number; addons: boolean }>) =>
     searched.filter(({ row }) => pass(row, { status, level, addons, ...next })).length;
-  // The viewer's own L's, for the name of the one being looked at.
-  const started = repo.linkLevels(openingId, user.id)[level - 1];
+  // The viewer's own L, when the one being looked at is theirs.
+  const mine = repo.linkLevels(openingId, user.id).find((l) => l.n === level);
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const scoped = slicePage(matching, current, PAGE_SIZE);
@@ -97,12 +98,15 @@ export function LinkVaultTable({
       <AddLinkForm openingId={openingId} canNote={canNote} />
 
       {level > 0 && (
-        <p className="mb-2 flex items-center gap-2 text-[13px]">
-          <span className="font-semibold">{started ? levelLabel(level, started) : `L${level}`}</span>
-          <a href={keep({ level: 0 })} className="text-[12px] text-ink-soft hover:text-ink hover:underline">
-            Show all Ls
-          </a>
-        </p>
+        <LinkLevelHeader
+          openingId={openingId}
+          n={level}
+          label={mine ? levelLabel(mine) : `L${level}`}
+          name={mine?.name ?? ""}
+          rows={everyRow.filter(({ row }) => row.level === level && row.addedBy === user.id).length}
+          own={!!mine}
+          allHref={keep({ level: 0 })}
+        />
       )}
       <nav aria-label="Interest" className="mb-3 flex flex-wrap items-center gap-2">
         {INTEREST_TABS.map((t) => (

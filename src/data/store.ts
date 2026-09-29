@@ -16,6 +16,7 @@ import { isDueForPurge, purgeAt } from "@/lib/bin";
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  LinkLevel,
   MatchRun,
   AiCall,
   Application,
@@ -2172,7 +2173,7 @@ const rawRepo = {
     // rather than hunting through the whole table (the desk, 28 Sep).
     const addOn = this.workingStage(openingId, addedBy) === "Add-on";
     // It goes into the TA's latest L; before their first + it is in none.
-    const level = this.linkLevels(openingId, addedBy).length;
+    const level = this.linkLevels(openingId, addedBy).at(-1)?.n ?? 0;
     mutate((db) => {
       db.linkVault.push({
         id,
@@ -3410,24 +3411,69 @@ const rawRepo = {
   },
 
   /**
-   * A TA's L's on an opening's Excel Tables — when each was started with the
-   * sidebar's +, oldest first, so index 0 is L1 (the desk, 29 Sep). Each TA
-   * numbers their own; rows they add go into their latest.
+   * A TA's L's on an opening's Excel Tables, oldest first (the desk, 29 Sep):
+   * started with the sidebar's +, named and deleted from the L's own page.
+   * Each TA numbers their own, and a number is never reused — rows hold it —
+   * so deleting L2 leaves L1 and L3 as they were and the next + is L4.
+   * Rows they add go into their latest L that is still there.
    */
-  linkLevels(openingId: Id, userId: Id): number[] {
+  allLinkLevels(openingId: Id, userId: Id): LinkLevel[] {
     try {
-      const arr = JSON.parse(this.setting(`link_levels:${openingId}:${userId}`, "[]"));
-      return Array.isArray(arr) ? arr.filter((n): n is number => typeof n === "number") : [];
+      const arr: unknown = JSON.parse(this.setting(`link_levels:${openingId}:${userId}`, "[]"));
+      if (!Array.isArray(arr)) return [];
+      // The first release stored only the time each was started.
+      return arr.map((x, i) => (typeof x === "number" ? { n: i + 1, at: x } : { ...(x as LinkLevel), n: i + 1 }));
     } catch {
       return [];
     }
   },
 
+  /** The L's still there — what the sidebar lists. */
+  linkLevels(openingId: Id, userId: Id): LinkLevel[] {
+    return this.allLinkLevels(openingId, userId).filter((l) => !l.deleted);
+  },
+
+  saveLinkLevels(openingId: Id, userId: Id, levels: LinkLevel[]) {
+    this.setSetting(`link_levels:${openingId}:${userId}`, JSON.stringify(levels.map(({ n: _n, ...rest }) => rest)));
+  },
+
   /** A new L for this TA on this opening; returns its number. */
   addLinkLevel(openingId: Id, userId: Id): number {
-    const levels = [...this.linkLevels(openingId, userId), Date.now()];
-    this.setSetting(`link_levels:${openingId}:${userId}`, JSON.stringify(levels));
+    const levels = [...this.allLinkLevels(openingId, userId), { n: 0, at: Date.now() }];
+    this.saveLinkLevels(openingId, userId, levels);
     return levels.length;
+  },
+
+  /** A name for one of this TA's L's ("Banks"); blank puts the date back. */
+  renameLinkLevel(openingId: Id, userId: Id, n: number, name: string): boolean {
+    const levels = this.allLinkLevels(openingId, userId);
+    const l = levels[n - 1];
+    if (!l || l.deleted) return false;
+    l.name = name.trim().slice(0, 40) || undefined;
+    this.saveLinkLevels(openingId, userId, levels);
+    return true;
+  },
+
+  /**
+   * One of this TA's L's gone from the sidebar. Its rows are not deleted:
+   * they stay in the table, under All, in no L. Returns how many were in it.
+   */
+  deleteLinkLevel(openingId: Id, userId: Id, n: number): number | null {
+    const levels = this.allLinkLevels(openingId, userId);
+    const l = levels[n - 1];
+    if (!l || l.deleted) return null;
+    l.deleted = true;
+    this.saveLinkLevels(openingId, userId, levels);
+    let moved = 0;
+    mutate((db) => {
+      for (const r of db.linkVault) {
+        if (r.openingId === openingId && r.addedBy === userId && r.level === n) {
+          r.level = null;
+          moved++;
+        }
+      }
+    });
+    return moved;
   },
 
   readAlertIds(userId: Id): Set<string> {

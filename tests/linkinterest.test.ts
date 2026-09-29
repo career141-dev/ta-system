@@ -82,7 +82,27 @@ console.log("\nL1, L2, L3: started with + by each TA");
   eq("the TA has two L's", repo.linkLevels(o.id, ta.id).length, 2);
   eq("another TA has none of them", repo.linkLevels(o.id, other.id).length, 0);
   eq("another TA's first + is their own L1", repo.addLinkLevel(o.id, other.id), 1);
-  eq("labelled with the day it was started", /^L2 · \d{1,2} \w{3,4}$/.test(levelLabel(2, repo.linkLevels(o.id, ta.id)[1])), true);
+  eq("labelled with the day it was started", /^L2 · \d{1,2} \w{3,4}$/.test(levelLabel(repo.linkLevels(o.id, ta.id)[1])), true);
+
+  // Rename and delete (the desk, 29 Sep).
+  eq("an L can be named", repo.renameLinkLevel(o.id, ta.id, 2, "  Banks  "), true);
+  eq("and shows its name", levelLabel(repo.linkLevels(o.id, ta.id)[1]), "L2 · Banks");
+  repo.renameLinkLevel(o.id, ta.id, 2, "");
+  eq("a blank name puts the date back", /^L2 · \d/.test(levelLabel(repo.linkLevels(o.id, ta.id)[1])), true);
+  eq("another TA's L cannot be renamed through yours", repo.renameLinkLevel(o.id, ta.id, 5, "X"), false);
+  const rows = repo.linkVault(o.id).length;
+  eq("deleting L1 reports its one row", repo.deleteLinkLevel(o.id, ta.id, 1), 1);
+  eq("L1 is gone from the list", repo.linkLevels(o.id, ta.id).map((l) => l.n), [2]);
+  eq("its row is still in the table", repo.linkVault(o.id).length, rows);
+  eq("in no L now", repo.linkEntry(one)!.level ?? null, null);
+  eq("L2 keeps its number and its row", repo.linkEntry(two)!.level, 2);
+  eq("deleting it twice does nothing", repo.deleteLinkLevel(o.id, ta.id, 1), null);
+  eq("the next + is L3, not a second L1", repo.addLinkLevel(o.id, ta.id), 3);
+  const three = repo.addLink(o.id, "https://linkedin.com/in/in-l-three", ta.id, "In Three");
+  eq("new rows go into it", repo.linkEntry(three)!.level, 3);
+  repo.deleteLinkLevel(o.id, ta.id, 3);
+  const after = repo.addLink(o.id, "https://linkedin.com/in/after-delete", ta.id, "After Delete");
+  eq("with the latest deleted, rows go into the latest still there", repo.linkEntry(after)!.level, 2);
 
   // All Ls → Interested gathers every L's; L2 + Interested only L2's.
   const table = [

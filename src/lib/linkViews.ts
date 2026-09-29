@@ -34,9 +34,9 @@ export const INTEREST_LABEL: Record<Interest, string> = {
   not_interested: "Not interested",
 };
 
-/** "L2 · 29 Sept" — the L, with the day it was started. */
-export function levelLabel(n: number, startedAt: number): string {
-  return `L${n} · ${new Date(startedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" })}`;
+/** "L2 · Banks" when the TA named it, "L2 · 29 Sept" when not. */
+export function levelLabel(l: { n: number; at: number; name?: string }): string {
+  return `L${l.n} · ${l.name || new Date(l.at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Colombo" })}`;
 }
 
 /** Old links (?view=shortlisted / ?view=addons) keep working. */

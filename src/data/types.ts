@@ -670,6 +670,17 @@ export interface ProfileCapture {
   capturedBy: Id;
 }
 
+/** One of a TA's L's on an opening's Excel Tables (store.linkLevels, 29 Sep). */
+export interface LinkLevel {
+  /** 1 for L1. Never reused, so rows can hold it. */
+  n: number;
+  /** When it was started with +. */
+  at: number;
+  /** The TA's own name for it; the date is shown when there is none. */
+  name?: string;
+  deleted?: boolean;
+}
+
 export interface LinkVaultEntry {
   id: Id;
   openingId: Id;

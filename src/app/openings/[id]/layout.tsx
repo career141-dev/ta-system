@@ -38,10 +38,10 @@ export default async function OpeningLayout({
   // The L's this person started under Excel Tables, with how many rows each holds.
   const mine = seat.canSeeSourcing ? repo.linkVault(id).filter((r) => r.addedBy === user.id) : [];
   const levels = seat.canSeeSourcing
-    ? repo.linkLevels(id, user.id).map((at, i) => ({
-        n: i + 1,
-        label: levelLabel(i + 1, at),
-        count: mine.filter((r) => r.level === i + 1).length,
+    ? repo.linkLevels(id, user.id).map((l) => ({
+        n: l.n,
+        label: levelLabel(l),
+        count: mine.filter((r) => r.level === l.n).length,
       }))
     : [];
 
