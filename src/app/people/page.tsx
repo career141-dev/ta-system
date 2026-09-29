@@ -2,7 +2,8 @@ import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { PeopleAdmin } from "./PeopleAdmin";
 import { allows } from "@/lib/auth";
-import { setFollowUpStandard, setAutoShortlistScore, setEodCopy } from "@/app/actions";
+import { setFollowUpStandard, setAutoShortlistScore } from "@/app/actions";
+import { EOD_CC_DEFAULTS, EOD_TO } from "@/lib/eod-format";
 import { inputClass } from "@/components/form";
 import { primeStore } from "@/data/prime";
 import { pendingInvites, offDeskAccounts } from "@/lib/invites";
@@ -82,21 +83,9 @@ export default async function PeoplePage({
       <section className="mt-8 rounded-2xl border border-rule bg-surface px-6 py-5">
         <h2 className="text-[15px] font-semibold">End-of-day copy</h2>
         <p className="mt-1 max-w-[70ch] text-[12.5px] leading-relaxed text-ink-soft">
-          Every end-of-day email a TA sends to the Director is copied here, with the day&rsquo;s
-          shortlist and progress.
+          Every end-of-day email goes to {EOD_TO} and copies {EOD_CC_DEFAULTS.join(", ")}. A TA can
+          add more To and Cc addresses on the email itself.
         </p>
-        <form action={setEodCopy} className="mt-3 flex items-center gap-3">
-          <input
-            name="eodCc"
-            type="email"
-            defaultValue={repo.eodCopyTo()}
-            disabled={!canEdit}
-            className={`${inputClass} w-[280px]`}
-          />
-          {canEdit && (
-            <SubmitButton pendingLabel="Saving…">Save</SubmitButton>
-          )}
-        </form>
       </section>
 
       {/* What follow-up asks every candidate. Each opening can add its own

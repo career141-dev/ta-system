@@ -281,6 +281,7 @@ export const TABLES: Record<string, TableModel> = {
         rating: nul(r.rating as number | null),
         taNotes: r.notes ?? [],
         taPreparedCvBox: u(r.preparedCvBox as { x: number; y: number } | null),
+        reviewNotes: (r.reviewNotes as unknown[] | undefined) ?? [],
         statusA: nul(r.statusA as string | null),
         statusB: nul(r.statusB as string | null),
         rankTier: nul(r.rankTier as string | null),

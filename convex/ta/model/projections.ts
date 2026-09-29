@@ -103,6 +103,7 @@ export function projectApplication(a: Doc<"applications">) {
     rating: x.rating ?? null,
     notes: x.taNotes ?? [],
     preparedCvBox: x.taPreparedCvBox ?? null,
+    reviewNotes: a.reviewNotes ?? [],
     statusA: a.statusA ?? null,
     statusB: a.statusB ?? null,
     rankTier: a.rankTier ?? null,

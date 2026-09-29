@@ -36,6 +36,8 @@ export type Capability =
   | "opening.sourcing"
   /** Leave a note for the TA on an Excel Tables row. */
   | "link.note"
+  /** Leave a note on a candidate in Director review. */
+  | "review.note"
   /** Record a decision that says the director approved somebody. */
   | "decide.director"
   /** Record a decision that says the client approved somebody. */
@@ -211,6 +213,16 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       return isDeskWide(user)
         ? ALLOW
         : deny("Only a TA Lead, Director, Admin or Ops can leave notes.");
+
+    case "review.note":
+      // Unlike link.note, this runs every way (29 Sep): the TA who sent the CV,
+      // the lead, the director and admin all add to what is said about a person
+      // in Director review. A client seat sees its own shortlist and stays out.
+      if (user.role === "client" || ctx.assignment?.role === "client_contact") {
+        return deny("A client seat reads its shortlist; it does not add notes to Director review.");
+      }
+      if (isDeskWide(user)) return ALLOW;
+      return ctx.assignment ? ALLOW : deny("You are not on this opening.");
 
     case "interview.feedback":
       // Wider than opening.act on purpose (28 Sep): the client's interviewer

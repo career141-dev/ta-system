@@ -18,6 +18,7 @@ import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
+import { EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "@/lib/eod-format";
 import { noticePeriodToDays } from "@/lib/answered";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
@@ -584,6 +585,39 @@ export async function removeLeadNote(formData: FormData) {
   if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
   repo.removeLeadNote(entryId, noteId);
   revalidateLinks(openingId);
+  await done("Note removed.");
+}
+
+/**
+ * A note on a person in Director review. Anyone on the opening may leave one:
+ * the TA, the lead, the director, an admin (29 Sep). The byline shows whose it is.
+ */
+export async function addReviewNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  const appId = String(formData.get("appId"));
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
+  const text = String(formData.get("note") ?? "").trim();
+  if (!text) await fail("Write the note first.");
+  if (text.length > LEAD_NOTE_MAX) await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
+  if (!repo.addReviewNote(appId, user.id, user.role, text)) await fail("That application no longer exists.");
+  markTablesStale();
+  revalidatePath(`/openings/${openingId}`, "layout");
+  await done("Note added.");
+}
+
+export async function removeReviewNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  const appId = String(formData.get("appId"));
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
+  const noteId = String(formData.get("noteId") ?? "");
+  const target = repo.application(appId)?.reviewNotes?.find((n) => n.id === noteId);
+  if (!target) await fail("That note is already gone.");
+  if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
+  repo.removeReviewNote(appId, noteId);
+  markTablesStale();
+  revalidatePath(`/openings/${openingId}`, "layout");
   await done("Note removed.");
 }
 
@@ -4205,6 +4239,17 @@ export async function sendEod(formData: FormData) {
     )}`);
   const sets = fresh.map((id) => repo.application(id)?.setNumber).filter((n): n is number => n != null);
 
+  // The desk's To is fixed; the TA can add more To and Cc addresses (29 Sep).
+  // An address that is not one stops the send, so nobody is quietly left off.
+  const toList = parseAddressList(String(formData.get("extraTo") ?? ""));
+  const ccList = parseAddressList(String(formData.get("extraCc") ?? ""));
+  const badAddress = [...toList.bad, ...ccList.bad];
+  if (kind === "director" && badAddress.length)
+    redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
+      `Not sent: ${badAddress.join(", ")} ${badAddress.length === 1 ? "is not an email address" : "are not email addresses"}.`,
+    )}`);
+  const sentTo = kind === "director" ? EOD_TO : String(formData.get("to") ?? "");
+
   // The Director's copy is really sent now, through Microsoft Graph from the
   // TA's own mailbox, copying the TA Lead, the desk's end-of-day copy and the
   // shortlist inbox. Nothing is recorded unless it went. The client's copy is
@@ -4238,7 +4283,9 @@ export async function sendEod(formData: FormData) {
       openingId,
       user,
       applicationIds: fresh,
-      to: String(formData.get("to") ?? ""),
+      to: sentTo,
+      extraTo: toList.ok,
+      extraCc: ccList.ok,
       subject: String(formData.get("subject") ?? ""),
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
@@ -4284,7 +4331,7 @@ export async function sendEod(formData: FormData) {
     applicationIds: fresh,
     setNumber: sets.length ? Math.min(...sets) : null,
     sentBy: user.id,
-    sentTo: String(formData.get("to") ?? ""),
+    sentTo,
     // The address the reply is watched on: copied in, and on the reply-to.
     trackedAt: repo.shortlistInbox(),
     subject: String(formData.get("subject") ?? ""),
@@ -4320,6 +4367,9 @@ async function emailEod(input: {
   user: User;
   applicationIds: string[];
   to: string;
+  /** Addresses the TA added beside the desk's To and Cc (29 Sep). */
+  extraTo?: string[];
+  extraCc?: string[];
   subject: string;
   effort?: EffortRow;
   rows?: ShortlistRow[];
@@ -4329,9 +4379,7 @@ async function emailEod(input: {
   const { openingId, user } = input;
   const opening = repo.opening(openingId);
   if (!opening) return { ok: false, error: "That opening no longer exists." };
-  const director = repo.users().find((u) => u.role === "director");
-  const to = input.to.trim() || director?.email || "";
-  if (!to) return { ok: false, error: "There is no Director email address to send to." };
+  const to = input.to.trim() || EOD_TO;
   if (!input.subject.trim()) return { ok: false, error: "The email needs a subject." };
 
   const candidateIds = input.applicationIds
@@ -4402,7 +4450,6 @@ async function emailEod(input: {
     }
   }
 
-  const lead = repo.user(opening.taLeadId);
   const html = eodEmailHtml({
     rows,
     effort: input.effort ?? effortRow(openingId, user),
@@ -4417,7 +4464,10 @@ async function emailEod(input: {
     result = await convexAction("ta/eodMail:send", {
       from: user.email,
       to,
-      cc: [lead?.email ?? "", repo.eodCopyTo(), repo.shortlistInbox()].filter(Boolean),
+      alsoTo: input.extraTo ?? [],
+      // The desk's fixed list, whoever the TA added, and the inbox that watches
+      // for the reply (no longer the TA Lead or the People-page copy, 29 Sep).
+      cc: [...EOD_CC_DEFAULTS, ...(input.extraCc ?? []), repo.shortlistInbox()].filter(Boolean),
       replyTo: [user.email, repo.shortlistInbox()].filter(Boolean),
       subject: input.subject.trim(),
       html,
@@ -4887,6 +4937,14 @@ export async function logOutreachInline(_: ActionResult | null, formData: FormDa
 
 export async function addLeadNoteInline(_: ActionResult | null, formData: FormData) {
   return inline(() => addLeadNote(formData));
+}
+
+export async function addReviewNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addReviewNote(formData));
+}
+
+export async function removeReviewNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeReviewNote(formData));
 }
 
 export async function removeLeadNoteInline(_: ActionResult | null, formData: FormData) {

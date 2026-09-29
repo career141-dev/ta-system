@@ -2029,6 +2029,27 @@ const rawRepo = {
     return found ? id : null;
   },
 
+  /** A note on a person in Director review, from anyone on the opening (29 Sep). */
+  addReviewNote(applicationId: Id, by: Id, byRole: Role, note: string): Id | null {
+    const id = `rn_${Math.random().toString(36).slice(2, 10)}`;
+    let found = false;
+    mutate((db) => {
+      const a = db.applications.find((x) => x.id === applicationId);
+      if (!a) return;
+      found = true;
+      a.reviewNotes = [...(a.reviewNotes ?? []), { id, at: Date.now(), note, by, byRole }];
+    });
+    return found ? id : null;
+  },
+
+  removeReviewNote(applicationId: Id, noteId: Id) {
+    mutate((db) => {
+      const a = db.applications.find((x) => x.id === applicationId);
+      if (!a?.reviewNotes) return;
+      a.reviewNotes = a.reviewNotes.filter((n) => n.id !== noteId);
+    });
+  },
+
   removeLeadNote(entryId: Id, noteId: Id) {
     mutate((db) => {
       const e = db.linkVault.find((l) => l.id === entryId);

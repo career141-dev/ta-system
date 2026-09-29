@@ -1082,6 +1082,15 @@ export default defineSchema({
     // Where the TA dragged the CAREER141 box on the Prepared CV, in PDF points
     // from page 1's top-left (29 Sep). Absent: placed automatically.
     taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number() })),
+    // Notes left on this person in Director review by a TA, lead, director or
+    // admin (29 Sep). `byRole` is the role at the time, as on link-vault notes.
+    reviewNotes: v.optional(v.array(v.object({
+      id: v.string(),
+      at: v.number(),
+      note: v.string(),
+      by: v.id("users"),
+      byRole: v.string(),
+    }))),
   })
     .index("by_jobId", ["jobId"])
     .index("by_job_stage", ["jobId", "currentStage"])

@@ -120,6 +120,37 @@ export function setsCell(sets: number | string | null | undefined, total: number
 /** Who is copied on every end-of-day email, until it is changed on the People page. */
 export const DEFAULT_EOD_CC = "azim@career141.com";
 
+/**
+ * Who the Director's end-of-day email goes to, as the desk set it on 29 Sep:
+ * the job-orders box, copying the leads and ops. The TA adds more on the
+ * composer (extra To, extra Cc); these are always on it. The shortlist inbox
+ * that watches for the reply is added on top by the sender, not listed here.
+ */
+export const EOD_TO = "joborders@career141.com";
+export const EOD_CC_DEFAULTS = [
+  "shamra@career141.com",
+  "asma@career141.com",
+  "opsteam@career141.com",
+  "cv@career141.com",
+] as const;
+
+/**
+ * Addresses typed into a box, separated by commas, semicolons, spaces or new
+ * lines: lower-cased, once each, and the ones that are not addresses listed
+ * apart so the TA is told instead of the email quietly going without them.
+ */
+export function parseAddressList(raw: string | null | undefined): { ok: string[]; bad: string[] } {
+  const ok: string[] = [];
+  const bad: string[] = [];
+  for (const part of String(raw ?? "").split(/[,;\s]+/)) {
+    const a = part.trim().toLowerCase();
+    if (!a) continue;
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(a)) bad.push(part.trim());
+    else if (!ok.includes(a)) ok.push(a);
+  }
+  return { ok, bad };
+}
+
 const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;")

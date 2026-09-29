@@ -4,6 +4,7 @@ import { repo, setsForOpening, SET_SIZE } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
+import { EOD_CC_DEFAULTS, EOD_TO } from "@/lib/eod-format";
 import { readEodReply, readInboundReply } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
@@ -101,7 +102,9 @@ export default async function EodPage({
       <header className="mb-7 mt-3">
         <h1 className="text-[26px] font-semibold tracking-tight">End of Day Submission</h1>
         <p className="mt-1.5 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
-          Daily shortlist and effort summary sent to {director?.name ?? "the Director"} ({director?.email || "director"}).
+          {kind === "director"
+            ? `Daily shortlist and effort summary sent to ${EOD_TO}, copying the desk. Add more To and Cc addresses below.`
+            : `Daily shortlist and effort summary for ${director?.name ?? "the Director"} (${director?.email || "director"}).`}{" "}
           Replies are tracked and candidate stages advance automatically.
         </p>
       </header>
@@ -228,12 +231,14 @@ export default async function EodPage({
         openingId={id}
         kind={kind}
         subject={formattedSubject}
-        toName={director?.name ?? "Director"}
-        toEmail={director?.email ?? ""}
-        ccName={lead?.name ?? ""}
-        ccEmail={lead?.email ?? ""}
+        toName={kind === "director" ? "Job Orders" : (director?.name ?? "Director")}
+        toEmail={kind === "director" ? EOD_TO : (director?.email ?? "")}
+        ccName={kind === "director" ? "" : (lead?.name ?? "")}
+        ccEmail={kind === "director" ? "" : (lead?.email ?? "")}
         trackedAt={repo.shortlistInbox()}
-        eodCc={kind === "director" ? repo.eodCopyTo() : null}
+        eodCc={null}
+        fixedCc={kind === "director" ? [...EOD_CC_DEFAULTS] : []}
+        canAddRecipients={kind === "director"}
         rows={rows}
         effort={effort}
         senderName={user.name}

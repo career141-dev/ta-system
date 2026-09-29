@@ -12,7 +12,7 @@ import path from "node:path";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-effort-"));
 process.chdir(tmp);
 const { repo } = await import("@/data/store");
-const { effortRow, effortFromForm, effortBucket } = await import("@/lib/eod");
+const { effortRow, effortFromForm, effortBucket, shortlistRows } = await import("@/lib/eod");
 const { dayTotal, setsCell, eodEmailHtml } = await import("@/lib/eod-format");
 import type { Id, User } from "@/data/types";
 
@@ -29,6 +29,7 @@ const edit = (fn: (db: any) => void) => {
   fn(raw);
   fs.writeFileSync(dbFile(), JSON.stringify(raw));
 };
+const shortlistRowsIds = (openingId: Id, ta: User) => shortlistRows(openingId, ta.id, "director").map((r) => r.applicationId);
 const NOW = Date.now();
 const YESTERDAY = NOW - 36 * 3_600_000;
 
@@ -149,6 +150,28 @@ repo.reset();
   eq("after it goes: counted once, beside the others sent", dayTotal(effortRow(o.id, ta)), 2);
   send(o.id, ta, [a5]);
   eq("a second email the same day adds to the day", dayTotal(effortRow(o.id, ta)), 3);
+}
+
+console.log("\nthe Director's email is Director Review only (29 Sep)");
+repo.reset();
+{
+  const ta = repo.users().find((u) => u.role === "ta")!;
+  const o = cleanOpening(ta);
+  const [a1] = repo.applications(o.id).map((a) => a.id);
+  const cid = repo.application(a1)!.candidateId;
+  // Every question answered, but still with the TA — not yet in Director Review.
+  edit((raw) => {
+    Object.assign(raw.applications.find((a: { id: string }) => a.id === a1), { stage: "ta_follow_up", ownerTaId: ta.id });
+    Object.assign(raw.candidates.find((c: { id: string }) => c.id === cid), {
+      currentSalary: "150,000", expectedSalary: "200,000", noticePeriodDays: 30,
+    });
+  });
+  const ready = repo.followUp(a1)?.followUp.state === "complete";
+  console.log(`  (follow-up complete in this fixture: ${ready})`);
+  eq("a finished follow-up still in the TA's hands is not in the email", shortlistRowsIds(o.id, ta).includes(a1), false);
+  eq("nor is it counted in the day", dayTotal(effortRow(o.id, ta)), 0);
+  edit((raw) => Object.assign(raw.applications.find((a: { id: string }) => a.id === a1), { stage: "director_review" }));
+  eq("moved to Director Review, it is in the email", shortlistRowsIds(o.id, ta).includes(a1), true);
 }
 
 console.log("\nSCOOP: of six mailed in by a lead, only the one sent to the Director");
