@@ -68,6 +68,32 @@ console.log("\nPending → Interested → Not interested, one person throughout"
   eq("one application for them here", repo.applicationsForCandidate(repo.linkEntry(a)!.candidateId!).filter((x) => x.openingId === o.id).length, 1);
 }
 
+console.log("\nNot interested, never on the pipeline: straight into Rejected");
+{
+  const b = repo.addLink(o.id, "https://linkedin.com/in/candidate-b-never", ta.id, "Candidate Bravo");
+  eq("Pending before", statusOf(b), "pending");
+  // What setLinkInterest does: outcome Declined, then onto the pipeline as Rejected.
+  repo.updateLink(b, { outcome: "declined" });
+  const made = repo.linkToApplication(b, ta.id, { rejected: "Not interested" });
+  eq("they go onto the pipeline", made.ok, true);
+  eq("as Rejected, with the reason", [appOf(b)?.stage, appOf(b)?.rejectReason, appOf(b)?.rejectedBy], ["rejected", "Not interested", ta.id]);
+  eq("Not interested", statusOf(b), "not_interested");
+  eq("still in the table", !!repo.linkEntry(b), true);
+  const n = repo.addLink(o.id, "https://linkedin.com/in/zz-no-name-9", ta.id, null);
+  repo.updateLink(n, { outcome: "declined", name: null });
+  const refused = repo.linkToApplication(n, ta.id, { rejected: "Not interested" });
+  eq("without a name it is refused, and nothing is added", [refused.ok, repo.linkEntry(n)!.candidateId ?? null], [false, null]);
+
+  // The TA's reason (the desk, 29 Sep): on the Rejected entry and the row's log.
+  const w = repo.addLink(o.id, "https://linkedin.com/in/candidate-why-9", ta.id, "Candidate Why");
+  repo.updateLink(w, { outcome: "declined" });
+  repo.linkToApplication(w, ta.id, { rejected: "Not interested — happy where they are" });
+  repo.logOutreach(w, ta.id, "Not interested", "happy where they are");
+  eq("the reason is on the Rejected entry", appOf(w)?.rejectReason, "Not interested — happy where they are");
+  eq("and on the row's log", repo.linkEntry(w)!.conversationLog.at(-1)?.note, "happy where they are");
+  eq("logging it does not change the Declined outcome", repo.linkEntry(w)!.outcome, "declined");
+}
+
 console.log("\nL1, L2, L3: started with + by each TA");
 {
   const before = repo.addLink(o.id, "https://linkedin.com/in/before-any-l", ta.id, "Before Any");
