@@ -6,6 +6,7 @@ import { LiveTableRefresh } from "@/components/LiveTableRefresh";
 import { getCurrentUser } from "@/lib/session";
 import { after } from "next/server";
 import { matchUnchecked } from "@/lib/cvMatch";
+import { readLinkFilters } from "@/lib/linkViews";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export default async function LinksPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string; view?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; status?: string; day?: string; addons?: string; page?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -29,7 +30,7 @@ export default async function LinksPage({
       <h1 className="text-[21px] font-semibold tracking-tight">Excel Tables</h1>
       <ProjectHeader openingId={id} />
       <CaptureSetup />
-      <LinkVaultTable openingId={id} user={user} q={sp.q} view={sp.view} page={Math.floor(Number(sp.page)) || 1} />
+      <LinkVaultTable openingId={id} user={user} q={sp.q} {...readLinkFilters(sp)} page={Math.floor(Number(sp.page)) || 1} />
     </>
   );
 }

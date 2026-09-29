@@ -1504,8 +1504,22 @@ export async function addLinkToPipeline(formData: FormData) {
     });
   }
 
+  const r = await pipelineFromLink(user, entryId, openingId);
+  return r.tone === "error" ? fail(r.message) : r.tone === "note" ? note(r.message) : done(r.message);
+}
+
+/**
+ * An Excel Tables row onto this opening's pipeline — what "Add to pipeline"
+ * and "Interested" both do. Answers instead of redirecting, so a caller that
+ * changed the row first can put it back when this is refused.
+ */
+async function pipelineFromLink(
+  user: User,
+  entryId: string,
+  openingId: string,
+): Promise<{ tone: "ok" | "note" | "error"; message: string }> {
   const made = repo.linkToApplication(entryId, user.id);
-  if (!made.ok) return fail(made.message);
+  if (!made.ok) return { tone: "error", message: made.message };
   markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
@@ -1515,12 +1529,17 @@ export async function addLinkToPipeline(formData: FormData) {
   const isFollowUp = (s: string) => s === "ai_follow_up" || s === "ta_follow_up" || s === "follow_up";
   if (made.stage === "rejected" || made.stage === "dropped_out") {
     const r = await reinstate(user, made.applicationId, openingId);
-    if (!r.ok) return fail(`They were ${(STAGE_LABEL[made.stage] ?? made.stage ?? "").toLowerCase()} here and could not be brought back: ${r.message}`);
+    if (!r.ok) {
+      return {
+        tone: "error",
+        message: `They were ${(STAGE_LABEL[made.stage] ?? made.stage ?? "").toLowerCase()} here and could not be brought back: ${r.message}`,
+      };
+    }
     made.stage = "ta_follow_up";
   }
   if (made.stage === "matched" || made.stage === "new_cv") made.stage = "ta_follow_up";
   if (!isFollowUp(made.stage)) {
-    return note(`Already on this opening's pipeline, in ${STAGE_LABEL[made.stage] ?? made.stage}.`);
+    return { tone: "note", message: `Already on this opening's pipeline, in ${STAGE_LABEL[made.stage] ?? made.stage}.` };
   }
 
   if (isConvex()) {
@@ -1533,17 +1552,100 @@ export async function addLinkToPipeline(formData: FormData) {
       problem = `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${backendMessage(e, "the move could not be made.")})`;
     }
     await afterBackendWrite(openingId);
-    if (problem) return note(problem);
-    return done("Added to the pipeline and moved to Director review.");
+    if (problem) return { tone: "note", message: problem };
+    return { tone: "ok", message: "Added to the pipeline and moved to Director review." };
   }
   repo.shortlist(made.applicationId, user.id);
   const moved = repo.moveStage(made.applicationId, "director_review", user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
   if (!moved.ok) {
-    return note(
-      `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${moved.message})`);
+    return {
+      tone: "note",
+      message: `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${moved.message})`,
+    };
   }
-  return done("Added to the pipeline and moved to Director review.");
+  return { tone: "ok", message: "Added to the pipeline and moved to Director review." };
+}
+
+/**
+ * Interested / Not interested on an Excel Tables row (the desk, 29 Sep).
+ *
+ * The row and the pipeline are one person, so they move together:
+ * Interested puts them on this opening's pipeline the way "Add to pipeline"
+ * does (TA Follow-up, then Director review when their details are complete),
+ * and Not interested rejects them there with the reason "Not interested".
+ * Nobody is deleted or copied. If the pipeline refuses, the row's outcome is
+ * put back, so the table never says one thing while the pipeline says another.
+ */
+export async function setLinkInterest(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
+  await authorize(formData, "opening.act", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const interest = String(formData.get("interest"));
+  const entry = repo.linkVault(openingId).find((e) => e.id === entryId);
+  if (!entry) return fail("That row is no longer in this table.");
+  const before = entry.outcome;
+  const refresh = () => {
+    revalidatePath(`/openings/${openingId}`, "layout");
+    revalidatePath(`/openings/${openingId}/hh/links`);
+  };
+
+  if (interest === "interested") {
+    repo.updateLink(entryId, { outcome: "shortlisted" });
+    const r = await pipelineFromLink(user, entryId, openingId);
+    if (r.tone === "error") {
+      // A backend write may have dropped the primed copy; load it again first.
+      await primeStore({ openingId });
+      repo.updateLink(entryId, { outcome: before });
+      refresh();
+      return fail(`Failed to update candidate status. ${r.message}`);
+    }
+    refresh();
+    return r.tone === "note" ? note(`Interested. ${r.message}`) : done(`Interest status updated — Interested. ${r.message}`);
+  }
+
+  if (interest !== "not_interested") return fail("Pick Interested or Not interested.");
+  const app = entry.candidateId
+    ? (repo.applicationsForCandidate(entry.candidateId).find((a) => a.openingId === openingId) ?? null)
+    : null;
+  repo.updateLink(entryId, { outcome: "declined" });
+  if (app && app.stage !== "rejected" && app.stage !== "dropped_out") {
+    // Their pipeline entry is checked as any other move would be — the
+    // collision lock included — before anything there changes.
+    const undo = async (message: string) => {
+      await primeStore({ openingId });
+      repo.updateLink(entryId, { outcome: before });
+      refresh();
+      return fail(`Failed to update candidate status. ${message}`);
+    };
+    const allowed = can(user, "opening.act", {
+      openingId,
+      assignment: repo.assignmentFor(openingId, user.id) ?? null,
+      ownerTaId: app.ownerTaId,
+    });
+    if (!allowed.ok) return undo(allowed.message);
+    if (isConvex()) {
+      try {
+        await backend.moveStage({ id: user.id }, app.id, "rejected", "Not interested");
+      } catch (e) {
+        return undo(backendMessage(e, "They could not be moved to Rejected."));
+      }
+      await afterBackendWrite(openingId);
+    } else {
+      const res = repo.moveStage(app.id, "rejected", user.id, "Not interested");
+      if (!res.ok) return undo(res.message);
+    }
+    refresh();
+    return done("Interest status updated — Not interested, and moved to Rejected on the pipeline.");
+  }
+  refresh();
+  return done("Interest status updated — Not interested.");
+}
+
+export async function setLinkInterestInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => setLinkInterest(formData));
 }
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────

@@ -9,6 +9,7 @@ import {
   deleteLinkInline,
   logOutreachInline,
   removeLeadNoteInline,
+  setLinkInterestInline,
   toggleEyeMarkInline,
   toggleLinkAddOnInline,
   updateLinkInline,
@@ -20,6 +21,7 @@ import { dateAt } from "@/lib/format";
 import { newestFirst, noteByline } from "@/lib/leadNotes";
 import { STAGE_LABEL } from "@/data/types";
 import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
+import { INTEREST_LABEL, type Interest } from "@/lib/linkViews";
 
 const OUTCOMES: { value: LinkOutcome; label: string }[] = [
   { value: "no_contact", label: "Not contacted" },
@@ -63,6 +65,8 @@ export function LinkRow({
   addedByName,
   userNames,
   onPipeline = null,
+  interest = "pending",
+  day = 0,
   canNote = false,
   viewerId = "",
 }: {
@@ -72,6 +76,10 @@ export function LinkRow({
   userNames: Record<string, string>;
   /** Their application on this opening, once they have been added. */
   onPipeline?: Pick<Application, "id" | "stage"> | null;
+  /** Pending, Interested or Not interested (lib/linkViews interestOf). */
+  interest?: Interest;
+  /** L number: the day it was added, 1 for the first day on this opening. */
+  day?: number;
   /** A lead, director, admin or ops: may leave notes for the TA. */
   canNote?: boolean;
   /** Who is looking — the author of a note may remove it. */
@@ -89,6 +97,7 @@ export function LinkRow({
   const addOn = useInline(toggleLinkAddOnInline);
   const save = useInline(updateLinkInline);
   const toPipeline = useInline(addLinkToPipelineInline);
+  const setInterest = useInline(setLinkInterestInline);
   const decide = useInline(decideCvMatchInline);
   const logIt = useInline(logOutreachInline);
   // Cleared once the approach is logged, not on the click: a refused note
@@ -111,8 +120,8 @@ export function LinkRow({
     }
   }, [sendNote.result]);
   const busy =
-    eye.pending || addOn.pending || save.pending || toPipeline.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending;
-  const answer = latest(eye.result, addOn.result, save.result, toPipeline.result, logIt.result, del.result, sendNote.result, dropNote.result);
+    eye.pending || addOn.pending || save.pending || toPipeline.pending || setInterest.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending;
+  const answer = latest(eye.result, addOn.result, save.result, toPipeline.result, setInterest.result, logIt.result, del.result, sendNote.result, dropNote.result);
 
   useEffect(() => {
     setIsEyeMarked(r.isEyeMarked);
@@ -178,6 +187,18 @@ export function LinkRow({
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}
                 </span>
+                {day > 0 && (
+                  <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium tabular-nums text-ink-soft" title="The day it was added">
+                    L{day}
+                  </span>
+                )}
+                <span
+                  className={`rounded px-1.5 py-[3px] text-[10.5px] font-medium ${
+                    interest === "interested" ? "bg-brand-soft text-brand" : interest === "not_interested" ? "bg-danger-soft text-danger" : "bg-warn-soft text-ink-soft"
+                  }`}
+                >
+                  {INTEREST_LABEL[interest]}
+                </span>
                 {r.isAddOn && (
                   <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">Add-on</span>
                 )}
@@ -192,6 +213,30 @@ export function LinkRow({
                 {[r.company, r.phoneNumber].filter(Boolean).join(" · ") || "No company or number yet"}
               </p>
               <CvStatus entry={r} openingId={openingId} decide={decide} />
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                {(["interested", "not_interested"] as const)
+                  .filter((to) => to !== interest)
+                  .map((to) => (
+                    <form key={to} onSubmit={(e) => setInterest.run(submitted(e).formData)}>
+                      <input type="hidden" name="openingId" value={openingId} />
+                      <input type="hidden" name="entryId" value={r.id} />
+                      <input type="hidden" name="interest" value={to} />
+                      <SubmitButton
+                        busy={setInterest.pending}
+                        locked={busy}
+                        pendingLabel="Updating…"
+                        tone="dark"
+                        className={`rounded-full border px-2.5 py-0.5 text-[11.5px] transition-colors disabled:opacity-60 ${
+                          to === "interested"
+                            ? "border-brand-line text-brand hover:bg-brand-soft"
+                            : "border-rule-strong text-ink-soft hover:border-danger hover:text-danger"
+                        }`}
+                      >
+                        {to === "interested" ? "Interested" : "Not interested"}
+                      </SubmitButton>
+                    </form>
+                  ))}
+              </div>
             </div>
 
             <div className="flex shrink-0 flex-col items-end gap-2">
