@@ -386,11 +386,12 @@ export function EodComposer({
         ) : (
           <div className="mt-3 flex flex-col gap-1.5">
             {effectiveRows.map((r) => {
-              const notesStr = Array.isArray(r.notes) ? r.notes.join("\n") : String(r.notes ?? "");
               return (
                 <a
                   key={r.applicationId}
-                  href={`/api/prepared-cv/${r.applicationId}?current=${encodeURIComponent(r.currentRemuneration)}&expected=${encodeURIComponent(r.expectedRemuneration)}&notes=${encodeURIComponent(notesStr)}`}
+                  // The file that is attached: the Prepared CV as the desk holds
+                  // it, box where the TA put it — not this table's text (29 Sep).
+                  href={`/api/prepared-cv/${r.applicationId}`}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-2.5 text-[12.5px] text-brand hover:underline"

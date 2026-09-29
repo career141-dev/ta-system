@@ -627,6 +627,10 @@ export default defineSchema({
      *  once the extraction has filed it on `assignToJob`, it is claimed by this
      *  TA into TA Follow-up and flagged HH. */
     headhuntedBy: v.optional(v.id("users")),
+    /** Set when a TA replaces a candidate's CV (ta/cv.ts attach, 29 Sep):
+     *  extraction then only fills that candidate's empty fields, and does not
+     *  match them to other jobs (convex/lib/fillBlanks.ts). */
+    replaceKeepDetails: v.optional(v.boolean()),
     /** Set when a TA uploads a scoop CV from the opening's Scoops page
      *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
      *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`
@@ -1075,6 +1079,9 @@ export default defineSchema({
     // TA System — a recruiter's rating and running notes on this application.
     rating: v.optional(v.union(v.number(), v.null())),
     taNotes: v.optional(v.array(v.string())),
+    // Where the TA dragged the CAREER141 box on the Prepared CV, in PDF points
+    // from page 1's top-left (29 Sep). Absent: placed automatically.
+    taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number() })),
   })
     .index("by_jobId", ["jobId"])
     .index("by_job_stage", ["jobId", "currentStage"])

@@ -50,6 +50,11 @@ export const attach = internalMutation({
       source: "Manual",
       uploadedBy: user._id as string,
       status: "uploaded",
+      // Only the file is replaced (29 Sep). Naming the candidate stops the
+      // extraction making a new one and merging it over this person; the flag
+      // makes it fill only what is empty (convex/lib/fillBlanks.ts).
+      candidateId: candidate._id,
+      replaceKeepDetails: true,
     });
     // The earlier upload stays in cvUploads: replacing the CV on file does
     // not delete what was there.

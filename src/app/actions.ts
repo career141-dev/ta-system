@@ -1398,6 +1398,35 @@ export async function declineOffer(formData: FormData) {
   );
 }
 
+/**
+ * Where the CAREER141 box sits on the Prepared CV (29 Sep): the TA drags it on
+ * the Prepared CV tab and it stays there for the download and the end-of-day
+ * attachment. Points from page 1's top-left; "reset" goes back to automatic.
+ */
+export async function savePreparedCvBox(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  if (String(formData.get("reset")) === "1") {
+    repo.setPreparedCvBox(appId, null);
+  } else {
+    const x = Number(formData.get("x"));
+    const y = Number(formData.get("y"));
+    // A page is at most a few thousand points; anything else is not a drag.
+    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 5000 || y > 5000) {
+      await fail("That position could not be read. Drag the box again.");
+    }
+    repo.setPreparedCvBox(appId, { x: Math.round(x), y: Math.round(y) });
+  }
+  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
+  await done(String(formData.get("reset")) === "1" ? "Box back in its automatic place." : "Box position saved.");
+}
+
+export async function savePreparedCvBoxInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => savePreparedCvBox(formData));
+}
+
 export async function toggleAddOn(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
@@ -4312,7 +4341,7 @@ async function emailEod(input: {
 
   const { shortlistRows, effortRow } = await import("@/lib/eod");
   const { eodEmailHtml } = await import("@/lib/eod-format");
-  const { buildPreparedCv, preparedCvFileName } = await import("@/lib/pdf");
+  const { preparedCvFileName } = await import("@/lib/pdf");
 
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
@@ -4353,59 +4382,12 @@ async function emailEod(input: {
     const c = app ? repo.candidate(app.candidateId) : null;
     if (!app || !c) continue;
     try {
-      let pdfBytes: Uint8Array | null = null;
-      const { isConvex } = await import("@/data/mode");
-      if (isConvex()) {
-        try {
-          const link = await backend.cvLink({ id: null }, c.id, false);
-          if (link.ok && link.url) {
-            const cvRes = await fetch(link.url);
-            if (cvRes.ok) {
-              const baseBuf = await cvRes.arrayBuffer();
-              const { stampPdfWithCareer141Box } = await import("@/lib/pdf");
-              pdfBytes = await stampPdfWithCareer141Box(
-                baseBuf,
-                {
-                  currentSalary: r.currentRemuneration,
-                  expectedSalary: r.expectedRemuneration,
-                  notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
-                },
-                undefined,
-                link.fileName ?? c.cvFileName
-              );
-            }
-          }
-        } catch {
-          /* Fallback */
-        }
-      }
-
-      if (!pdfBytes) {
-        const profile = await backend.candidateProfile({ id: null }, c.id).catch(() => null);
-        const { pdf } = buildPreparedCv(
-          {
-            fullName: c.fullName,
-            currentTitle: c.currentTitle,
-            currentEmployer: c.currentEmployer,
-            location: c.location,
-            totalExperienceYears: c.totalExperienceYears,
-            educationDegree: c.educationDegree,
-            educationInstitution: c.educationInstitution,
-            summary: profile?.summary ?? null,
-            career: profile?.career ?? [],
-            education: profile?.education ?? [],
-            skills: c.skills ?? [],
-            languages: profile?.languages ?? [],
-            certifications: profile?.certifications ?? [],
-          },
-          {
-            currentSalary: r.currentRemuneration,
-            expectedSalary: r.expectedRemuneration,
-            notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
-          },
-        );
-        pdfBytes = new Uint8Array(pdf);
-      }
+      // The same file as the drawer's Prepared CV: what the desk holds, with
+      // the box where the TA put it (lib/preparedCvFile, 29 Sep). It used to
+      // add its own "Total Experience" / "Currently at" lines and print
+      // "Not disclosed" for an unknown salary.
+      const { preparedCvFile } = await import("@/lib/preparedCvFile");
+      const pdfBytes = (await preparedCvFile(app, c, opening)).bytes;
 
       const base64 = Buffer.from(pdfBytes).toString("base64");
       if (used + base64.length > EOD_ATTACHMENT_BUDGET) {

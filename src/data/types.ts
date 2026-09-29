@@ -371,6 +371,9 @@ export interface Application {
   /** Answers to the opening's own follow-up questions, by question id. The
    *  standard three are written to the candidate instead. */
   answers: Record<string, string>;
+  /** Where the TA put the CAREER141 box on the Prepared CV, in PDF points from
+   *  page 1's top-left. Null or missing: placed automatically (29 Sep). */
+  preparedCvBox?: { x: number; y: number } | null;
   sourcingChannel: SourcingChannel;
 
   /** Spec §9 / Q3 — set in the same write as the shortlist. First to shortlist owns. */
