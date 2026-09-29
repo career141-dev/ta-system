@@ -60,6 +60,7 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     ageNote: typeof c.ageNote === "string" ? c.ageNote : null,
     experienceNote: typeof c.experienceNote === "string" ? c.experienceNote : null,
     gender: c.gender ?? null,
+    genderSource: c.genderSource ?? null,
     currentEmployer: c.currentEmployer ?? null,
     currentTitle: c.currentJobTitle || c.currentTitle || null,
     totalExperienceYears: typeof c.totalExperienceYears === "number" ? c.totalExperienceYears : typeof c.yearsOfExperience === "number" ? c.yearsOfExperience : null,

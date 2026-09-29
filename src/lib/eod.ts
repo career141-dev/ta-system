@@ -149,7 +149,7 @@ export function sentToDirectorToday(openingId: Id, taId: Id, since: number): App
  * exactly one column (effortBucket), so they add up to the total beside SETS:
  *
  *   BACK-UP   tagged as cover for someone already at interview or offer.
- *   SCOOP     mailed to the TA by the Director, a TA Lead or Ops
+ *   SCOOP     uploaded by the TA under Scoops (sent by the Director, a TA Lead or Ops)
  *             (convex/mailIntake); the TA adds WhatsApp ones on top.
  *   ADD-ONS   flagged Add-on — worked on an Add-on day, or tagged by hand.
  *   DA        came to us directly — WhatsApp or a WhatsApp campaign.

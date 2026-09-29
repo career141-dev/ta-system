@@ -264,6 +264,8 @@ export interface Candidate {
   /** When the CV's date of birth and its NIC disagree, or the age is only approximate. */
   ageNote?: string | null;
   gender: string | null;
+  /** Where gender came from when extraction filled it: cv_stated | nic | cv_llm. */
+  genderSource?: string | null;
   currentEmployer: string | null;
   currentTitle: string | null;
   totalExperienceYears: number | null;

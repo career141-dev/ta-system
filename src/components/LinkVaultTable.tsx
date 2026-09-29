@@ -8,6 +8,7 @@ import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
 import { LinkFilters } from "./LinkFilters";
+import { movedBackToTables } from "@/lib/pipeline";
 
 const PAGE_SIZE = 25;
 
@@ -54,9 +55,12 @@ export function LinkVaultTable({
   // their counts and the rows all read the same answer.
   const facts = new Map(
     everyRow.map(({ row: r }) => {
-      const app = r.candidateId
-        ? (repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId) ?? null)
-        : null;
+      const found = r.candidateId
+        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId)
+        : undefined;
+      // Someone moved back here from the pipeline is off it: the row offers
+      // "Add to pipeline" again and reads Pending (29 Sep).
+      const app = found && !movedBackToTables(found) ? found : null;
       return [r.id, { app, interest: interestOf(r, app) }] as const;
     }),
   );

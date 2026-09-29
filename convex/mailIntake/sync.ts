@@ -34,7 +34,8 @@ export const syncMailbox = internalAction({
   args: { mailbox: v.string() },
   handler: async (ctx, args): Promise<{ recorded: number; pages: number; done: boolean; error?: string }> => {
     const box = await ctx.runQuery(internal.mailIntake.model.mailbox, { mailbox: args.mailbox });
-    if (!box || !box.enabled) return { recorded: 0, pages: 0, done: true };
+    // A TA's own mailbox is not read (29 Sep): scoops are uploaded on the opening's Scoops page.
+    if (!box || !box.enabled || box.kind === "ta") return { recorded: 0, pages: 0, done: true };
 
     const since = new Date(box.backfillFrom).toISOString();
     let url =
@@ -43,11 +44,6 @@ export const syncMailbox = internalAction({
       `${GRAPH}/users/${encodeURIComponent(args.mailbox)}/mailFolders/inbox/messages/delta` +
         `?$select=subject,from,receivedDateTime,hasAttachments` +
         `&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}`;
-
-    // A TA's own mailbox is theirs: only a CV the Director, a TA Lead or Ops
-    // sent them (a scoop, 27 Sep) is logged. The rest of their mail never is.
-    const scoopFrom: Set<string> | null =
-      box.kind === "ta" ? new Set(await ctx.runQuery(internal.mailIntake.model.scoopSenderEmails, {})) : null;
 
     let recorded = 0;
     let pages = 0;
@@ -91,8 +87,7 @@ export const syncMailbox = internalAction({
             fromAddress: (m.from?.emailAddress?.address ?? "").toLowerCase(),
             hasAttachments: Boolean(m.hasAttachments),
           }))
-          .filter((m) => m.receivedAt >= box.backfillFrom)
-          .filter((m) => !scoopFrom || (m.hasAttachments && scoopFrom.has(m.fromAddress)));
+          .filter((m) => m.receivedAt >= box.backfillFrom);
         if (messages.length) {
           const { added } = await ctx.runMutation(internal.mailIntake.model.recordMessages, { mailbox: args.mailbox, messages });
           recorded += added;

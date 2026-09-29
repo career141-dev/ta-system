@@ -21,6 +21,29 @@
 import type { Candidate, Stage } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 
+/**
+ * The drop-out reason that means "put back on Excel Tables", not "left".
+ *
+ * Moving someone back is a move to Dropped out, not a delete, for the same
+ * reason Remove is (21 Sep): the application keeps its history, and "Add to
+ * pipeline" on the row brings the same application back. This reason is how
+ * Excel Tables tells that drop-out apart and offers the button again (29 Sep).
+ */
+export const BACK_TO_TABLES_REASON = "Moved back to Excel Tables";
+
+export function movedBackToTables(app: { stage: Stage; droppedOutReason?: string | null }): boolean {
+  return app.stage === "dropped_out" && app.droppedOutReason === BACK_TO_TABLES_REASON;
+}
+
+/** On the pipeline, and put there from one of this opening's Excel Tables rows. */
+export function cameFromTables(
+  app: { stage: Stage; candidateId: string },
+  rows: { candidateId?: string | null }[],
+): boolean {
+  if (app.stage === "rejected" || app.stage === "dropped_out") return false;
+  return rows.some((r) => r.candidateId === app.candidateId);
+}
+
 export const ALLOWED_TRANSITIONS: Record<Stage, Stage[]> = {
   // AI Follow-up is filled by the AI's own shortlist, never by hand (22 Sep):
   // a TA moves people on from it into TA Follow-up, not back into it.

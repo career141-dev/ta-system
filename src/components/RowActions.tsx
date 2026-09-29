@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL, type Candidate, type Stage } from "@/data/types";
-import { declineOffer, moveStageInline, scheduleInterviewInline, toggleAddOnInline, toggleBackupInline } from "@/app/actions";
+import { declineOffer, moveBackToTablesInline, moveStageInline, scheduleInterviewInline, toggleAddOnInline, toggleBackupInline } from "@/app/actions";
 import { ActionNote, SubmitButton, Spinner, latest, submitted, useInline } from "./Submit";
 import { directorReviewBlockers, nextStages } from "@/lib/pipeline";
 import { inputClass } from "./form";
@@ -40,6 +40,7 @@ export function RowActions({
   isBackup = false,
   canDecideDirector = false,
   canDecideClient = false,
+  backToTables = false,
 }: {
   appId: string;
   openingId: string;
@@ -54,6 +55,9 @@ export function RowActions({
    *  checks again; this only decides what the menu offers. */
   canDecideDirector?: boolean;
   canDecideClient?: boolean;
+  /** They were put on the pipeline from an Excel Tables row, so the menu can
+   *  offer to send them back there. */
+  backToTables?: boolean;
 }) {
   const missingForDirector = candidate ? directorReviewBlockers(candidate, app) : [];
   const [open, setOpen] = useState<false | "stage" | "reject" | "dropout" | "decline" | "interview">(false);
@@ -64,9 +68,10 @@ export function RowActions({
   const backup = useInline(toggleBackupInline);
   const move = useInline(moveStageInline);
   const book = useInline(scheduleInterviewInline);
+  const back = useInline(moveBackToTablesInline);
   const [movingTo, setMovingTo] = useState<Stage | null>(null);
-  const busy = addOn.pending || backup.pending || move.pending || book.pending;
-  const answer = latest(addOn.result, backup.result, move.result, book.result);
+  const busy = addOn.pending || backup.pending || move.pending || book.pending || back.pending;
+  const answer = latest(addOn.result, backup.result, move.result, book.result, back.result);
   const moveTo = (e: React.FormEvent<HTMLFormElement>) => {
     const { formData } = submitted(e);
     setMovingTo(String(formData.get("stage")) as Stage);
@@ -119,8 +124,12 @@ export function RowActions({
         aria-busy={move.pending}
         className="inline-flex items-center gap-2 rounded-full border border-brand-line px-3.5 py-[7px] text-[12.5px] font-medium text-brand hover:bg-brand-soft whitespace-nowrap disabled:opacity-60"
       >
-        {move.pending && <Spinner tone="dark" />}
-        {move.pending && movingTo ? `Moving to ${STAGE_LABEL[movingTo]}…` : "Change stage"}
+        {(move.pending || back.pending) && <Spinner tone="dark" />}
+        {back.pending
+          ? "Moving back…"
+          : move.pending && movingTo
+            ? `Moving to ${STAGE_LABEL[movingTo]}…`
+            : "Change stage"}
       </button>
       {current === "offer" ? (
         <button
@@ -227,6 +236,24 @@ export function RowActions({
               {STAGE_LABEL[s]}…
             </button>
           ))}
+          {backToTables && (
+            <form
+              onSubmit={(e) => {
+                const { formData } = submitted(e);
+                setOpen(false);
+                back.run(formData);
+              }}
+            >
+              <input type="hidden" name="appId" value={appId} />
+              <input type="hidden" name="openingId" value={openingId} />
+              <button
+                className="w-full px-3.5 py-2 text-left text-[13px] text-ink-soft hover:bg-paper"
+                title="Off the pipeline and back on their Excel Tables row, where Add to pipeline puts them back."
+              >
+                Back to Excel Tables
+              </button>
+            </form>
+          )}
         </div>
       )}
 

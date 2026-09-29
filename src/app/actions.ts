@@ -9,6 +9,7 @@ import { headers } from "next/headers";
 import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
+import { BACK_TO_TABLES_REASON } from "@/lib/pipeline";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
@@ -1692,6 +1693,49 @@ export async function renameLinkLevelInline(_: ActionResult | null, formData: Fo
 
 export async function setLinkInterestInline(_: ActionResult | null, formData: FormData) {
   return inline(() => setLinkInterest(formData));
+}
+
+/**
+ * The way back from "Add to pipeline": someone put on the pipeline from Excel
+ * Tables goes back to their row there, with "Add to pipeline" on it again.
+ *
+ * Not a delete. They move to Dropped out with BACK_TO_TABLES_REASON, so their
+ * history, calls and notes stay, and adding them again brings the same
+ * application back instead of making a second one (29 Sep).
+ */
+export async function moveBackToTables(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  // opening.act with the application checks the collision lock too: only the
+  // TA who owns them here, or a lead, can send them back.
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const app = repo.application(appId);
+  if (!app) return fail("That candidate is no longer on this opening.");
+  const row = repo.linkVault(openingId).find((l) => l.candidateId === app.candidateId);
+  if (!row) return fail("They did not come from Excel Tables, so there is no row to go back to. Use Reject or Dropped out instead.");
+  if (app.stage === "rejected" || app.stage === "dropped_out") {
+    return fail(`They are already ${(STAGE_LABEL[app.stage] ?? app.stage).toLowerCase()}, not on the pipeline.`);
+  }
+  if (repo.offers(appId).length > 0 || repo.placements({ openingId }).some((p) => p.applicationId === appId)) {
+    return fail("They have an offer or a placement on this opening, so they stay on the pipeline.");
+  }
+
+  if (isConvex()) {
+    try {
+      await backend.moveStage({ id: user.id }, appId, "dropped_out", BACK_TO_TABLES_REASON);
+    } catch (e) {
+      return fail(backendMessage(e, "They could not be moved back."));
+    }
+    await afterBackendWrite(openingId);
+  } else {
+    const r = repo.moveStage(appId, "dropped_out", user.id, BACK_TO_TABLES_REASON);
+    if (!r.ok) return fail(r.message);
+  }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  revalidatePath(`/openings/${openingId}/hh/links`);
+  return done("Moved back to Excel Tables — \"Add to pipeline\" on their row puts them back.");
 }
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
@@ -4869,6 +4913,10 @@ export async function removeLeadNoteInline(_: ActionResult | null, formData: For
 
 export async function addLinkToPipelineInline(_: ActionResult | null, formData: FormData) {
   return inline(() => addLinkToPipeline(formData));
+}
+
+export async function moveBackToTablesInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => moveBackToTables(formData));
 }
 
 export async function deleteLinkInline(_: ActionResult | null, formData: FormData) {

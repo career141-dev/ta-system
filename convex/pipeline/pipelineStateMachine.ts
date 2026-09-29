@@ -154,6 +154,10 @@ export async function executeStageTransition(
   // The backend's closed stages: rejected, and unresponsive (the desk's "dropped out").
   const closed = targetStage === "rejected" || targetStage === "unresponsive";
   const wasClosed = ["rejected", "unresponsive"].includes(String(app.currentStage));
+  // The drop-out reason was only ever in the stage history, so the app could
+  // not tell someone moved back to Excel Tables from someone who left — the
+  // local store always kept it on the row (29 Sep).
+  if (targetStage === "unresponsive") patch.droppedOutReason = reason || undefined;
   if (closed) patch.isActive = false;
   else if (wasClosed) {
     patch.isActive = true;
@@ -161,6 +165,7 @@ export async function executeStageTransition(
     patch.rejectedAt = undefined;
     patch.rejectReason = undefined;
     patch.rejectedFromStage = undefined;
+    patch.droppedOutReason = undefined;
   }
 
   await ctx.db.patch(applicationId, patch);

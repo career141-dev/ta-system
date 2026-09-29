@@ -175,18 +175,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
                 {status.mailboxes.filter((m) => m.kind !== "ta").map(mailboxCard)}
               </div>
 
-              {status.mailboxes.some((m) => m.kind === "ta") && (
-                <div className="mt-8">
-                  <h3 className="text-[13.5px] font-semibold">TA mailboxes — scoops</h3>
-                  <p className="mt-1 max-w-[80ch] text-[12.5px] leading-relaxed text-ink-soft">
-                    CVs the Director, a TA Lead or Ops email to a TA are scoops. They go on that TA&rsquo;s job and are counted on
-                    their end-of-day SCOOP. Only those emails are read; the rest of the TA&rsquo;s mail is never logged, marked
-                    read or moved. When the email does not say which job, nothing is filed and the TA is told.
-                  </p>
-                  <div className="mt-4 grid gap-4 lg:grid-cols-3">{status.mailboxes.filter((m) => m.kind === "ta").map(mailboxCard)}</div>
-                </div>
-              )}
-
               <div className="mt-8 overflow-hidden rounded-2xl border border-rule bg-surface">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-rule px-5 py-3">
                   <h3 className="text-[13.5px] font-semibold">Latest messages</h3>

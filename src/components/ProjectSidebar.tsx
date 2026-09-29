@@ -241,6 +241,14 @@ export function ProjectSidebar({
               </div>
             )}
 
+            {/* The CVs a lead sent the TA, uploaded here (29 Sep) — this
+                replaced reading each TA's mailbox for them. */}
+            {canSeeSourcing && (
+              <Link href={`${base}/scoops`} className={row(path.startsWith(`${base}/scoops`))}>
+                Scoops
+              </Link>
+            )}
+
             {/* Posts open the same way the stages do. A TA running three posts
                 on one opening is nearly always looking at one of them, not at
                 the merged pile — but the merged pile is still the first row,
