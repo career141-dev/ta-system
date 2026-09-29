@@ -47,7 +47,9 @@ export async function GET(
 
   const curSal = url.searchParams.get("current") ?? c.currentSalary ?? "";
   const expSal = url.searchParams.get("expected") ?? c.expectedSalary ?? "";
-  const npVal = url.searchParams.get("notice") ?? (c.noticePeriodDays != null ? String(c.noticePeriodDays) : "");
+  // The notice as said ("2 months", "Not disclosed") before the bare days,
+  // which are absent for anything that is not a number (29 Sep).
+  const npVal = url.searchParams.get("notice") ?? c.noticePeriod ?? (c.noticePeriodDays != null ? String(c.noticePeriodDays) : "");
   const notesList = notes.length
     ? notes
     : (app.notes && app.notes.some((n) => !isSystemNote(n)))

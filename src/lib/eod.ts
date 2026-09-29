@@ -1,6 +1,7 @@
 import { repo, setsForOpening } from "@/data/store";
 import { EFFORT_NUMBERS, OUTREACH_TYPES } from "@/lib/eod-format";
 import { colomboDayStart } from "@/lib/calendar";
+import { noticePeriodToDays } from "@/lib/answered";
 import { cvSource, headhuntedCandidates } from "@/lib/cvSource";
 import type { Application, Candidate, Id, User } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
@@ -69,8 +70,10 @@ export function shortlistRows(
         age: c.age ? String(c.age) : "",
         // Zero days is "immediate", which is the best answer there is — it was
         // printed as a blank (audit finding 28).
+        // As said first ("2 months", "Not disclosed"), which has no days.
         notice:
-          c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : "",
+          c.noticePeriod?.trim() ||
+          (c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : ""),
         notes: HOUSE_NOTE(c, a),
         currentCompany: c.currentEmployer ?? "",
         currentDesignation: c.currentTitle ?? "",
@@ -263,6 +266,43 @@ export function shortlistRowsFromForm(
       applicationId: id,
     };
   });
+}
+
+/** The lines the table writes itself (HOUSE_NOTE), not the TA's own notes. */
+const isHouseLine = (n: string) => /^>?\s*(Total Experience - |Currently at )/i.test(n.trim());
+const taNotes = (notes: string[]) => notes.filter((n) => !isHouseLine(n)).map((n) => n.replace(/^>/, "").trim()).filter(Boolean);
+
+/**
+ * What the TA changed on the Director's email that belongs on the candidate
+ * (the desk, 29 Sep): salaries, notice and their own notes — the same details
+ * as the CV's box and the Director review form. Saved when the email goes, so
+ * the CV, the profile and the next email say what this one said. Null when
+ * nothing of these was changed. Name, age, company and designation are the
+ * email's wording only and stay there.
+ */
+export function eodDetailChanges(
+  base: ShortlistRow,
+  edited: ShortlistRow,
+): {
+  patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">>;
+  notes: string[] | null;
+} | null {
+  const patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">> = {};
+  if (edited.currentRemuneration.trim() !== base.currentRemuneration.trim()) {
+    patch.currentSalary = edited.currentRemuneration.trim() || null;
+  }
+  if (edited.expectedRemuneration.trim() !== base.expectedRemuneration.trim()) {
+    patch.expectedSalary = edited.expectedRemuneration.trim() || null;
+  }
+  if (edited.notice.trim() !== base.notice.trim()) {
+    const text = edited.notice.trim();
+    patch.noticePeriod = text || null;
+    patch.noticePeriodDays = text ? noticePeriodToDays(text) : null;
+  }
+  const before = taNotes(base.notes);
+  const after = taNotes(edited.notes);
+  const notes = JSON.stringify(before) === JSON.stringify(after) ? null : after;
+  return Object.keys(patch).length || notes ? { patch, notes } : null;
 }
 
 /**

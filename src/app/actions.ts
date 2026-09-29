@@ -4266,6 +4266,28 @@ export async function sendEod(formData: FormData) {
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
+
+    // What the TA corrected on the email goes onto the candidate too, so their
+    // CV's box, profile and Director review read the same (the desk, 29 Sep).
+    // Only after it went, and a detail that cannot be saved does not undo the
+    // send — it is said.
+    const { eodDetailChanges } = await import("@/lib/eod");
+    let unsaved = 0;
+    for (const edited of editedRows) {
+      if (!fresh.includes(edited.applicationId)) continue;
+      const base = baseRows.find((b) => b.applicationId === edited.applicationId);
+      const app = repo.application(edited.applicationId);
+      const change = base && app ? eodDetailChanges(base, edited) : null;
+      if (!change || !app) continue;
+      try {
+        repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
+        invalidateCandidate(app.candidateId);
+      } catch (e) {
+        unsaved++;
+        console.warn("[eod] details not saved to the candidate:", (e as Error).message);
+      }
+    }
+    if (unsaved) sentNote += ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`;
   }
 
   // Anyone sent to the Director straight out of a finished follow-up moves to
@@ -4416,6 +4438,9 @@ async function emailEod(input: {
                 {
                   currentSalary: r.currentRemuneration,
                   expectedSalary: r.expectedRemuneration,
+                  // The notice as the TA left it on the email; it was never
+                  // passed, so the box on the CV had none (29 Sep).
+                  noticePeriod: r.notice,
                   notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
                 },
                 undefined,
@@ -4449,6 +4474,7 @@ async function emailEod(input: {
           {
             currentSalary: r.currentRemuneration,
             expectedSalary: r.expectedRemuneration,
+            noticePeriod: r.notice,
             notes: r.notes.map((n: string) => n.replace(/^>/, "").trim()).filter(Boolean),
           },
         );

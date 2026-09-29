@@ -432,7 +432,7 @@ export function EodComposer({
               return (
                 <a
                   key={r.applicationId}
-                  href={`/api/prepared-cv/${r.applicationId}?current=${encodeURIComponent(r.currentRemuneration)}&expected=${encodeURIComponent(r.expectedRemuneration)}&notes=${encodeURIComponent(notesStr)}`}
+                  href={`/api/prepared-cv/${r.applicationId}?current=${encodeURIComponent(r.currentRemuneration)}&expected=${encodeURIComponent(r.expectedRemuneration)}&notice=${encodeURIComponent(r.notice)}&notes=${encodeURIComponent(notesStr)}`}
                   target="_blank"
                   rel="noreferrer"
                   className="flex items-center gap-2.5 text-[12.5px] text-brand hover:underline"

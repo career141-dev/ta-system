@@ -1757,12 +1757,13 @@ const rawRepo = {
   saveReviewDetails(
     applicationId: Id,
     candidateId: Id,
-    notes: string[],
-    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays">>,
+    /** The TA's notes; null leaves them as they are. */
+    notes: string[] | null,
+    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">>,
   ) {
     mutate((db) => {
       const a = db.applications.find((x) => x.id === applicationId);
-      if (a) {
+      if (a && notes) {
         const systemNotes = (a.notes ?? []).filter((n) => /^Matched from the database/i.test(n) || /^>Historical/i.test(n));
         a.notes = [...systemNotes, ...notes];
       }
