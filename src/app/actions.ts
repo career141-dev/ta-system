@@ -1642,6 +1642,12 @@ export async function setLinkInterest(formData: FormData) {
   }
 
   if (interest !== "not_interested") return fail("Pick Interested or Not interested.");
+  // Why, in the TA's words (the desk, 29 Sep): it goes on the Rejected entry,
+  // and on the row's log where the next person to open it reads it.
+  const why = String(formData.get("reason") ?? "").trim().slice(0, 300);
+  if (!why) return fail("Say why they are not interested.");
+  const rejectReason = `Not interested — ${why}`;
+  const noteWhy = () => repo.logOutreach(entryId, user.id, "Not interested", why);
   const app = entry.candidateId
     ? (repo.applicationsForCandidate(entry.candidateId).find((a) => a.openingId === openingId) ?? null)
     : null;
@@ -1663,15 +1669,18 @@ export async function setLinkInterest(formData: FormData) {
     if (!allowed.ok) return undo(allowed.message);
     if (isConvex()) {
       try {
-        await backend.moveStage({ id: user.id }, app.id, "rejected", "Not interested");
+        await backend.moveStage({ id: user.id }, app.id, "rejected", rejectReason);
       } catch (e) {
         return undo(backendMessage(e, "They could not be moved to Rejected."));
       }
       await afterBackendWrite(openingId);
     } else {
-      const res = repo.moveStage(app.id, "rejected", user.id, "Not interested");
+      const res = repo.moveStage(app.id, "rejected", user.id, rejectReason);
       if (!res.ok) return undo(res.message);
     }
+    // A backend write may have dropped the primed copy; load it before logging.
+    await primeStore({ openingId });
+    noteWhy();
     refresh();
     return done("Interest status updated — Not interested, and moved to Rejected on the pipeline.");
   }
@@ -1679,12 +1688,18 @@ export async function setLinkInterest(formData: FormData) {
     // Never on the pipeline: they go onto it as Rejected, so every Not
     // interested is in the Rejected column (the desk, 29 Sep). Written
     // straight there — nothing is sent, and no follow-up starts.
-    const made = repo.linkToApplication(entryId, user.id, { rejected: "Not interested" });
+    const made = repo.linkToApplication(entryId, user.id, { rejected: rejectReason });
     if (!made.ok) {
       repo.updateLink(entryId, { outcome: before });
       refresh();
       return fail(`Failed to update candidate status. ${made.message}`);
     }
+    // Written straight to Rejected, so its history says so and why.
+    repo.logEvent({
+      applicationId: made.applicationId, openingId, eventType: "rejected",
+      fromStage: null, toStage: "rejected", actorType: "user", actorId: user.id, note: rejectReason,
+    });
+    noteWhy();
     markTablesStale();
     refresh();
     return done("Interest status updated — Not interested, and added to Rejected on the pipeline.");
@@ -1692,6 +1707,7 @@ export async function setLinkInterest(formData: FormData) {
   // Already Rejected, or sent back here from the pipeline (Dropped out): the
   // pipeline does not move a dropped-out person straight to Rejected, and the
   // only way round starts follow-up to them, so it stays as it is.
+  noteWhy();
   refresh();
   return done("Interest status updated — Not interested.");
 }

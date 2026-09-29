@@ -83,6 +83,15 @@ console.log("\nNot interested, never on the pipeline: straight into Rejected");
   repo.updateLink(n, { outcome: "declined", name: null });
   const refused = repo.linkToApplication(n, ta.id, { rejected: "Not interested" });
   eq("without a name it is refused, and nothing is added", [refused.ok, repo.linkEntry(n)!.candidateId ?? null], [false, null]);
+
+  // The TA's reason (the desk, 29 Sep): on the Rejected entry and the row's log.
+  const w = repo.addLink(o.id, "https://linkedin.com/in/candidate-why-9", ta.id, "Candidate Why");
+  repo.updateLink(w, { outcome: "declined" });
+  repo.linkToApplication(w, ta.id, { rejected: "Not interested — happy where they are" });
+  repo.logOutreach(w, ta.id, "Not interested", "happy where they are");
+  eq("the reason is on the Rejected entry", appOf(w)?.rejectReason, "Not interested — happy where they are");
+  eq("and on the row's log", repo.linkEntry(w)!.conversationLog.at(-1)?.note, "happy where they are");
+  eq("logging it does not change the Declined outcome", repo.linkEntry(w)!.outcome, "declined");
 }
 
 console.log("\nL1, L2, L3: started with + by each TA");

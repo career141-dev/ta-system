@@ -88,6 +88,7 @@ export function LinkRow({
   // Opened from "Add to pipeline" on a row that is not shortlisted yet.
   const [forPipeline, setForPipeline] = useState(false);
   const [allLog, setAllLog] = useState(false);
+  const [askWhy, setAskWhy] = useState(false);
   // Every button on the row answers under the row (21 Sep: they answered at
   // the top of the page, or not at all).
   const eye = useInline(toggleEyeMarkInline);
@@ -134,6 +135,8 @@ export function LinkRow({
   const guessedName = profileLink(r.linkedinUrl)?.guessedName ?? "";
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-9`;
   const log = [...r.conversationLog].reverse();
+  // The latest reason given for Not interested, shown under the badge.
+  const why = log.find((c) => c.channel === "Not interested");
   const shown = allLog ? log : log.slice(0, 2);
   const outcome = OUTCOMES.find((o) => o.value === r.outcome)?.label ?? r.outcome;
   const notes = newestFirst(r.leadNotes);
@@ -210,8 +213,56 @@ export function LinkRow({
                 {[r.company, r.phoneNumber].filter(Boolean).join(" · ") || "No company or number yet"}
               </p>
               <CvStatus entry={r} openingId={openingId} decide={decide} />
+              {interest === "not_interested" && why && (
+                <p className="mt-1 text-[12px] text-danger">Not interested — {why.note}</p>
+              )}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                {(["interested", "not_interested"] as const)
+                {/* Not interested asks why first (the desk, 29 Sep); the reason
+                    goes on the Rejected entry and on this row's log. */}
+                {interest !== "not_interested" &&
+                  (askWhy ? (
+                    <form
+                      onSubmit={(e) => {
+                        setInterest.run(submitted(e).formData);
+                        setAskWhy(false);
+                      }}
+                      className="flex flex-wrap items-center gap-1.5"
+                    >
+                      <input type="hidden" name="openingId" value={openingId} />
+                      <input type="hidden" name="entryId" value={r.id} />
+                      <input type="hidden" name="interest" value="not_interested" />
+                      <input
+                        name="reason"
+                        required
+                        autoFocus
+                        maxLength={300}
+                        placeholder="Why not interested? e.g. happy where they are"
+                        className="w-[260px] rounded-full border border-rule-strong bg-surface px-3 py-1 text-[12px]"
+                      />
+                      <SubmitButton
+                        busy={setInterest.pending}
+                        locked={busy}
+                        pendingLabel="Updating…"
+                        tone="dark"
+                        className="rounded-full border border-danger px-2.5 py-0.5 text-[11.5px] text-danger disabled:opacity-60"
+                      >
+                        Save
+                      </SubmitButton>
+                      <button type="button" onClick={() => setAskWhy(false)} className="px-1 text-[11.5px] text-ink-soft hover:text-ink">
+                        Cancel
+                      </button>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setAskWhy(true)}
+                      className="rounded-full border border-rule-strong px-2.5 py-0.5 text-[11.5px] text-ink-soft transition-colors hover:border-danger hover:text-danger disabled:opacity-60"
+                    >
+                      Not interested
+                    </button>
+                  ))}
+                {(["interested"] as const)
                   .filter((to) => to !== interest)
                   .map((to) => (
                     <form key={to} onSubmit={(e) => setInterest.run(submitted(e).formData)}>
