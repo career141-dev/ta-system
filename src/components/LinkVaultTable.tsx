@@ -7,6 +7,7 @@ import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
+import { LinkFilters } from "./LinkFilters";
 
 const PAGE_SIZE = 25;
 
@@ -81,38 +82,43 @@ export function LinkVaultTable({
   // A tab's count is what pressing it would show, with the other filters kept.
   const count = (next: Partial<{ status: string; level: number; addons: boolean }>) =>
     searched.filter(({ row }) => pass(row, { status, level, addons, ...next })).length;
-  // The viewer's own L, when the one being looked at is theirs.
-  const mine = repo.linkLevels(openingId, user.id).find((l) => l.n === level);
+  // The sheets: All, then the viewer's own L's (started with + in the
+  // sidebar). An L number from someone else's link still gets a tab.
+  const sheets = repo.linkLevels(openingId, user.id);
+  if (level && !sheets.some((l) => l.n === level)) sheets.push({ n: level, at: 0 });
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const scoped = slicePage(matching, current, PAGE_SIZE);
   const rows = scoped.map((x) => x.row);
-  const pill = (on: boolean) =>
-    `rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors ${
-      on ? "border-brand bg-brand-soft font-medium text-brand" : "border-rule text-ink-soft hover:border-ink-faint hover:text-ink"
+  // Sheet tabs, as in a workbook: the open one joins the table below it.
+  const tab = (on: boolean) =>
+    `-mb-px whitespace-nowrap rounded-t-lg border px-4 py-2 text-[12.5px] transition-colors ${
+      on ? "border-rule border-b-surface bg-surface font-semibold text-ink" : "border-transparent text-ink-soft hover:bg-tag hover:text-ink"
     }`;
 
   return (
     <>
       <AddLinkForm openingId={openingId} canNote={canNote} />
 
-      {level > 0 && (
-        // Which L this is; rename and delete are on its ⋯ in the sidebar.
-        <h2 className="mb-2 text-[14px] font-semibold">{mine ? levelLabel(mine) : `L${level}`}</h2>
-      )}
-      <nav aria-label="Interest" className="mb-3 flex flex-wrap items-center gap-2">
-        {INTEREST_TABS.map((t) => (
-          <a key={t.key || "all"} href={keep({ status: t.key })} aria-current={status === t.key ? "page" : undefined} className={pill(status === t.key)}>
-            {t.label} <span className="tabular-nums text-ink-faint">{count({ status: t.key })}</span>
-          </a>
-        ))}
-        <span aria-hidden className="mx-1 h-4 w-px bg-rule" />
-        <a href={keep({ addons: !addons })} aria-current={addons ? "page" : undefined} className={pill(addons)}>
-          Add-ons only <span className="tabular-nums text-ink-faint">{count({ addons: true })}</span>
-        </a>
-      </nav>
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-rule">
+        <nav aria-label="Sheets" className="flex min-w-0 flex-wrap items-end gap-0.5">
+          {[{ n: 0, at: 0 } as { n: number; at: number; name?: string }, ...sheets].map((l) => (
+            <a key={l.n} href={keep({ level: l.n })} aria-current={level === l.n ? "page" : undefined} className={tab(level === l.n)}>
+              {l.n === 0 ? "All" : l.at ? levelLabel(l) : `L${l.n}`}{" "}
+              <span className="tabular-nums font-normal text-ink-faint">{count({ level: l.n, status: "", addons: false })}</span>
+            </a>
+          ))}
+        </nav>
+        <div className="pb-2">
+          <LinkFilters
+            status={status}
+            options={INTEREST_TABS.map((t) => ({ key: t.key, label: t.label, count: count({ status: t.key }), href: keep({ status: t.key }) }))}
+            addons={{ on: addons, count: count({ addons: true }), href: keep({ addons: !addons }) }}
+          />
+        </div>
+      </div>
 
-      <div className="overflow-hidden rounded-xl border border-rule bg-surface">
+      <div className="overflow-hidden rounded-b-xl border border-t-0 border-rule bg-surface">
         {rows.length === 0 && (q || status || level || addons) && everyRow.length > 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
             {q
