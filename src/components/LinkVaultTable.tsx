@@ -7,6 +7,7 @@ import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { LINK_VIEWS, inLinkView } from "@/lib/linkViews";
+import { movedBackToTables } from "@/lib/pipeline";
 
 const PAGE_SIZE = 25;
 
@@ -56,6 +57,14 @@ export function LinkVaultTable({
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const scoped = slicePage(matching, current, PAGE_SIZE);
+  // Someone moved back here from the pipeline is off it: the row offers "Add
+  // to pipeline" again, which brings the same application back (29 Sep).
+  const onPipeline = (candidateId: string | null | undefined) => {
+    const app = candidateId
+      ? repo.applicationsForCandidate(candidateId).find((a) => a.openingId === openingId)
+      : undefined;
+    return app && !movedBackToTables(app) ? app : null;
+  };
   const rows = scoped.map((x) => x.row);
 
   return (
@@ -111,11 +120,7 @@ export function LinkVaultTable({
                     entry={r}
                     openingId={openingId}
                     addedByName={userNames[r.addedBy] ?? "—"}
-                    onPipeline={
-                      r.candidateId
-                        ? (repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId) ?? null)
-                        : null
-                    }
+                    onPipeline={onPipeline(r.candidateId)}
                     userNames={userNames}
                     canNote={canNote}
                     viewerId={user.id}
