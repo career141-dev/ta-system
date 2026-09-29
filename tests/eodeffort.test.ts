@@ -208,7 +208,7 @@ repo.reset();
 console.log("\nExcel Tables: add-on links, tagged and filtered");
 repo.reset();
 {
-  const { inLinkView } = await import("@/lib/linkViews");
+  const { readLinkFilters } = await import("@/lib/linkViews");
   const ta = repo.users().find((u) => u.role === "ta")!;
   const o = cleanOpening(ta);
   const plain = repo.addLink(o.id, "https://linkedin.com/in/plain-day", ta.id, "Nimal Perera");
@@ -222,9 +222,10 @@ repo.reset();
   eq("and untagged", repo.linkEntry(plain)!.isAddOn, false);
 
   const rows = repo.linkVault(o.id);
-  eq("All links shows both", rows.filter((r) => inLinkView(r, "")).length, 2);
-  eq("Add-ons shows the add-on", rows.filter((r) => inLinkView(r, "addons")).map((r) => r.id), [extra]);
-  eq("Shortlisted shows the shortlisted", rows.filter((r) => inLinkView(r, "shortlisted")).map((r) => r.id), [plain]);
+  eq("both rows are in the table", rows.length, 2);
+  eq("Add-ons shows the add-on", rows.filter((r) => r.isAddOn).map((r) => r.id), [extra]);
+  eq("an old ?view=addons link still filters add-ons", readLinkFilters({ view: "addons" }).addons, true);
+  eq("an old ?view=shortlisted link opens Interested", readLinkFilters({ view: "shortlisted" }).status, "interested");
 
   // Joining the pipeline keeps the tag, so it is counted under ADD-ONS.
   repo.updateLink(extra, { outcome: "shortlisted" });
