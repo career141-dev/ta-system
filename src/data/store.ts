@@ -2077,13 +2077,16 @@ const rawRepo = {
    * The caller then moves them to Director Review through the normal stage
    * rules, so the same checks apply as for anyone else.
    */
-  linkToApplication(entryId: Id, byUserId: Id):
+  linkToApplication(entryId: Id, byUserId: Id, opts: { rejected?: string } = {}):
     | { ok: true; applicationId: Id; stage: Stage }
     | { ok: false; message: string } {
     const db = load();
     const e = db.linkVault.find((l) => l.id === entryId);
     if (!e) return { ok: false, message: "That row no longer exists." };
-    if (e.outcome !== "shortlisted") return { ok: false, message: "Set the outcome to Shortlisted first." };
+    // "Not interested" on a row not yet on the pipeline puts them there as
+    // Rejected, with the reason, so every one is in the Rejected column (29 Sep).
+    const rejected = opts.rejected?.trim() || null;
+    if (!rejected && e.outcome !== "shortlisted") return { ok: false, message: "Set the outcome to Shortlisted first." };
     const name = (e.name ?? e.capture?.fullName ?? "").trim();
     if (!name) return { ok: false, message: "Add their name first (Change outcome ⇕ → Name)." };
     // A possible match unanswered: going ahead would make a second record for
@@ -2111,7 +2114,7 @@ const rawRepo = {
       return { ok: true, applicationId: onOpening.id, stage: onOpening.stage };
     }
 
-    const targetStage: Stage = "ta_follow_up";
+    const targetStage: Stage = rejected ? "rejected" : "ta_follow_up";
     const by = db.users.find((u) => u.id === byUserId)?.name ?? "a TA";
     const now = Date.now();
     const applicationId = `app_${Math.random().toString(36).slice(2, 10)}`;
@@ -2158,7 +2161,7 @@ const rawRepo = {
         shortlistedAt: null,
         setNumber: null,
         rating: null,
-        notes: [`Headhunted — shortlisted in Excel Tables by ${by}`],
+        notes: [rejected ? `Headhunted — not interested, in Excel Tables by ${by}` : `Headhunted — shortlisted in Excel Tables by ${by}`],
         statusA: null,
         statusB: null,
         rankTier: null,
@@ -2170,8 +2173,8 @@ const rawRepo = {
         backupForApplicationId: null,
         offerDeclinedAt: null,
         offerDeclineReason: null,
-        rejectedBy: null,
-        rejectReason: null,
+        rejectedBy: rejected ? byUserId : null,
+        rejectReason: rejected,
         droppedOutReason: null,
         createdAt: now,
         lastStageChangedAt: now,

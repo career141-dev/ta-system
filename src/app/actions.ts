@@ -1675,6 +1675,23 @@ export async function setLinkInterest(formData: FormData) {
     refresh();
     return done("Interest status updated — Not interested, and moved to Rejected on the pipeline.");
   }
+  if (!app) {
+    // Never on the pipeline: they go onto it as Rejected, so every Not
+    // interested is in the Rejected column (the desk, 29 Sep). Written
+    // straight there — nothing is sent, and no follow-up starts.
+    const made = repo.linkToApplication(entryId, user.id, { rejected: "Not interested" });
+    if (!made.ok) {
+      repo.updateLink(entryId, { outcome: before });
+      refresh();
+      return fail(`Failed to update candidate status. ${made.message}`);
+    }
+    markTablesStale();
+    refresh();
+    return done("Interest status updated — Not interested, and added to Rejected on the pipeline.");
+  }
+  // Already Rejected, or sent back here from the pipeline (Dropped out): the
+  // pipeline does not move a dropped-out person straight to Rejected, and the
+  // only way round starts follow-up to them, so it stays as it is.
   refresh();
   return done("Interest status updated — Not interested.");
 }
