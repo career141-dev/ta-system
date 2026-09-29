@@ -868,7 +868,12 @@ export default defineSchema({
     dateOfBirthSource: v.optional(v.string()),
     // When the CV's stated date and its NIC disagree.
     dateOfBirthNote: v.optional(v.string()),
+    // "Male" / "Female". Extraction fills it when the CV states it, the NIC
+    // encodes it, or a title or pronoun gives it (convex/cvs/genderFromCv.ts) —
+    // blanks only; the desk's value wins. genderSource says which:
+    // cv_stated | nic | cv_llm | desk.
     gender: v.optional(v.string()),
+    genderSource: v.optional(v.string()),
     englishLevel: v.optional(v.number()),
     cvFileName: v.optional(v.string()),
     taCurrentSalaryText: v.optional(v.string()),

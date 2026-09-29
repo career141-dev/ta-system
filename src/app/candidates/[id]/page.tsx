@@ -96,6 +96,9 @@ export default async function CandidatePage({
             relationship: r.relationship,
           }));
 
+  // Gender filled by CV extraction says how it was read; the desk's own has no note.
+  const GENDER_SOURCE: Record<string, string> = { cv_stated: "stated in CV", nic: "from NIC", cv_llm: "from CV wording" };
+
   const row = (label: string, value: React.ReactNode) => (
     <>
       <dt className="text-ink-faint">{label}</dt>
@@ -209,7 +212,9 @@ export default async function CandidatePage({
               {row("Notice", notice)}
               {row("Availability", profile?.availability ?? profile?.employmentStatus)}
               {row("Nationality", c.nationality)}
-              {row("Gender", c.gender ?? profile?.gender)}
+              {row("Gender", c.gender ? (
+                <>{c.gender}{c.genderSource && GENDER_SOURCE[c.genderSource] && <span className="text-ink-faint"> · {GENDER_SOURCE[c.genderSource]}</span>}</>
+              ) : profile?.gender)}
               {row("Languages", (profile?.languages.length ? profile.languages : c.languages).join(", "))}
               {row("Skills", c.skills.join(", "))}
               {row("Industries", c.industries.join(", "))}

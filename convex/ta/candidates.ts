@@ -73,7 +73,7 @@ async function withCareer(
 /** Exactly the fields `mapCandidate` reads. Add here when the mapper grows. */
 const LIST_FIELDS = [
   "_id", "_creationTime", "fullName", "email", "phone", "linkedinUrl", "location", "nationality",
-  "age", "gender", "currentEmployer", "currentJobTitle", "currentTitle", "totalExperienceYears",
+  "age", "gender", "genderSource", "currentEmployer", "currentJobTitle", "currentTitle", "totalExperienceYears",
   "yearsOfExperience", "educationDegree", "educationInstitution", "certifications", "languages",
   "skills", "industries", "sector", "noticePeriodDays", "noticePeriod", "availability", "currentSalary", "currentSalaryCurrency",
   "expectedSalary", "expectedSalaryCurrency", "taCurrentSalaryText", "taExpectedSalaryText", "currentSalaryNote", "expectedSalaryNote", "cvFileName",

@@ -451,6 +451,8 @@ export const updateCandidateFields = mutation({
     embedding: v.optional(v.array(v.float64())),
     hasEmbedding: v.optional(v.boolean()),
     extractionModel: v.optional(v.string()),
+    gender: v.optional(v.string()),
+    genderSource: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { candidateId, rawText, rawTextKey, jobHistory, embedding, hasEmbedding, ...candidateArgs } = args;
@@ -542,6 +544,15 @@ export const updateCandidateFields = mutation({
     if (candidateArgs.currentTitle !== undefined) patches.currentJobTitle = candidateArgs.currentTitle;
     if (rawTextKey !== undefined) patches.rawTextKey = rawTextKey;
     if (hasEmbedding !== undefined) patches.hasEmbedding = hasEmbedding;
+    // Gender from a CV only fills a blank. What the desk recorded, or what an
+    // earlier CV of the same person gave, stays — search hides people on it.
+    if (patches.gender !== undefined) {
+      const current = survivor ?? (await ctx.db.get(targetId));
+      if (current?.gender) {
+        delete patches.gender;
+        delete patches.genderSource;
+      }
+    }
 
     // Filter out undefined values to only update provided fields
     const definedPatches = Object.fromEntries(
