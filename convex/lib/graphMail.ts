@@ -41,6 +41,8 @@ export interface FollowUpMail {
   fallbackFrom?: string;
   /** The recipient. The gate decides where it actually goes. */
   to: string;
+  /** More people on the To line, beside `to`. Gated like Cc: dropped in test mode. */
+  alsoTo?: string[];
   cc?: string[];
   subject: string;
   html?: string;
@@ -55,7 +57,7 @@ export interface FollowUpMail {
 }
 
 export type MailResult =
-  | { ok: true; to: string; from: string; cc: string[]; note: string }
+  | { ok: true; to: string; alsoTo?: string[]; from: string; cc: string[]; note: string }
   | { ok: false; error: string; blocked: boolean };
 
 type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
@@ -80,11 +82,11 @@ export function addressList(values: (string | null | undefined)[], except: strin
 }
 
 /** The `sendMail` request body. */
-export function sendMailPayload(mail: FollowUpMail, to: string, cc: string[] = []) {
+export function sendMailPayload(mail: FollowUpMail, to: string, cc: string[] = [], alsoTo: string[] = []) {
   const message: Record<string, unknown> = {
     subject: mail.subject,
     body: mail.html ? { contentType: "HTML", content: mail.html } : { contentType: "Text", content: mail.text ?? "" },
-    toRecipients: [{ emailAddress: { address: to } }],
+    toRecipients: [to, ...alsoTo].map((address) => ({ emailAddress: { address } })),
   };
   if (cc.length) message.ccRecipients = cc.map((address) => ({ emailAddress: { address } }));
   const replyTo = addressList(Array.isArray(mail.replyTo) ? mail.replyTo : [mail.replyTo]);
@@ -113,10 +115,17 @@ export async function sendFollowUpMail(
   if (!emailAllowed(decision.to)) return { ok: false, error: suppressed("email", decision.to), blocked: true };
 
   let note = decision.note;
-  let cc = addressList(mail.cc ?? [], [decision.to]);
-  if (cc.length && !outreachLive()) {
-    note += ` [TEST MODE: ${cc.length} cc dropped]`;
+  let alsoTo = addressList(mail.alsoTo ?? [], [decision.to]);
+  let cc = addressList(mail.cc ?? [], [decision.to, ...alsoTo]);
+  if ((cc.length || alsoTo.length) && !outreachLive()) {
+    note += ` [TEST MODE: ${cc.length + alsoTo.length} extra recipient${cc.length + alsoTo.length === 1 ? "" : "s"} dropped]`;
     cc = [];
+    alsoTo = [];
+  }
+  const toBlocked = alsoTo.filter((c) => !emailAllowed(c));
+  if (toBlocked.length) {
+    for (const c of toBlocked) suppressed("email to", c);
+    alsoTo = alsoTo.filter((c) => emailAllowed(c));
   }
   const ccBlocked = cc.filter((c) => !emailAllowed(c));
   if (ccBlocked.length) {
@@ -141,7 +150,7 @@ export async function sendFollowUpMail(
     return { ok: false, error: "Microsoft Graph credentials are not configured (MS_TENANT_ID, MS_CLIENT_ID, MS_CLIENT_SECRET).", blocked: false };
   }
 
-  const body = JSON.stringify(sendMailPayload(mail, decision.to, cc));
+  const body = JSON.stringify(sendMailPayload(mail, decision.to, cc, alsoTo));
   let lastError = "";
   for (const [i, from] of senders.entries()) {
     try {
@@ -152,7 +161,7 @@ export async function sendFollowUpMail(
       });
       // Graph answers 202 Accepted with an empty body.
       if (res.ok) {
-        return { ok: true, to: decision.to, from, cc, note: i > 0 ? `${note} [sent from ${from}: ${senders[0]} could not send]` : note };
+        return { ok: true, to: decision.to, alsoTo, from, cc, note: i > 0 ? `${note} [sent from ${from}: ${senders[0]} could not send]` : note };
       }
       lastError = `Microsoft Graph sendMail from ${from} returned ${res.status}: ${(await res.text()).slice(0, 500)}`;
       // Only a mailbox Graph will not send as is worth trying the fallback for.
