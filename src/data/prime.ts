@@ -117,6 +117,9 @@ export async function refreshUsers(): Promise<void> {
  * idempotent, so the second caller finds its scope already held and returns
  * without asking the backend for anything.
  */
+/** A read that a save overtook; its rows are dropped, not installed. */
+class StaleRead extends Error {}
+
 let loading: Promise<void> = Promise.resolve();
 
 export function primeStore(scope: PrimeScope = {}): Promise<void> {
@@ -213,6 +216,7 @@ async function refresh(scope: PrimeScope): Promise<void> {
    * old; an empty list of users is not an improvement on that.
    */
   if (!state.snapshot || now - state.tablesAt > TABLES_TTL_MS) {
+    const w = state.writes;
     try {
       const [users, openings, clients, whole] = await Promise.all([
         backend.users(actor),
@@ -224,6 +228,7 @@ async function refresh(scope: PrimeScope): Promise<void> {
       // error. Nobody can sign in to a desk with no users, so that is a failed
       // read, not an answer.
       if (users.length === 0) throw new Error("The backend returned no users — it may still be starting.");
+      if (state.snapshot && state.writes !== w) throw new StaleRead();
       const db = state.snapshot ?? blank();
       db.users = users;
       db.openings = openings;
@@ -239,8 +244,12 @@ async function refresh(scope: PrimeScope): Promise<void> {
       state.tablesAt = now;
     } catch (e) {
       if (!state.snapshot) throw e;
-      // Said, not swallowed: rows that stop updating have a reason in the log.
-      console.warn("[prime] small tables refresh failed; keeping the rows held:", e instanceof Error ? e.message : e);
+      // A read a save overtook: what is held already has the save, and the
+      // next page reads again. Anything else is said, not swallowed — rows
+      // that stop updating have a reason in the log.
+      if (!(e instanceof StaleRead)) {
+        console.warn("[prime] small tables refresh failed; keeping the rows held:", e instanceof Error ? e.message : e);
+      }
     }
   }
   const db = state.snapshot!;
@@ -249,35 +258,49 @@ async function refresh(scope: PrimeScope): Promise<void> {
   const wanted = new Set<Id>(scope.candidateIds ?? []);
 
   if ((scope.allApplications || scope.followUps) && now - state.allAt > TABLES_TTL_MS) {
+    const w = state.writes;
     try {
       const { applications } = await backend.allApplications(actor);
-      // Replaced, not merged: an application that moved stage or was removed
-      // must not survive as its old self.
-      db.applications = applications;
-      state.allAt = now;
-      for (const o of db.openings) state.openings.set(o.id, now);
+      // Overtaken by a save: installed only if nothing is held yet (a page
+      // cannot render without it), and never marked fresh.
+      const settled = state.writes === w;
+      if (settled || state.allAt === 0) {
+        // Replaced, not merged: an application that moved stage or was removed
+        // must not survive as its old self.
+        db.applications = applications;
+      }
+      if (settled) {
+        state.allAt = now;
+        for (const o of db.openings) state.openings.set(o.id, now);
+      }
     } catch (e) {
       if (state.allAt === 0) throw e;
     }
   } else if (scope.openingId && now - (state.openings.get(scope.openingId) ?? 0) > TABLES_TTL_MS) {
     const openingId = scope.openingId;
+    const w = state.writes;
     const [apps, detail] = await Promise.all([
       backend.applications(actor, openingId),
       backend.opening(actor, openingId),
     ]);
-    state.openings.set(openingId, now);
-    db.applications = [...db.applications.filter((a) => a.openingId !== openingId), ...apps];
-    // Posts and assignments come with the whole tables above, with their real
-    // ids. But the opening itself must be here even when that list is not:
-    // a refresh of the small tables that fails keeps the older list, and a
-    // just-created opening was then missing from it — Save job went straight
-    // to a 404 for an opening that had been saved (testing, 21 Sep). The
-    // opening was fetched on its own anyway; it is now kept.
-    if (detail) {
-      db.openings = [detail.opening, ...db.openings.filter((o) => o.id !== detail.opening.id)];
-      const known = new Set(db.jobPosts.map((p) => p.id));
-      db.jobPosts = [...db.jobPosts, ...detail.posts.filter((p) => !known.has(p.id))];
-      state.version++;
+    // Overtaken by a save: what is held has it, so keep that and leave the
+    // opening due for the next page — unless this is its first read.
+    const settled = state.writes === w;
+    if (settled) state.openings.set(openingId, now);
+    if (settled || !db.applications.some((a) => a.openingId === openingId)) {
+      db.applications = [...db.applications.filter((a) => a.openingId !== openingId), ...apps];
+      // Posts and assignments come with the whole tables above, with their real
+      // ids. But the opening itself must be here even when that list is not:
+      // a refresh of the small tables that fails keeps the older list, and a
+      // just-created opening was then missing from it — Save job went straight
+      // to a 404 for an opening that had been saved (testing, 21 Sep). The
+      // opening was fetched on its own anyway; it is now kept.
+      if (detail) {
+        db.openings = [detail.opening, ...db.openings.filter((o) => o.id !== detail.opening.id)];
+        const known = new Set(db.jobPosts.map((p) => p.id));
+        db.jobPosts = [...db.jobPosts, ...detail.posts.filter((p) => !known.has(p.id))];
+        state.version++;
+      }
     }
   }
 
@@ -313,13 +336,18 @@ async function refresh(scope: PrimeScope): Promise<void> {
     }
   }
   const stale = [...wanted].filter((id) => now - (state.candidates.get(id) ?? 0) > CANDIDATE_TTL_MS);
+  const wc = state.writes;
   if (stale.length > 0) {
     const people = await backend.candidatesByIds(actor, stale);
+    // Candidates a page needs are installed even after a save (a page cannot
+    // render without them), but not marked fresh, so the next page reads them
+    // again rather than trusting rows that may predate the save.
+    const settled = state.writes === wc;
     const fresh: Candidate[] = [];
     for (const id of stale) {
       // Remembered even when absent, so a deleted row is not chased forever
       // and a genuine miss can still be told from a page that never asked.
-      state.candidates.set(id, now);
+      state.candidates.set(id, settled ? now : 1);
       const c = people.get(id);
       if (c) fresh.push(c);
     }
