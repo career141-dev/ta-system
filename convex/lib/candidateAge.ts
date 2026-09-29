@@ -115,8 +115,9 @@ const plausible = (y: number, m: number, d: number, asOf: Date) => {
 };
 
 const DOB_LABEL = /\b(?:date\s*of\s*birth|d\.?\s?o\.?\s?b\.?|birth\s*date|birthday|born(?:\s+on)?)\b\.?\s*[:\-–]?\s*([^\n]{6,40})/gi;
-const NIC_LABELLED = /\b(?:n\.?\s?i\.?\s?c\.?|national\s+identity(?:\s+card)?|identity\s+card|id\s*(?:no|number|#))\b[^0-9\n]{0,20}(\d{9}[vVxX]|\d{12})\b/gi;
-const NIC_OLD_BARE = /\b(\d{9}[vVxX])\b/g;
+// Shared with convex/cvs/genderFromCv, which reads the same NIC for gender.
+export const NIC_LABELLED = /\b(?:n\.?\s?i\.?\s?c\.?|national\s+identity(?:\s+card)?|identity\s+card|id\s*(?:no|number|#))\b[^0-9\n]{0,20}(\d{9}[vVxX]|\d{12})\b/gi;
+export const NIC_OLD_BARE = /\b(\d{9}[vVxX])\b/g;
 const AGE_LABEL = /\bage\b\s*[:\-–]?\s*(\d{2})\s*(?:years?|yrs?)?\b/gi;
 
 /**

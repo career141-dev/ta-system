@@ -74,6 +74,7 @@ if (typeof (globalThis as any).DOMMatrix === "undefined") {
 }
 
 import { findBirth } from "../lib/candidateAge";
+import { resolveGender } from "./genderFromCv";
 import { Jimp } from "jimp";
 
 import { v } from "convex/values";
@@ -206,6 +207,7 @@ export const cvExtractionSchema = z.object({
   certifications: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   languages: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   summary: z.preprocess(makeString, z.string().nullable().optional()),
+  gender: z.preprocess(makeString, z.string().nullable().optional()),
   jobHistory: z.array(jobHistorySchema).nullable().optional(),
   referees: z.array(refereeSchema).nullable().optional(),
 });
@@ -851,6 +853,7 @@ CRITICAL INSTRUCTION: If the document is NOT a CV, Resume, or Candidate Profile 
 4. Return jobHistory as an array of objects, including a confidence field (0.0 to 1.0) on each job object.
 5. If currentTitle or currentEmployer are not explicitly stated as "current" or "present", infer them from the most recent job in their work experience by considering the dates.
 6. Extract any referees or professional references explicitly mentioned in the CV (including name, designation/title, company, contact number/phone, email, relationship to candidate, and any notes). Return as an array of objects under "referees".
+7. Return gender as "Male" or "Female" only when the CV states it, gives the candidate a title (Mr., Ms., Mrs., Miss), or refers to the candidate as he or she. Pronouns and titles for referees describe the referee, not the candidate. Never decide it from the name or a photo. Otherwise return null.
 
 JSON Target Schema:
 {
@@ -868,6 +871,7 @@ JSON Target Schema:
   "education": [{ "degree": null, "institution": null, "year": null, "field": null }],
   "languages": null,
   "summary": null,
+  "gender": null,
   "jobHistory": [{ "company": null, "title": null, "startDate": null, "endDate": null, "description": null, "confidence": 0.0 }],
   "referees": [{ "name": null, "designation": null, "company": null, "contactNo": null, "email": null, "relationship": null, "notes": null }]
 }`
@@ -1313,7 +1317,10 @@ export async function runCvExtraction(
         description: jh.description,
       }));
 
-      const { referees, ...safeExtractedWithoutReferees } = safeExtracted;
+      // The model's gender is one signal of three; resolveGender decides, and
+      // only its "Male"/"Female" reaches the record.
+      const { referees, gender: llmGender, ...safeExtractedWithoutReferees } = safeExtracted;
+      const genderRead = resolveGender({ rawText: cappedRawText, llmGender });
 
       let locationStructured: any = undefined;
       if (safeExtracted.location && typeof safeExtracted.location === "string" && safeExtracted.location.trim()) {
@@ -1346,6 +1353,8 @@ export async function runCvExtraction(
         isParsed: true,
         hasEmbedding: true,
         extractionModel: extractionModel || OPENROUTER_PRIMARY_MODEL,
+        gender: genderRead?.gender,
+        genderSource: genderRead?.source,
       });
 
       if (updateRes?.targetCandidateId) {
