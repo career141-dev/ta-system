@@ -280,7 +280,7 @@ export function EffortSheet({
       <p className="mt-2 flex flex-wrap items-center gap-3 text-[11.5px] text-ink-faint">
         <span>
           Filled in from the records, counting only the CVs you send the Director today. Each is in one column: BACK-UP if
-          it is tagged Backup, else SCOOP if a lead mailed it to you (add any that came on WhatsApp), else ADD-ONS if it is
+          it is tagged Backup, else SCOOP if you uploaded it under Scoops (add any that came on WhatsApp), else ADD-ONS if it is
           an add-on, else DA if it came on WhatsApp, POST if it applied to a LinkedIn post, L if you hunted it in Excel
           Tables. Under SETS is those columns added up.
           A shaded cell differs from the records. The fourth

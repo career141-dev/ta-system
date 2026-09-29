@@ -9,7 +9,6 @@ import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import type { RoutablePost } from "../lib/postRouting";
-import { isScoopSender, type ScoopOpening } from "../lib/scoopMail";
 
 /** The desk's shared mailboxes. Created switched off; turned on in Settings → Mailboxes. */
 export const DEFAULT_MAILBOXES = ["linkedin@career141.com", "cv@career141.com", "job@career141.com"];
@@ -56,40 +55,17 @@ export const ensureMailboxes = internalMutation({
         });
       }
     }
-    // Each TA's own mailbox, read only for scoops (27 Sep). Created switched
-    // off like the shared ones; the Director turns each on in Settings.
-    for (const u of await ctx.db.query("users").collect()) {
-      if (!isScoopMailboxOwner(u)) continue;
-      const mailbox = u.email.trim().toLowerCase();
-      const row = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", mailbox)).first();
-      if (row) {
-        if (row.kind !== "ta" || row.taUserId !== u._id) await ctx.db.patch(row._id, { kind: "ta", taUserId: u._id, updatedAt: now });
-        continue;
-      }
-      await ctx.db.insert("mailIntakeMailboxes", {
-        mailbox,
-        enabled: false,
-        kind: "ta",
-        taUserId: u._id,
-        backfillFrom: now,
-        totals: { ...EMPTY_TOTALS },
-        updatedAt: now,
-      });
+    // A TA's own mailbox is not read any more (29 Sep): scoops are uploaded on
+    // the opening's Scoops page. Any that were switched on are switched off.
+    for (const row of await ctx.db.query("mailIntakeMailboxes").collect()) {
+      if (row.kind === "ta" && row.enabled) await ctx.db.patch(row._id, { enabled: false, updatedAt: now });
     }
   },
 });
 
-/** A TA whose mailbox can take scoops: active, on the company domain, not a test login. */
-function isScoopMailboxOwner(u: Doc<"users">): boolean {
-  const email = u.email.trim().toLowerCase();
-  if (!u.isActive || !email.endsWith("@career141.com") || DEFAULT_MAILBOXES.includes(email)) return false;
-  if (u.taRole) return u.taRole === "ta" || u.taRole === "ta_lead";
-  return ["ta", "recruiter", "senior_ta", "ta_manager"].includes(u.role);
-}
-
 export const enabledMailboxes = internalQuery({
   args: {},
-  handler: async (ctx) => (await ctx.db.query("mailIntakeMailboxes").collect()).filter((m) => m.enabled),
+  handler: async (ctx) => (await ctx.db.query("mailIntakeMailboxes").collect()).filter((m) => m.enabled && m.kind !== "ta"),
 });
 
 export const mailbox = internalQuery({
@@ -533,92 +509,12 @@ export const setApplicationPost = internalMutation({
   },
 });
 
-// ── scoops in a TA's mailbox (27 Sep) ───────────────────────────────────────
-
-/** The addresses whose mail is a scoop: the Director, TA Leads and Ops. */
-export const scoopSenderEmails = internalQuery({
-  args: {},
-  handler: async (ctx): Promise<string[]> =>
-    (await ctx.db.query("users").collect()).filter((u) => isScoopSender(u)).map((u) => u.email.trim().toLowerCase()),
-});
-
-/** Who sent it, if they are someone whose CVs count as a scoop. */
-export const scoopSender = internalQuery({
-  args: { fromAddress: v.string() },
-  handler: async (ctx, args) => {
-    const email = args.fromAddress.trim().toLowerCase();
-    if (!email) return null;
-    const users = await ctx.db.query("users").withIndex("by_email", (q) => q.eq("email", email)).collect();
-    const u = users.find((x) => isScoopSender(x));
-    return u ? { userId: u._id, name: u.fullName } : null;
-  },
-});
-
-/** The open jobs a TA is working — assigned on the job, or through an active assignment. */
-export const taOpenOpenings = internalQuery({
-  args: { taUserId: v.id("users") },
-  handler: async (ctx, args): Promise<ScoopOpening[]> => {
-    const assigned = new Set<string>();
-    const rows = await ctx.db
-      .query("jobAssignments")
-      .withIndex("by_userId_isActive", (q) => q.eq("userId", args.taUserId).eq("isActive", true))
-      .collect();
-    for (const a of rows) {
-      if (a.assignmentRole === "primary_recruiter" || a.assignmentRole === "supporting_recruiter") assigned.add(a.jobId as string);
-    }
-    const out: ScoopOpening[] = [];
-    for (const job of await ctx.db.query("jobs").withIndex("by_status", (q) => q.eq("status", "active")).collect()) {
-      if (assigned.has(job._id as string) || (job.assignedTaIds ?? []).includes(args.taUserId)) {
-        out.push({ id: job._id as string, title: job.title, clientName: job.clientName });
-      }
-    }
-    return out;
-  },
-});
-
-/**
- * Mark the candidate's application on the job as the TA's scoop.
- *
- * `needsApplication` when there is none yet — the caller creates it and calls
- * again. An application that is already there keeps its stage: creating it
- * again moved people who were further along (17 September). It is left alone
- * if another TA owns it, and a scoop already marked keeps its first date.
- */
-export const placeScoop = internalMutation({
-  args: {
-    candidateId: v.id("candidates"),
-    jobId: v.id("jobs"),
-    taUserId: v.id("users"),
-    fromUserId: v.id("users"),
-    receivedAt: v.number(),
-  },
-  handler: async (ctx, args): Promise<{ needsApplication: boolean; marked: boolean; note?: string }> => {
-    const person = await ctx.db.get(args.candidateId);
-    const candidateId = (person?.mergedInto as Id<"candidates"> | undefined) ?? args.candidateId;
-    const app = await ctx.db
-      .query("applications")
-      .withIndex("by_candidate_job", (q) => q.eq("candidateId", candidateId).eq("jobId", args.jobId))
-      .first();
-    if (!app) return { needsApplication: true, marked: false };
-    if (app.ownerTaId && app.ownerTaId !== args.taUserId) {
-      return { needsApplication: false, marked: false, note: "already on the job with another TA" };
-    }
-    if (app.scoopReceivedAt) return { needsApplication: false, marked: false, note: "already marked as a scoop" };
-    await ctx.db.patch(app._id, {
-      scoopFromUserId: args.fromUserId,
-      scoopReceivedAt: args.receivedAt,
-      ownerTaId: args.taUserId,
-    });
-    return { needsApplication: false, marked: true };
-  },
-});
-
 // ── Settings → Mailboxes ────────────────────────────────────────────────────
 
 export const status = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const mailboxes = await ctx.db.query("mailIntakeMailboxes").collect();
+    const mailboxes = (await ctx.db.query("mailIntakeMailboxes").collect()).filter((m) => m.kind !== "ta");
     const recent = await ctx.db.query("mailIntakeMessages").withIndex("by_receivedAt").order("desc").take(Math.min(args.limit ?? 50, 200));
     const titles = new Map<string, string>();
     for (const m of recent) {

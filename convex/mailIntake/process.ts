@@ -21,7 +21,6 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
 import { isCvAttachment, isNotAnApplication, parseApplicationEmail, type MailAttachmentMeta } from "../lib/mailParse";
 import { routeShared, type PostPick } from "../lib/postRouting";
-import { pickScoopOpening } from "../lib/scoopMail";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
 /** Messages handled per tick. Each can mean a download and an upload. */
@@ -131,10 +130,13 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
   const parsed = parseApplicationEmail({ subject, fromAddress, bodyHtml: html, bodyText: plain });
   const sourceChannel = channelFor(m.mailbox);
 
-  // A TA's own mailbox is read for scoops and nothing else.
+  // A TA's own mailbox is no longer read (29 Sep): scoops are uploaded on the
+  // opening's Scoops page. Anything still waiting from before is closed.
   const box = await ctx.runQuery(internal.mailIntake.model.mailbox, { mailbox: m.mailbox });
-  if (box?.kind === "ta" && box.taUserId) {
-    await handleScoop(ctx, token, m, box.taUserId, { subject, fromAddress, text: parsed.text, mailboxPath });
+  if (box?.kind === "ta") {
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+      id: m._id, outcome: "skipped", note: "A TA's mailbox is not read any more — scoops are uploaded on the opening's Scoops page.",
+    });
     return;
   }
 
@@ -328,117 +330,6 @@ async function ingestCvs(
   return { cvUploadIds, notes, waitingOnOther };
 }
 
-/** Put one scooped candidate on the job as the TA's; a note when they could not be. */
-async function placeScoopedCandidate(
-  ctx: ActionCtx,
-  candidateId: Id<"candidates">,
-  jobId: Id<"jobs">,
-  taUserId: Id<"users">,
-  fromUserId: Id<"users">,
-  receivedAt: number,
-  subject: string,
-): Promise<string | null> {
-  const args = { candidateId, jobId, taUserId, fromUserId, receivedAt };
-  let r = await ctx.runMutation(internal.mailIntake.model.placeScoop, args);
-  if (r.needsApplication) {
-    await ctx.runMutation(api.applications.applications.createApplication, {
-      candidateId,
-      jobId,
-      sourceChannel: "email",
-      metaHeadline: subject.slice(0, 200),
-    });
-    r = await ctx.runMutation(internal.mailIntake.model.placeScoop, args);
-  }
-  return r.note ?? null;
-}
-
-/**
- * A scoop: CVs the Director, a TA Lead or Ops mailed to a TA for one of their
- * jobs (the desk, 27 September). Each CV is read like any other and the
- * candidate goes on that job as the TA's, marked as a scoop — which is what
- * the TA's end-of-day SCOOP counts. Where the job cannot be told, nothing is
- * filed and the TA is told, so a CV never lands on the wrong job.
- */
-async function handleScoop(
-  ctx: ActionCtx,
-  token: string,
-  m: Doc<"mailIntakeMessages">,
-  taUserId: Id<"users">,
-  msg: { subject: string; fromAddress: string; text: string; mailboxPath: string },
-) {
-  const sender = await ctx.runQuery(internal.mailIntake.model.scoopSender, { fromAddress: msg.fromAddress });
-  if (!sender) {
-    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
-      id: m._id, outcome: "skipped", note: "Not from the Director, a TA Lead or Ops — the rest of a TA's mail is not read.",
-    });
-    return;
-  }
-
-  const attachments = m.hasAttachments
-    ? ((await graph<{ value: MailAttachmentMeta[] }>(token, `${msg.mailboxPath}/attachments?$select=id,name,contentType,size,isInline`)).body?.value ?? [])
-    : [];
-  const cvs = attachments.filter(isCvAttachment);
-  if (cvs.length === 0) {
-    await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "no_cv", note: `From ${sender.name}, with no CV attached.` });
-    return;
-  }
-
-  const openings = await ctx.runQuery(internal.mailIntake.model.taOpenOpenings, { taUserId });
-  const job = pickScoopOpening(openings, msg.subject, msg.text);
-  if (!job) {
-    const why = openings.length === 0 ? "you have no open job" : "the email does not say which of your jobs it is for";
-    await ctx.runMutation(internal.ta.notifications.create, {
-      userId: taUserId as string,
-      type: "scoop_received",
-      title: `Scoop from ${sender.name} — not filed`,
-      body: `"${msg.subject.slice(0, 80)}": ${cvs.length} CV${cvs.length > 1 ? "s" : ""}, but ${why}. Add them to the job by hand.`,
-    });
-    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
-      id: m._id, outcome: "skipped", note: `Scoop from ${sender.name}, not filed: ${why}. The TA was told.`,
-    });
-    return;
-  }
-
-  const jobId = job.id as Id<"jobs">;
-  const candidateIds: Id<"candidates">[] = [];
-  const notes: string[] = [];
-  const ingest = await ingestCvs(
-    ctx, token, msg.mailboxPath, cvs,
-    { jobId, sourceChannel: "email", fromAddress: msg.fromAddress, subject: msg.subject, campaign: `TA System scoop — ${m.mailbox}` },
-    async (candidateId, fileName) => {
-      candidateIds.push(candidateId);
-      const note = await placeScoopedCandidate(ctx, candidateId, jobId, taUserId, sender.userId, m.receivedAt, msg.subject);
-      notes.push(`${fileName} was already held${note ? ` (${note})` : ""}.`);
-    },
-  );
-  const summary = `Scoop from ${sender.name} for ${job.title}${job.clientName ? ` — ${job.clientName}` : ""}.`;
-  if (ingest.cvUploadIds.length > 0) {
-    await ctx.runMutation(internal.mailIntake.model.markExtracting, {
-      id: m._id, cvUploadIds: ingest.cvUploadIds, candidateIds, openingIds: [jobId],
-      scoopTaId: taUserId, scoopFromUserId: sender.userId,
-      note: [summary, ...notes, ...ingest.notes].join(" "),
-    });
-    return;
-  }
-  if (candidateIds.length) await notifyScoop(ctx, taUserId, jobId, candidateIds.length, msg.subject);
-  await ctx.runMutation(internal.mailIntake.model.finishMessage, {
-    id: m._id,
-    outcome: candidateIds.length ? "filed" : "failed",
-    note: [summary, ...notes, ...ingest.notes].join(" "),
-    openingIds: [jobId], candidateIds,
-  });
-}
-
-async function notifyScoop(ctx: ActionCtx, taUserId: Id<"users">, jobId: Id<"jobs">, count: number, subject: string) {
-  await ctx.runMutation(internal.ta.notifications.create, {
-    userId: taUserId as string,
-    type: "scoop_received",
-    title: `Scoop: ${count} CV${count > 1 ? "s" : ""} added to your job`,
-    body: `"${subject.slice(0, 80)}" — counted on tonight's SCOOP.`,
-    jobId: jobId as string,
-  });
-}
-
 /** Once a CV has been read: put the candidate on every opening the advert serves, with the post. */
 async function finishExtracting(ctx: ActionCtx, m: Doc<"mailIntakeMessages">) {
   type UploadState = { id: Id<"cvUploads">; status: string; candidateId: Id<"candidates"> | null; error: string | null };
@@ -447,27 +338,6 @@ async function finishExtracting(ctx: ActionCtx, m: Doc<"mailIntakeMessages">) {
   const timedOut = Date.now() - (m.processedAt ?? m.createdAt) > EXTRACTION_TIMEOUT_MS && Date.now() - m.receivedAt > EXTRACTION_TIMEOUT_MS;
   if (pending.length > 0 && !timedOut) {
     await ctx.runMutation(internal.mailIntake.model.recheckExtractingLater, { id: m._id });
-    return;
-  }
-
-  // A scoop goes on the TA's job as theirs, not wherever an advert points.
-  if (m.scoopTaId && m.scoopFromUserId && m.openingIds[0]) {
-    const placed = new Set<Id<"candidates">>(m.candidateIds);
-    const notes: string[] = [];
-    for (const s of states) {
-      if (!s.candidateId) continue;
-      placed.add(s.candidateId);
-      const note = await placeScoopedCandidate(ctx, s.candidateId, m.openingIds[0], m.scoopTaId, m.scoopFromUserId, m.receivedAt, m.subject);
-      if (note) notes.push(`One candidate was ${note}.`);
-    }
-    const unread = states.filter((s) => !s.candidateId);
-    if (placed.size > 0) await notifyScoop(ctx, m.scoopTaId, m.openingIds[0], placed.size, m.subject);
-    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
-      id: m._id,
-      outcome: placed.size === 0 ? "failed" : "filed",
-      note: [m.note ?? "", ...notes, unread.length ? `${unread.length} CV${unread.length > 1 ? "s" : ""} could not be read.` : ""].filter(Boolean).join(" "),
-      candidateIds: [...placed],
-    });
     return;
   }
 
