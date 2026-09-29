@@ -47,22 +47,13 @@ export function shortlistRows(
   const alreadySent = new Set(
     repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds),
   );
-  // For the Director, a candidate whose follow-up is finished is ready too:
-  // every question answered is what "ready for the Director" means, and making
-  // the TA move each one by hand first is a step the desk does not have.
-  // (Kept on 25 Sep by the owner's decision, reviewing PR #56.)
-  const readyFromFollowUp =
-    kind === "director"
-      ? new Set(
-          repo
-            .followUps()
-            .filter((f) => f.application.openingId === openingId && f.followUp.state === "complete")
-            .map((f) => f.application.id),
-        )
-      : new Set<string>();
+  // Only people actually in Director Review go in the Director's email (29 Sep).
+  // A finished follow-up used to pull a TA Shortlisted candidate in as well
+  // (25 Sep, PR #56); the desk wants the email to match the stage, so the TA
+  // moves them to Director Review first.
   const apps = repo
     .applications(openingId)
-    .filter((a) => (a.stage === stage || readyFromFollowUp.has(a.id)) && !alreadySent.has(a.id))
+    .filter((a) => a.stage === stage && !alreadySent.has(a.id))
     // The client's copy is the Director's decision, not the TA's, so it is not
     // narrowed to one recruiter's own shortlisting.
     .filter((a) => (taId && kind === "director" ? a.ownerTaId === taId : true))
