@@ -2756,7 +2756,7 @@ export default defineSchema({
     enabled: v.boolean(),
     /** shared (absent): linkedin@, cv@, job@. ta: a TA's own mailbox, read only
      *  for scoops the Director, a TA Lead or Ops send them (27 Sep). */
-    kind: v.optional(v.union(v.literal("shared"), v.literal("ta"))),
+    kind: v.optional(v.union(v.literal("shared"), v.literal("ta"), v.literal("shortlist"))),
     taUserId: v.optional(v.id("users")),
     /** Graph's delta token URL; absent until the first full sync completes. */
     deltaLink: v.optional(v.string()),
@@ -2789,10 +2789,11 @@ export default defineSchema({
     /** waiting → processing → extracting (a CV is being read) → done. */
     status: v.union(v.literal("waiting"), v.literal("processing"), v.literal("extracting"), v.literal("done")),
     /** filed: on an opening · database: no advert matched · duplicate: already held and placed ·
-     *  no_cv: nothing to read · skipped: not an application · failed: gave up. */
+     *  no_cv: nothing to read · skipped: not an application · failed: gave up ·
+     *  held: a shortlist mail no opening could be chosen for — a lead places it. */
     outcome: v.optional(v.union(
       v.literal("filed"), v.literal("database"), v.literal("duplicate"),
-      v.literal("no_cv"), v.literal("skipped"), v.literal("failed"),
+      v.literal("no_cv"), v.literal("skipped"), v.literal("failed"), v.literal("held"),
     )),
     attempts: v.number(),
     nextAttemptAt: v.number(),
@@ -2800,6 +2801,9 @@ export default defineSchema({
     jobPostId: v.optional(v.id("jobPosts")),
     /** Where each opening's post came from, carried until the CV is read. */
     route: v.optional(v.any()),
+    /** shortlists@: what the subject said, carried until the CVs are read —
+     *  { kind, opening (from a Director's subject), setNumber }. */
+    shortlist: v.optional(v.any()),
     candidateIds: v.array(v.id("candidates")),
     cvUploadIds: v.array(v.id("cvUploads")),
     note: v.optional(v.string()),

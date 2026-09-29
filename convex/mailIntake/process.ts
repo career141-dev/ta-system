@@ -19,7 +19,8 @@ import { internalAction, type ActionCtx } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
-import { isCvAttachment, isNotAnApplication, parseApplicationEmail, type MailAttachmentMeta } from "../lib/mailParse";
+import { isAutoReply, isCvAttachment, isNotAnApplication, parseApplicationEmail, type MailAttachmentMeta } from "../lib/mailParse";
+import { inferOpening, matchHouseSubject, parseHouseSubject, type OpeningLite, type ShortlistKind } from "../lib/shortlistMail";
 import { routeShared, type PostPick } from "../lib/postRouting";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -137,6 +138,13 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
     await ctx.runMutation(internal.mailIntake.model.finishMessage, {
       id: m._id, outcome: "skipped", note: "A TA's mailbox is not read any more — scoops are uploaded on the opening's Scoops page.",
     });
+    return;
+  }
+
+  // shortlists@ is read differently: a CV there is someone already in the
+  // pipeline being put forward, not an application.
+  if (box?.kind === "shortlist") {
+    await handleShortlistMessage(ctx, token, m, mailboxPath, subject, fromAddress, parsed.text);
     return;
   }
 
@@ -264,6 +272,136 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
   });
 }
 
+/** What the subject said, kept on the message until its CVs have been read. */
+type ShortlistNote = {
+  kind: ShortlistKind;
+  /** A Director's subject was in the house form. */
+  parsed: boolean;
+  /** The opening that subject named, when it named exactly one. */
+  openingId: string | null;
+  /** Why it did not, when it did not — shown to the lead. */
+  matchNote: string;
+  setNumber: number | null;
+  body: string;
+};
+
+/**
+ * Mail at shortlists@: the Director's shortlist ("CLIENT > POSITION > SET 01")
+ * or a client's. The CVs are read and matched to people we already hold; the
+ * opening comes from the subject (Director) or is inferred (client). Nothing
+ * is sent.
+ */
+async function handleShortlistMessage(
+  ctx: ActionCtx, token: string, m: Doc<"mailIntakeMessages">, mailboxPath: string,
+  subject: string, fromAddress: string, text: string,
+) {
+  if (isAutoReply(fromAddress, subject)) {
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "skipped", note: "An automatic reply or a bounce." });
+    return;
+  }
+  const attachments = m.hasAttachments
+    ? ((await graph<{ value: MailAttachmentMeta[] }>(token, `${mailboxPath}/attachments?$select=id,name,contentType,size,isInline`)).body?.value ?? [])
+    : [];
+  const cvs = attachments.filter(isCvAttachment);
+  if (cvs.length === 0) {
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "no_cv", note: "A shortlist mail with no CV attached." });
+    return;
+  }
+
+  const { openings, directorAddresses } = await ctx.runQuery(internal.mailIntake.shortlist.context, {});
+  const house = parseHouseSubject(subject);
+  // The subject decides. A Director writing without it is still the Director,
+  // but then there is no subject to name the opening, so it is inferred.
+  const kind: ShortlistKind = house || directorAddresses.includes(fromAddress) ? "director" : "client";
+  const match = house ? matchHouseSubject(house, openings) : null;
+  const note: ShortlistNote = {
+    kind,
+    parsed: Boolean(house),
+    openingId: match?.opening?.id ?? null,
+    matchNote: match?.note ?? "",
+    setNumber: house?.setNumber ?? null,
+    body: text.slice(0, 2000),
+  };
+
+  const candidateIds: Id<"candidates">[] = [];
+  const ingest = await ingestCvs(
+    ctx, token, mailboxPath, cvs,
+    { jobId: note.openingId ? (note.openingId as Id<"jobs">) : undefined, sourceChannel: "email", fromAddress, subject, campaign: `TA System mail intake — ${m.mailbox}` },
+    async (candidateId) => { candidateIds.push(candidateId); },
+  );
+  if (ingest.cvUploadIds.length > 0) {
+    await ctx.runMutation(internal.mailIntake.model.markExtracting, {
+      id: m._id, cvUploadIds: ingest.cvUploadIds, candidateIds,
+      openingIds: note.openingId ? [note.openingId as Id<"jobs">] : [],
+      shortlist: note, note: ingest.notes.join(" ") || undefined,
+    });
+    return;
+  }
+  await fileShortlist(ctx, m, note, candidateIds, ingest.notes.join(" "));
+}
+
+/**
+ * Once the people are known: choose the opening and move them. A Director's
+ * subject that names no single opening is HELD, never guessed at; a client's
+ * mail is filed only when one opening clearly leads (lib/shortlistMail).
+ */
+async function fileShortlist(
+  ctx: ActionCtx, m: Doc<"mailIntakeMessages">, note: ShortlistNote, candidateIds: Id<"candidates">[], carried: string,
+) {
+  const label = note.kind === "director" ? "Director shortlist" : "Client shortlist";
+  const set = note.setNumber ? `, set ${note.setNumber}` : "";
+  if (candidateIds.length === 0) {
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+      id: m._id, outcome: "failed", note: [`${label}: no CV could be read.`, carried].filter(Boolean).join(" "),
+    });
+    return;
+  }
+
+  const { openings } = await ctx.runQuery(internal.mailIntake.shortlist.context, {});
+  let opening: OpeningLite | null = note.openingId ? openings.find((o: OpeningLite) => o.id === note.openingId) ?? null : null;
+  let why = note.matchNote;
+  if (!opening && !note.parsed) {
+    const apps = await ctx.runQuery(internal.mailIntake.shortlist.applicationsFor, { candidateIds });
+    const inferred = inferOpening({
+      subject: m.subject, body: note.body, fromAddress: m.fromAddress,
+      applications: apps, candidateCount: candidateIds.length, openings,
+    });
+    opening = inferred.opening;
+    why = inferred.note;
+  }
+
+  if (!opening) {
+    const held = `${label}${set}: ${why || "no opening could be told from the mail."} Added to the database, nothing moved — a lead places them.`;
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "held", note: [held, carried].filter(Boolean).join(" "), candidateIds });
+    return;
+  }
+
+  const jobId = opening.id as Id<"jobs">;
+  // Someone the mail names who is not on the opening yet is put on it first.
+  const apps = await ctx.runQuery(internal.mailIntake.shortlist.applicationsFor, { candidateIds });
+  for (const c of candidateIds) {
+    if (!apps.some((a: { candidateId: string; openingId: string }) => a.candidateId === (c as string) && a.openingId === opening!.id)) {
+      await ctx.runMutation(api.applications.applications.createApplication, {
+        candidateId: c, jobId, sourceChannel: "email", metaHeadline: m.subject.slice(0, 200),
+      });
+    }
+  }
+  const r = await ctx.runMutation(internal.mailIntake.shortlist.moveShortlisted, {
+    openingId: jobId, kind: note.kind, candidateIds, mailbox: m.mailbox, subject: m.subject,
+  });
+  const stage = note.kind === "director" ? "Director Shortlist" : "Client Shortlist";
+  const parts = [
+    `${label}${set} for ${opening.clientName} · ${opening.title}: ${why || "matched."}`,
+    `${r.moved.length} moved to ${stage}`,
+    r.already.length ? `${r.already.length} already there` : "",
+    r.left.length ? `${r.left.length} left where they are (${[...new Set(r.left.map((l: { stage: string }) => l.stage))].join(", ")})` : "",
+    carried,
+  ].filter(Boolean);
+  await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+    id: m._id, outcome: "filed", note: parts.join(". ") + ".", openingIds: [jobId], candidateIds,
+  });
+}
+
 /**
  * Download a message's CV attachments and hand each to the extraction
  * pipeline, the way handleMessage does. A CV already held is not read again:
@@ -338,6 +476,17 @@ async function finishExtracting(ctx: ActionCtx, m: Doc<"mailIntakeMessages">) {
   const timedOut = Date.now() - (m.processedAt ?? m.createdAt) > EXTRACTION_TIMEOUT_MS && Date.now() - m.receivedAt > EXTRACTION_TIMEOUT_MS;
   if (pending.length > 0 && !timedOut) {
     await ctx.runMutation(internal.mailIntake.model.recheckExtractingLater, { id: m._id });
+    return;
+  }
+
+  if (m.shortlist) {
+    const ids = new Set<Id<"candidates">>(m.candidateIds);
+    for (const s of states) if (s.candidateId) ids.add(s.candidateId);
+    const unread = states.filter((s) => !s.candidateId);
+    await fileShortlist(
+      ctx, m, m.shortlist as ShortlistNote, [...ids],
+      [m.note ?? "", unread.length ? `${unread.length} CV${unread.length > 1 ? "s" : ""} could not be read.` : ""].filter(Boolean).join(" "),
+    );
     return;
   }
 

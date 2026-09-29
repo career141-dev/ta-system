@@ -100,6 +100,16 @@ const OUR_DOMAINS = /@(career141\.com|[a-z0-9-]+\.onmicrosoft\.com|linkedin\.com
 export function isNotAnApplication(fromAddress: string, subject: string): boolean {
   const from = (fromAddress ?? "").toLowerCase();
   if (/@(career141\.com|[a-z0-9-]+\.onmicrosoft\.com)$/.test(from)) return true;
+  return isAutoReply(fromAddress, subject);
+}
+
+/**
+ * Bounces and automatic replies only. shortlists@ uses this rather than
+ * isNotAnApplication, because the Director writes from a career141.com address
+ * and his shortlists are exactly the mail that has to be read.
+ */
+export function isAutoReply(fromAddress: string, subject: string): boolean {
+  const from = (fromAddress ?? "").toLowerCase();
   if (/^(mailer-daemon|postmaster|no-?reply-?notifications?)@/.test(from)) return true;
   return /^\s*(automatic reply|auto(?:matic)?[- ]?reply|out of (?:the )?office|undeliverable|delivery (?:status notification|has failed)|mail delivery failed|read:|not read:)/i.test(subject ?? "");
 }
