@@ -43,6 +43,8 @@ export const send = internalAction({
         html: args.html,
         attachments: args.attachments,
         testInbox: "EOD_TEST_EMAIL",
+        // Internal only: in test mode the desk still gets it beside the test inbox.
+        keepInternalInTest: "career141.com",
       },
       getGraphToken,
     );

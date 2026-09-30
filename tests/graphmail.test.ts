@@ -154,6 +154,17 @@ async function main() {
   g = fakeGraph();
   r = await sendFollowUpMail(desk, token, g.fetchImpl);
   eq("test mode: only the test mailbox, no added To or Cc", [g.calls[0].payload.message.toRecipients.length, g.calls[0].payload.message.ccRecipients], [1, undefined]);
+  // ── End of day, 30 Sep: a test send still reaches the desk ─────────────────
+  env({ OUTREACH_TEST_EMAIL: "tester@gmail.com" });
+  g = fakeGraph();
+  r = await sendFollowUpMail({ ...desk, alsoTo: [...desk.alsoTo, "friend@gmail.com"], keepInternalInTest: "career141.com" }, token, g.fetchImpl);
+  eq("test mode, internal kept: the test inbox first, then the job-orders box and the added To", g.calls[0].payload.message.toRecipients.map((x: any) => x.emailAddress.address), ["tester@gmail.com", "joborders@career141.com", "boss@career141.com"]);
+  eq("test mode, internal kept: the desk's Cc still go", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["shamra@career141.com", "asma@career141.com", "opsteam@career141.com", "cv@career141.com", "extra@career141.com", "shortlists@career141.com"]);
+  eq("test mode, internal kept: an outside address is still dropped, and it says so", r.ok && r.note.includes("1 extra recipient dropped"), true);
+  g = fakeGraph();
+  r = await sendFollowUpMail({ ...mail, cc: ["lead@career141.com"] }, token, g.fetchImpl);
+  eq("a candidate email in test mode still copies nobody", [g.calls[0].payload.message.toRecipients.length, g.calls[0].payload.message.ccRecipients], [1, undefined]);
+
   env({ OUTREACH_LIVE: "true", C141_OUTBOUND_LOCK: "true", C141_OUTBOUND_ALLOW_EMAILS: "joborders@career141.com,boss@career141.com,cv@career141.com" });
   g = fakeGraph();
   r = await sendFollowUpMail(desk, token, g.fetchImpl);
