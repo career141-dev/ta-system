@@ -54,6 +54,13 @@ export interface FollowUpMail {
   attachments?: MailAttachment[];
   /** In test mode, the env var naming this email's own test mailbox (e.g. EOD_TEST_EMAIL). */
   testInbox?: string;
+  /**
+   * In test mode, recipients at this domain still get the email beside the test
+   * mailbox. Only for mail that never goes to a candidate — the end-of-day email
+   * goes to the desk, and a test send that reached only the test inbox left the
+   * desk unable to check it (30 Sep). The outbound lock still applies.
+   */
+  keepInternalInTest?: string;
 }
 
 export type MailResult =
@@ -117,10 +124,18 @@ export async function sendFollowUpMail(
   let note = decision.note;
   let alsoTo = addressList(mail.alsoTo ?? [], [decision.to]);
   let cc = addressList(mail.cc ?? [], [decision.to, ...alsoTo]);
-  if ((cc.length || alsoTo.length) && !outreachLive()) {
-    note += ` [TEST MODE: ${cc.length + alsoTo.length} extra recipient${cc.length + alsoTo.length === 1 ? "" : "s"} dropped]`;
-    cc = [];
-    alsoTo = [];
+  if (!outreachLive()) {
+    const domain = (mail.keepInternalInTest ?? "").trim().toLowerCase().replace(/^@/, "");
+    const internal = (a: string) => !!domain && a.endsWith(`@${domain}`);
+    const wanted = [...alsoTo, ...cc];
+    // The intended recipient was swapped for the test mailbox; an internal one
+    // still gets it, on the To line.
+    const intended = addressList([mail.to], [decision.to]).filter(internal);
+    alsoTo = addressList([...intended, ...alsoTo.filter(internal)], [decision.to]);
+    cc = cc.filter(internal).filter((c) => !alsoTo.includes(c));
+    const dropped = wanted.filter((a) => !alsoTo.includes(a) && !cc.includes(a)).length;
+    if (dropped) note += ` [TEST MODE: ${dropped} extra recipient${dropped === 1 ? "" : "s"} dropped]`;
+    if (alsoTo.length || cc.length) note += ` [TEST MODE: the ${domain} recipients get it too]`;
   }
   const toBlocked = alsoTo.filter((c) => !emailAllowed(c));
   if (toBlocked.length) {
