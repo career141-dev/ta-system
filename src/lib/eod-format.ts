@@ -159,6 +159,46 @@ const esc = (s: unknown) =>
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
 
+/** Strips formatting markers (==highlight==, **bold**, *italic*, <mark>) for plain text / PDF. */
+export function stripNoteFormatting(n: string): string {
+  return String(n ?? "")
+    .replace(/==([^=]+)==/g, "$1")
+    .replace(/<\/?mark[^>]*>/gi, "")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "$1")
+    .trim();
+}
+
+/** Formats a note line for email HTML with highlighted points, bold text, and clean bullets. */
+export function formatNoteHtml(note: string): string {
+  let line = esc(note.trim());
+  const highlightStyle =
+    "background-color:#fef08a;color:#171c18;font-weight:600;padding:1px 4px;border-radius:2px;display:inline-block;";
+
+  // Replace ==highlight==
+  line = line.replace(/==([^=]+)==/g, `<mark style="${highlightStyle}">$1</mark>`);
+
+  // Replace &lt;mark(?:\s+[^&]*)?&gt;(.*?)&lt;\/mark&gt;
+  line = line.replace(/&lt;mark(?:&gt;|\s+[^&]*&gt;)(.*?)&lt;\/mark&gt;/gi, `<mark style="${highlightStyle}">$1</mark>`);
+
+  // Replace **bold**
+  line = line.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+
+  // Replace *italic*
+  line = line.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<i>$1</i>");
+
+  // Format leading bullet / chevron
+  if (line.startsWith("&gt; ")) {
+    line = `<span style="color:#6b736d;font-weight:600;margin-right:3px;">&rsaquo;</span> ${line.slice(5).trim()}`;
+  } else if (line.startsWith("&gt;")) {
+    line = `<span style="color:#6b736d;font-weight:600;margin-right:3px;">&rsaquo;</span> ${line.slice(4).trim()}`;
+  } else if (line.startsWith("- ")) {
+    line = `<span style="color:#6b736d;margin-right:3px;">&bull;</span> ${line.slice(2).trim()}`;
+  }
+
+  return line;
+}
+
 /**
  * The end-of-day email as it is sent: the same greeting, the same two tables
  * and the same sign-off as the composer on screen. Inline styles only, because
@@ -184,7 +224,7 @@ export function eodEmailHtml(input: {
     input.rows
       .map(
         (r) =>
-          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(esc).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
+          `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(formatNoteHtml).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
       )
       .join(""),
   );
@@ -232,8 +272,15 @@ ${outro}
 </div>`;
 }
 /** The lines the table writes itself (HOUSE_NOTE), not the TA's own notes. */
-const isHouseLine = (n: string) => /^>?\s*(Total Experience - |Currently at )/i.test(n.trim());
-const taNotes = (notes: string[]) => notes.filter((n) => !isHouseLine(n)).map((n) => n.replace(/^>/, "").trim()).filter(Boolean);
+const isHouseLine = (n: string) => {
+  const stripped = stripNoteFormatting(n);
+  return /^>?\s*(Total Experience - |Currently at )/i.test(stripped.trim());
+};
+// Highlight and bold are the email's styling (30 Sep): the words are saved to
+// the candidate, the ==marks== and **stars** are not — they would show as raw
+// symbols on the profile and in Director review. Styling alone is no change.
+const taNotes = (notes: string[]) =>
+  notes.filter((n) => !isHouseLine(n)).map((n) => stripNoteFormatting(n.replace(/^>/, ""))).filter(Boolean);
 
 /**
  * What the TA changed on the Director's email that belongs on the candidate

@@ -18,6 +18,7 @@
 import type { Application, Candidate, Opening } from "@/data/types";
 import { isSystemNote } from "./pdf";
 import { BOX } from "./career141Box";
+import { stripNoteFormatting } from "./eod-format";
 
 export interface BoxContent {
   currentSalary: string | null;
@@ -47,7 +48,7 @@ export function boxContent(
   opening: Pick<Opening, "followUpQuestions"> | null,
 ): BoxContent {
   const notes = (app.notes ?? [])
-    .map((n) => n.replace(/^>/, "").replace(/^[-•*]\s*/, "").trim())
+    .map((n) => stripNoteFormatting(n.replace(/^>/, "").replace(/^[-•*]\s*/, "")))
     .filter((n) => n && !isSystemNote(n));
   // Answers to the opening's own follow-up questions are details the desk
   // gathered too; they never reached the box before.

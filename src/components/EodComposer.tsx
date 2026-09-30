@@ -1,10 +1,354 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { SHORTLIST_COLUMNS, boxOverrides, eodDetailChanges, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
+import { useEffect, useState, useRef } from "react";
+import {
+  SHORTLIST_COLUMNS,
+  boxOverrides,
+  eodDetailChanges,
+  parseAddressList,
+  type EffortRow,
+  type ShortlistRow,
+} from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { sendEod } from "@/app/actions";
+
+function noteLineToHtml(line: string): string {
+  let l = line
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const highlightStyle =
+    "background-color:#fef08a;color:#171c18;font-weight:600;padding:1px 4px;border-radius:3px;display:inline-block;";
+
+  l = l.replace(/==([^=]+)==/g, `<mark style="${highlightStyle}">$1</mark>`);
+  l = l.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  l = l.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<i>$1</i>");
+
+  return l;
+}
+
+function notesToEditorHtml(notes: string[]): string {
+  if (!notes || notes.length === 0) return "";
+  return notes
+    .map((l) => (l ? `<div>${noteLineToHtml(l)}</div>` : `<div><br></div>`))
+    .join("");
+}
+
+function domNodeToMarkdown(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent || "";
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return "";
+  }
+
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+
+  if (tag === "br") return "\n";
+
+  let inner = "";
+  for (let i = 0; i < el.childNodes.length; i++) {
+    inner += domNodeToMarkdown(el.childNodes[i]);
+  }
+
+  const isMark =
+    tag === "mark" ||
+    el.style.backgroundColor === "rgb(254, 240, 138)" ||
+    el.style.backgroundColor === "#fef08a" ||
+    el.style.backgroundColor.includes("yellow") ||
+    el.getAttribute("data-highlight") === "true";
+
+  const isBold =
+    tag === "b" ||
+    tag === "strong" ||
+    el.style.fontWeight === "bold" ||
+    el.style.fontWeight === "700" ||
+    el.style.fontWeight === "600";
+
+  const isItalic = tag === "i" || tag === "em" || el.style.fontStyle === "italic";
+
+  let res = inner;
+  if (isMark && res.trim()) {
+    res = `==${res.replace(/^==|==$/g, "")}==`;
+  }
+  if (isBold && res.trim()) {
+    res = `**${res.replace(/^\*\*|\*\*$/g, "")}**`;
+  }
+  if (isItalic && res.trim()) {
+    res = `*${res.replace(/^\*|\*$/g, "")}*`;
+  }
+
+  if (tag === "div" || tag === "p" || tag === "li") {
+    return `\n${res}\n`;
+  }
+
+  return res;
+}
+
+function editorHtmlToNotes(el: HTMLElement): string[] {
+  let text = "";
+  for (let i = 0; i < el.childNodes.length; i++) {
+    text += domNodeToMarkdown(el.childNodes[i]);
+  }
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+const HIGHLIGHT_STYLE =
+  "background-color:#fef08a;color:#171c18;font-weight:600;padding:1px 4px;border-radius:3px;display:inline-block;";
+
+function createMarkElement(content?: string | Node | DocumentFragment): HTMLElement {
+  const mark = document.createElement("mark");
+  mark.setAttribute("style", HIGHLIGHT_STYLE);
+  if (typeof content === "string") {
+    mark.textContent = content;
+  } else if (content) {
+    mark.appendChild(content);
+  }
+  return mark;
+}
+
+function isHighlightElement(node: Node | null): node is HTMLElement {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  if (tag === "mark") return true;
+  const bg = el.style?.backgroundColor;
+  if (bg && (bg.includes("254, 240, 138") || bg.includes("fef08a") || bg.includes("yellow"))) {
+    return true;
+  }
+  return el.getAttribute("data-highlight") === "true";
+}
+
+function findHighlightAncestor(node: Node | null, root: HTMLElement): HTMLElement | null {
+  let cur: Node | null = node;
+  while (cur && cur !== root) {
+    if (isHighlightElement(cur)) return cur as HTMLElement;
+    cur = cur.parentNode;
+  }
+  return null;
+}
+
+function getIntersectingHighlightElements(root: HTMLElement, range: Range): HTMLElement[] {
+  const highlights = new Set<HTMLElement>();
+
+  const startMark = findHighlightAncestor(range.startContainer, root);
+  if (startMark) highlights.add(startMark);
+
+  const endMark = findHighlightAncestor(range.endContainer, root);
+  if (endMark) highlights.add(endMark);
+
+  const commonMark = findHighlightAncestor(range.commonAncestorContainer, root);
+  if (commonMark) highlights.add(commonMark);
+
+  const allMarks = root.querySelectorAll("mark, [data-highlight='true'], [style*='background-color']");
+  allMarks.forEach((el) => {
+    if (isHighlightElement(el)) {
+      try {
+        if (range.intersectsNode(el)) {
+          highlights.add(el as HTMLElement);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  return Array.from(highlights);
+}
+
+function unwrapElement(el: HTMLElement) {
+  const parent = el.parentNode;
+  if (!parent) return;
+  while (el.firstChild) {
+    parent.insertBefore(el.firstChild, el);
+  }
+  parent.removeChild(el);
+}
+
+function EodNotesEditor({
+  appId,
+  notes,
+  onChange,
+}: {
+  appId: string;
+  notes: string[];
+  onChange: (notes: string[]) => void;
+  className?: string;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const notesStr = Array.isArray(notes) ? notes.join("\n") : String(notes ?? "");
+
+  // Initialize and sync HTML content when notes change externally
+  useEffect(() => {
+    if (!editorRef.current) return;
+    const currentNotes = editorHtmlToNotes(editorRef.current).join("\n");
+    if (currentNotes !== notesStr) {
+      editorRef.current.innerHTML = notesToEditorHtml(
+        Array.isArray(notes) ? notes : notesStr.split("\n")
+      );
+    }
+  }, [notesStr, notes]);
+
+  const sync = () => {
+    if (!editorRef.current) return;
+    const parsedNotes = editorHtmlToNotes(editorRef.current);
+    onChange(parsedNotes);
+  };
+
+  const highlightSelection = () => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<mark style="${HIGHLIGHT_STYLE}">highlighted point</mark>&nbsp;`
+      );
+      sync();
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const root = editorRef.current;
+
+    // Find all highlight elements that intersect or contain the range
+    const intersectingHighlights = getIntersectingHighlightElements(root, range);
+
+    if (intersectingHighlights.length > 0) {
+      // TOGGLE OFF: Remove highlight from all intersecting highlight elements
+      intersectingHighlights.forEach((markEl) => {
+        unwrapElement(markEl);
+      });
+      root.normalize();
+      sync();
+      return;
+    }
+
+    // TOGGLE ON: Apply highlight to selection
+    try {
+      const frag = range.extractContents();
+      const hasBlocks = Array.from(frag.childNodes).some(
+        (n) => n.nodeType === Node.ELEMENT_NODE && (n.nodeName === "DIV" || n.nodeName === "P" || n.nodeName === "LI")
+      );
+
+      if (hasBlocks) {
+        // Multi-line selection: wrap inline content of each block line
+        Array.from(frag.childNodes).forEach((child) => {
+          if (child.nodeType === Node.ELEMENT_NODE && (child.nodeName === "DIV" || child.nodeName === "P" || child.nodeName === "LI")) {
+            const mark = createMarkElement();
+            while (child.firstChild) {
+              mark.appendChild(child.firstChild);
+            }
+            child.appendChild(mark);
+          } else if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+            const mark = createMarkElement(child.textContent);
+            frag.replaceChild(mark, child);
+          }
+        });
+        range.insertNode(frag);
+      } else {
+        // Single line inline selection
+        const mark = createMarkElement(frag);
+        range.insertNode(mark);
+        sel.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(mark);
+        sel.addRange(newRange);
+      }
+    } catch {
+      document.execCommand("hiliteColor", false, "#fef08a");
+    }
+
+    root.normalize();
+    sync();
+  };
+
+  const boldSelection = () => {
+    if (editorRef.current) editorRef.current.focus();
+    document.execCommand("bold");
+    sync();
+  };
+
+  const insertBullet = () => {
+    if (editorRef.current) editorRef.current.focus();
+    document.execCommand("insertText", false, "> ");
+    sync();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "h" || e.key === "H")) {
+      e.preventDefault();
+      highlightSelection();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+      e.preventDefault();
+      boldSelection();
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1 w-full min-w-[270px]">
+      {/* Mini formatting toolbar */}
+      <div className="flex items-center gap-1 px-0.5 py-0.5 text-[10.5px]">
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            highlightSelection();
+          }}
+          title="Highlight selected text in yellow (Ctrl+H)"
+          className="flex items-center gap-1 rounded bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 border border-amber-300 dark:border-amber-700 px-2 py-0.5 font-semibold text-amber-950 dark:text-amber-100 transition-colors shadow-2xs cursor-pointer"
+        >
+          <span className="text-[10px]">🟡</span>
+          <span>Highlight</span>
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            boldSelection();
+          }}
+          title="Bold selected text (Ctrl+B)"
+          className="rounded border border-rule px-1.5 py-0.5 font-bold text-ink-soft hover:bg-paper hover:text-ink transition-colors cursor-pointer"
+        >
+          𝐁
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            insertBullet();
+          }}
+          title="Add > bullet"
+          className="rounded border border-rule px-1.5 py-0.5 text-ink-soft hover:bg-paper hover:text-ink transition-colors cursor-pointer"
+        >
+          › Bullet
+        </button>
+      </div>
+
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={sync}
+        onBlur={sync}
+        onKeyDown={handleKeyDown}
+        data-placeholder="Type notes or select text & click Highlight..."
+        className="w-full min-h-[58px] max-h-[120px] overflow-y-auto resize-y p-2 rounded border border-rule/50 hover:border-rule focus:border-brand focus:bg-surface leading-[1.6] text-[12px] text-ink outline-none transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-ink-faint bg-paper/30 whitespace-pre-wrap break-words"
+      />
+
+      {/* Hidden input to ensure form submission always carries the exact serialized notes string */}
+      <input type="hidden" form="eod-send" name={`shortlist_${appId}_notes`} value={notesStr} />
+    </div>
+  );
+}
 
 /**
  * The end-of-day email, composed for review.
@@ -63,12 +407,35 @@ export function EodComposer({
   const [introText, setIntroText] = useState(defaultIntro);
   const [outroText, setOutroText] = useState(defaultOutro);
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
-  const [extraTo, setExtraTo] = useState("");
-  const [extraCc, setExtraCc] = useState("");
+  // Added recipients are chips, like skills on LinkedIn: type the address, pick
+  // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
+  const [extraTo, setExtraTo] = useState<string[]>([]);
+  const [extraCc, setExtraCc] = useState<string[]>([]);
+  const [draftAddress, setDraftAddress] = useState("");
+  const [addAs, setAddAs] = useState<"to" | "cc">("to");
+  const [addressError, setAddressError] = useState<string | null>(null);
 
-  // Restore draft from localStorage on mount
+  const onEmail = [toEmail, ccEmail, eodCc, ...fixedCc, trackedAt, ...extraTo, ...extraCc]
+    .filter((a): a is string => !!a)
+    .map((a) => a.toLowerCase());
+  const addAddress = () => {
+    const { ok, bad } = parseAddressList(draftAddress);
+    if (bad.length) return setAddressError(`${bad.join(", ")} is not an email address.`);
+    if (!ok.length) return setAddressError("Type an email address first.");
+    const fresh = ok.filter((a) => !onEmail.includes(a));
+    if (!fresh.length) return setAddressError(`${ok.join(", ")} is already on this email.`);
+    (addAs === "to" ? setExtraTo : setExtraCc)((prev) => [...prev, ...fresh]);
+    setDraftAddress("");
+    setAddressError(null);
+  };
+  const removeAddress = (list: "to" | "cc", address: string) =>
+    (list === "to" ? setExtraTo : setExtraCc)((prev) => prev.filter((a) => a !== address));
+
+  // Restore draft from localStorage on mount. Nothing is saved until this has
+  // run: the save below used to write the page's defaults over the draft first.
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
-    try {
+    setRestored(true);    try {
       const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
       if (saved) {
         // Only a subject the TA typed, and only while the set and CV count it
@@ -80,8 +447,9 @@ export function EodComposer({
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
-        if (typeof saved.extraTo === "string") setExtraTo(saved.extraTo);
-        if (typeof saved.extraCc === "string") setExtraCc(saved.extraCc);
+        // Saved as the comma text the server reads, before and after the chips.
+        if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
+        if (typeof saved.extraCc === "string") setExtraCc(parseAddressList(saved.extraCc).ok);
       }
     } catch {
       /* storage disabled */
@@ -90,15 +458,24 @@ export function EodComposer({
 
   // Persist draft to localStorage
   useEffect(() => {
+    if (!restored) return;
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ subject, baseSubject: initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc }),
+        JSON.stringify({
+          subject,
+          baseSubject: initialSubject,
+          introText,
+          outroText,
+          shortlistDraft,
+          extraTo: extraTo.join(", "),
+          extraCc: extraCc.join(", "),
+        }),
       );
     } catch {
       /* storage disabled */
     }
-  }, [draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc]);
+  }, [restored, draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc]);
 
   // Clear draft on send
   useEffect(() => {
@@ -157,38 +534,35 @@ export function EodComposer({
     <div className="flex flex-col gap-5">
       <section className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex flex-col gap-3 border-b border-rule px-7 py-5">
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-2 text-[12.5px]">
-            <span>
-              <span className="text-ink-faint">From </span>
-              {senderName} — your own mailbox
-            </span>
-            <span>
-              <span className="text-ink-faint">To </span>
-              {toName} <span className="text-ink-faint">{toEmail}</span>
-            </span>
-            {ccName && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                {ccName} <span className="text-ink-faint">{ccEmail}</span>
-              </span>
-            )}
-            {eodCc && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                {eodCc}
-              </span>
-            )}
-            {fixedCc.length > 0 && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                {fixedCc.join(", ")}
-              </span>
-            )}
-            {trackedAt && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                <span className="text-ink-faint">{trackedAt}</span>
-              </span>
+          <div className="flex flex-col gap-2 text-[12.5px]">
+            <div className="flex items-center gap-3">
+              <span className="w-[42px] shrink-0 text-ink-faint">From</span>
+              <span>{senderName} — your own mailbox</span>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="w-[42px] shrink-0 pt-1 text-ink-faint">To</span>
+              <div className="flex flex-wrap gap-1.5">
+                <RecipientChip label={toName && toName !== toEmail ? `${toName} · ${toEmail}` : toEmail} />
+                {extraTo.map((a) => (
+                  <RecipientChip key={a} label={a} added onRemove={() => removeAddress("to", a)} />
+                ))}
+              </div>
+            </div>
+            {(ccEmail || eodCc || fixedCc.length > 0 || trackedAt || extraCc.length > 0) && (
+              <div className="flex items-start gap-3">
+                <span className="w-[42px] shrink-0 pt-1 text-ink-faint">Cc</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {ccEmail && <RecipientChip label={ccName ? `${ccName} · ${ccEmail}` : ccEmail} />}
+                  {eodCc && <RecipientChip label={eodCc} />}
+                  {fixedCc.map((a) => (
+                    <RecipientChip key={a} label={a} />
+                  ))}
+                  {trackedAt && <RecipientChip label={trackedAt} faint title="Watches for the reply" />}
+                  {extraCc.map((a) => (
+                    <RecipientChip key={a} label={a} added onRemove={() => removeAddress("cc", a)} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
           {trackedAt && (
@@ -200,29 +574,54 @@ export function EodComposer({
             </p>
           )}
           {canAddRecipients && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-3">
-                <span className="w-[74px] shrink-0 text-[12.5px] font-medium text-ink-faint">Also To</span>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-[42px] shrink-0 text-[12.5px] text-ink-faint">Add</span>
                 <input
-                  form="eod-send"
-                  name="extraTo"
-                  value={extraTo}
-                  onChange={(e) => setExtraTo(e.target.value)}
-                  placeholder="more addresses, separated by commas"
-                  className={`${inputClass} flex-1`}
+                  type="email"
+                  value={draftAddress}
+                  onChange={(e) => {
+                    setDraftAddress(e.target.value);
+                    setAddressError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addAddress();
+                    }
+                  }}
+                  placeholder="name@company.com"
+                  aria-label="Email address to add"
+                  className={`${inputClass} min-w-[200px] flex-1`}
                 />
-              </label>
-              <label className="flex items-center gap-3">
-                <span className="w-[74px] shrink-0 text-[12.5px] font-medium text-ink-faint">Also Cc</span>
-                <input
-                  form="eod-send"
-                  name="extraCc"
-                  value={extraCc}
-                  onChange={(e) => setExtraCc(e.target.value)}
-                  placeholder="more addresses, separated by commas"
-                  className={`${inputClass} flex-1`}
-                />
-              </label>
+                <div role="radiogroup" aria-label="Add as" className="flex overflow-hidden rounded-full border border-rule">
+                  {(["to", "cc"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={addAs === k}
+                      onClick={() => setAddAs(k)}
+                      className={`px-3.5 py-1.5 text-[12px] font-medium transition-colors ${
+                        addAs === k ? "bg-ink text-white" : "text-ink-soft hover:bg-paper"
+                      }`}
+                    >
+                      {k === "to" ? "To" : "Cc"}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={addAddress}
+                  className="rounded-full border border-brand px-4 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand hover:text-white"
+                >
+                  Add
+                </button>
+              </div>
+              {addressError && <p className="pl-[50px] text-[11.5px] text-warn">{addressError}</p>}
+              {/* What the server reads: the chips as comma lists (actions.ts sendEod). */}
+              <input type="hidden" form="eod-send" name="extraTo" value={extraTo.join(", ")} />
+              <input type="hidden" form="eod-send" name="extraCc" value={extraCc.join(", ")} />
             </div>
           )}
           <label className="flex items-center gap-3">
@@ -261,7 +660,7 @@ export function EodComposer({
                 Candidate Shortlist Table
               </span>
               <span className="text-[11px] text-ink-faint">
-                Click any cell to edit details before sending
+                Click any cell to edit · Select text and click <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/80 px-1 font-medium text-amber-900 dark:text-amber-200 text-[10.5px]">🟡 Highlight</span> on Notes to emphasize key points
               </span>
             </div>
 
@@ -301,7 +700,6 @@ export function EodComposer({
                   </thead>
                   <tbody>
                     {effectiveRows.map((r) => {
-                      const notesStr = Array.isArray(r.notes) ? r.notes.join("\n") : String(r.notes ?? "");
                       return (
                         <tr key={r.applicationId} className="hover:bg-paper/30 transition-colors">
                           <td className={`${td} tabular font-medium text-ink-faint text-center pt-2.5`}>
@@ -334,20 +732,12 @@ export function EodComposer({
                               className={cellInput}
                             />
                           </td>
-                          <td className={`${td} min-w-[240px]`}>
-                            <textarea
-                              form="eod-send"
-                              name={`shortlist_${r.applicationId}_notes`}
-                              value={notesStr}
-                              onChange={(e) =>
-                                updateCandidateField(
-                                  r.applicationId,
-                                  "notes",
-                                  e.target.value.split("\n"),
-                                )
-                              }
-                              rows={Math.max(2, notesStr.split("\n").length)}
-                              className={`${cellInput} resize-y leading-[1.6] text-ink-soft`}
+                          <td className={`${td} min-w-[260px]`}>
+                            <EodNotesEditor
+                              appId={r.applicationId}
+                              notes={r.notes}
+                              onChange={(n) => updateCandidateField(r.applicationId, "notes", n)}
+                              className={cellInput}
                             />
                           </td>
                           <td className={`${td} min-w-[140px]`}>
@@ -482,5 +872,41 @@ export function EodComposer({
         </button>
       </form>
     </div>
+  );
+}
+
+/** One address on the To or Cc line. Only the ones the TA added can be taken off. */
+function RecipientChip({
+  label,
+  added,
+  faint,
+  title,
+  onRemove,
+}: {
+  label: string;
+  added?: boolean;
+  faint?: boolean;
+  title?: string;
+  onRemove?: () => void;
+}) {
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[12px] ${
+        added ? "border-brand/40 bg-brand/5 text-ink" : "border-rule bg-tag text-ink-soft"
+      } ${faint ? "text-ink-faint" : ""}`}
+    >
+      {label}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${label}`}
+          className="-mr-1 ml-0.5 rounded-full px-1 leading-none text-ink-faint hover:bg-paper hover:text-ink"
+        >
+          ×
+        </button>
+      )}
+    </span>
   );
 }

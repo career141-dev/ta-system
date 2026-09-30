@@ -13,6 +13,7 @@
 
 import { blockSize, findPlacement, type Box } from "./placement";
 import { BOX, boxItems, clampBox, layoutBox, noticeText, roughMeasure } from "./preparedCv";
+import { stripNoteFormatting } from "./eod-format";
 
 const GREEN = { r: 0.047, g: 0.478, b: 0.047 }; // #0C7A0C
 const PAGE = { w: 595.28, h: 841.89 }; // A4 points
@@ -177,7 +178,7 @@ export function annotationItems(a: CvAnnotation): string[] {
     expectedSalary: a.expectedSalary?.trim() || null,
     noticePeriod: np ? noticeText({ noticePeriod: np, noticePeriodDays: null }) : null,
     notes: (a.notes || [])
-      .map((n) => n.replace(/^[->•*]\s*/, "").trim())
+      .map((n) => stripNoteFormatting(n.replace(/^[->•*]\s*/, "")))
       .filter((n) => n.length > 0 && !isSystemNote(n)),
   });
 }
