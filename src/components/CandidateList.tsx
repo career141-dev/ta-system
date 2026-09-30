@@ -1,5 +1,7 @@
+import { Fragment } from "react";
 import Form from "next/form";
 import { repo } from "@/data/store";
+import { colomboDayLabel, colomboDayStart, groupByColomboDay } from "@/lib/calendar";
 import type { Application, Candidate, User } from "@/data/types";
 import { CandidateRow } from "./CandidateRow";
 import { SearchIcon } from "./icons";
@@ -84,6 +86,7 @@ export function CandidateList({
   scored: showScore = false,
   basePath,
   keepQuery = {},
+  groupByDay,
 }: {
   openingId: string;
   apps: Application[];
@@ -95,6 +98,12 @@ export function CandidateList({
   basePath: string;
   /** Query the filter form must carry through — the post being viewed, say. */
   keepQuery?: Record<string, string>;
+  /**
+   * Split the list into days — Today, Yesterday, then dates — on this
+   * timestamp, newest first. Director review uses it so each day's batch reads
+   * on its own (30 Sep).
+   */
+  groupByDay?: (a: Application) => number;
 }) {
   const users = repo.users();
 
@@ -158,6 +167,27 @@ export function CandidateList({
     shown = [...shown].sort((a, b) => (value(b.id) ?? -1) - (value(a.id) ?? -1));
   } else if (sort === "worst") {
     shown = [...shown].sort((a, b) => (value(a.id) ?? 999) - (value(b.id) ?? 999));
+  } else if (groupByDay) {
+    shown = groupByColomboDay(shown, groupByDay).flatMap((d) => d.items);
+  }
+  // Days first, whatever the order inside them: sorted by fit alone — the
+  // default wherever there are scores — the day headings came back scattered
+  // (Today, Yesterday, Today…). Each day keeps the chosen order (review, 30 Sep).
+  if (groupByDay && (sort === "worst" || (ranked && sort === "fit"))) {
+    const days = new Map<number, Application[]>();
+    for (const a of shown) {
+      const d = colomboDayStart(groupByDay(a));
+      days.set(d, [...(days.get(d) ?? []), a]);
+    }
+    shown = [...days].sort((x, y) => y[0] - x[0]).flatMap(([, list]) => list);
+  }
+  // Each day's count is the whole day's, not just what is on this page.
+  const dayCount = new Map<number, number>();
+  if (groupByDay) {
+    for (const a of shown) {
+      const day = colomboDayStart(groupByDay(a));
+      dayCount.set(day, (dayCount.get(day) ?? 0) + 1);
+    }
   }
 
   // Rank is against the whole scored list, so it does not renumber when a band
@@ -323,16 +353,29 @@ export function CandidateList({
               )}
             </BulkBar>
           </div>
-          {onPage.map((a) => {
+          {onPage.map((a, i) => {
             const c = repo.candidate(a.candidateId);
             if (!c) return null;
             const owner = users.find((u) => u.id === a.ownerTaId);
             // Locked for anyone the collision lock applies to — the same test the
             // server makes, so the screen never offers what will be refused.
             const locked = !allows(currentUser, "opening.act", { openingId, assignment, ownerTaId: a.ownerTaId });
+            // A day heading before each day's first row, and again at the top of
+            // a page that carries a day on, so no page starts without one.
+            const day = groupByDay ? colomboDayStart(groupByDay(a)) : null;
+            const prev = groupByDay && i > 0 ? colomboDayStart(groupByDay(onPage[i - 1])) : null;
+            const n = day !== null ? (dayCount.get(day) ?? 0) : 0;
             return (
+              <Fragment key={a.id}>
+              {day !== null && day !== prev && (
+                <div className="bg-paper px-8 py-2.5 text-[12px] font-medium text-ink-soft">
+                  {colomboDayLabel(day)}
+                  <span className="font-normal text-ink-faint">
+                    {" "}· {n} {n === 1 ? "candidate" : "candidates"}
+                  </span>
+                </div>
+              )}
               <CandidateRow
-                key={a.id}
                 app={a}
                 candidate={c}
                 owner={owner}
@@ -345,6 +388,7 @@ export function CandidateList({
                 canDecideClient={canDecideClient}
                 selectForm={BULK_FORM}
               />
+              </Fragment>
             );
           })}
         </div>

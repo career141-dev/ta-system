@@ -138,6 +138,44 @@ export function colomboDayStart(at: number): number {
   return shifted - (((shifted % 86_400_000) + 86_400_000) % 86_400_000) - COLOMBO_OFFSET_MS;
 }
 
+/**
+ * "Today", "Yesterday", or "Mon 28 Sep" for the Colombo day containing `at` —
+ * with the year once it is not this year's.
+ */
+export function colomboDayLabel(at: number, now = Date.now()): string {
+  const day = colomboDayStart(at);
+  const today = colomboDayStart(now);
+  if (day === today) return "Today";
+  if (day === today - 86_400_000) return "Yesterday";
+  const year = (t: number) => new Date(t + COLOMBO_OFFSET_MS).getUTCFullYear();
+  return new Date(at)
+    .toLocaleDateString("en-GB", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      ...(year(at) !== year(now) ? { year: "numeric" as const } : {}),
+      timeZone: TIMEZONE,
+    })
+    .replace(",", "");
+}
+
+/**
+ * Items split into Colombo days, newest day first and newest first inside it.
+ *
+ * For Director review, where the Director reads the list batch by batch: the
+ * three sent today apart from the five sent yesterday (30 Sep).
+ */
+export function groupByColomboDay<T>(items: T[], at: (t: T) => number): { dayStart: number; items: T[] }[] {
+  const days = new Map<number, T[]>();
+  for (const item of [...items].sort((a, b) => at(b) - at(a))) {
+    const day = colomboDayStart(at(item));
+    const list = days.get(day);
+    if (list) list.push(item);
+    else days.set(day, [item]);
+  }
+  return [...days].map(([dayStart, items]) => ({ dayStart, items }));
+}
+
 /** The Colombo hour (0–23) at an instant. */
 export function colomboHour(at: number): number {
   return Math.floor((((at + COLOMBO_OFFSET_MS) % 86_400_000) + 86_400_000) % 86_400_000 / 3_600_000);
