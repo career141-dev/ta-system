@@ -5,6 +5,8 @@ import { PRIORITY_TARGET } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageOf, type Params } from "@/lib/paging";
+import { linkedinStatus, type LinkedInStatus } from "@/lib/linkedinStatus";
+import { LinkedInPill } from "@/components/LinkedInPill";
 
 /**
  * The TA Lead's view — spec §13: allocation across the team, who is under the
@@ -16,6 +18,9 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
   // The header search, on the dashboard, narrows its lists: a role, its client, a TA.
   const roleMatches = (o: { title: string; clientId: string }) => matchesQuery(q, o.title, repo.client(o.clientId)?.name);
   const openings = repo.openings().filter((o) => o.status === "open");
+  // Each job's LinkedIn connection, worked out once for both lists (30 Sep).
+  const linked = new Map<string, LinkedInStatus>(openings.map((o) => [o.id, linkedinStatus(repo.jobPosts(o.id))]));
+  const offOnly = sp.li === "off";
   // A TA matches by name, or by carrying a role that matches.
   const tas = repo
     .users()
@@ -43,6 +48,8 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
       cvsToday,
       sets,
       alerts: alerts.filter((a) => a.assignedTo.includes(t.id)).length,
+      onLinkedIn: mine.filter((o) => linked.get(o.id) === "connected").length,
+      noLink: mine.filter((o) => linked.get(o.id) === "no_link").length,
     };
   });
 
@@ -77,7 +84,15 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
     10,
     "/",
   );
-  const roles = pageOf(openings.filter(roleMatches), sp, "rpage", 15, "/");
+  const notOn = openings.filter(roleMatches).filter((o) => linked.get(o.id) !== "connected");
+  const roles = pageOf(offOnly ? notOn : openings.filter(roleMatches), sp, "rpage", 15, "/");
+  const liHref = (on: boolean) => {
+    const params = new URLSearchParams();
+    if (q) params.set("q", q);
+    if (on) params.set("li", "off");
+    const qs = params.toString();
+    return qs ? `/?${qs}` : "/";
+  };
 
   return (
     <>
@@ -116,6 +131,23 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                       </>
                     )}
                   </p>
+                  {l.openings.length > 0 && (
+                    <p className="mt-1 flex items-center gap-1.5 text-[11.5px] text-ink-soft">
+                      <span
+                        aria-hidden
+                        className={`h-1.5 w-1.5 rounded-full ${l.onLinkedIn === l.openings.length ? "bg-brand" : "bg-warn"}`}
+                      />
+                      LinkedIn:{" "}
+                      <span className="tabular font-medium">
+                        {l.onLinkedIn} of {l.openings.length}
+                      </span>{" "}
+                      on
+                      {l.noLink > 0 && <span className="text-warn">· {l.noLink} no link</span>}
+                      {l.openings.length - l.onLinkedIn - l.noLink > 0 && (
+                        <span>· {l.openings.length - l.onLinkedIn - l.noLink} not posted</span>
+                      )}
+                    </p>
+                  )}
                 </div>
                 <div className="flex gap-7 text-right">
                   {[
@@ -183,11 +215,25 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
         </section>
 
         <section>
-          <h2 className="mb-3.5 text-[13px] font-semibold">Every open role</h2>
+          <div className="mb-3.5 flex items-baseline justify-between gap-3">
+            <h2 className="text-[13px] font-semibold">Every open role</h2>
+            {/* The roles LinkedIn applications cannot reliably reach, on their own (30 Sep). */}
+            {(notOn.length > 0 || offOnly) && (
+              <a
+                href={liHref(!offOnly)}
+                aria-current={offOnly ? "true" : undefined}
+                className={`rounded-full border px-3 py-1 text-[12px] transition-colors ${
+                  offOnly ? "border-warn bg-warn-soft font-medium text-warn" : "border-rule text-ink-soft hover:border-ink-faint hover:text-ink"
+                }`}
+              >
+                {offOnly ? "Showing not on LinkedIn · show all" : `${notOn.length} not on LinkedIn`}
+              </a>
+            )}
+          </div>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             {roles.pager.total === 0 && (
               <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
-                {q ? "No open role matches that search." : "No open roles."}
+                {offOnly ? "Every open role is on LinkedIn." : q ? "No open role matches that search." : "No open roles."}
               </p>
             )}
             <div className="divide-y divide-rule">
@@ -201,10 +247,15 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px]">{o.title}</p>
-                      <p className="text-[11.5px] text-ink-faint">
-                        {repo.client(o.clientId)?.name} · assigned {relDays(o.assignedAt)}
+                      <p className="truncate text-[11.5px] text-ink-faint">
+                        {repo.client(o.clientId)?.name} ·{" "}
+                        {o.assignedTaIds.length
+                          ? o.assignedTaIds.map((t) => repo.user(t)?.name).filter(Boolean).join(", ")
+                          : "Unassigned"}{" "}
+                        · assigned {relDays(o.assignedAt)}
                       </p>
                     </div>
+                    <LinkedInPill status={linked.get(o.id) ?? "no_post"} />
                     <span className="tabular shrink-0 text-[13px] text-ink-soft">
                       {(c.ai_follow_up ?? 0) + (c.ta_follow_up ?? 0)}
                     </span>
