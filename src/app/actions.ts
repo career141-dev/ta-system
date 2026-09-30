@@ -4521,7 +4521,9 @@ async function emailEod(input: {
     attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
   });
 
-  let result: { ok: true; from: string; to: string; cc: string[]; note: string } | { ok: false; error: string };
+  let result:
+    | { ok: true; from: string; to: string; alsoTo?: string[]; cc: string[]; note: string }
+    | { ok: false; error: string };
   try {
     result = await convexAction("ta/eodMail:send", {
       from: user.email,
@@ -4539,9 +4541,12 @@ async function emailEod(input: {
     return { ok: false, error: backendMessage(e, "The email could not be sent.") };
   }
   if (!result.ok) return { ok: false, error: result.error };
+  // Everyone it actually went to: the added To were left out of this line, so
+  // it read as if only the first address got the email (1 Oct).
+  const sentTo = [result.to, ...(result.alsoTo ?? [])].join(", ");
   return {
     ok: true,
-    note: `Sent from ${result.from} to ${result.to}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ""}, with ${attachments.length} CV${attachments.length === 1 ? "" : "s"} attached.${result.note ? ` ${result.note.trim()}` : ""}`,
+    note: `Sent from ${result.from} to ${sentTo}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ", no cc"}, with ${attachments.length} CV${attachments.length === 1 ? "" : "s"} attached.${result.note ? ` ${result.note.trim()}` : ""}`,
   };
 }
 

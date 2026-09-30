@@ -165,6 +165,14 @@ async function main() {
   r = await sendFollowUpMail({ ...mail, cc: ["lead@career141.com"] }, token, g.fetchImpl);
   eq("a candidate email in test mode still copies nobody", [g.calls[0].payload.message.toRecipients.length, g.calls[0].payload.message.ccRecipients], [1, undefined]);
 
+  // ── End of day, 1 Oct: the lock held back every Cc and the screen said "Sent" ─
+  env({ OUTREACH_TEST_EMAIL: "tester@gmail.com", C141_OUTBOUND_LOCK: "true", C141_OUTBOUND_ALLOW_EMAILS: "tester@gmail.com,joborders@career141.com" });
+  g = fakeGraph();
+  r = await sendFollowUpMail({ ...desk, alsoTo: [], cc: [...EOD_CC_DEFAULTS], keepInternalInTest: "career141.com" }, token, g.fetchImpl);
+  eq("lock: the allow-listed To still go", g.calls[0].payload.message.toRecipients.map((x: any) => x.emailAddress.address), ["tester@gmail.com", "joborders@career141.com"]);
+  eq("lock: the desk's Cc are held back", g.calls[0].payload.message.ccRecipients, undefined);
+  eq("lock: and the note names each one", r.ok && EOD_CC_DEFAULTS.every((a) => r.ok && r.note.includes(a)) && r.note.includes("OUTBOUND LOCK"), true);
+
   env({ OUTREACH_LIVE: "true", C141_OUTBOUND_LOCK: "true", C141_OUTBOUND_ALLOW_EMAILS: "joborders@career141.com,boss@career141.com,cv@career141.com" });
   g = fakeGraph();
   r = await sendFollowUpMail(desk, token, g.fetchImpl);
