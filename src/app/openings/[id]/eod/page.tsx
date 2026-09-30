@@ -103,7 +103,7 @@ export default async function EodPage({
         <h1 className="text-[26px] font-semibold tracking-tight">End of Day Submission</h1>
         <p className="mt-1.5 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
           {kind === "director"
-            ? `Daily shortlist and effort summary sent to ${EOD_TO}, copying the desk. Add more To and Cc addresses below.`
+            ? `Daily shortlist and effort summary sent to ${EOD_TO}, copying the desk. Add or take off To and Cc addresses below.`
             : `Daily shortlist and effort summary for ${director?.name ?? "the Director"} (${director?.email || "director"}).`}{" "}
           Replies are tracked and candidate stages advance automatically.
         </p>

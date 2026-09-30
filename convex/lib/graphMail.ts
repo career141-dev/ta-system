@@ -147,6 +147,13 @@ export async function sendFollowUpMail(
     for (const c of ccBlocked) suppressed("email cc", c);
     cc = cc.filter((c) => emailAllowed(c));
   }
+  // Said on screen, not only in the server log: an end-of-day email whose Cc
+  // were all held back by the lock showed a plain "Sent", and the desk found
+  // out from the people who never got it (1 Oct).
+  const held = [...toBlocked, ...ccBlocked];
+  if (held.length) {
+    note += ` [OUTBOUND LOCK: not sent to ${held.join(", ")} — not on C141_OUTBOUND_ALLOW_EMAILS]`;
+  }
 
   const first = (mail.from ?? "").trim();
   const fallback = (mail.fallbackFrom ?? "").trim();

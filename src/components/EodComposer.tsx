@@ -414,9 +414,22 @@ export function EodComposer({
   const [draftAddress, setDraftAddress] = useState("");
   const [addAs, setAddAs] = useState<"to" | "cc">("to");
   const [addressError, setAddressError] = useState<string | null>(null);
+  // The desk's own To and Cc can be taken off too (1 Oct); the server leaves
+  // off whatever is named here (lib/eod-format eodRecipients).
+  const [removed, setRemoved] = useState<string[]>([]);
+  const isOff = (a: string | null | undefined) => !!a && removed.includes(a.toLowerCase());
+  const takeOff = (a: string) => setRemoved((prev) => (prev.includes(a.toLowerCase()) ? prev : [...prev, a.toLowerCase()]));
+  const putBack = (a: string) => {
+    setRemoved((prev) => prev.filter((r) => r !== a));
+    // Typed back in by hand while it was off: one chip, not two.
+    setExtraTo((prev) => prev.filter((x) => x !== a));
+    setExtraCc((prev) => prev.filter((x) => x !== a));
+  };
+  const nobodyOnTo = canAddRecipients && (!toEmail || isOff(toEmail)) && extraTo.length === 0;
 
-  const onEmail = [toEmail, ccEmail, eodCc, ...fixedCc, trackedAt, ...extraTo, ...extraCc]
-    .filter((a): a is string => !!a)
+  const onEmail = [toEmail, ccEmail, eodCc, ...fixedCc, trackedAt]
+    .filter((a): a is string => !!a && !isOff(a))
+    .concat(extraTo, extraCc)
     .map((a) => a.toLowerCase());
   const addAddress = () => {
     const { ok, bad } = parseAddressList(draftAddress);
@@ -435,7 +448,8 @@ export function EodComposer({
   // run: the save below used to write the page's defaults over the draft first.
   const [restored, setRestored] = useState(false);
   useEffect(() => {
-    setRestored(true);    try {
+    setRestored(true);
+    try {
       const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
       if (saved) {
         // Only a subject the TA typed, and only while the set and CV count it
@@ -450,6 +464,7 @@ export function EodComposer({
         // Saved as the comma text the server reads, before and after the chips.
         if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
         if (typeof saved.extraCc === "string") setExtraCc(parseAddressList(saved.extraCc).ok);
+        if (typeof saved.removed === "string") setRemoved(parseAddressList(saved.removed).ok);
       }
     } catch {
       /* storage disabled */
@@ -470,12 +485,13 @@ export function EodComposer({
           shortlistDraft,
           extraTo: extraTo.join(", "),
           extraCc: extraCc.join(", "),
+          removed: removed.join(", "),
         }),
       );
     } catch {
       /* storage disabled */
     }
-  }, [restored, draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc]);
+  }, [restored, draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc, removed]);
 
   // Clear draft on send
   useEffect(() => {
@@ -542,25 +558,61 @@ export function EodComposer({
             <div className="flex items-start gap-3">
               <span className="w-[42px] shrink-0 pt-1 text-ink-faint">To</span>
               <div className="flex flex-wrap gap-1.5">
-                <RecipientChip label={toName && toName !== toEmail ? `${toName} · ${toEmail}` : toEmail} />
+                {toEmail && !isOff(toEmail) && (
+                  <RecipientChip
+                    label={toName && toName !== toEmail ? `${toName} · ${toEmail}` : toEmail}
+                    onRemove={canAddRecipients ? () => takeOff(toEmail) : undefined}
+                  />
+                )}
                 {extraTo.map((a) => (
                   <RecipientChip key={a} label={a} added onRemove={() => removeAddress("to", a)} />
                 ))}
+                {nobodyOnTo && <span className="pt-0.5 text-[12px] text-warn">Nobody yet — add an address as To.</span>}
               </div>
             </div>
-            {(ccEmail || eodCc || fixedCc.length > 0 || trackedAt || extraCc.length > 0) && (
+            <div className="flex items-start gap-3">
+              <span className="w-[42px] shrink-0 pt-1 text-ink-faint">Cc</span>
+              <div className="flex flex-wrap gap-1.5">
+                {ccEmail && <RecipientChip label={ccName ? `${ccName} · ${ccEmail}` : ccEmail} />}
+                {eodCc && <RecipientChip label={eodCc} />}
+                {fixedCc
+                  .filter((a) => !isOff(a))
+                  .map((a) => (
+                    <RecipientChip key={a} label={a} onRemove={canAddRecipients ? () => takeOff(a) : undefined} />
+                  ))}
+                {trackedAt && !isOff(trackedAt) && (
+                  <RecipientChip
+                    label={trackedAt}
+                    faint
+                    title="Watches for the reply. Taken off Cc, replies still come back to it through Reply-to."
+                    onRemove={canAddRecipients ? () => takeOff(trackedAt) : undefined}
+                  />
+                )}
+                {extraCc.map((a) => (
+                  <RecipientChip key={a} label={a} added onRemove={() => removeAddress("cc", a)} />
+                ))}
+                {!ccEmail && !eodCc && fixedCc.every(isOff) && (!trackedAt || isOff(trackedAt)) && extraCc.length === 0 && (
+                  <span className="pt-0.5 text-[12px] text-ink-faint">Nobody</span>
+                )}
+              </div>
+            </div>
+            {removed.length > 0 && (
               <div className="flex items-start gap-3">
-                <span className="w-[42px] shrink-0 pt-1 text-ink-faint">Cc</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {ccEmail && <RecipientChip label={ccName ? `${ccName} · ${ccEmail}` : ccEmail} />}
-                  {eodCc && <RecipientChip label={eodCc} />}
-                  {fixedCc.map((a) => (
-                    <RecipientChip key={a} label={a} />
+                <span className="w-[42px] shrink-0 pt-1 text-ink-faint">Off</span>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {removed.map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => putBack(a)}
+                      aria-label={`Put ${a} back on the email`}
+                      title="Put back on the email"
+                      className="rounded-full border border-dashed border-rule px-2.5 py-0.5 text-[12px] text-ink-faint line-through decoration-ink-faint/60 transition-colors hover:border-brand hover:text-brand hover:no-underline"
+                    >
+                      {a}
+                    </button>
                   ))}
-                  {trackedAt && <RecipientChip label={trackedAt} faint title="Watches for the reply" />}
-                  {extraCc.map((a) => (
-                    <RecipientChip key={a} label={a} added onRemove={() => removeAddress("cc", a)} />
-                  ))}
+                  <span className="text-[11.5px] text-ink-faint">Click one to put it back.</span>
                 </div>
               </div>
             )}
@@ -622,6 +674,7 @@ export function EodComposer({
               {/* What the server reads: the chips as comma lists (actions.ts sendEod). */}
               <input type="hidden" form="eod-send" name="extraTo" value={extraTo.join(", ")} />
               <input type="hidden" form="eod-send" name="extraCc" value={extraCc.join(", ")} />
+              <input type="hidden" form="eod-send" name="removed" value={removed.join(", ")} />
             </div>
           )}
           <label className="flex items-center gap-3">
@@ -865,7 +918,8 @@ export function EodComposer({
           value={initialRows.map((r) => r.applicationId).join(",")}
         />
         <button
-          disabled={initialRows.length === 0}
+          disabled={initialRows.length === 0 || nobodyOnTo}
+          title={nobodyOnTo ? "Add an address as To first" : undefined}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
           {kind === "director" ? "Send email" : "Record that it went to the client"}
@@ -875,7 +929,7 @@ export function EodComposer({
   );
 }
 
-/** One address on the To or Cc line. Only the ones the TA added can be taken off. */
+/** One address on the To or Cc line; an × when it can be taken off. */
 function RecipientChip({
   label,
   added,

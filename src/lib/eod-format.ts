@@ -152,6 +152,35 @@ export function parseAddressList(raw: string | null | undefined): { ok: string[]
   return { ok, bad };
 }
 
+/**
+ * Who the Director's end-of-day email actually goes to.
+ *
+ * The desk's To and Cc (and the shortlist inbox) start on it; the TA can take
+ * any of them off and add others (1 Oct). The ones taken off are named in
+ * `removed`; an address added back by hand goes where it was added, so taking
+ * joborders@ off To and adding it as Cc moves it. Nobody is on both lines.
+ */
+export function eodRecipients(opts: {
+  removed: string[];
+  extraTo: string[];
+  extraCc: string[];
+  shortlistInbox: string;
+}): { to: string[]; cc: string[] } {
+  const off = new Set(opts.removed.map((a) => a.trim().toLowerCase()));
+  const once = (list: string[], except: string[] = []) => {
+    const out: string[] = [];
+    for (const raw of list) {
+      const a = raw.trim().toLowerCase();
+      if (a && !except.includes(a) && !out.includes(a)) out.push(a);
+    }
+    return out;
+  };
+  const kept = (list: readonly string[]) => list.filter((a) => a && !off.has(a.trim().toLowerCase()));
+  const to = once([...kept([EOD_TO]), ...opts.extraTo]);
+  const cc = once([...kept(EOD_CC_DEFAULTS), ...kept([opts.shortlistInbox]), ...opts.extraCc], to);
+  return { to, cc };
+}
+
 const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;")
