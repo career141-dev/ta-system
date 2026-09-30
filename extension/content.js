@@ -346,6 +346,123 @@
   let host = null;
   let root = null;
   let busy = false;
+  let savedPos = null;
+
+  try {
+    const raw = localStorage.getItem("c141_btn_pos");
+    if (raw) savedPos = JSON.parse(raw);
+  } catch {}
+
+  function applySavedPosition(bar) {
+    if (!bar) return;
+    if (savedPos && typeof savedPos.left === "number" && typeof savedPos.top === "number") {
+      const rect = bar.getBoundingClientRect();
+      const w = rect.width || 240;
+      const h = rect.height || 40;
+      const maxLeft = Math.max(10, window.innerWidth - w - 10);
+      const maxTop = Math.max(10, window.innerHeight - h - 10);
+      const left = Math.min(Math.max(10, savedPos.left), maxLeft);
+      const top = Math.min(Math.max(10, savedPos.top), maxTop);
+      bar.style.left = `${left}px`;
+      bar.style.top = `${top}px`;
+      bar.style.right = "auto";
+      bar.style.bottom = "auto";
+    }
+  }
+
+  function makeDraggable(bar) {
+    let isDragging = false;
+    const dragThreshold = 5;
+    let startX = 0;
+    let startY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+    let hasMoved = false;
+
+    applySavedPosition(bar);
+    requestAnimationFrame(() => applySavedPosition(bar));
+    setTimeout(() => applySavedPosition(bar), 120);
+
+    bar.addEventListener("pointerdown", (e) => {
+      // Only drag with primary mouse button / touch
+      if (e.button !== 0) return;
+      const rect = bar.getBoundingClientRect();
+      startX = e.clientX;
+      startY = e.clientY;
+      initialLeft = rect.left;
+      initialTop = rect.top;
+      hasMoved = false;
+      isDragging = false;
+
+      try {
+        bar.setPointerCapture(e.pointerId);
+      } catch {}
+
+      const onPointerMove = (moveEv) => {
+        const dx = moveEv.clientX - startX;
+        const dy = moveEv.clientY - startY;
+
+        if (!hasMoved && Math.hypot(dx, dy) > dragThreshold) {
+          hasMoved = true;
+          isDragging = true;
+          bar.classList.add("dragging");
+        }
+
+        if (isDragging) {
+          const bRect = bar.getBoundingClientRect();
+          const maxLeft = Math.max(10, window.innerWidth - bRect.width - 10);
+          const maxTop = Math.max(10, window.innerHeight - bRect.height - 10);
+          const newLeft = Math.min(Math.max(10, initialLeft + dx), maxLeft);
+          const newTop = Math.min(Math.max(10, initialTop + dy), maxTop);
+
+          bar.style.left = `${newLeft}px`;
+          bar.style.top = `${newTop}px`;
+          bar.style.right = "auto";
+          bar.style.bottom = "auto";
+        }
+      };
+
+      const onPointerUp = (upEv) => {
+        bar.removeEventListener("pointermove", onPointerMove);
+        bar.removeEventListener("pointerup", onPointerUp);
+        bar.removeEventListener("pointercancel", onPointerUp);
+        try {
+          bar.releasePointerCapture(upEv.pointerId);
+        } catch {}
+
+        if (isDragging) {
+          bar.classList.remove("dragging");
+          const bRect = bar.getBoundingClientRect();
+          savedPos = { left: bRect.left, top: bRect.top };
+          try {
+            localStorage.setItem("c141_btn_pos", JSON.stringify(savedPos));
+          } catch {}
+
+          // Suppress click event after dragging
+          const cancelClick = (clickEv) => {
+            clickEv.stopPropagation();
+            clickEv.preventDefault();
+            bar.removeEventListener("click", cancelClick, true);
+          };
+          bar.addEventListener("click", cancelClick, true);
+          setTimeout(() => {
+            bar.removeEventListener("click", cancelClick, true);
+          }, 80);
+        }
+      };
+
+      bar.addEventListener("pointermove", onPointerMove);
+      bar.addEventListener("pointerup", onPointerUp);
+      bar.addEventListener("pointercancel", onPointerUp);
+    });
+  }
+
+  window.addEventListener("resize", () => {
+    if (root) {
+      const bar = root.querySelector(".bar");
+      if (bar) applySavedPosition(bar);
+    }
+  });
 
   function build() {
     if (window !== window.top) return;
@@ -371,37 +488,45 @@
       <style>
         .bar {
           position: fixed; right: 20px; bottom: 20px; z-index: 2147483647;
-          display: flex; align-items: center; gap: 10px;
-          padding: 10px 16px; border-radius: 999px;
+          display: flex; align-items: center; gap: 8px;
+          padding: 10px 16px 10px 12px; border-radius: 999px;
           background: #165b42; color: #ffffff;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           font-size: 13px; font-weight: 500; line-height: 1.2;
           -webkit-font-smoothing: antialiased;
           -moz-osx-font-smoothing: grayscale;
           text-rendering: optimizeLegibility;
-          box-shadow: 0 6px 24px rgba(0,0,0,.28); cursor: pointer;
+          box-shadow: 0 6px 24px rgba(0,0,0,.28); cursor: grab;
           border: 0;
           user-select: none;
           white-space: nowrap;
           backface-visibility: hidden;
-          transform: translateZ(0);
-          transition: opacity .15s ease, transform .15s ease, background-color .15s ease;
+          touch-action: none;
+          transition: opacity .15s ease, background-color .15s ease, box-shadow .15s ease;
         }
-        .bar:hover { transform: translateY(-1px) translateZ(0); }
-        .bar:active { transform: translateY(0) translateZ(0); }
-        .bar[disabled] { opacity: .75; cursor: default; transform: translateZ(0); }
+        .bar:hover { box-shadow: 0 8px 28px rgba(0,0,0,.36); }
+        .bar.dragging { cursor: grabbing; transition: none; opacity: .94; box-shadow: 0 12px 32px rgba(0,0,0,.45); }
+        .bar[disabled] { opacity: .75; cursor: default; }
         .bar.ok { background: #14663f; }
         .bar.bad { background: #b3261e; }
+        .drag-icon {
+          display: inline-flex; align-items: center; justify-content: center;
+          opacity: .6; font-size: 11px; margin-right: 2px; cursor: grab;
+        }
+        .bar.dragging .drag-icon { cursor: grabbing; }
         .to { opacity: .75; font-weight: 400; }
         .dot { width: 7px; height: 7px; border-radius: 50%; background: #ffffff; opacity: .85; flex-shrink: 0; }
       </style>
-      <button class="bar" type="button">
+      <button class="bar" type="button" title="Click to shortlist · Drag to move anywhere">
+        <span class="drag-icon" title="Drag to move">⋮⋮</span>
         <span class="dot"></span>
         <span class="label">Add to Career141</span>
         <span class="to"></span>
       </button>`;
     (document.body || document.documentElement).appendChild(host);
-    root.querySelector("button").addEventListener("click", capture);
+    const btn = root.querySelector("button");
+    btn.addEventListener("click", capture);
+    makeDraggable(btn);
     paintTarget();
   }
 
