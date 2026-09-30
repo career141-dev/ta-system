@@ -276,7 +276,11 @@ const isHouseLine = (n: string) => {
   const stripped = stripNoteFormatting(n);
   return /^>?\s*(Total Experience - |Currently at )/i.test(stripped.trim());
 };
-const taNotes = (notes: string[]) => notes.filter((n) => !isHouseLine(n)).map((n) => n.replace(/^>/, "").trim()).filter(Boolean);
+// Highlight and bold are the email's styling (30 Sep): the words are saved to
+// the candidate, the ==marks== and **stars** are not — they would show as raw
+// symbols on the profile and in Director review. Styling alone is no change.
+const taNotes = (notes: string[]) =>
+  notes.filter((n) => !isHouseLine(n)).map((n) => stripNoteFormatting(n.replace(/^>/, ""))).filter(Boolean);
 
 /**
  * What the TA changed on the Director's email that belongs on the candidate

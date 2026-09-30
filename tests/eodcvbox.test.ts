@@ -90,5 +90,12 @@ eq("formatNoteHtml renders <mark> with inline style", formatNoteHtml(">==Immedia
 eq("formatNoteHtml renders <b> for bold", formatNoteHtml(">**Top performer**").includes("<b>Top performer</b>"), true);
 eq("formatNoteHtml escapes special chars safely", formatNoteHtml("><script>alert(1)</script>").includes("<script>"), false);
 
+console.log("\nhighlighting stays in the email");
+{
+  const row = { no: 1, name: "A", age: "", notice: "", notes: [">Immediate joiner"], currentCompany: "", currentDesignation: "", currentRemuneration: "", expectedRemuneration: "", applicationId: "a1" };
+  eq("highlighting a note alone is no change to save", eodDetailChanges(row, { ...row, notes: [">==Immediate joiner=="] }), null);
+  eq("a new highlighted note is saved as plain words", eodDetailChanges(row, { ...row, notes: [">Immediate joiner", ">**Top performer**"] })?.notes, ["Immediate joiner", "Top performer"]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
