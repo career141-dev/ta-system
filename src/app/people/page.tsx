@@ -83,8 +83,8 @@ export default async function PeoplePage({
       <section className="mt-8 rounded-2xl border border-rule bg-surface px-6 py-5">
         <h2 className="text-[15px] font-semibold">End-of-day copy</h2>
         <p className="mt-1 max-w-[70ch] text-[12.5px] leading-relaxed text-ink-soft">
-          Every end-of-day email goes to {EOD_TO} and copies {EOD_CC_DEFAULTS.join(", ")}. A TA can
-          add more To and Cc addresses on the email itself.
+          Every end-of-day email starts out to {EOD_TO}, copying {EOD_CC_DEFAULTS.join(", ")}. A TA
+          can add or take off To and Cc addresses on the email itself.
         </p>
       </section>
 

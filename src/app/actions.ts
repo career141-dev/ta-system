@@ -18,7 +18,7 @@ import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
-import { EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "@/lib/eod-format";
+import { EOD_TO, eodRecipients, parseAddressList } from "@/lib/eod-format";
 import { noticePeriodToDays } from "@/lib/answered";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
@@ -4272,8 +4272,9 @@ export async function sendEod(formData: FormData) {
     )}`);
   const sets = fresh.map((id) => repo.application(id)?.setNumber).filter((n): n is number => n != null);
 
-  // The desk's To is fixed; the TA can add more To and Cc addresses (29 Sep).
-  // An address that is not one stops the send, so nobody is quietly left off.
+  // The desk's To and Cc start on it; the TA can add more (29 Sep) and take any
+  // off, the desk's own included (1 Oct). An address that is not one stops the
+  // send, so nobody is quietly left off.
   const toList = parseAddressList(String(formData.get("extraTo") ?? ""));
   const ccList = parseAddressList(String(formData.get("extraCc") ?? ""));
   const badAddress = [...toList.bad, ...ccList.bad];
@@ -4281,7 +4282,17 @@ export async function sendEod(formData: FormData) {
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
       `Not sent: ${badAddress.join(", ")} ${badAddress.length === 1 ? "is not an email address" : "are not email addresses"}.`,
     )}`);
-  const sentTo = kind === "director" ? EOD_TO : String(formData.get("to") ?? "");
+  const recipients = eodRecipients({
+    removed: parseAddressList(String(formData.get("removed") ?? "")).ok,
+    extraTo: toList.ok,
+    extraCc: ccList.ok,
+    shortlistInbox: repo.shortlistInbox(),
+  });
+  if (kind === "director" && recipients.to.length === 0)
+    redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
+      "Not sent: nobody is on the To line. Add an address as To.",
+    )}`);
+  const sentTo = kind === "director" ? recipients.to[0] : String(formData.get("to") ?? "");
 
   // The Director's copy is really sent now, through Microsoft Graph from the
   // TA's own mailbox, copying the TA Lead, the desk's end-of-day copy and the
@@ -4317,8 +4328,8 @@ export async function sendEod(formData: FormData) {
       user,
       applicationIds: fresh,
       to: sentTo,
-      extraTo: toList.ok,
-      extraCc: ccList.ok,
+      extraTo: recipients.to.slice(1),
+      cc: recipients.cc,
       subject: String(formData.get("subject") ?? ""),
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
@@ -4422,9 +4433,9 @@ async function emailEod(input: {
   user: User;
   applicationIds: string[];
   to: string;
-  /** Addresses the TA added beside the desk's To and Cc (29 Sep). */
+  /** More To beside `to`, and the whole Cc line, as the TA left them (lib/eod-format eodRecipients). */
   extraTo?: string[];
-  extraCc?: string[];
+  cc: string[];
   subject: string;
   effort?: EffortRow;
   rows?: ShortlistRow[];
@@ -4529,9 +4540,9 @@ async function emailEod(input: {
       from: user.email,
       to,
       alsoTo: input.extraTo ?? [],
-      // The desk's fixed list, whoever the TA added, and the inbox that watches
-      // for the reply (no longer the TA Lead or the People-page copy, 29 Sep).
-      cc: [...EOD_CC_DEFAULTS, ...(input.extraCc ?? []), repo.shortlistInbox()].filter(Boolean),
+      // The desk's list and the inbox that watches for the reply, less any the
+      // TA took off, plus any they added (sendEod, 1 Oct).
+      cc: input.cc,
       replyTo: [user.email, repo.shortlistInbox()].filter(Boolean),
       subject: input.subject.trim(),
       html,

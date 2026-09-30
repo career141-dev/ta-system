@@ -1,5 +1,5 @@
 import { addressList, followUpCancelledReason, GRAPH_BASE, sendFollowUpMail, sendMailPayload } from "../convex/lib/graphMail";
-import { eodEmailHtml, DEFAULT_EOD_CC, EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "../src/lib/eod-format";
+import { eodEmailHtml, eodRecipients, DEFAULT_EOD_CC, EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "../src/lib/eod-format";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -164,6 +164,14 @@ async function main() {
   g = fakeGraph();
   r = await sendFollowUpMail({ ...mail, cc: ["lead@career141.com"] }, token, g.fetchImpl);
   eq("a candidate email in test mode still copies nobody", [g.calls[0].payload.message.toRecipients.length, g.calls[0].payload.message.ccRecipients], [1, undefined]);
+
+  // ── End of day, 1 Oct: the desk's own To and Cc can be taken off ──────────
+  const inbox = "shortlists@career141.com";
+  eq("nothing taken off: the desk's To, Cc and the reply inbox", eodRecipients({ removed: [], extraTo: [], extraCc: [], shortlistInbox: inbox }), { to: [EOD_TO], cc: [...EOD_CC_DEFAULTS, inbox] });
+  eq("taken off: joborders@, asma@ and the reply inbox go", eodRecipients({ removed: ["JobOrders@career141.com", "asma@career141.com", inbox], extraTo: ["boss@career141.com"], extraCc: [], shortlistInbox: inbox }), { to: ["boss@career141.com"], cc: ["shamra@career141.com", "opsteam@career141.com", "cv@career141.com"] });
+  eq("taken off To and added back as Cc: it moves", eodRecipients({ removed: [EOD_TO], extraTo: ["boss@career141.com"], extraCc: [EOD_TO], shortlistInbox: inbox }).cc.includes(EOD_TO), true);
+  eq("everyone taken off: nobody on To (the send refuses it)", eodRecipients({ removed: [EOD_TO], extraTo: [], extraCc: [], shortlistInbox: inbox }).to, []);
+  eq("an added Cc already on To is not copied twice", eodRecipients({ removed: [], extraTo: ["cv@career141.com"], extraCc: [], shortlistInbox: inbox }).cc.includes("cv@career141.com"), false);
 
   // ── End of day, 1 Oct: the lock held back every Cc and the screen said "Sent" ─
   env({ OUTREACH_TEST_EMAIL: "tester@gmail.com", C141_OUTBOUND_LOCK: "true", C141_OUTBOUND_ALLOW_EMAILS: "tester@gmail.com,joborders@career141.com" });
