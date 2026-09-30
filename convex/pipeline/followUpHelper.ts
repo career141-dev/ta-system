@@ -3,7 +3,7 @@ import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod, noticePeriodToDay
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { internal } from "../_generated/api";
 import { adjustJobStageStat } from "../jobs/stats";
-import { buildStructuredEmailHtml } from "../communications/emailHtml";
+import { buildStructuredEmailHtml, initialReachOutEmail } from "../communications/emailHtml";
 import { resolveRecipient } from "../lib/outreachSafety";
 
 /**
@@ -169,11 +169,21 @@ export async function updateFollowUpFlags(
  * sender falls back to the system inbox.
  */
 export async function assignedTaEmail(ctx: any, app: any, job: any): Promise<string | undefined> {
-  for (const userId of [app?.ownerTaId, job?.primaryRecruiterId]) {
+  return (await assignedTa(ctx, app, job))?.email;
+}
+
+/**
+ * The TA a candidate's follow-up is written as. Several TAs can share one
+ * opening, each on their own post (30 Sep), so: whoever shortlisted them, then
+ * the TA of the post they applied through, then the opening's primary recruiter.
+ */
+export async function assignedTa(ctx: any, app: any, job: any): Promise<{ name: string; email: string } | undefined> {
+  const post = app?.jobPostId ? await ctx.db.get(app.jobPostId) : null;
+  for (const userId of [app?.ownerTaId, post?.assignedTaId, job?.primaryRecruiterId]) {
     if (!userId) continue;
     const user = await ctx.db.get(userId);
     const email = (user?.email ?? "").trim();
-    if (email) return email;
+    if (email) return { name: (user?.fullName ?? "").trim(), email };
   }
   return undefined;
 }
@@ -496,9 +506,23 @@ export async function initiateFollowUpOutreach(
       }
     }
 
-    // 2. Email Outreach
+    // 2. Email Outreach — the desk's approved first email (30 Sep), written as
+    // the candidate's TA, naming the client only by its industry.
     let emailCommId: any = undefined;
     if (isEmailEnabled) {
+      const ta = await assignedTa(ctx, app, job);
+      const client = job.clientId ? await ctx.db.get(job.clientId) : null;
+      const first = initialReachOutEmail({
+        candidateName: candidate.fullName,
+        gender: candidate.gender,
+        taName: ta?.name,
+        taEmail: ta?.email,
+        jobTitle: job.title,
+        clientIndustry: client?.industry,
+        // "Colombo, Sri Lanka" → "Sri Lanka"
+        country: (job.location ?? "").split(",").pop()?.trim(),
+        asks: missingFields,
+      });
       // Create Email communication record (pending — will be sent via Graph)
       emailCommId = await ctx.db.insert("communications", {
         candidateId: app.candidateId,
@@ -506,35 +530,25 @@ export async function initiateFollowUpOutreach(
         applicationId: app._id,
         direction: "outbound",
         channel: "email",
-        subject: emailSubject,
-        body: emailBody,
+        subject: first.subject,
+        body: first.text,
         deliveryStatus: "pending",
         sentAt: now,
         stoppedSequence: false,
         sequenceDay: 0,
       });
 
-      // Schedule the actual Email delivery via Microsoft Graph
-      const taEmail = await assignedTaEmail(ctx, app, job);
+      // Schedule the actual Email delivery via Microsoft Graph, from the TA's
+      // mailbox (the system inbox when they have none).
       const candidateEmail = candidate.email;
-
-      // Sent from the system inbox through Microsoft Graph (lib/graphMail.ts);
-      // the recruiter's own address is not needed to send it.
       if (candidateEmail) {
-        const htmlBody = buildStructuredEmailHtml({
-          candidateName: candidate.fullName || "there",
-          jobTitle: job.title,
-          missingHeader: `We're still waiting on the following to progress your application for ${job.title}:`,
-          remainingMissing: missingFields,
-          ctaText: "Please share these at your earliest convenience. Thank you!",
-        });
         await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {
           communicationId: emailCommId,
           candidateJobId: app._id as string,
-          taEmail: taEmail ?? "",
+          taEmail: ta?.email ?? "",
           toAddress: candidateEmail,
-          subject: `Action Required: Missing info for your ${job.title} application`,
-          bodyHtml: htmlBody,
+          subject: first.subject,
+          bodyHtml: first.html,
         });
       } else {
         console.warn(`[Follow-up Outreach] Skipped email for application ${applicationId}: candidate has no email address`);
