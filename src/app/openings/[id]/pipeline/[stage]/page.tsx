@@ -184,6 +184,9 @@ export default async function StagePage({
             title={STAGE_LABEL[s]}
             filters={filters}
             basePath={`/openings/${id}/pipeline/${s}`}
+            // By the day each candidate was sent for review, so the Director
+            // sees today's batch apart from yesterday's (30 Sep).
+            groupByDay={s === "director_review" ? (a) => a.lastStageChangedAt : undefined}
           />
         </div>
       </div>
