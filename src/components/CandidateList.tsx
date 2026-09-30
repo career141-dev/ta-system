@@ -170,6 +170,17 @@ export function CandidateList({
   } else if (groupByDay) {
     shown = groupByColomboDay(shown, groupByDay).flatMap((d) => d.items);
   }
+  // Days first, whatever the order inside them: sorted by fit alone — the
+  // default wherever there are scores — the day headings came back scattered
+  // (Today, Yesterday, Today…). Each day keeps the chosen order (review, 30 Sep).
+  if (groupByDay && (sort === "worst" || (ranked && sort === "fit"))) {
+    const days = new Map<number, Application[]>();
+    for (const a of shown) {
+      const d = colomboDayStart(groupByDay(a));
+      days.set(d, [...(days.get(d) ?? []), a]);
+    }
+    shown = [...days].sort((x, y) => y[0] - x[0]).flatMap(([, list]) => list);
+  }
   // Each day's count is the whole day's, not just what is on this page.
   const dayCount = new Map<number, number>();
   if (groupByDay) {
