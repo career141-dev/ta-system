@@ -103,7 +103,64 @@ export function buildStructuredEmailHtml(opts: StructuredEmailContent): string {
     ? `Best regards,<br/>Talent Acquisition Team<br/>Career141<br/>${cleanText(senderEmail)}`
     : `Best regards,<br/>Talent Acquisition Team<br/>Career141`;
   blocks.push(para(signature));
+  return wrap(blocks);
+}
 
+/**
+ * The first email a candidate gets from the automatic follow-up — the desk's
+ * approved reach-out (30 September), written as the TA who owns them:
+ *
+ *   Dear Mr. Nimal Perera, … This is Shamra from Career141. With reference to
+ *   your profile, which we have received for the COO opportunity, this
+ *   position is with one of the leading apparel clients in Sri Lanka. …
+ *
+ * `asks` is what is still missing: the standard details and the opening's own
+ * questions ("Years of experience working with Sweater / Knit products").
+ */
+export function initialReachOutEmail(o: {
+  candidateName: string | null | undefined;
+  gender?: string | null;
+  taName?: string | null;
+  taEmail?: string | null;
+  jobTitle: string;
+  clientIndustry?: string | null;
+  country?: string | null;
+  asks: string[];
+}): { subject: string; text: string; html: string } {
+  const name = (o.candidateName ?? "").trim();
+  const g = (o.gender ?? "").trim().toLowerCase();
+  const honorific = g === "male" ? "Mr. " : g === "female" ? "Ms. " : "";
+  const dear = name ? `Dear ${honorific}${name},` : "Dear Candidate,";
+  const ta = (o.taName ?? "").trim();
+  const industry = (o.clientIndustry ?? "").trim().toLowerCase();
+  const where = (o.country ?? "").trim();
+  const client = `one of the leading ${industry ? `${industry} ` : ""}clients${where ? ` in ${where}` : ""}`;
+  const signature = [ta || "Talent Acquisition Team", "Career141", (o.taEmail ?? "").trim()].filter(Boolean);
+
+  const paragraphs = [
+    dear,
+    "I hope you are doing well.",
+    `This is ${ta || "the Talent Acquisition team"} from Career141. With reference to your profile, which we have received for the ${o.jobTitle} opportunity, this position is with ${client}.`,
+    "Our team will be reaching out to you shortly to brief you further on the opportunity. In the meantime, we would appreciate it if you could kindly share the following details:",
+  ];
+  const closing = "Thank you, and we look forward to hearing from you.";
+
+  const text = [
+    ...paragraphs,
+    o.asks.map((a) => `- ${a}`).join("\n"),
+    closing,
+    `Best regards,\n${signature.join("\n")}`,
+  ].join("\n\n");
+  const html = wrap([
+    ...paragraphs.map((p) => para(cleanText(p))),
+    para(o.asks.map((a) => `• ${cleanText(a)}`).join("<br/>"), BULLET_P_STYLE),
+    para(cleanText(closing)),
+    para(`Best regards,<br/>${signature.map(cleanText).join("<br/>")}`),
+  ]);
+  return { subject: `${o.jobTitle} opportunity – Career141`, text, html };
+}
+
+function wrap(blocks: string[]): string {
   return `<!DOCTYPE html>
 <html>
 <body style="margin:0;padding:0;background-color:#f8fafc;font-family:Arial,Helvetica,sans-serif;">
