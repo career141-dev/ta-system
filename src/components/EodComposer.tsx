@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { SHORTLIST_COLUMNS, boxOverrides, eodDetailChanges, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
+import {
+  SHORTLIST_COLUMNS,
+  boxOverrides,
+  eodDetailChanges,
+  parseAddressList,
+  type EffortRow,
+  type ShortlistRow,
+} from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { sendEod } from "@/app/actions";
@@ -63,12 +70,35 @@ export function EodComposer({
   const [introText, setIntroText] = useState(defaultIntro);
   const [outroText, setOutroText] = useState(defaultOutro);
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
-  const [extraTo, setExtraTo] = useState("");
-  const [extraCc, setExtraCc] = useState("");
+  // Added recipients are chips, like skills on LinkedIn: type the address, pick
+  // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
+  const [extraTo, setExtraTo] = useState<string[]>([]);
+  const [extraCc, setExtraCc] = useState<string[]>([]);
+  const [draftAddress, setDraftAddress] = useState("");
+  const [addAs, setAddAs] = useState<"to" | "cc">("to");
+  const [addressError, setAddressError] = useState<string | null>(null);
 
-  // Restore draft from localStorage on mount
+  const onEmail = [toEmail, ccEmail, eodCc, ...fixedCc, trackedAt, ...extraTo, ...extraCc]
+    .filter((a): a is string => !!a)
+    .map((a) => a.toLowerCase());
+  const addAddress = () => {
+    const { ok, bad } = parseAddressList(draftAddress);
+    if (bad.length) return setAddressError(`${bad.join(", ")} is not an email address.`);
+    if (!ok.length) return setAddressError("Type an email address first.");
+    const fresh = ok.filter((a) => !onEmail.includes(a));
+    if (!fresh.length) return setAddressError(`${ok.join(", ")} is already on this email.`);
+    (addAs === "to" ? setExtraTo : setExtraCc)((prev) => [...prev, ...fresh]);
+    setDraftAddress("");
+    setAddressError(null);
+  };
+  const removeAddress = (list: "to" | "cc", address: string) =>
+    (list === "to" ? setExtraTo : setExtraCc)((prev) => prev.filter((a) => a !== address));
+
+  // Restore draft from localStorage on mount. Nothing is saved until this has
+  // run: the save below used to write the page's defaults over the draft first.
+  const [restored, setRestored] = useState(false);
   useEffect(() => {
-    try {
+    setRestored(true);    try {
       const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
       if (saved) {
         // Only a subject the TA typed, and only while the set and CV count it
@@ -80,8 +110,9 @@ export function EodComposer({
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
-        if (typeof saved.extraTo === "string") setExtraTo(saved.extraTo);
-        if (typeof saved.extraCc === "string") setExtraCc(saved.extraCc);
+        // Saved as the comma text the server reads, before and after the chips.
+        if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
+        if (typeof saved.extraCc === "string") setExtraCc(parseAddressList(saved.extraCc).ok);
       }
     } catch {
       /* storage disabled */
@@ -90,15 +121,24 @@ export function EodComposer({
 
   // Persist draft to localStorage
   useEffect(() => {
+    if (!restored) return;
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({ subject, baseSubject: initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc }),
+        JSON.stringify({
+          subject,
+          baseSubject: initialSubject,
+          introText,
+          outroText,
+          shortlistDraft,
+          extraTo: extraTo.join(", "),
+          extraCc: extraCc.join(", "),
+        }),
       );
     } catch {
       /* storage disabled */
     }
-  }, [draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc]);
+  }, [restored, draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc]);
 
   // Clear draft on send
   useEffect(() => {
@@ -157,38 +197,35 @@ export function EodComposer({
     <div className="flex flex-col gap-5">
       <section className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex flex-col gap-3 border-b border-rule px-7 py-5">
-          <div className="flex flex-wrap items-center gap-x-8 gap-y-2 text-[12.5px]">
-            <span>
-              <span className="text-ink-faint">From </span>
-              {senderName} — your own mailbox
-            </span>
-            <span>
-              <span className="text-ink-faint">To </span>
-              {toName} <span className="text-ink-faint">{toEmail}</span>
-            </span>
-            {ccName && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                {ccName} <span className="text-ink-faint">{ccEmail}</span>
-              </span>
-            )}
-            {eodCc && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                {eodCc}
-              </span>
-            )}
-            {fixedCc.length > 0 && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                {fixedCc.join(", ")}
-              </span>
-            )}
-            {trackedAt && (
-              <span>
-                <span className="text-ink-faint">Cc </span>
-                <span className="text-ink-faint">{trackedAt}</span>
-              </span>
+          <div className="flex flex-col gap-2 text-[12.5px]">
+            <div className="flex items-center gap-3">
+              <span className="w-[42px] shrink-0 text-ink-faint">From</span>
+              <span>{senderName} — your own mailbox</span>
+            </div>
+            <div className="flex items-start gap-3">
+              <span className="w-[42px] shrink-0 pt-1 text-ink-faint">To</span>
+              <div className="flex flex-wrap gap-1.5">
+                <RecipientChip label={toName && toName !== toEmail ? `${toName} · ${toEmail}` : toEmail} />
+                {extraTo.map((a) => (
+                  <RecipientChip key={a} label={a} added onRemove={() => removeAddress("to", a)} />
+                ))}
+              </div>
+            </div>
+            {(ccEmail || eodCc || fixedCc.length > 0 || trackedAt || extraCc.length > 0) && (
+              <div className="flex items-start gap-3">
+                <span className="w-[42px] shrink-0 pt-1 text-ink-faint">Cc</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {ccEmail && <RecipientChip label={ccName ? `${ccName} · ${ccEmail}` : ccEmail} />}
+                  {eodCc && <RecipientChip label={eodCc} />}
+                  {fixedCc.map((a) => (
+                    <RecipientChip key={a} label={a} />
+                  ))}
+                  {trackedAt && <RecipientChip label={trackedAt} faint title="Watches for the reply" />}
+                  {extraCc.map((a) => (
+                    <RecipientChip key={a} label={a} added onRemove={() => removeAddress("cc", a)} />
+                  ))}
+                </div>
+              </div>
             )}
           </div>
           {trackedAt && (
@@ -200,29 +237,54 @@ export function EodComposer({
             </p>
           )}
           {canAddRecipients && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-3">
-                <span className="w-[74px] shrink-0 text-[12.5px] font-medium text-ink-faint">Also To</span>
+            <div className="flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="w-[42px] shrink-0 text-[12.5px] text-ink-faint">Add</span>
                 <input
-                  form="eod-send"
-                  name="extraTo"
-                  value={extraTo}
-                  onChange={(e) => setExtraTo(e.target.value)}
-                  placeholder="more addresses, separated by commas"
-                  className={`${inputClass} flex-1`}
+                  type="email"
+                  value={draftAddress}
+                  onChange={(e) => {
+                    setDraftAddress(e.target.value);
+                    setAddressError(null);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addAddress();
+                    }
+                  }}
+                  placeholder="name@company.com"
+                  aria-label="Email address to add"
+                  className={`${inputClass} min-w-[200px] flex-1`}
                 />
-              </label>
-              <label className="flex items-center gap-3">
-                <span className="w-[74px] shrink-0 text-[12.5px] font-medium text-ink-faint">Also Cc</span>
-                <input
-                  form="eod-send"
-                  name="extraCc"
-                  value={extraCc}
-                  onChange={(e) => setExtraCc(e.target.value)}
-                  placeholder="more addresses, separated by commas"
-                  className={`${inputClass} flex-1`}
-                />
-              </label>
+                <div role="radiogroup" aria-label="Add as" className="flex overflow-hidden rounded-full border border-rule">
+                  {(["to", "cc"] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={addAs === k}
+                      onClick={() => setAddAs(k)}
+                      className={`px-3.5 py-1.5 text-[12px] font-medium transition-colors ${
+                        addAs === k ? "bg-ink text-white" : "text-ink-soft hover:bg-paper"
+                      }`}
+                    >
+                      {k === "to" ? "To" : "Cc"}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={addAddress}
+                  className="rounded-full border border-brand px-4 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand hover:text-white"
+                >
+                  Add
+                </button>
+              </div>
+              {addressError && <p className="pl-[50px] text-[11.5px] text-warn">{addressError}</p>}
+              {/* What the server reads: the chips as comma lists (actions.ts sendEod). */}
+              <input type="hidden" form="eod-send" name="extraTo" value={extraTo.join(", ")} />
+              <input type="hidden" form="eod-send" name="extraCc" value={extraCc.join(", ")} />
             </div>
           )}
           <label className="flex items-center gap-3">
@@ -482,5 +544,41 @@ export function EodComposer({
         </button>
       </form>
     </div>
+  );
+}
+
+/** One address on the To or Cc line. Only the ones the TA added can be taken off. */
+function RecipientChip({
+  label,
+  added,
+  faint,
+  title,
+  onRemove,
+}: {
+  label: string;
+  added?: boolean;
+  faint?: boolean;
+  title?: string;
+  onRemove?: () => void;
+}) {
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[12px] ${
+        added ? "border-brand/40 bg-brand/5 text-ink" : "border-rule bg-tag text-ink-soft"
+      } ${faint ? "text-ink-faint" : ""}`}
+    >
+      {label}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={`Remove ${label}`}
+          className="-mr-1 ml-0.5 rounded-full px-1 leading-none text-ink-faint hover:bg-paper hover:text-ink"
+        >
+          ×
+        </button>
+      )}
+    </span>
   );
 }
