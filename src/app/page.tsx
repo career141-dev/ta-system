@@ -10,6 +10,8 @@ import { OpsDashboard } from "@/components/dash/OpsDashboard";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageOf, type Params } from "@/lib/paging";
+import { linkedinStatus } from "@/lib/linkedinStatus";
+import { LinkedInPill } from "@/components/LinkedInPill";
 
 /**
  * The day, not the database. What is urgent, what is scheduled, what each of my
@@ -147,7 +149,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               const counts = stageCounts(o.id);
               const sets = setsForOpening(o.id);
               const openSet = sets.find((s) => s.status === "open");
-              const live = repo.jobPosts(o.id).filter((j) => j.status === "live");
+              const posts = repo.jobPosts(o.id);
+              const live = posts.filter((j) => j.status === "live");
               const cvsToday = live.reduce((n, j) => n + j.cvCountToday, 0);
               const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
               const target = PRIORITY_TARGET[o.priorityTier].days;
@@ -171,6 +174,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <div>
                       <p className="text-[12px] text-ink-faint">{client?.name}</p>
                       <p className="mt-0.5 text-[15.5px] font-semibold tracking-tight">{o.title}</p>
+                      {/* Whether LinkedIn applications reach this job, without opening it (30 Sep). */}
+                      <div className="mt-2">
+                        <LinkedInPill status={linkedinStatus(posts)} />
+                      </div>
                     </div>
                     <div className="flex gap-7 text-right">
                       <div>
