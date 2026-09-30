@@ -12,6 +12,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-eodbox-"));
 process.chdir(tmp);
 const { repo } = await import("@/data/store");
 const { eodDetailChanges } = await import("@/lib/eod");
+const { formatNoteHtml, stripNoteFormatting } = await import("@/lib/eod-format");
 const { noticePeriodToDays } = await import("@/lib/answered");
 const { buildAnnotationLines, printedBoxExtent, stampPdfWithCareer141Box } = await import("@/lib/pdf");
 const { PDFDocument, StandardFonts } = await import("pdf-lib");
@@ -82,6 +83,12 @@ eq("carries the notice", buildAnnotationLines({ currentSalary: "LKR 1", expected
   const after = await stampPdfWithCareer141Box(Buffer.from(before), { currentSalary: "LKR 250,000", expectedSalary: "LKR 300,000", noticePeriod: "2 months", notes: [] });
   eq("a new box is drawn", after.length > before.length, true);
 }
+
+console.log("\nnote highlighting and formatting");
+eq("stripNoteFormatting cleans highlight and bold", stripNoteFormatting(">==Immediate joiner== (**Relocation ready**)"), ">Immediate joiner (Relocation ready)");
+eq("formatNoteHtml renders <mark> with inline style", formatNoteHtml(">==Immediate joiner==").includes('<mark style="background-color:#fef08a'), true);
+eq("formatNoteHtml renders <b> for bold", formatNoteHtml(">**Top performer**").includes("<b>Top performer</b>"), true);
+eq("formatNoteHtml escapes special chars safely", formatNoteHtml("><script>alert(1)</script>").includes("<script>"), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

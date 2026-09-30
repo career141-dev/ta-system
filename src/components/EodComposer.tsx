@@ -1,10 +1,347 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { SHORTLIST_COLUMNS, boxOverrides, eodDetailChanges, type EffortRow, type ShortlistRow } from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { sendEod } from "@/app/actions";
+
+function noteLineToHtml(line: string): string {
+  let l = line
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+
+  const highlightStyle =
+    "background-color:#fef08a;color:#171c18;font-weight:600;padding:1px 4px;border-radius:3px;display:inline-block;";
+
+  l = l.replace(/==([^=]+)==/g, `<mark style="${highlightStyle}">$1</mark>`);
+  l = l.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+  l = l.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, "<i>$1</i>");
+
+  return l;
+}
+
+function notesToEditorHtml(notes: string[]): string {
+  if (!notes || notes.length === 0) return "";
+  return notes
+    .map((l) => (l ? `<div>${noteLineToHtml(l)}</div>` : `<div><br></div>`))
+    .join("");
+}
+
+function domNodeToMarkdown(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent || "";
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return "";
+  }
+
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+
+  if (tag === "br") return "\n";
+
+  let inner = "";
+  for (let i = 0; i < el.childNodes.length; i++) {
+    inner += domNodeToMarkdown(el.childNodes[i]);
+  }
+
+  const isMark =
+    tag === "mark" ||
+    el.style.backgroundColor === "rgb(254, 240, 138)" ||
+    el.style.backgroundColor === "#fef08a" ||
+    el.style.backgroundColor.includes("yellow") ||
+    el.getAttribute("data-highlight") === "true";
+
+  const isBold =
+    tag === "b" ||
+    tag === "strong" ||
+    el.style.fontWeight === "bold" ||
+    el.style.fontWeight === "700" ||
+    el.style.fontWeight === "600";
+
+  const isItalic = tag === "i" || tag === "em" || el.style.fontStyle === "italic";
+
+  let res = inner;
+  if (isMark && res.trim()) {
+    res = `==${res.replace(/^==|==$/g, "")}==`;
+  }
+  if (isBold && res.trim()) {
+    res = `**${res.replace(/^\*\*|\*\*$/g, "")}**`;
+  }
+  if (isItalic && res.trim()) {
+    res = `*${res.replace(/^\*|\*$/g, "")}*`;
+  }
+
+  if (tag === "div" || tag === "p" || tag === "li") {
+    return `\n${res}\n`;
+  }
+
+  return res;
+}
+
+function editorHtmlToNotes(el: HTMLElement): string[] {
+  let text = "";
+  for (let i = 0; i < el.childNodes.length; i++) {
+    text += domNodeToMarkdown(el.childNodes[i]);
+  }
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+const HIGHLIGHT_STYLE =
+  "background-color:#fef08a;color:#171c18;font-weight:600;padding:1px 4px;border-radius:3px;display:inline-block;";
+
+function createMarkElement(content?: string | Node | DocumentFragment): HTMLElement {
+  const mark = document.createElement("mark");
+  mark.setAttribute("style", HIGHLIGHT_STYLE);
+  if (typeof content === "string") {
+    mark.textContent = content;
+  } else if (content) {
+    mark.appendChild(content);
+  }
+  return mark;
+}
+
+function isHighlightElement(node: Node | null): node is HTMLElement {
+  if (!node || node.nodeType !== Node.ELEMENT_NODE) return false;
+  const el = node as HTMLElement;
+  const tag = el.tagName.toLowerCase();
+  if (tag === "mark") return true;
+  const bg = el.style?.backgroundColor;
+  if (bg && (bg.includes("254, 240, 138") || bg.includes("fef08a") || bg.includes("yellow"))) {
+    return true;
+  }
+  return el.getAttribute("data-highlight") === "true";
+}
+
+function findHighlightAncestor(node: Node | null, root: HTMLElement): HTMLElement | null {
+  let cur: Node | null = node;
+  while (cur && cur !== root) {
+    if (isHighlightElement(cur)) return cur as HTMLElement;
+    cur = cur.parentNode;
+  }
+  return null;
+}
+
+function getIntersectingHighlightElements(root: HTMLElement, range: Range): HTMLElement[] {
+  const highlights = new Set<HTMLElement>();
+
+  const startMark = findHighlightAncestor(range.startContainer, root);
+  if (startMark) highlights.add(startMark);
+
+  const endMark = findHighlightAncestor(range.endContainer, root);
+  if (endMark) highlights.add(endMark);
+
+  const commonMark = findHighlightAncestor(range.commonAncestorContainer, root);
+  if (commonMark) highlights.add(commonMark);
+
+  const allMarks = root.querySelectorAll("mark, [data-highlight='true'], [style*='background-color']");
+  allMarks.forEach((el) => {
+    if (isHighlightElement(el)) {
+      try {
+        if (range.intersectsNode(el)) {
+          highlights.add(el as HTMLElement);
+        }
+      } catch {
+        // ignore
+      }
+    }
+  });
+
+  return Array.from(highlights);
+}
+
+function unwrapElement(el: HTMLElement) {
+  const parent = el.parentNode;
+  if (!parent) return;
+  while (el.firstChild) {
+    parent.insertBefore(el.firstChild, el);
+  }
+  parent.removeChild(el);
+}
+
+function EodNotesEditor({
+  appId,
+  notes,
+  onChange,
+}: {
+  appId: string;
+  notes: string[];
+  onChange: (notes: string[]) => void;
+  className?: string;
+}) {
+  const editorRef = useRef<HTMLDivElement>(null);
+  const notesStr = Array.isArray(notes) ? notes.join("\n") : String(notes ?? "");
+
+  // Initialize and sync HTML content when notes change externally
+  useEffect(() => {
+    if (!editorRef.current) return;
+    const currentNotes = editorHtmlToNotes(editorRef.current).join("\n");
+    if (currentNotes !== notesStr) {
+      editorRef.current.innerHTML = notesToEditorHtml(
+        Array.isArray(notes) ? notes : notesStr.split("\n")
+      );
+    }
+  }, [notesStr, notes]);
+
+  const sync = () => {
+    if (!editorRef.current) return;
+    const parsedNotes = editorHtmlToNotes(editorRef.current);
+    onChange(parsedNotes);
+  };
+
+  const highlightSelection = () => {
+    if (!editorRef.current) return;
+    editorRef.current.focus();
+
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      document.execCommand(
+        "insertHTML",
+        false,
+        `<mark style="${HIGHLIGHT_STYLE}">highlighted point</mark>&nbsp;`
+      );
+      sync();
+      return;
+    }
+
+    const range = sel.getRangeAt(0);
+    const root = editorRef.current;
+
+    // Find all highlight elements that intersect or contain the range
+    const intersectingHighlights = getIntersectingHighlightElements(root, range);
+
+    if (intersectingHighlights.length > 0) {
+      // TOGGLE OFF: Remove highlight from all intersecting highlight elements
+      intersectingHighlights.forEach((markEl) => {
+        unwrapElement(markEl);
+      });
+      root.normalize();
+      sync();
+      return;
+    }
+
+    // TOGGLE ON: Apply highlight to selection
+    try {
+      const frag = range.extractContents();
+      const hasBlocks = Array.from(frag.childNodes).some(
+        (n) => n.nodeType === Node.ELEMENT_NODE && (n.nodeName === "DIV" || n.nodeName === "P" || n.nodeName === "LI")
+      );
+
+      if (hasBlocks) {
+        // Multi-line selection: wrap inline content of each block line
+        Array.from(frag.childNodes).forEach((child) => {
+          if (child.nodeType === Node.ELEMENT_NODE && (child.nodeName === "DIV" || child.nodeName === "P" || child.nodeName === "LI")) {
+            const mark = createMarkElement();
+            while (child.firstChild) {
+              mark.appendChild(child.firstChild);
+            }
+            child.appendChild(mark);
+          } else if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) {
+            const mark = createMarkElement(child.textContent);
+            frag.replaceChild(mark, child);
+          }
+        });
+        range.insertNode(frag);
+      } else {
+        // Single line inline selection
+        const mark = createMarkElement(frag);
+        range.insertNode(mark);
+        sel.removeAllRanges();
+        const newRange = document.createRange();
+        newRange.selectNodeContents(mark);
+        sel.addRange(newRange);
+      }
+    } catch {
+      document.execCommand("hiliteColor", false, "#fef08a");
+    }
+
+    root.normalize();
+    sync();
+  };
+
+  const boldSelection = () => {
+    if (editorRef.current) editorRef.current.focus();
+    document.execCommand("bold");
+    sync();
+  };
+
+  const insertBullet = () => {
+    if (editorRef.current) editorRef.current.focus();
+    document.execCommand("insertText", false, "> ");
+    sync();
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if ((e.ctrlKey || e.metaKey) && (e.key === "h" || e.key === "H")) {
+      e.preventDefault();
+      highlightSelection();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === "b" || e.key === "B")) {
+      e.preventDefault();
+      boldSelection();
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-1 w-full min-w-[270px]">
+      {/* Mini formatting toolbar */}
+      <div className="flex items-center gap-1 px-0.5 py-0.5 text-[10.5px]">
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            highlightSelection();
+          }}
+          title="Highlight selected text in yellow (Ctrl+H)"
+          className="flex items-center gap-1 rounded bg-amber-100 hover:bg-amber-200 dark:bg-amber-950/70 dark:hover:bg-amber-900 border border-amber-300 dark:border-amber-700 px-2 py-0.5 font-semibold text-amber-950 dark:text-amber-100 transition-colors shadow-2xs cursor-pointer"
+        >
+          <span className="text-[10px]">🟡</span>
+          <span>Highlight</span>
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            boldSelection();
+          }}
+          title="Bold selected text (Ctrl+B)"
+          className="rounded border border-rule px-1.5 py-0.5 font-bold text-ink-soft hover:bg-paper hover:text-ink transition-colors cursor-pointer"
+        >
+          𝐁
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            insertBullet();
+          }}
+          title="Add > bullet"
+          className="rounded border border-rule px-1.5 py-0.5 text-ink-soft hover:bg-paper hover:text-ink transition-colors cursor-pointer"
+        >
+          › Bullet
+        </button>
+      </div>
+
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        onInput={sync}
+        onBlur={sync}
+        onKeyDown={handleKeyDown}
+        data-placeholder="Type notes or select text & click Highlight..."
+        className="w-full min-h-[58px] max-h-[120px] overflow-y-auto resize-y p-2 rounded border border-rule/50 hover:border-rule focus:border-brand focus:bg-surface leading-[1.6] text-[12px] text-ink outline-none transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-ink-faint bg-paper/30 whitespace-pre-wrap break-words"
+      />
+
+      {/* Hidden input to ensure form submission always carries the exact serialized notes string */}
+      <input type="hidden" form="eod-send" name={`shortlist_${appId}_notes`} value={notesStr} />
+    </div>
+  );
+}
 
 /**
  * The end-of-day email, composed for review.
@@ -261,7 +598,7 @@ export function EodComposer({
                 Candidate Shortlist Table
               </span>
               <span className="text-[11px] text-ink-faint">
-                Click any cell to edit details before sending
+                Click any cell to edit · Select text and click <span className="inline-flex items-center gap-0.5 rounded bg-amber-100 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700/80 px-1 font-medium text-amber-900 dark:text-amber-200 text-[10.5px]">🟡 Highlight</span> on Notes to emphasize key points
               </span>
             </div>
 
@@ -301,7 +638,6 @@ export function EodComposer({
                   </thead>
                   <tbody>
                     {effectiveRows.map((r) => {
-                      const notesStr = Array.isArray(r.notes) ? r.notes.join("\n") : String(r.notes ?? "");
                       return (
                         <tr key={r.applicationId} className="hover:bg-paper/30 transition-colors">
                           <td className={`${td} tabular font-medium text-ink-faint text-center pt-2.5`}>
@@ -334,20 +670,12 @@ export function EodComposer({
                               className={cellInput}
                             />
                           </td>
-                          <td className={`${td} min-w-[240px]`}>
-                            <textarea
-                              form="eod-send"
-                              name={`shortlist_${r.applicationId}_notes`}
-                              value={notesStr}
-                              onChange={(e) =>
-                                updateCandidateField(
-                                  r.applicationId,
-                                  "notes",
-                                  e.target.value.split("\n"),
-                                )
-                              }
-                              rows={Math.max(2, notesStr.split("\n").length)}
-                              className={`${cellInput} resize-y leading-[1.6] text-ink-soft`}
+                          <td className={`${td} min-w-[260px]`}>
+                            <EodNotesEditor
+                              appId={r.applicationId}
+                              notes={r.notes}
+                              onChange={(n) => updateCandidateField(r.applicationId, "notes", n)}
+                              className={cellInput}
                             />
                           </td>
                           <td className={`${td} min-w-[140px]`}>

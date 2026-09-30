@@ -60,7 +60,7 @@ export default async function CandidateDrawer({
   const sp = await searchParams;
   const { tab = "cv", q = "" } = sp;
   const logPage = Math.max(1, Math.floor(Number(sp.page)) || 1);
-  await primeStore({ openingId: id, allApplications: tab === "company_refs" });
+  await primeStore({ openingId: id });
   const user = await getCurrentUser();
 
   const app = repo.application(appId);
@@ -127,7 +127,7 @@ export default async function CandidateDrawer({
     ? repo.peopleAtCompany(targetCompany, c.id)
     : [];
 
-  if (isConvex() && targetCompany && tab === "company_refs") {
+  if (isConvex() && targetCompany) {
     try {
       const { convexQuery } = await import("@/lib/convexServer");
       const backendResults = await convexQuery<{
