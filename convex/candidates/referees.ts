@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "../_generated/server";
+import { isPlausibleReferee } from "../lib/refereeCheck";
 
 export const getRefereesByCandidate = query({
   args: { candidateId: v.string() },
@@ -37,9 +38,12 @@ export const saveExtractedReferees = mutation({
     onlyIfNone: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    // Only people (convex/lib/refereeCheck, 30 Sep): the CV reading returned the
+    // candidate's duty bullets as referees, and the Reference tab listed them.
+    const referees = args.referees.filter((r) => isPlausibleReferee(r));
     // A re-read that found nobody leaves what is on file alone. It used to
     // delete the real referees and put nothing (or sample ones) back.
-    if (!args.referees.some((r) => r.name && r.name.trim())) return [];
+    if (!referees.length) return [];
     // Delete existing referees for this candidate to allow re-parsing idempotency
     const existing = await ctx.db
       .query("referees")
@@ -56,8 +60,7 @@ export const saveExtractedReferees = mutation({
     const insertedIds = [];
     const now = new Date().toISOString();
 
-    for (const ref of args.referees) {
-      if (!ref.name || ref.name.trim().length === 0) continue;
+    for (const ref of referees) {
       const id = await ctx.db.insert("referees", {
         candidateId: args.candidateId,
         name: ref.name.trim(),
