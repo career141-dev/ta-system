@@ -141,3 +141,68 @@ export function ContactRow({
     </span>
   );
 }
+
+/**
+ * The candidate's name, typed by the TA when the CV reading found none (30 Sep).
+ * A CV whose heading is a picture reads without a name, and "Unnamed candidate"
+ * had no way to be put right. Shown only while the name is missing.
+ */
+export function NameEditor({
+  name,
+  candidateId,
+  openingId,
+  locked,
+}: {
+  name: string;
+  candidateId: string;
+  openingId: string;
+  locked: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const save = useInline(updateCandidateContactInline);
+  useEffect(() => {
+    if (save.result?.ok) setEditing(false);
+  }, [save.result]);
+
+  const unnamed = !name.trim() || /^unnamed candidate$/i.test(name.trim());
+  if (!unnamed || locked) return null;
+
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="mt-1 rounded-full border border-brand-line px-3 py-1 text-[12px] font-medium text-brand hover:bg-brand-soft"
+      >
+        Add their name
+      </button>
+    );
+  }
+  return (
+    <form onSubmit={(e) => save.run(submitted(e).formData)} className="mt-1 flex flex-wrap items-center gap-2">
+      <input type="hidden" name="candidateId" value={candidateId} />
+      <input type="hidden" name="openingId" value={openingId} />
+      <input type="hidden" name="field" value="name" />
+      <input
+        name="value"
+        required
+        autoFocus
+        maxLength={120}
+        placeholder="Full name, as on the CV"
+        className="w-[260px] rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-brand"
+      />
+      <SubmitButton
+        busy={save.pending}
+        locked={save.pending}
+        pendingLabel="Saving…"
+        className="rounded-full bg-brand px-3 py-1.5 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+      >
+        Save
+      </SubmitButton>
+      <button type="button" disabled={save.pending} onClick={() => setEditing(false)} className="px-1 text-[12px] text-ink-soft hover:text-ink">
+        Cancel
+      </button>
+      {save.result && !save.result.ok && <ActionNote result={save.result} className="basis-full" />}
+    </form>
+  );
+}

@@ -15,7 +15,8 @@ import { isWordFile } from "@/lib/wordToPdf";
 import { SubmitButton } from "@/components/Submit";
 import { RowActions } from "@/components/RowActions";
 import { CallLogForm } from "@/components/CallLogForm";
-import { ContactRow } from "@/components/ContactRow";
+import { ContactRow, NameEditor } from "@/components/ContactRow";
+import { isPlausibleReferee } from "../../../../../../convex/lib/refereeCheck";
 import { Confirm } from "@/components/Confirm";
 import { ChevronIcon, CloseIcon } from "@/components/icons";
 import { ClosingPanel } from "@/components/ClosingPanel";
@@ -97,6 +98,11 @@ export default async function CandidateDrawer({
       console.warn("[candidate page] Referee lookup failed:", err);
     }
   }
+  // Only people: duty bullets saved as referees before 30 Sep are not shown
+  // (convex/lib/refereeCheck — the same test new ones pass on the way in).
+  referees = referees.filter((r) =>
+    isPlausibleReferee({ name: r.name, contactNo: r.phone, email: r.email, company: r.company, designation: r.title }),
+  );
 
   // Every interview, soonest first — a finished one still needs its result
   // and feedback, so none are hidden (28 Sep: several per candidate).
@@ -240,6 +246,7 @@ export default async function CandidateDrawer({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-[22px] font-semibold tracking-tight">{c.fullName}</h2>
+              <NameEditor name={c.fullName} candidateId={c.id} openingId={id} locked={locked} />
               <span className="rounded bg-tag px-1.5 py-[3px] text-[11px] font-medium text-ink-soft">{channelTag(app.sourcingChannel, cvSource(app, headhuntedCandidates(repo.linkVault(app.openingId))))}</span>
               {app.isAddOn && <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[11px] font-medium text-brand">Add-on</span>}
               {app.backupForApplicationId && <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[11px] font-medium text-brand">Backup</span>}

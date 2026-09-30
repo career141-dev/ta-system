@@ -1743,7 +1743,7 @@ const rawRepo = {
     return { ok: found };
   },
 
-  updateCandidateContact(candidateId: Id, patch: { email?: string | null; phone?: string | null }) {
+  updateCandidateContact(candidateId: Id, patch: { email?: string | null; phone?: string | null; fullName?: string }) {
     mutate((db) => {
       const c = db.candidates.find((x) => x.id === candidateId);
       if (c) Object.assign(c, patch);
