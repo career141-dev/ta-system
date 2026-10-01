@@ -1461,6 +1461,58 @@ export async function savePreparedCvBoxInline(_: ActionResult | null, formData: 
   return inline(() => savePreparedCvBox(formData));
 }
 
+export async function extractRefereesFromCv(formData: FormData) {
+  await primeStore({ allApplications: true });
+  await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  const app = repo.application(appId);
+  if (!app) return await fail("Application not found.");
+  const candidateId = app.candidateId;
+
+  const { cvBytes } = await import("@/lib/cvAccess");
+  const cv = await cvBytes(candidateId);
+  if (!cv.ok) {
+    return await fail("Could not read candidate's CV file.");
+  }
+
+  const { extractRawText, parseReferees, parseRefereesRegex } = await import("@/lib/refereeExtractor");
+  const rawText = await extractRawText(cv.bytes, cv.fileName ?? undefined);
+  if (!rawText || rawText.trim().length < 30) {
+    return await fail("No readable text found in this CV.");
+  }
+
+  const { isPlausibleReferee } = await import("../../convex/lib/refereeCheck");
+  let extracted = parseRefereesRegex(rawText);
+  if (extracted.length === 0) {
+    extracted = await parseReferees(rawText);
+  }
+  const valid = extracted.filter(isPlausibleReferee);
+
+  if (valid.length === 0) {
+    return await fail("No contactable referees were identified on this CV.");
+  }
+
+  if (isConvex()) {
+    const { convexMutation } = await import("@/lib/convexServer");
+    await convexMutation("candidates/referees:saveExtractedReferees", {
+      candidateId: candidateId as any,
+      referees: valid.map((r) => ({
+        name: r.name,
+        designation: r.designation,
+        company: r.company,
+        contactNo: r.contactNo,
+        email: r.email,
+        relationship: r.relationship,
+        notes: r.notes,
+      })),
+    });
+  }
+
+  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
+  return await done(`Extracted ${valid.length} referee${valid.length === 1 ? "" : "s"} from CV.`);
+}
+
 export async function toggleAddOn(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });

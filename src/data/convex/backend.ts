@@ -602,13 +602,40 @@ export async function cvLink(actor: Actor, candidateId: Id, download = false): P
   const proxied = found.url.match(/^\/api\/r2-file\?key=(.+)$/);
   if (!proxied) return { ok: true, url: found.url, fileName, fileType };
 
+  const rawKey = decodeURIComponent(proxied[1]);
   try {
     const url = await convexAction<string>("storage/r2:generateDownloadUrl", {
-      key: decodeURIComponent(proxied[1]),
+      key: rawKey,
       ...(download && fileName ? { downloadFilename: fileName.replace(/["\r\n]/g, "") } : {}),
     });
+    if (!url) throw new Error("Empty URL returned from storage/r2:generateDownloadUrl");
     return { ok: true, url, fileName, fileType };
   } catch (e) {
+    // If Convex action failed (e.g. rate limit HTTP 429), fallback to direct S3 client if env keys are present
+    if (process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_ENDPOINT && process.env.R2_BUCKET_NAME) {
+      try {
+        const { S3Client, GetObjectCommand } = await import("@aws-sdk/client-s3");
+        const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
+        const s3 = new S3Client({
+          region: "auto",
+          endpoint: process.env.R2_ENDPOINT,
+          credentials: {
+            accessKeyId: process.env.R2_ACCESS_KEY_ID,
+            secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+          },
+        });
+        const command = new GetObjectCommand({
+          Bucket: process.env.R2_BUCKET_NAME,
+          Key: rawKey,
+          ...(download && fileName ? { ResponseContentDisposition: `attachment; filename="${fileName.replace(/["\r\n]/g, "")}"` } : {}),
+        });
+        const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+        if (signedUrl) return { ok: true, url: signedUrl, fileName, fileType };
+      } catch (s3Err) {
+        console.warn("[cvLink] Direct S3 fallback failed:", s3Err);
+      }
+    }
+
     const message = (e as Error).message;
     // The SDK's words for "nothing is configured" are about HTTP labels and
     // buckets; the person reading the profile needs to know it is a setting.

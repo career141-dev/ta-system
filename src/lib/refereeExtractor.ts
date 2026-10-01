@@ -1,5 +1,7 @@
 import mammoth from "mammoth";
 import { logAiFailure, modelFor, write } from "./ai";
+import { extractPageTextWithLayout } from "./pdfLayout";
+import { isPlausibleReferee } from "../../convex/lib/refereeCheck";
 
 export interface ExtractedReferee {
   name: string;
@@ -27,7 +29,7 @@ export async function extractRawText(buffer: Buffer, fileType?: string): Promise
     }
   }
 
-  // 1. PDF extraction via pdfjs-dist with newline and coordinate preservation
+  // 1. PDF extraction via pdfjs-dist with column/layout awareness
   try {
     // @ts-ignore
     const pdfjs: any = await import("pdfjs-dist/legacy/build/pdf.mjs").catch(() => import("pdfjs-dist/build/pdf.mjs"));
@@ -42,24 +44,12 @@ export async function extractRawText(buffer: Buffer, fileType?: string): Promise
     let fullText = "";
     for (let pageNum = 1; pageNum <= doc.numPages; pageNum++) {
       const page = await doc.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1 });
       const textContent = await page.getTextContent();
-      let pageText = "";
-      let lastY: number | null = null;
-      for (const item of textContent.items) {
-        if (!("str" in item)) continue;
-        const y = item.transform ? item.transform[5] : null;
-        if (lastY !== null && y !== null && Math.abs(y - lastY) > 4) {
-          pageText += "\n";
-        } else if (pageText.length > 0 && !pageText.endsWith("\n") && !pageText.endsWith(" ")) {
-          pageText += " ";
-        }
-        pageText += item.str;
-        if (item.hasEOL) {
-          pageText += "\n";
-        }
-        lastY = y;
+      const pageText = extractPageTextWithLayout(textContent.items, viewport.width, viewport.height);
+      if (pageText) {
+        fullText += (fullText ? "\n\n" : "") + pageText;
       }
-      fullText += `\n${pageText}`;
     }
     if (fullText.trim().length > 20) {
       return fullText;
@@ -115,7 +105,7 @@ Answer with a JSON array, and nothing else — no markdown, no explanation:
 Nobody listed as a referee means []. Never invent one.
 
 CV:
-${rawText.slice(0, 15000)}`,
+${rawText.slice(0, 16000)}`,
       1500,
       "parse",
     );
@@ -158,16 +148,36 @@ export function parseRefereesRegex(text: string): ExtractedReferee[] {
   if (refIndex === -1) return [];
   refSection = text.slice(refIndex).slice(0, 4000);
 
+  // Stop at the next major section heading if present
+  const nextSectionIndex = refSection
+    .slice(15)
+    .search(
+      /\n\s*(?:SUMMARY|PROFILE|ABOUT\s+ME|OBJECTIVE|EXPERIENCE|WORK\s+EXPERIENCE|EMPLOYMENT|PROJECTS?|KEY\s+PROJECTS?|INITIATIVES?|EDUCATION|SKILLS?|TECHNICAL\s+SKILLS?|AREA\s+OF\s+EXPERTISE|CERTIFICATIONS?|DECLARATION|AWARDS?|PUBLICATIONS?|VOLUNTEER(?:ING)?|INTERESTS?|HOBBIES?|LANGUAGES?|CONTACT|PERSONAL\s+DETAILS?)\b/i,
+    );
+  if (nextSectionIndex !== -1) {
+    refSection = refSection.slice(0, 15 + nextSectionIndex);
+  }
+
   const rawLines = refSection
     .split(/\r?\n/)
     .map((l) => l.trim())
-    .filter((l) => l.length > 0 && !/^(?:REFERENCES?|REFEREES?|NON[-\s]?RELATED\s+REFEREES?|PROFESSIONAL\s+REFEREES?):?$/i.test(l));
+    .filter((l) => !/^(?:REFERENCES?|REFEREES?|NON[-\s]?RELATED\s+REFEREES?|PROFESSIONAL\s+REFEREES?):?$/i.test(l))
+    .filter((l) => !/^(?:https?:\/\/|www\.|linkedin\.com|github\.com|[a-z0-9]+\.(?:com|org|net|io|site|dev|website|lk))\b/i.test(l))
+    .filter((l) => !/^(?:website|portfolio|github|linkedin)\b/i.test(l));
 
-  // 1. Group lines into distinct referee blocks
+  // 1. Group lines into distinct referee blocks (by blank lines, prefixes, honorifics)
   const blocks: string[][] = [];
   let currentBlock: string[] = [];
 
   for (const line of rawLines) {
+    if (line.length === 0) {
+      if (currentBlock.length > 0) {
+        blocks.push(currentBlock);
+        currentBlock = [];
+      }
+      continue;
+    }
+
     const isNewBlockStart =
       /^(?:\d+[\.\)]|[\u2022\*\-])\s+/.test(line) ||
       /^(?:Referee\s*\d*|Reference\s*\d*|Name)\s*[:\-]/i.test(line) ||
@@ -185,7 +195,7 @@ export function parseRefereesRegex(text: string): ExtractedReferee[] {
   const finalBlocks: string[][] = [];
   for (const blk of blocks) {
     const emailsInBlock = blk.filter((l) => /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(l));
-    if (emailsInBlock.length > 1 && blk.length >= 3) {
+    if (emailsInBlock.length > 1 && blk.length >= 2) {
       let temp: string[] = [];
       for (const l of blk) {
         temp.push(l);
@@ -224,8 +234,9 @@ export function parseRefereesRegex(text: string): ExtractedReferee[] {
         }
       }
 
-      // 3. Clean leading prefixes like 'Email:', 'Tel:', 'Mobile:', 'Phone:', 'Contact:'
+      // 3. Clean leading/trailing punctuation and prefixes like 'Email:', 'Tel:', 'Mobile:', 'Phone:', 'Contact:'
       line = line.replace(/^(?:email|e-mail|tel|telephone|mobile|phone|contact(?:\s*no)?)\s*[:\-]?\s*/i, "").trim();
+      line = line.replace(/^[,\-–—·:]+/, "").replace(/[,\-–—·:]+$/, "").trim();
       if (!line) continue;
 
       // 4. Labeled fields
@@ -293,7 +304,7 @@ export function parseRefereesRegex(text: string): ExtractedReferee[] {
       }
     }
 
-    if (ref.name && ref.name.length > 2) {
+    if (ref.name && isPlausibleReferee(ref)) {
       referees.push(ref as ExtractedReferee);
     }
   }
