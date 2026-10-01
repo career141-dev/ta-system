@@ -711,8 +711,9 @@ const unconfiguredDetail = (fileName: string | null) =>
 export interface MailIntakeStatus {
   mailboxes: {
     mailbox: string;
-    /** ta: a TA's own mailbox, read only for scoops (27 Sep). */
-    kind: "shared" | "ta";
+    /** ta: a TA's own mailbox, read only for scoops (27 Sep). shortlist: shortlists@,
+     *  where the Director's and the clients' shortlists arrive (29 Sep). */
+    kind: "shared" | "ta" | "shortlist";
     taName: string | null;
     enabled: boolean;
     synced: boolean;
@@ -729,7 +730,7 @@ export interface MailIntakeStatus {
     subject: string;
     fromAddress: string;
     status: "waiting" | "processing" | "extracting" | "done";
-    outcome: "filed" | "database" | "duplicate" | "no_cv" | "skipped" | "failed" | null;
+    outcome: "filed" | "database" | "duplicate" | "no_cv" | "skipped" | "failed" | "held" | null;
     openings: { id: string; title: string }[];
     candidateIds: string[];
     note: string | null;
