@@ -760,6 +760,27 @@ export async function extractText(
 // Text Cleaning
 // ──────────────────────────────────────────────────
 
+/** A person's name from the CV text's first lines, else from the file name; null when neither reads as one. */
+export function guessNameFromCv(text: string, fileName?: string | null): string | null {
+  const word = /^[A-Za-z][A-Za-z.'’-]*$/;
+  const looksLikeName = (s: string) => {
+    const parts = s.trim().split(/\s+/);
+    return parts.length >= 2 && parts.length <= 4 && parts.every((p) => word.test(p)) && s.length <= 50;
+  };
+  const skip = /\b(curriculum|vitae|resume|résumé|cv|profile|contact|summary|objective|engineer|developer|manager|experience|education)\b/i;
+  for (const line of text.split(/\r?\n/).slice(0, 8)) {
+    const l = line.trim();
+    if (l && !skip.test(l) && looksLikeName(l)) return l;
+  }
+  const fromFile = (fileName ?? "")
+    .replace(/\.[^/.]+$/, "")
+    .replace(/\b(cv|resume|résumé|curriculum vitae|profile|linkedin|final|updated|copy)\b/gi, " ")
+    .replace(/[_\-.\d()]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return looksLikeName(fromFile) ? fromFile : null;
+}
+
 export function cleanRawText(text: string): string {
   let cleaned = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\uFFFD]/g, "");
 
@@ -1261,6 +1282,14 @@ export async function runCvExtraction(
 
       extracted = extractedData;
 
+      // 30 Sep: with the providers slow, the first read alone can take ~180s, and
+      // OCR plus a second read then ran past Convex's 300s kill, so the upload
+      // was never marked failed and the candidate stayed "Unnamed". A second read
+      // can take up to ~180s, so start OCR only when there is time for both.
+      if (!extracted && Date.now() - tStart > CV_EXTRACTION_DEADLINE_MS - 120_000) {
+        throw new Error(`LLM failed to extract candidate data (API timeout) — no time left for OCR retry (${Math.round((Date.now() - tStart) / 1000)}s elapsed)`);
+      }
+
       // Fallback: If initial text extraction produced thin/no text, process CV through local Tesseract.js OCR
       if (!extracted) {
         console.warn(`[CvExtraction] Initial text extraction returned thin/empty result. Sending CV to Tesseract OCR...`);
@@ -1301,6 +1330,13 @@ export async function runCvExtraction(
     }
 
     if (extracted) {
+      // 29 Sep: a headhunted CV came back with no name (the model answered
+      // fullName null) and showed as "Unnamed candidate". Read the name off the
+      // CV's own first lines, then the file name, rather than leave it blank.
+      if (!extracted.fullName?.trim()) {
+        const guessed = guessNameFromCv(cleanedText, cvUpload?.fileName);
+        if (guessed) extracted = { ...extracted, fullName: guessed };
+      }
       const safeExtracted = nullToUndefined(extracted);
 
       const noticePeriodDays = deriveNoticePeriodDays(extracted.noticePeriod);
@@ -1521,9 +1557,11 @@ export async function runCvExtraction(
     // A replaced CV's candidate is a real, named person already on file: a
     // failed read must not rename them after the file (29 Sep).
     if (candidateId && !keepDetails) {
-      const fallbackName = cvUpload?.fileName
-        ? cvUpload.fileName.replace(/\.[^/.]+$/, "").replace(/[_\-]/g, " ")
-        : "Applicant";
+      // A person's name from the file name when it reads as one, else the file name.
+      const fallbackName = guessNameFromCv("", cvUpload?.fileName)
+        ?? (cvUpload?.fileName
+          ? cvUpload.fileName.replace(/\.[^/.]+$/, "").replace(/[_\-]/g, " ")
+          : "Applicant");
 
       await ctx.runMutation(api.candidates.candidates.updateCandidateFields, {
         candidateId,
