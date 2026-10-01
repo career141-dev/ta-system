@@ -1,5 +1,6 @@
 import { repo } from "@/data/store";
 import { canonicalProfile } from "@/lib/serper";
+import { linkKey } from "@/lib/url";
 import { authorised, normaliseCapture, preflight, reply } from "@/lib/extension";
 import { can } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
@@ -62,7 +63,14 @@ export async function POST(req: Request) {
   // Recruiter URLs do not carry a /in/ slug, so they are filed as they came.
   const url = canonical ? `https://www.${canonical}` : capture.sourceUrl;
 
-  const existing = canonical ? repo.findLinkByUrl(openingId, canonical) : undefined;
+  // Already on this opening (1 Oct): by the profile's address — a Recruiter
+  // page's profile id included, which had no key, so each capture of the same
+  // person from Recruiter made a new row — or by the same full name at the
+  // same company, which catches one person saved from LinkedIn and Recruiter.
+  const key = canonical ?? linkKey(capture.sourceUrl);
+  const existing =
+    (key ? repo.findLinkByUrl(openingId, key) : undefined) ??
+    repo.findLinkByPerson(openingId, capture.fullName, capture.currentCompany);
   const id = existing?.id ?? repo.addLink(openingId, url, userId);
 
   // A capture fills what the row is missing and refreshes what it already has,
@@ -84,7 +92,7 @@ export async function POST(req: Request) {
   });
 
   // Someone we already hold? Linked now if certain, left to confirm if not (lib/cvMatch).
-  await matchLink(id, userId);
+  const held = await matchLink(id, userId);
 
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
@@ -95,6 +103,12 @@ export async function POST(req: Request) {
   return reply({
     status: existing ? "updated" : "added",
     id,
+    // Who has the row already, so a TA unsure whether they added someone
+    // hears "already in the table — added by Hassan" (1 Oct).
+    addedByName: existing ? (repo.users().find((u) => u.id === existing.addedBy)?.name ?? null) : null,
+    // What our database said about them, for the extension to show (1 Oct):
+    // already held (with or without a CV), possibly someone to check, or new.
+    match: held && held.decided !== "different" ? { strength: held.decided === "same" ? "same" : held.strength, fullName: held.fullName, hasCv: held.hasCv } : null,
     name: capture.fullName,
     openingTitle: opening.title,
     openingUrl: `/openings/${openingId}/hh/links`,

@@ -14,6 +14,7 @@ import {
   toggleLinkAddOnInline,
   updateLinkInline,
 } from "@/app/actions";
+import { FindCvButton } from "./FindCvButton";
 import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
 import Link from "next/link";
 import { inputClass } from "./form";
@@ -691,7 +692,12 @@ function CvStatus({
     const hasCv = m ? m.hasCv : null;
     return (
       <div className={`${pill} bg-brand-soft text-brand`}>
-        <span>{hasCv === false ? "In our database — no CV yet" : "In our database"}{m ? `: ${m.fullName}` : ""}</span>
+        {/* Said as a match, so the TA can see it may be wrong (1 Oct): from a
+            LinkedIn profile there is often only a name and a company to go on. */}
+        <span>
+          {m ? <>Matched to <strong>{m.fullName}</strong> in our database</> : "In our database"}
+          {hasCv === false ? " — no CV yet" : ""}
+        </span>
         {hasCv !== false && (
           <a href={`/api/cv/${encodeURIComponent(r.candidateId)}`} target="_blank" rel="noreferrer" className={linkCls}>
             View CV
@@ -701,6 +707,24 @@ function CvStatus({
           Their record
         </Link>
         {m?.reasons.length ? <span className="text-ink-faint">· {m.reasons.join(", ")}</span> : null}
+        {/* Linked by the matching on its own: a TA can say it is someone else
+            (1 Oct — profiles were landing on the wrong person). */}
+        {m && m.candidateId === r.candidateId && m.decided !== "same" && (
+          <form onSubmit={(e) => decide.run(submitted(e).formData)} className="inline">
+            <input type="hidden" name="openingId" value={openingId} />
+            <input type="hidden" name="entryId" value={r.id} />
+            <button
+              name="decision"
+              value="different"
+              disabled={decide.pending}
+              title="This LinkedIn profile is someone else. The row is unlinked from this candidate, and their CV and details stay out of it."
+              className="rounded-full border border-rule-strong bg-surface px-2.5 py-0.5 text-[11.5px] font-medium text-ink hover:border-danger hover:text-danger disabled:opacity-60"
+            >
+              Not the same person
+            </button>
+          </form>
+        )}
+        <ActionNote result={decide.result} className="w-full" />
       </div>
     );
   }
@@ -728,5 +752,11 @@ function CvStatus({
       </form>
     );
   }
-  return <p className="mt-1.5 text-[12px] text-ink-faint">Not in our database — CV not available yet</p>;
+  return (
+    <>
+      <p className="mt-1.5 text-[12px] text-ink-faint">Not matched to anyone in our database yet</p>
+      {/* The matching only links when certain; Find CV asks on demand (1 Oct). */}
+      <FindCvButton openingId={openingId} entryId={r.id} />
+    </>
+  );
 }

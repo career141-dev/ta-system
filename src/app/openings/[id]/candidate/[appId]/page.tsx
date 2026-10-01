@@ -34,6 +34,7 @@ import { AuraCallButton } from "@/components/AuraCallButton";
 import { WebCallResults } from "@/components/WebCallResults";
 import { VerifyReferee } from "@/components/VerifyReferee";
 import { isConvex } from "@/data/mode";
+import type { ExtractedReferee } from "@/lib/refereeExtractor";
 import * as backend from "@/data/convex/backend";
 import { primeStore } from "@/data/prime";
 import { PreparedCvEditor } from "@/components/PreparedCvEditor";
@@ -50,6 +51,58 @@ const TAB_LABEL: Record<(typeof TABS)[number], string> = {
   // the other is the conversation.
   cv: "CV", prepared: "Prepared CV", history: "History", call: "Call Log", chat: "Chat", reference: "Reference", company_refs: "Company Reference",
 };
+
+/**
+ * Referees read off the CV when none are on file (#107, 1 Oct), and saved.
+ * Once per candidate while the app runs: a CV with no referees would otherwise
+ * be downloaded and sent to the AI on every open, and two TAs opening the same
+ * profile together would save the referees twice. They share the one run.
+ * ponytail: per-process memory — after a restart a CV with no referees is read once more.
+ */
+const refereeRuns = new Map<string, Promise<ExtractedReferee[]>>();
+function refereesFromCv(candidateId: string): Promise<ExtractedReferee[]> {
+  let run = refereeRuns.get(candidateId);
+  if (!run) {
+    run = (async () => {
+      try {
+        const { cvBytes } = await import("@/lib/cvAccess");
+        const cv = await cvBytes(candidateId);
+        // No file reached (storage busy, or none on file): try again next open — no AI was spent.
+        if (!cv.ok || !cv.bytes) {
+          refereeRuns.delete(candidateId);
+          return [];
+        }
+        const { extractRawText, parseRefereesRegex, parseReferees } = await import("@/lib/refereeExtractor");
+        const rawText = await extractRawText(cv.bytes, cv.fileName ?? undefined);
+        if (!rawText || rawText.trim().length <= 30) return [];
+        let extracted = parseRefereesRegex(rawText);
+        if (extracted.length === 0) extracted = await parseReferees(rawText);
+        const valid = extracted.filter(isPlausibleReferee);
+        if (valid.length > 0 && isConvex()) {
+          const { convexMutation } = await import("@/lib/convexServer");
+          await convexMutation("candidates/referees:saveExtractedReferees", {
+            candidateId: candidateId as any,
+            referees: valid.map((r) => ({
+              name: r.name,
+              designation: r.designation,
+              company: r.company,
+              contactNo: r.contactNo,
+              email: r.email,
+              relationship: r.relationship,
+              notes: r.notes,
+            })),
+          }).catch((e) => console.warn("[candidate page] Auto-save referees failed:", e));
+        }
+        return valid;
+      } catch (err) {
+        console.warn("[candidate page] Auto-extraction of referees failed:", err);
+        return [];
+      }
+    })();
+    refereeRuns.set(candidateId, run);
+  }
+  return run;
+}
 
 export default async function CandidateDrawer({
   params, searchParams,
@@ -93,11 +146,48 @@ export default async function CandidateDrawer({
       const existingRefs = await convexQuery<any[]>("ta/tables:refereesFor", { candidateIds: [c.id] }).catch(() => []);
       if (existingRefs && existingRefs.length > 0) {
         referees = existingRefs;
+      } else {
+        const directRefs = await convexQuery<any[]>("candidates/referees:getRefereesByCandidate", { candidateId: c.id }).catch(() => []);
+        if (directRefs && directRefs.length > 0) {
+          referees = directRefs.map((r) => ({
+            id: r._id,
+            fromCandidateId: r.candidateId,
+            name: r.name,
+            title: r.designation ?? null,
+            company: r.company ?? null,
+            phone: r.contactNo ?? null,
+            email: r.email ?? null,
+            relationship: r.relationship ?? null,
+            contactable: true,
+            lastContactedAt: null,
+            extractedAt: Date.now(),
+          }));
+        }
       }
     } catch (err) {
       console.warn("[candidate page] Referee lookup failed:", err);
     }
   }
+
+  // If still no referees on file, read them off the CV (once per candidate).
+  if (referees.length === 0) {
+    const valid = await refereesFromCv(c.id);
+    const now = Date.now();
+    referees = valid.map((r, idx) => ({
+      id: `ref_auto_${c.id}_${idx}`,
+      fromCandidateId: c.id,
+      name: r.name,
+      title: r.designation ?? null,
+      company: r.company ?? null,
+      phone: r.contactNo ?? null,
+      email: r.email ?? null,
+      relationship: r.relationship ?? null,
+      contactable: true,
+      lastContactedAt: null,
+      extractedAt: now,
+    }));
+  }
+
   // Only people: duty bullets saved as referees before 30 Sep are not shown
   // (convex/lib/refereeCheck — the same test new ones pass on the way in).
   referees = referees.filter((r) =>
@@ -276,7 +366,15 @@ export default async function CandidateDrawer({
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {locked ? (
                 <p className="rounded-lg border border-rule bg-paper px-3.5 py-2 text-[12px] text-ink-soft">
-                  Shortlisted by <span className="text-ink">{owner?.name}</span> — you cannot contact
+                  {/* Locked for a viewer or someone not on the opening too, where
+                      nobody has shortlisted them: it read "Shortlisted by —" (1 Oct). */}
+                  {owner ? (
+                    <>Shortlisted by <span className="text-ink">{owner.name}</span> — you cannot contact</>
+                  ) : app.ownerTaId ? (
+                    "Shortlisted by another recruiter — you cannot contact"
+                  ) : (
+                    "View only — you are not working this opening"
+                  )}
                 </p>
               ) : !app.ownerTaId ? (
                 <form action={claimCandidate}>
@@ -388,7 +486,7 @@ export default async function CandidateDrawer({
       )}
 
       <nav className="mt-4 flex gap-6 border-b border-rule px-1">
-        {TABS.filter((t) => t !== "reference" || referees.length > 0).map((t) => {
+        {TABS.filter((t) => t !== "reference" || referees.length > 0 || Boolean(c.cvFileName || cvFile?.ok)).map((t) => {
           // A count on every tab that can have one, so a TA knows whether a tab
           // is worth opening before they open it.
           const n = COUNTS[t];
@@ -461,7 +559,7 @@ export default async function CandidateDrawer({
                   tab names who they are and links there, so the same referees
                   are not listed twice (review of PR #11, 22 September). */}
               {referees.length === 0 ? (
-                <p className="py-2 text-[12.5px] text-ink-faint">No referees named on this CV.</p>
+                <p className="py-2 text-[12.5px] text-ink-faint">No referees currently listed for this candidate.</p>
               ) : (
                 <p className="py-1 text-[12.5px] text-ink-soft">
                   {referees.map((r) => r.name).join(", ")}.{" "}
@@ -566,7 +664,9 @@ export default async function CandidateDrawer({
 
         {tab === "reference" && (
           referees.length === 0 ? (
-            <p className="py-8 text-center text-[13px] text-ink-faint">No referees named on this CV.</p>
+            <div className="py-8 text-center">
+              <p className="text-[13px] text-ink-faint">No referees currently on record for this candidate.</p>
+            </div>
           ) : (
             <div className="divide-y divide-rule">
               {referees.map((r) => (

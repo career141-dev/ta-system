@@ -46,8 +46,8 @@ import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
-import { profileLink } from "@/lib/url";
-import { matchLink, decideMatch } from "@/lib/cvMatch";
+import { linkKey, profileLink } from "@/lib/url";
+import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
@@ -236,18 +236,38 @@ export async function moveStage(formData: FormData) {
     // The backend owns the pipeline: its state machine checks the move, stops
     // any running follow-up on the way out, and (by design) sends nothing on
     // the way in — follow-up is sent from the candidate's Chat tab.
+    const unowned = stage === "ta_follow_up" && !repo.application(appId)?.ownerTaId;
     try {
       await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
     } catch (e) {
       await fail(backendMessage(e, "That move could not be made."));
     }
+    // In TA Follow-up with nobody's name on them, they were in no TA's sets or
+    // end-of-day and showed as not shortlisted (1 Oct): whoever moved them claims them.
+    if (unowned) await claimFor(user.id, appId);
     await afterBackendWrite(openingId);
     await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
   }
+  const unowned = stage === "ta_follow_up" && !repo.application(appId)?.ownerTaId;
   const res = repo.moveStage(appId, stage, user.id, reason || undefined);
   if (!res.ok) await fail(res.message);
+  if (unowned) repo.shortlist(appId, user.id);
   revalidatePath(`/openings/${openingId}`, "layout");
   await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
+}
+
+/**
+ * Claim someone just put in TA Follow-up with no owner (1 Oct). The same claim
+ * as the Shortlist button — owner, set number — on someone already there, so
+ * nothing is sent. A claim refused because someone else holds them is fine:
+ * then they are already shortlisted.
+ */
+async function claimFor(userId: string, appId: string): Promise<void> {
+  try {
+    await backend.shortlist({ id: userId }, appId);
+  } catch (e) {
+    console.warn(`[claim ${appId}]`, (e as Error).message);
+  }
 }
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
@@ -270,13 +290,17 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
   if (isConvex()) {
     try {
       await backend.moveStage({ id: userId }, appId, targetStage, "Brought back");
-      await afterBackendWrite(openingId);
-      return { ok: true };
     } catch (e) {
       return { ok: false, message: backendMessage(e, "the move was refused.") };
     }
+    // Brought back is taken on (1 Oct): with no owner they were in nobody's
+    // sets or end-of-day, and read as not shortlisted.
+    if (!owner) await claimFor(userId, appId);
+    await afterBackendWrite(openingId);
+    return { ok: true };
   }
   const r = repo.moveStage(appId, targetStage, userId, "Brought back");
+  if (r.ok && !owner) repo.shortlist(appId, userId);
   return r.ok ? { ok: true } : { ok: false, message: r.message };
 }
 
@@ -348,6 +372,9 @@ export async function claimCandidate(formData: FormData) {
     try {
       r = await backend.shortlist({ id: user.id }, appId);
     } catch (e) {
+      // Read again either way: an error after the claim was written showed
+      // them as not shortlisted until the cache ran out (1 Oct).
+      await afterBackendWrite(openingId);
       await fail(backendMessage(e, "Could not shortlist."));
     }
     // Named before the store is dropped — reading `repo` after that would throw.
@@ -426,16 +453,21 @@ export async function confirmShortlist(formData: FormData) {
   const assignment = repo.assignmentFor(openingId, user.id) ?? null;
   let done = 0;
   let skipped = 0;
+  // A failure is said as what it was (1 Oct): every one used to read "already
+  // taken by someone else", so an error looked like a colleague's claim.
+  let failed = 0;
+  let lastError = "";
   for (const id of ids) {
     const app = repo.application(id);
-    if (!app || app.openingId !== openingId) { skipped++; continue; }
+    if (!app || app.openingId !== openingId) { failed++; lastError = "no longer on this opening"; continue; }
     if (!can(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId }).ok) { skipped++; continue; }
     if (isConvex()) {
       try {
         const r = await backend.shortlist({ id: user.id }, id);
         if (r.ok) done++; else skipped++;
-      } catch {
-        skipped++;
+      } catch (e) {
+        failed++;
+        lastError = backendMessage(e, "the claim was refused");
       }
       continue;
     }
@@ -447,9 +479,11 @@ export async function confirmShortlist(formData: FormData) {
     resetStore();
   }
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back(
-    `${done} shortlisted and sent to Follow-up.${skipped ? ` ${skipped} skipped — already taken by someone else.` : ""}`,
-  );
+  const message =
+    `${done} shortlisted and sent to Follow-up.` +
+    (skipped ? ` ${skipped} skipped — already taken by someone else.` : "") +
+    (failed ? ` ${failed} could not be shortlisted (${lastError}) — try them again.` : "");
+  await (failed && !done ? fail(message) : back(message, failed ? "note" : "ok"));
 }
 
 export async function logCall(formData: FormData) {
@@ -489,9 +523,21 @@ export async function decideCvMatch(formData: FormData) {
   const decision = String(formData.get("decision")) === "same" ? "same" : "different";
   const e = repo.linkEntry(entryId);
   if (!e || e.openingId !== openingId) await fail("That row no longer exists. Reload the page.");
+  // Unlinking a row whose person is already on this opening's pipeline would
+  // leave that application on the wrong record: it is dealt with there first.
+  if (decision === "different" && e!.candidateId) {
+    const onPipeline = repo.applicationsForCandidate(e!.candidateId).find((a) => a.openingId === openingId);
+    if (onPipeline) {
+      await fail(`${e!.cvMatch?.fullName ?? "They"} ${e!.cvMatch?.fullName ? "is" : "are"} already on this opening's pipeline from this row. Reject or drop them there first, then mark this row as a different person.`);
+    }
+  }
   if (!(await decideMatch(entryId, decision, user.id))) await fail("There is no match on that row to answer.");
   revalidateLinks(openingId);
-  await done(decision === "same" ? `Linked to ${e!.cvMatch!.fullName}'s record.` : "Noted: a different person. The row stays on its own.");
+  await done(
+    decision === "same"
+      ? `Linked to ${e!.cvMatch!.fullName}'s record.`
+      : `Done — not the same person. This row is no longer linked to ${e!.cvMatch!.fullName}.`,
+  );
 }
 
 export async function addLink(formData: FormData) {
@@ -789,6 +835,8 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
         taLeadId,
         directorId,
         notesMarkdown: notes,
+        briefKind: isLead ? "management_to_lead" : "lead_to_ta",
+        briefExtracted: notes.trim() ? { ...extractFromText(notes), title } : undefined,
         autoFollowUp,
       },
     );
@@ -1607,13 +1655,27 @@ async function pipelineFromLink(
   }
 
   if (isConvex()) {
+    // The claim and the move are told apart (1 Oct): one try for both reported
+    // a failed claim as "Director review needs their CV…", and the person sat
+    // in TA Follow-up with nobody's name on them.
+    let claimed: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
+    try {
+      claimed = await backend.shortlist({ id: user.id }, made.applicationId);
+    } catch (e) {
+      await afterBackendWrite(openingId);
+      return { tone: "error", message: `They could not be shortlisted: ${backendMessage(e, "the claim was refused.")}` };
+    }
+    if (!claimed.ok) {
+      const owner = repo.users().find((u) => u.id === claimed!.ownerTaId)?.name ?? "Another recruiter";
+      await afterBackendWrite(openingId);
+      // An error, so "Interested" puts the row back: the person is someone else's.
+      return { tone: "error", message: `${owner} already claimed this candidate — they are working them.` };
+    }
     let problem: string | null = null;
     try {
-      const claimed = await backend.shortlist({ id: user.id }, made.applicationId);
-      if (!claimed.ok) problem = "Another recruiter already claimed this candidate.";
-      else await backend.moveStage({ id: user.id }, made.applicationId, "director_review");
+      await backend.moveStage({ id: user.id }, made.applicationId, "director_review");
     } catch (e) {
-      problem = `Added to the pipeline in Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${backendMessage(e, "the move could not be made.")})`;
+      problem = `Shortlisted — in TA Follow-up. Director review needs their CV, current and expected salary and notice period — add them on their page. (${backendMessage(e, "the move could not be made.")})`;
     }
     await afterBackendWrite(openingId);
     if (problem) return { tone: "note", message: problem };
@@ -1673,8 +1735,13 @@ export async function setLinkInterest(formData: FormData) {
   if (interest !== "not_interested") return fail("Pick Interested or Not interested.");
   // Why, in the TA's words (the desk, 29 Sep): it goes on the Rejected entry,
   // and on the row's log where the next person to open it reads it.
-  const why = String(formData.get("reason") ?? "").trim().slice(0, 300);
-  if (!why) return fail("Say why they are not interested.");
+  // "Not interested, happy where he is" read "Not interested — Not interested,
+  // happy…" (1 Oct): the words the label already says are not repeated.
+  const why = String(formData.get("reason") ?? "")
+    .trim()
+    .replace(/^not\s+interested\b[\s,.:;—–-]*/i, "")
+    .slice(0, 300);
+  if (!why) return fail("Say why they are not interested — for example, happy where they are.");
   const rejectReason = `Not interested — ${why}`;
   const noteWhy = () => repo.logOutreach(entryId, user.id, "Not interested", why);
   const app = entry.candidateId
@@ -3236,12 +3303,119 @@ export async function keepSuggestion(formData: FormData) {
   repo.setSuggestionStatus(id, "kept", "more_like_this", user.id);
   let held: CvMatch | null = null;
   if (s!.linkedinUrl) {
+    const already = linkFor(openingId, s!);
+    if (already) {
+      revalidatePath(`/openings/${openingId}/hh`, "layout");
+      await note(`${s!.name ?? "They"} ${s!.name ? "is" : "are"} already in Excel Tables${already.addedBy !== user.id ? `, added by ${repo.user(already.addedBy)?.name ?? "another TA"}` : ""}.`);
+    }
     const entryId = repo.addLink(openingId, s!.linkedinUrl, user.id);
     repo.updateLink(entryId, { name: s!.name, title: s!.headline, company: s!.company });
     held = await matchLink(entryId, user.id);
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   await back(`${heldLine(held)}${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
+}
+
+/** The Excel Tables row a suggestion already has on this opening — by its address, or name and company (1 Oct). */
+function linkFor(openingId: string, s: { linkedinUrl: string | null; name: string; company: string | null }) {
+  const key = linkKey(s.linkedinUrl);
+  return (key ? repo.findLinkByUrl(openingId, key) : undefined) ?? repo.findLinkByPerson(openingId, s.name, s.company);
+}
+
+/**
+ * "Find CV" (1 Oct): who in our database might be this LinkedIn person — an
+ * Excel Tables row, or a Suggestions result — for the TA to choose from.
+ * Returns the people to the button; nothing is changed here.
+ */
+export async function findCv(input: {
+  openingId: string;
+  entryId?: string;
+  suggestionId?: string;
+}): Promise<{ ok: true; hits: CvHit[] } | { ok: false; message: string }> {
+  await primeStore({ openingId: input.openingId });
+  const user = await getCurrentUser();
+  const assignment = repo.assignmentFor(input.openingId, user.id) ?? null;
+  const allowed = can(user, "opening.sourcing", { openingId: input.openingId, assignment });
+  if (!allowed.ok) return { ok: false, message: allowed.message };
+  const profile = profileFor(input);
+  if (!profile) return { ok: false, message: "That profile is no longer here. Reload the page." };
+  try {
+    return { ok: true, hits: await findCvCandidates(profile, user.id) };
+  } catch (e) {
+    console.warn("[findCv]", (e as Error).message);
+    return { ok: false, message: "The search could not run just now. Try again." };
+  }
+}
+
+/** What is known about a LinkedIn person on this opening, for "Find CV". */
+function profileFor(input: { openingId: string; entryId?: string; suggestionId?: string }) {
+  if (input.entryId) {
+    const e = repo.linkEntry(input.entryId);
+    if (!e || e.openingId !== input.openingId) return null;
+    const cap = e.capture ?? null;
+    return {
+      linkedinUrl: e.linkedinUrl,
+      name: e.name ?? cap?.fullName ?? null,
+      phone: e.phoneNumber ?? cap?.phone ?? null,
+      email: cap?.email ?? null,
+      company: e.company ?? cap?.currentCompany ?? null,
+      title: e.title ?? cap?.currentTitle ?? cap?.headline ?? null,
+      location: cap?.location ?? null,
+      employers: (cap?.experience ?? []).map((x) => x.company).filter(Boolean),
+      ...captureHistory(cap),
+    };
+  }
+  const s = input.suggestionId ? repo.suggestions(input.openingId).find((x) => x.id === input.suggestionId) : null;
+  if (!s) return null;
+  return { linkedinUrl: s.linkedinUrl, name: s.name, company: s.company, title: s.headline, location: s.location };
+}
+
+/**
+ * The TA chose who this LinkedIn person is in our database (1 Oct): the row is
+ * linked to that candidate, so their CV is used and no second record is made.
+ * From Suggestions, the profile goes to Excel Tables already linked. The
+ * chosen person is checked against a fresh search — only someone offered can
+ * be chosen.
+ */
+export async function chooseCv(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const entryId = String(formData.get("entryId") ?? "") || undefined;
+  const suggestionId = String(formData.get("suggestionId") ?? "") || undefined;
+  const user = entryId
+    ? await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" })
+    : await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
+  const profile = profileFor({ openingId, entryId, suggestionId });
+  if (!profile) return fail("That profile is no longer here. Reload the page.");
+  const candidateId = String(formData.get("candidateId") ?? "");
+  const hit = (await findCvCandidates(profile, user.id).catch(() => [] as CvHit[])).find((h) => h.candidateId === candidateId);
+  if (!hit) return fail("That person is no longer offered for this profile. Press Find CV again.");
+
+  let rowId = entryId;
+  if (!rowId) {
+    const s = repo.suggestions(openingId).find((x) => x.id === suggestionId)!;
+    if (!s.linkedinUrl) return fail("This suggestion has no LinkedIn profile to add.");
+    rowId = linkFor(openingId, s)?.id;
+    if (!rowId) {
+      rowId = repo.addLink(openingId, s.linkedinUrl, user.id);
+      repo.updateLink(rowId, { name: s.name, title: s.headline, company: s.company });
+    }
+    repo.setSuggestionStatus(s.id, "kept", "more_like_this", user.id);
+  } else {
+    // A row already put on the pipeline as someone is changed there, not here.
+    const e = repo.linkEntry(rowId)!;
+    if (e.candidateId && e.candidateId !== hit.candidateId && repo.applicationsForCandidate(e.candidateId).some((a) => a.openingId === openingId)) {
+      return fail("This row is already on the pipeline as someone else. Reject or drop them there first.");
+    }
+  }
+  await linkRowTo(rowId, hit, user.id);
+  revalidateLinks(openingId);
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  return done(`Linked to ${hit.fullName}'s record${hit.hasCv ? " — their CV on file is used" : ""}. No new record was made.`);
+}
+
+export async function chooseCvInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => chooseCv(formData));
 }
 
 export async function dismissSuggestion(formData: FormData) {

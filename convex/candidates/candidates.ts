@@ -7,6 +7,7 @@ import { checkAndAdvanceFollowUp, updateFollowUpFlags } from "../pipeline/follow
 import { requireFullAccess } from "../lib/permissions";
 import { answersById } from "../lib/followUpScope";
 import { CV_FILE_KEYS, fillBlanksOnly } from "../lib/fillBlanks";
+import { findSameCandidate } from "../lib/sameCandidate";
 
 export const listCandidates = query({
   args: {
@@ -480,46 +481,24 @@ export const updateCandidateFields = mutation({
     // If so, the current candidateId is a ghost duplicate — merge into survivor.
     let targetId = candidateId;
 
-    const lookupByEmail = args.email
-      ? await ctx.db
-          .query("candidates")
-          .withIndex("by_email", (q) => q.eq("email", args.email as string))
-          .first()
-      : null;
-
-    const lookupByPhone = phoneClean
-      ? await ctx.db
-          .query("candidates")
-          .withIndex("by_phoneClean", (q) => q.eq("phoneClean", phoneClean as string))
-          .first()
-      : null;
-
-    const lookupByLinkedin = args.linkedinUrl
-      ? await ctx.db
-          .query("candidates")
-          .withIndex("by_linkedinUrl", (q) => q.eq("linkedinUrl", args.linkedinUrl as string))
-          .first()
-      : null;
-
-    const lookupByFileHash = args.fileHash
-      ? await ctx.db
-          .query("candidates")
-          .withIndex("by_fileHash", (q) => q.eq("fileHash", args.fileHash as string))
-          .first()
-      : null;
-
     // A replaced CV belongs to the candidate the TA replaced it on; matching
     // it to someone else by phone or email would delete this one as a ghost.
-    const survivor = keepDetails
-      ? undefined
-      : [lookupByEmail, lookupByPhone, lookupByLinkedin, lookupByFileHash].find((c) => c && c._id !== candidateId);
+    // Nor is anyone already on an opening a ghost: merging deletes the record
+    // being updated, and theirs has applications (1 Oct).
+    const isGhost = !keepDetails && !(await ctx.db
+      .query("applications")
+      .withIndex("by_candidateId", (q: any) => q.eq("candidateId", candidateId))
+      .first());
+    // The same person only on proof (findSameCandidate): the same file, the
+    // same LinkedIn profile, or an email or phone that one person holds AND a
+    // name that agrees. Merging on any one field put an agency's or a
+    // referee's contact details — and a stranger's CV — on someone's record.
+    const survivor = isGhost
+      ? await findSameCandidate(ctx, { fullName: args.fullName, email: args.email, phone: args.phone, linkedinUrl: args.linkedinUrl, fileHash: args.fileHash }, candidateId)
+      : null;
 
     if (survivor) {
-      console.log(
-        `[Dedup] Ghost candidate ${candidateId} matched survivor ${survivor._id}` +
-        ` (email=${!!lookupByEmail}, phone=${!!lookupByPhone}, linkedin=${!!lookupByLinkedin}, hash=${!!lookupByFileHash}).` +
-        ` Merging into survivor.`
-      );
+      console.log(`[Dedup] Ghost candidate ${candidateId} is ${survivor._id} (${survivor.fullName ?? "no name"}). Merging into them.`);
       // Relink the upload record to the survivor so stats stay accurate
       if (args.cvUploadId) {
         await ctx.db.patch(args.cvUploadId, { candidateId: survivor._id });
@@ -692,44 +671,17 @@ export const createCandidate = mutation({
     lastUpdatedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    // 4-Factor Deduplication (Agent 6)
-    let existingCandidateId: Id<"candidates"> | null = null;
-
-    // Factor 1: fileHash
-    if (args.fileHash && !existingCandidateId) {
-      const existing = await ctx.db
-        .query("candidates")
-        .withIndex("by_fileHash", (q) => q.eq("fileHash", args.fileHash!))
-        .first();
-      if (existing) existingCandidateId = existing._id;
-    }
-
-    // Factor 2: email
-    if (args.email && !existingCandidateId) {
-      const existing = await ctx.db
-        .query("candidates")
-        .withIndex("by_email", (q) => q.eq("email", args.email!))
-        .first();
-      if (existing) existingCandidateId = existing._id;
-    }
-
-    // Factor 3: phone
-    if (args.phone && !existingCandidateId) {
-      const existing = await ctx.db
-        .query("candidates")
-        .withIndex("by_phone", (q) => q.eq("phone", args.phone!))
-        .first();
-      if (existing) existingCandidateId = existing._id;
-    }
-
-    // Factor 4: linkedinUrl
-    if (args.linkedinUrl && !existingCandidateId) {
-      const existing = await ctx.db
-        .query("candidates")
-        .withIndex("by_linkedinUrl", (q) => q.eq("linkedinUrl", args.linkedinUrl!))
-        .first();
-      if (existing) existingCandidateId = existing._id;
-    }
+    // Someone we already hold, on proof only (findSameCandidate, 1 Oct): the
+    // same file, the same LinkedIn profile, or a contact detail one person
+    // holds with a name that agrees. Any one field used to be enough.
+    const existingCandidateId: Id<"candidates"> | null =
+      (await findSameCandidate(ctx, {
+        fullName: args.fullName,
+        email: args.email,
+        phone: args.phone,
+        linkedinUrl: args.linkedinUrl,
+        fileHash: args.fileHash,
+      }))?._id ?? null;
 
     if (existingCandidateId) {
       // Retrieve candidate applications

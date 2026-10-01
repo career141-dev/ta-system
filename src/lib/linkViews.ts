@@ -24,9 +24,16 @@ const CLOSED = new Set(["rejected", "dropped_out"]);
  * (New rows arrive Shortlisted, so the outcome alone cannot mean Interested.)
  */
 export function interestOf(row: { outcome: string }, app: { stage: string } | null | undefined): Interest {
-  if (app) return CLOSED.has(app.stage) ? "not_interested" : "interested";
+  if (app && CLOSED.has(app.stage)) return "not_interested";
+  // Matched to the opening by the system — Database matches, New CVs, the
+  // AI's own shortlist — is not a TA's Interested (1 Oct). It read as
+  // Interested, so the Interested button was hidden and the TA had no way to
+  // take them on from the row. Pending until a TA does.
+  if (app && !SYSTEM_ONLY.has(app.stage)) return "interested";
   return row.outcome === "declined" ? "not_interested" : "pending";
 }
+
+const SYSTEM_ONLY = new Set(["matched", "new_cv", "ai_follow_up"]);
 
 export const INTEREST_LABEL: Record<Interest, string> = {
   pending: "Pending",
@@ -40,8 +47,11 @@ export function levelLabel(l: { n: number; at: number; name?: string }): string 
 }
 
 /** Old links (?view=shortlisted / ?view=addons) keep working. */
-export function readLinkFilters(sp: { status?: string; view?: string; level?: string; addons?: string }) {
+export function readLinkFilters(sp: { status?: string; view?: string; level?: string; addons?: string; by?: string }) {
   const status = INTEREST_TABS.some((t) => t.key === sp.status) ? (sp.status ?? "") : sp.view === "shortlisted" ? "interested" : "";
   const level = Math.max(0, Math.floor(Number(sp.level)) || 0);
-  return { status, level, addons: sp.addons === "1" || sp.view === "addons" };
+  // Who added the row (1 Oct): two TAs on one opening could not tell their
+  // own headhunted profiles from each other's.
+  const by = /^[\w-]{1,64}$/.test(sp.by ?? "") ? (sp.by as string) : "";
+  return { status, level, addons: sp.addons === "1" || sp.view === "addons", by };
 }

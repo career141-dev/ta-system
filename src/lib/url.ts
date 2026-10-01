@@ -38,6 +38,19 @@ export function externalUrl(raw: string | null | undefined): string | null {
  * showed "Unnamed profile" until someone typed a name (testing, 21 Sep).
  * Returns null for anything that is not a linkedin.com/in/ profile.
  */
+/**
+ * The key a row's LinkedIn address is matched on: the /in/ profile's, or for a
+ * LinkedIn Recruiter page ("…/talent/hire/…/profile/AEMAAC…") that profile's
+ * own id (1 Oct). Recruiter addresses had no key, so every capture of the same
+ * person from Recruiter made another row.
+ */
+export function linkKey(raw: string | null | undefined): string | null {
+  const inKey = profileLink(raw)?.key;
+  if (inKey) return inKey;
+  const m = (raw ?? "").match(/linkedin\.com\/talent\/[^?#\s]*?\/profile\/([A-Za-z0-9_-]{10,})/i);
+  return m ? `linkedin.com/talent/profile/${m[1].toLowerCase()}` : null;
+}
+
 export function profileLink(raw: string | null | undefined): { url: string; key: string; guessedName: string | null } | null {
   const href = externalUrl(raw);
   if (!href) return null;

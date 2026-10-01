@@ -35,22 +35,31 @@ export async function cvBytes(candidateId: string, download = false): Promise<Cv
   const link = await backend.cvLink({ id: null }, candidateId, download);
   if (!link.ok) return { ok: false, status: link.reason === "storage_unavailable" ? 503 : 404, detail: link.detail };
 
-  try {
-    const res = await fetch(internalUploadUrl(link.url));
-    if (res.ok) {
-      const rawType = res.headers.get("content-type") || link.fileType || "application/pdf";
-      const isPdf =
-        /pdf/i.test(rawType) || /\.pdf$/i.test(link.fileName ?? "") || !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(link.fileName ?? "");
-      return {
-        ok: true,
-        bytes: Buffer.from(await res.arrayBuffer()),
-        fileName: link.fileName,
-        contentType: isPdf ? "application/pdf" : rawType,
-        isPdf,
-      };
+  // Twice, with a time limit each (1 Oct): a single slow or dropped fetch used
+  // to leave the viewer broken for that one person while it worked for others.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(internalUploadUrl(link.url), { signal: AbortSignal.timeout(20_000) });
+      if (res.ok) {
+        const rawType = res.headers.get("content-type") || link.fileType || "application/pdf";
+        const isPdf =
+          /pdf/i.test(rawType) || /\.pdf$/i.test(link.fileName ?? "") || !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(link.fileName ?? "");
+        return {
+          ok: true,
+          bytes: Buffer.from(await res.arrayBuffer()),
+          fileName: link.fileName,
+          contentType: isPdf ? "application/pdf" : rawType,
+          isPdf,
+        };
+      }
+    } catch (err) {
+      console.warn(`[cv proxy] attempt ${attempt + 1}:`, (err as Error).message);
     }
-  } catch (err) {
-    console.warn("[cv proxy]", (err as Error).message);
+  }
+  // An address only the server can reach (internal storage) is no use to the
+  // browser: the CV route's redirect to it showed a broken frame. Said plainly instead.
+  if (internalUploadUrl(link.url) !== link.url) {
+    return { ok: false, status: 502, detail: "The CV could not be fetched just now. Reload the page to try again." };
   }
   return { ok: false, url: link.url, fileName: link.fileName };
 }

@@ -51,6 +51,9 @@ eq("no industry or country: just 'one of the leading clients'", bare.text.includ
 eq("no TA: signed by the team", bare.text.includes("Best regards,\nTalent Acquisition Team\nCareer141"), true);
 eq("female: Ms.", initialReachOutEmail({ candidateName: "Kumari Silva", gender: "Female", jobTitle: "X", asks: [] }).text.startsWith("Dear Ms. Kumari Silva,"), true);
 eq("no name at all", initialReachOutEmail({ candidateName: null, jobTitle: "X", asks: [] }).text.startsWith("Dear Candidate,"), true);
+eq("a name with its own title gets no second one", initialReachOutEmail({ candidateName: "Mr. Nimal Perera", gender: "Male", jobTitle: "X", asks: [] }).text.startsWith("Dear Mr. Nimal Perera,"), true);
+eq("…nor 'Dr.' a 'Ms.'", initialReachOutEmail({ candidateName: "Dr. Kumari Silva", gender: "Female", jobTitle: "X", asks: [] }).text.startsWith("Dear Dr. Kumari Silva,"), true);
+eq("a name starting like a title is still titled", initialReachOutEmail({ candidateName: "Drashan Silva", gender: "Male", jobTitle: "X", asks: [] }).text.startsWith("Dear Mr. Drashan Silva,"), true);
 eq("a name is escaped in the HTML", initialReachOutEmail({ candidateName: "<b>x</b>", jobTitle: "X", asks: [] }).html.includes("<b>x</b>"), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);

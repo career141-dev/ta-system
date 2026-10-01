@@ -11,7 +11,8 @@
  * it is what the Convex swap will inherit conceptually — read, decide, commit.
  */
 
-import { profileLink } from "@/lib/url";
+import { linkKey, profileLink } from "@/lib/url";
+import { companyMatch, compareNames } from "../../convex/lib/samePerson";
 import { isDueForPurge, purgeAt } from "@/lib/bin";
 import fs from "node:fs";
 import path from "node:path";
@@ -2072,7 +2073,23 @@ const rawRepo = {
     // "linkedin.com/in/nimal-perera", and they are different people.
     const want = canonical.toLowerCase();
     return load().linkVault.find(
-      (l) => l.openingId === openingId && (profileLink(l.linkedinUrl)?.key ?? l.linkedinUrl.toLowerCase()) === want,
+      (l) => l.openingId === openingId && (linkKey(l.linkedinUrl) ?? l.linkedinUrl.toLowerCase()) === want,
+    );
+  },
+
+  /**
+   * A row on this opening that is plainly this person by name and company
+   * (1 Oct): the same profile saved once from LinkedIn and once from
+   * Recruiter has two different addresses, and became two rows. The same full
+   * name at the same company on one opening is the same person.
+   */
+  findLinkByPerson(openingId: Id, name: string | null | undefined, company: string | null | undefined): LinkVaultEntry | undefined {
+    if (!name || !company) return undefined;
+    return load().linkVault.find(
+      (l) =>
+        l.openingId === openingId &&
+        compareNames(l.name ?? l.capture?.fullName, name) === "exact" &&
+        companyMatch(l.company ?? l.capture?.currentCompany, company) === "same",
     );
   },
 
@@ -2117,6 +2134,20 @@ const rawRepo = {
     // was matched across the whole database (lib/cvMatch), and falling through
     // to a new id made a second record for someone we already held (28 Sep).
     const candidateId = existingCandidate?.id ?? e.candidateId ?? `ca_${Math.random().toString(36).slice(2, 10)}`;
+    // The person we already hold takes what the row knows and they lack — the
+    // LinkedIn address, a number, a title — and never loses what they have:
+    // the CV's details stay, the row only fills gaps (1 Oct).
+    if (existingCandidate) {
+      const cap = e.capture ?? null;
+      const fill: Partial<Candidate> = {};
+      const blank = (v: string | null | undefined) => !(v ?? "").trim();
+      if (blank(existingCandidate.linkedinUrl) && /linkedin\.com\/in\//i.test(e.linkedinUrl)) fill.linkedinUrl = e.linkedinUrl;
+      if (blank(existingCandidate.phone) && !blank(e.phoneNumber)) fill.phone = e.phoneNumber;
+      if (blank(existingCandidate.currentTitle) && !blank(e.title ?? cap?.currentTitle)) fill.currentTitle = e.title ?? cap?.currentTitle ?? null;
+      if (blank(existingCandidate.currentEmployer) && !blank(e.company ?? cap?.currentCompany)) fill.currentEmployer = e.company ?? cap?.currentCompany ?? null;
+      if (blank(existingCandidate.location) && !blank(cap?.location)) fill.location = cap?.location ?? null;
+      if (Object.keys(fill).length) mutate((d) => { const c = d.candidates.find((x) => x.id === existingCandidate.id); if (c) Object.assign(c, fill); });
+    }
     const onOpening = db.applications.find((a) => a.candidateId === candidateId && a.openingId === e.openingId);
     if (onOpening) {
       if (e.candidateId !== candidateId) mutate((d) => { const row = d.linkVault.find((l) => l.id === entryId); if (row) row.candidateId = candidateId; });

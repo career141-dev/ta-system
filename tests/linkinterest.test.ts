@@ -36,6 +36,11 @@ eq("Declined off the pipeline is Not interested", interestOf({ outcome: "decline
 eq("on the pipeline is Interested", interestOf({ outcome: "contacted" }, { stage: "ta_follow_up" }), "interested");
 eq("rejected on the pipeline is Not interested", interestOf({ outcome: "shortlisted" }, { stage: "rejected" }), "not_interested");
 eq("dropped out is Not interested", interestOf({ outcome: "shortlisted" }, { stage: "dropped_out" }), "not_interested");
+// 1 Oct: Ajith, linked to his record, sat in Database matches; the row said
+// Interested, so the Interested button was hidden and nobody could move him on.
+eq("in Database matches, not yet taken on by a TA, is Pending", interestOf({ outcome: "shortlisted" }, { stage: "matched" }), "pending");
+eq("…and in New CVs", interestOf({ outcome: "shortlisted" }, { stage: "new_cv" }), "pending");
+eq("…and on the AI's own shortlist", interestOf({ outcome: "shortlisted" }, { stage: "ai_follow_up" }), "pending");
 
 console.log("\nPending → Interested → Not interested, one person throughout");
 {
@@ -146,9 +151,25 @@ console.log("\nL1, L2, L3: started with + by each TA");
 }
 
 console.log("\nthe address bar");
-eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, addons: false });
+eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, addons: false, by: "" });
 eq("a made-up status is All", readLinkFilters({ status: "maybe" }).status, "");
 eq("a bad L is All Ls", readLinkFilters({ level: "x" }).level, 0);
+
+console.log("\ntwo TAs on one opening: whose rows, and no duplicates (1 Oct)");
+{
+  const { linkKey } = await import("@/lib/url");
+  eq("added by: one person's rows", readLinkFilters({ by: "u_hassan" }).by, "u_hassan");
+  eq("added by: nonsense is everyone", readLinkFilters({ by: "<script>" }).by, "");
+  const rec = "https://www.linkedin.com/talent/hire/2151390298/discover/recruiterSearch/profile/AEMAACJp05QBEw6SFXmbmHUmR5wG3wKSWBK2ItY";
+  eq("a Recruiter page has a key: the profile's own id", linkKey(rec), "linkedin.com/talent/profile/aemaacjp05qbew6sfxmbmhumr5wg3wkswbk2ity");
+  eq("…the same from another Recruiter search", linkKey(rec.replace("2151390298/discover/recruiterSearch", "999/pipeline")), linkKey(rec));
+  eq("a public profile's key is unchanged", linkKey("lk.linkedin.com/in/Kgpk/"), "linkedin.com/in/kgpk");
+  const r1 = repo.addLink(o.id, rec, ta.id, "Thivanka Nimesh");
+  eq("captured again from Recruiter: found, not added", repo.findLinkByUrl(o.id, linkKey(rec)!)?.id, r1);
+  repo.updateLink(r1, { company: "Virtusa (Pvt) Ltd" });
+  eq("the same name at the same company, from a public profile: found", repo.findLinkByPerson(o.id, "Thivanka Nimesh", "Virtusa")?.id, r1);
+  eq("the same name at another company: a different person", repo.findLinkByPerson(o.id, "Thivanka Nimesh", "Dialog Axiata"), undefined);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

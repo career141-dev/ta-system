@@ -163,7 +163,10 @@ export function isSystemNote(note: string): boolean {
     /^>Historical/i.test(t) ||
     /^Imported from/i.test(t) ||
     /^Reverse match/i.test(t) ||
-    /^System:/i.test(t)
+    /^System:/i.test(t) ||
+    // Written by the app when a row joins the pipeline; it leaked into the
+    // end-of-day notes and the CV's box as a note the TA never wrote (1 Oct).
+    /^>?\s*Headhunted\s+—\s+(shortlisted|not interested)/i.test(t)
   );
 }
 

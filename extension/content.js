@@ -119,10 +119,22 @@
   }
 
   /** Only present when the TA has the contact-info panel open. Nothing here
-   *  opens it — an extension that clicks through a profile is automation. */
+   *  opens it — an extension that clicks through a profile is automation, and
+   *  can get a LinkedIn account restricted.
+   *
+   *  Read from that panel only (1 Oct). It used to search the whole page when
+   *  the panel was shut, so any number on the page — a colleague's in a post, a
+   *  company's — became this person's phone, and matched them to someone else. */
+  function contactPanel() {
+    const direct = document.querySelector(".pv-contact-info, [data-test-contact-info-section]");
+    if (direct) return direct;
+    // The panel is a dialog headed "Contact info"; any other dialog is not it.
+    return [...document.querySelectorAll('.artdeco-modal, [role="dialog"]')].find((d) => /contact info/i.test(txt(d.querySelector("h1, h2, h3")) || "")) || null;
+  }
+
   function readContact() {
-    const modal = document.querySelector(".pv-contact-info, [data-test-modal] .pv-profile-section, .artdeco-modal");
-    const scope = modal || document;
+    const scope = contactPanel();
+    if (!scope) return { email: null, phone: null, open: false };
     const mail = scope.querySelector('a[href^="mailto:"]');
     const phone = [...scope.querySelectorAll("span, li")]
       .map(txt)
@@ -130,6 +142,7 @@
     return {
       email: mail ? clean(mail.getAttribute("href").replace(/^mailto:/, "")) : null,
       phone: phone || null,
+      open: true,
     };
   }
 
@@ -146,9 +159,16 @@
   }
 
   function recruiterLockup() {
-    const nameEl = document.querySelector(
-      '[data-test-row-lockup-full-name] a[data-test-lockup-name-button], a[data-test-lockup-name-button], [data-test-profile-header-name], .artdeco-entity-lockup__title',
-    );
+    // In order of trust, not page order (1 Oct): the open profile's own header
+    // first. A list row or a sidebar card ("People also viewed") is someone
+    // else, and reading their name put profiles on the wrong person.
+    const nameEl = [
+      "[data-test-profile-header-name]",
+      "[data-test-row-lockup-full-name] a[data-test-lockup-name-button]",
+      "a[data-test-lockup-name-button]",
+    ]
+      .map((s) => document.querySelector(s))
+      .find(Boolean);
     if (!nameEl) return null;
     const degreeText = recruiterField("[data-test-lockup-degree] .artdeco-entity-lockup__degree");
     const degreeMatch = degreeText && degreeText.match(/\b(1st|2nd|3rd)\b/);
@@ -167,8 +187,9 @@
       if (n) return n;
     }
 
-    // 2. Recruiter lockup
-    if (recruiter?.fullName) {
+    // 2. Recruiter lockup — on Recruiter pages only. On a public profile the
+    // page's own h1 is the person; a lockup there is a sidebar card (1 Oct).
+    if (recruiter?.fullName && window.location.pathname.startsWith("/talent/")) {
       const n = cleanName(recruiter.fullName);
       if (n) return n;
     }
@@ -516,7 +537,21 @@
         .bar.dragging .drag-icon { cursor: grabbing; }
         .to { opacity: .75; font-weight: 400; }
         .dot { width: 7px; height: 7px; border-radius: 50%; background: #ffffff; opacity: .85; flex-shrink: 0; }
+        .note {
+          position: fixed; z-index: 2147483647; max-width: 320px;
+          padding: 10px 12px; border-radius: 10px; background: #ffffff; color: #1c241f;
+          border: 1px solid #d6dcd8; box-shadow: 0 6px 24px rgba(0,0,0,.18);
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+          font-size: 12.5px; line-height: 1.45; cursor: pointer;
+        }
+        .note[hidden] { display: none; }
+        .note p { margin: 0; }
+        .note p + p { margin-top: 4px; }
+        .note .found { color: #14663f; font-weight: 600; }
+        .note .check { color: #8a5a00; font-weight: 600; }
+        .note .tip { color: #5b6660; }
       </style>
+      <div class="note" hidden title="Click to close"></div>
       <button class="bar" type="button" title="Click to shortlist · Drag to move anywhere">
         <span class="drag-icon" title="Drag to move">⋮⋮</span>
         <span class="dot"></span>
@@ -528,6 +563,34 @@
     btn.addEventListener("click", capture);
     makeDraggable(btn);
     paintTarget();
+  }
+
+  /**
+   * What our database said about the person just saved (1 Oct), in a note
+   * above the button: already held, possibly someone to check, or new — and,
+   * for a 1st-degree connection, a reminder that their email and phone are
+   * only read with LinkedIn's Contact info open.
+   */
+  let noteTimer = null;
+  function showNote(lines) {
+    if (!root) return;
+    const note = root.querySelector(".note");
+    const bar = root.querySelector(".bar");
+    note.replaceChildren(
+      ...lines.map(([cls, text]) => {
+        const p = document.createElement("p");
+        if (cls) p.className = cls;
+        p.textContent = text;
+        return p;
+      }),
+    );
+    const r = bar.getBoundingClientRect();
+    note.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+    note.style.bottom = `${Math.max(8, window.innerHeight - r.top + 8)}px`;
+    note.hidden = false;
+    note.onclick = () => (note.hidden = true);
+    clearTimeout(noteTimer);
+    noteTimer = setTimeout(() => (note.hidden = true), 12000);
   }
 
   function setState(text, tone) {
@@ -562,6 +625,7 @@
     try {
       const profile = extractProfile();
       if (!profile.fullName) throw new Error("Could not read a name off this page");
+      const contactOpen = readContact().open;
 
       let res;
       try {
@@ -575,7 +639,21 @@
       }
       if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
-      setState(res.status === "updated" ? "Updated in the table" : "Shortlisted in the table", "ok");
+      setState(res.status === "updated" ? "Already in the table — updated" : "Saved to the table", "ok");
+      const m = res.match;
+      showNote([
+        res.status === "updated"
+          ? ["", `Already in Excel Tables${res.addedByName ? `, added by ${res.addedByName}` : ""}. Updated, not added again.`]
+          : ["", "Saved to Excel Tables."],
+        m && m.strength === "same"
+          ? ["found", `In our database: ${m.fullName}${m.hasCv ? " — CV on file" : " — no CV yet"}.`]
+          : m && m.strength === "possible"
+            ? ["check", `Possibly ${m.fullName}, already in our database. Check on the row in Excel Tables.`]
+            : ["", "Not in our database yet — a new person. Use Find CV on the row if you think we have them."],
+        !contactOpen && profile.connectionDegree === "1st" && !profile.email && !profile.phone
+          ? ["tip", "Tip: open their Contact info before saving, to include their email and phone."]
+          : null,
+      ].filter(Boolean));
     } catch (err) {
       const msg = /context invalidated/i.test(err?.message || "")
         ? "Extension reloaded — refresh (F5)"

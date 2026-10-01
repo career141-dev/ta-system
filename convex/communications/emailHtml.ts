@@ -129,7 +129,10 @@ export function initialReachOutEmail(o: {
 }): { subject: string; text: string; html: string } {
   const name = (o.candidateName ?? "").trim();
   const g = (o.gender ?? "").trim().toLowerCase();
-  const honorific = g === "male" ? "Mr. " : g === "female" ? "Ms. " : "";
+  // A name read from a CV often carries its own title ("Mr. Nimal Perera",
+  // "Dr. …"): that one is kept and no second added — it read "Dear Mr. Mr." (1 Oct).
+  const titled = /^(mr|mrs|ms|miss|dr|prof|eng|rev|capt|col|maj|lt|hon)\b\.?\s/i.test(name);
+  const honorific = titled ? "" : g === "male" ? "Mr. " : g === "female" ? "Ms. " : "";
   const dear = name ? `Dear ${honorific}${name},` : "Dear Candidate,";
   const ta = (o.taName ?? "").trim();
   const industry = (o.clientIndustry ?? "").trim().toLowerCase();

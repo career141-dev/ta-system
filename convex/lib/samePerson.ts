@@ -31,6 +31,22 @@ export interface Profile {
   company?: string | null;
   title?: string | null;
   location?: string | null;
+  /**
+   * Every company on their LinkedIn experience, as the extension read it (1
+   * Oct). A CV a year old names their old employer; LinkedIn names both.
+   */
+  employers?: (string | null | undefined)[];
+  /** Their LinkedIn jobs with the years, "Jan 2018 - Dec 2022" read as 2018–2022. */
+  jobs?: Job[];
+  /** Universities and colleges on their LinkedIn education. */
+  schools?: (string | null | undefined)[];
+}
+
+/** One job, with the years it started and ended (null end: still there). */
+export interface Job {
+  company?: string | null;
+  from?: number | null;
+  to?: number | null;
 }
 
 export interface Held {
@@ -43,6 +59,47 @@ export interface Held {
   location?: string | null;
   /** Every employer in their career, current one included. */
   employers?: (string | null | undefined)[];
+  /** Their CV's jobs with years, where the CV gives them. */
+  jobs?: Job[];
+  /** Where they studied, from their CV. */
+  schools?: (string | null | undefined)[];
+}
+
+/**
+ * The years in a job's dates, however written: "Jan 2018 - Dec 2022 · 5 yrs",
+ * "2018 – Present", "03/2019". The first year is the start; a second is the
+ * end; "Present" (or no second year) is still there.
+ */
+export function jobYears(dates: string | null | undefined): { from: number | null; to: number | null } {
+  const years = [...(dates ?? "").matchAll(/\b(19[5-9]\d|20\d{2})\b/g)].map((m) => Number(m[1]));
+  return { from: years[0] ?? null, to: years[1] ?? null };
+}
+
+const SCHOOL_NOISE = /\b(university|universiti|college|institute|institution|school|campus|faculty|of|the|and|for|sri|lanka|colombo|pvt|ltd)\b/g;
+const schoolWords = (s: string | null | undefined) =>
+  (s ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(SCHOOL_NOISE, " ").split(/\s+/).filter((w) => w.length > 1);
+
+/**
+ * The same university or college: the same distinctive words ("University of
+ * Moratuwa" and "Moratuwa University"). One generic word in common is not it.
+ */
+export function sameSchool(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = schoolWords(a);
+  const y = schoolWords(b);
+  if (!x.length || !y.length) return false;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((w) => long.includes(w));
+}
+
+/** A company they both name, starting within a year of each other there: a very strong sign. */
+function sameJobYears(p: Job[] | undefined, c: Job[] | undefined): { company: string; from: number } | null {
+  for (const a of p ?? []) {
+    if (!a.from) continue;
+    for (const b of c ?? []) {
+      if (b.from && Math.abs(a.from - b.from) <= 1 && companyMatch(a.company, b.company)) return { company: b.company ?? "", from: b.from };
+    }
+  }
+  return null;
 }
 
 export interface Verdict {
@@ -127,13 +184,45 @@ const COMPANY_NOISE = /\b(pvt|private|ltd|limited|plc|llc|inc|co|company|group|h
 const companyWords = (c: string | null | undefined) =>
   (c ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(COMPANY_NOISE, " ").split(/\s+/).filter((w) => w.length > 1);
 
-/** Two employer names are one company: every distinctive word of the shorter is in the longer. */
-export function sameCompany(a: string | null | undefined, b: string | null | undefined): boolean {
+/**
+ * How closely two employer names agree.
+ *
+ *   "same"  — the same distinctive words: "SWEN Container Line (Pvt) Ltd" and
+ *             "Swen Container Line".
+ *   "close" — one name's words all sit inside the other's: "Bank of Ceylon"
+ *             and "Commercial Bank of Ceylon". Often a different company, so it
+ *             only ever makes a match "possible" (1 Oct: profiles were linked to
+ *             the wrong person on exactly this).
+ *   null    — no agreement. Generic words ("self employed", "freelance") never agree.
+ */
+export function companyMatch(a: string | null | undefined, b: string | null | undefined): "same" | "close" | null {
   const x = companyWords(a);
   const y = companyWords(b);
-  if (!x.length || !y.length) return false;
+  if (!x.length || !y.length) return null;
+  if (x.every((w) => GENERIC_EMPLOYER.has(w)) || y.every((w) => GENERIC_EMPLOYER.has(w))) return null;
+  const sx = [...new Set(x)].sort().join(" ");
+  const sy = [...new Set(y)].sort().join(" ");
+  if (sx === sy) return "same";
   const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  return short.every((w) => long.includes(w));
+  return short.every((w) => long.includes(w)) ? "close" : null;
+}
+
+const GENERIC_EMPLOYER = new Set(["self", "employed", "freelance", "freelancer", "consultant", "independent", "unemployed", "student", "na", "none"]);
+
+/** Two employer names are one company, or one sits inside the other (see companyMatch). */
+export function sameCompany(a: string | null | undefined, b: string | null | undefined): boolean {
+  return companyMatch(a, b) !== null;
+}
+
+/**
+ * Do these two names belong to one person, as far as a merge may assume?
+ * A shared phone or email is only proof when the names agree too: an agency's
+ * number on a scoop CV, a referee's email or a company switchboard are shared
+ * by unrelated people, and merging on them put one person's CV on another
+ * person's record (1 Oct). No name on either side is no proof.
+ */
+export function namesAgree(a: string | null | undefined, b: string | null | undefined): boolean {
+  return compareNames(a, b) !== null;
 }
 
 const TITLE_NOISE = /\b(senior|junior|sr|jr|assistant|associate|executive|officer|of|and|the|at|in|for|lead|head|chief|deputy)\b/g;
@@ -159,26 +248,82 @@ export function samePerson(p: Profile, c: Held): Verdict {
     return slugP === slugC ? { strength: "same", reasons: ["Same LinkedIn profile"] } : { strength: "none", reasons: ["A different LinkedIn profile is on their record"] };
   }
   const email = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
-  if (email(p.email) && email(p.email) === email(c.email)) return { strength: "same", reasons: ["Same email"] };
   const phone = phoneKey(p.phone);
-  if (phone && phone === phoneKey(c.phone)) return { strength: "same", reasons: ["Same phone number"] };
+  const contact =
+    email(p.email) && email(p.email) === email(c.email) ? "Same email"
+    : phone && phone === phoneKey(c.phone) ? "Same phone number"
+    : null;
+  // A shared email or phone is certain only with the name agreeing (1 Oct): on
+  // its own it may be an agency's, a referee's or a company's. A TA confirms.
+  if (contact) {
+    return namesAgree(p.name, c.fullName)
+      ? { strength: "same", reasons: [contact, "Same name"] }
+      : { strength: "possible", reasons: [contact, p.name ? "but a different name" : "no name to compare"] };
+  }
 
   const name = compareNames(p.name, c.fullName);
   if (!name) return { strength: "none", reasons: [] };
 
-  const employers = [c.currentEmployer, ...(c.employers ?? [])];
-  const employer = employers.find((e) => sameCompany(p.company, e));
+  const employers = [c.currentEmployer, ...(c.employers ?? []), ...(c.jobs ?? []).map((j) => j.company)];
+  // Their whole LinkedIn history against their whole CV career (1 Oct): a
+  // person who has changed jobs since their CV shares a past company, not a
+  // current one. The exact company first, then one inside another's name.
+  const theirs = [p.company, ...(p.employers ?? []), ...(p.jobs ?? []).map((j) => j.company)].filter(Boolean);
+  const pair = (kind: "same" | "close") => {
+    for (const mine of theirs) for (const e of employers) if (companyMatch(mine, e) === kind) return e;
+    return undefined;
+  };
+  const employer = pair("same") ?? pair("close");
+  const employerSame = !!employer && pair("same") !== undefined;
   const title = similarTitle(p.title, c.currentTitle);
   const place = samePlace(p.location, c.location);
+  // The same company in the same years, and the same university (1 Oct): with
+  // the name, either makes it certain where a company alone only suggests it.
+  const years = sameJobYears(p.jobs, c.jobs);
+  const school = (p.schools ?? []).find((s) => (c.schools ?? []).some((h) => sameSchool(s, h)));
   const reasons = [
     name === "exact" ? "Same name" : "Same surname, and initials that fit",
-    employer ? `Both at ${employer}` : null,
+    years ? `Both at ${years.company} from ${years.from}` : employer ? `Both at ${employer}` : null,
+    school ? `Both studied at ${school}` : null,
     title ? "Similar job title" : null,
     place ? "Same place" : null,
   ].filter((r): r is string => Boolean(r));
 
-  if (name === "exact" && employer) return { strength: "same", reasons };
-  if (employer || title || place) return { strength: "possible", reasons };
+  if (name === "exact" && (employerSame || years)) return { strength: "same", reasons };
+  if (name === "exact" && employer && school) return { strength: "same", reasons };
+  if (name === "initials" && (years || (employerSame && school))) return { strength: "same", reasons };
+  if (employer || years || school || title || place) return { strength: "possible", reasons };
   // The same name and nothing else agreeing: two people, as far as we can tell.
   return { strength: "none", reasons };
+}
+
+export interface CvSearchHit {
+  strength: "same" | "possible" | "name";
+  score: number;
+  reasons: string[];
+}
+
+/**
+ * How well a database candidate fits a LinkedIn profile, for the TA's
+ * "Find CV" search (1 Oct). Wider than samePerson: a candidate with only the
+ * same name, or the same surname, is still shown — lower down — because the
+ * TA decides, and a person the matching missed is usually one whose company
+ * or title has changed since their CV. Null when nothing ties them, or their
+ * record carries a different LinkedIn profile.
+ */
+export function cvSearchScore(p: Profile, c: Held): CvSearchHit | null {
+  const v = samePerson(p, c);
+  if (v.strength === "same") return { strength: "same", score: 100, reasons: v.reasons };
+  if (v.strength === "possible") return { strength: "possible", score: 60 + 5 * v.reasons.length, reasons: v.reasons };
+  if (v.reasons.some((r) => r.startsWith("A different LinkedIn profile"))) return null;
+  const name = compareNames(p.name, c.fullName);
+  if (name === "exact") return { strength: "name", score: 40, reasons: ["Same name"] };
+  if (name === "initials") return { strength: "name", score: 30, reasons: ["Same surname, and initials that fit"] };
+  const mine = nameWords(p.name).filter((w) => w.length > 1);
+  const theirs = nameWords(c.fullName);
+  const surname = mine.at(-1);
+  if (surname && mine.length >= 2 && theirs.includes(surname) && mine.some((w) => w !== surname && theirs.includes(w))) {
+    return { strength: "name", score: 20, reasons: ["Name partly the same"] };
+  }
+  return null;
 }

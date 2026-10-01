@@ -64,7 +64,14 @@ const seen = (rows: LinkVaultEntry[], u: User = ta) =>
 eq("a row a lead added is theirs to work, not taken", seen([mk("a", "u_lead", "shortlisted")]), [["a", null]]);
 eq("even before it is shortlisted", seen([mk("b", "u_lead", "no_contact")]), [["b", null]]);
 eq("another TA's unshortlisted row stays hidden", seen([mk("c", "u_other", "contacted")]), []);
-eq("another TA's shortlisted row is still marked", seen([mk("d", "u_other", "shortlisted")]), [["d", "u_other"]]);
+// 1 Oct: every row arrives Shortlisted, so "shortlisted" put all of another
+// TA's saved links in your table. Only a person they really took on shows.
+eq("another TA's saved link (Shortlisted by default) stays hidden", seen([mk("d", "u_other", "shortlisted")]), []);
+eq(
+  "another TA's row whose person is on the pipeline from it is marked",
+  scopeLinks([mk("d2", "u_other", "shortlisted")], ta, deskWide, () => true).map((s) => [s.row.id, s.takenBy]),
+  [["d2", "u_other"]],
+);
 eq("their own row, as before", seen([mk("e", "u_me", "contacted")]), [["e", null]]);
 eq(
   "a lead sees every row",
