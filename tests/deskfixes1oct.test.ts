@@ -30,7 +30,7 @@ console.log("\na headhunted CV is a claim the others see");
 const ta = { id: "u_hifa", role: "ta", isActive: true } as User;
 const row = (outcome: LinkVaultEntry["outcome"]) => ({ id: `r_${outcome}`, addedBy: "u_sanduni", outcome }) as LinkVaultEntry;
 const seen = scopeLinks([row("shortlisted"), row("cv_received"), row("contacted")], ta, () => false).map((s) => [s.row.id, s.takenBy]);
-eq("shortlisted and CV received show as Sanduni's; contacted stays hers alone", seen, [["r_shortlisted", "u_sanduni"], ["r_cv_received", "u_sanduni"]]);
+eq("a CV received shows as Sanduni's; a saved link or a contact stays hers alone", seen, [["r_cv_received", "u_sanduni"]]);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

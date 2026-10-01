@@ -48,10 +48,14 @@ export function LinkVaultTable({
   const users = repo.users();
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
   // A TA's table is their own, plus whatever a lead put in for them. The
-  // exception is somebody the other TA has already shortlisted, which appears
-  // marked so it is not worked twice.
+  // exception is somebody the other TA is really working — on the pipeline
+  // from their row — which appears marked so it is not worked twice (1 Oct).
   const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
-  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
+  const notTakenOn = new Set(["rejected", "dropped_out", "matched", "new_cv", "ai_follow_up"]);
+  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id), (r) =>
+    !!r.candidateId &&
+    repo.applicationsForCandidate(r.candidateId).some((a) => a.openingId === openingId && !notTakenOn.has(a.stage)),
+  );
   // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
   const canNote = can(user, "link.note").ok;
   // Each row's application here and its interest, worked out once: the tabs,
@@ -123,7 +127,9 @@ export function LinkVaultTable({
           ))}
         </nav>
         <div className="flex flex-wrap items-center gap-3 pb-2">
-          {adders.length > 1 && (
+          {/* For leads, who see every TA's rows. A TA's table is their own
+              (scopeLinks), so the filter would only repeat it (1 Oct). */}
+          {isDeskWide(user) && adders.length > 1 && (
             <nav aria-label="Added by" className="flex flex-wrap items-center gap-1 text-[12px]">
               <span className="text-ink-faint">Added by</span>
               {["", ...adders].map((id) => (
