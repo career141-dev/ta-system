@@ -255,6 +255,10 @@ export const create = internalMutation({
     taLeadId: v.optional(v.union(v.string(), v.null())),
     directorId: v.optional(v.union(v.string(), v.null())),
     notesMarkdown: v.optional(v.string()),
+    /** Whose notes these are: a lead's brief, or the TA's own (1 Oct). Defaults to the lead's. */
+    briefKind: v.optional(v.union(v.literal("management_to_lead"), v.literal("lead_to_ta"))),
+    /** What the app read out of the notes (salary, locations, must-haves). */
+    briefExtracted: v.optional(v.any()),
     priorityTier: v.optional(v.string()),
     /** Automatic follow-up reminders after the TA's first Send (ta/followUp.ts `setAuto`). */
     autoFollowUp: v.optional(v.boolean()),
@@ -352,17 +356,20 @@ export const create = internalMutation({
     if (made) await ctx.db.insert("jobPosts", firstPostFor(made, Date.now()));
 
     if (args.notesMarkdown) {
-      await ctx.db.insert("briefs", {
+      // Marked by who wrote it. A TA's notes were filed as the lead's brief, and
+      // the job never pointed at them, so the TA found nothing on it (1 Oct).
+      const briefId = await ctx.db.insert("briefs", {
         clientId: clientIdVal,
         openingId: jobId,
-        kind: "management_to_lead",
+        kind: args.briefKind ?? "management_to_lead",
         capturedBy: user._id,
         capturedAt: Date.now(),
         method: "notes",
         notesMarkdown: args.notesMarkdown,
         transcriptStatus: "none",
-        extracted: {},
+        extracted: args.briefExtracted ?? {},
       });
+      await ctx.db.patch(jobId, { briefId });
     }
 
     return { id: jobId as string };

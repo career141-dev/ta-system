@@ -5,7 +5,8 @@ import { HealthBar } from "@/components/HealthBar";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { PIPELINE_STAGES, STAGE_LABEL, PRIORITY_TARGET, URGENT_ALERTS } from "@/data/types";
-import { relDays } from "@/lib/format";
+import { relDays, dateAt } from "@/lib/format";
+import { OpeningBrief } from "@/components/OpeningBrief";
 import { JdApproval } from "@/components/JdApproval";
 import { JobDetailsSummary } from "@/components/JobDetailsSummary";
 import { OpeningAdmin } from "./OpeningAdmin";
@@ -138,6 +139,21 @@ export default async function OverviewPage({
           briefSummary={briefSummary}
         />
       )}
+
+      {/* Kept on the Overview whatever state the JD is in; it used to be gone once approved (1 Oct). */}
+      <OpeningBrief
+        className="mb-8"
+        entries={repo
+          .briefsForOpening(id)
+          .filter((b) => b.notesMarkdown.trim())
+          .map((b) => ({
+            id: b.id,
+            author: users.find((u) => u.id === b.capturedBy)?.name ?? "Someone on the desk",
+            isLead: users.find((u) => u.id === b.capturedBy)?.role !== "ta",
+            notes: b.notesMarkdown.trim(),
+            at: dateAt(b.capturedAt),
+          }))}
+      />
 
       {/* The facts only; the form is edited on the Job description page, beside
           the JD it is read from (testing, 21 Sep). */}

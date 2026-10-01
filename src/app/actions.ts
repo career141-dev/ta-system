@@ -835,6 +835,8 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
         taLeadId,
         directorId,
         notesMarkdown: notes,
+        briefKind: isLead ? "management_to_lead" : "lead_to_ta",
+        briefExtracted: notes.trim() ? { ...extractFromText(notes), title } : undefined,
         autoFollowUp,
       },
     );

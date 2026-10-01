@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { JdScreen } from "@/components/JdScreen";
+import { OpeningBrief } from "@/components/OpeningBrief";
 import { JdRead } from "./JdRead";
 import { ProjectHeader } from "../ProjectHeader";
 import { dateAt } from "@/lib/format";
@@ -43,7 +44,21 @@ export default async function JdPage({
     }));
   const e = brief?.extracted;
   const lead = repo.user(o.taLeadId);
-  const canWrite = o.assignedTaIds.includes(user.id) || user.role === "admin";
+  // The same rule as every other edit on the opening, so a TA who is on it
+  // through an assignment, or its lead, is not shut out of the notes (1 Oct).
+  const canWrite =
+    o.assignedTaIds.includes(user.id) ||
+    allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
+  // Everyone's notes, the viewer's own included, for the read-only views.
+  const everyone = briefs
+    .filter((b) => b.notesMarkdown.trim() || b.transcript)
+    .map((b) => ({
+      id: b.id,
+      author: repo.user(b.capturedBy)?.name ?? "Someone on the desk",
+      isLead: repo.user(b.capturedBy)?.role !== "ta",
+      notes: [b.notesMarkdown.trim(), b.transcriptStatus === "ready" ? b.transcript ?? "" : ""].filter(Boolean).join("\n\n"),
+      at: dateAt(b.capturedAt),
+    }));
 
   // Named, not bare values: "P3" on its own read as a code (testing, 21 Sep).
   const summary = [
@@ -109,6 +124,7 @@ export default async function JdPage({
           canAmend={canWrite}
           chat={chat}
         />
+        <OpeningBrief entries={everyone} className="mt-8" />
         <MatchingStatus openingId={id} />
         {details}
       </>
@@ -139,14 +155,17 @@ export default async function JdPage({
           chat={chat}
         />
       ) : (
-        <div className="rounded-2xl border border-rule bg-surface px-7 py-14 text-center">
-          <p className="text-[13px] text-ink-soft">
-            Only an assigned TA can write this JD.
-          </p>
-          <p className="mt-1.5 text-[12.5px] text-ink-faint">
-            Assigned to {o.assignedTaIds.map((t) => repo.user(t)?.name).join(", ")}.
-          </p>
-        </div>
+        <>
+          <OpeningBrief entries={everyone} className="mb-5" />
+          <div className="rounded-2xl border border-rule bg-surface px-7 py-14 text-center">
+            <p className="text-[13px] text-ink-soft">
+              Only an assigned TA can write this JD.
+            </p>
+            <p className="mt-1.5 text-[12.5px] text-ink-faint">
+              Assigned to {o.assignedTaIds.map((t) => repo.user(t)?.name).join(", ") || "no one yet"}.
+            </p>
+          </div>
+        </>
       )}
 
       {details}
