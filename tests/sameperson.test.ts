@@ -3,7 +3,7 @@
  * The two ways it can go wrong both matter: a second record for the same
  * person, and one person's CV shown for somebody else with the same name.
  */
-import { compareNames, linkedinVariants, phoneKey, profileSlug, sameCompany, samePerson } from "../convex/lib/samePerson";
+import { companyMatch, compareNames, linkedinVariants, namesAgree, phoneKey, profileSlug, sameCompany, samePerson } from "../convex/lib/samePerson";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -30,8 +30,8 @@ eq("different companies", sameCompany("SWEN Container Line", "Pacific Container 
 console.log("\ncertain: linked without asking");
 const cv = { fullName: "Kajan Thiyagamoorthy", email: "kajan.t@gmail.com", phone: "077 123 4567", currentEmployer: "SWEN Container Line", currentTitle: "Documentation Executive", location: "Colombo", employers: ["Pacific Container Line", "SWEN Container Line"] };
 eq("the same LinkedIn profile", samePerson({ linkedinUrl: "https://www.linkedin.com/in/kajan-t" }, { ...cv, linkedinUrl: "https://lk.linkedin.com/in/kajan-t/" }).strength, "same");
-eq("the same email", samePerson({ name: "K T", email: "Kajan.T@gmail.com " }, cv).strength, "same");
-eq("the same phone, written differently", samePerson({ phone: "+94771234567" }, cv).strength, "same");
+eq("the same email and the same name", samePerson({ name: "Kajan Thiyagamoorthy", email: "Kajan.T@gmail.com " }, cv).strength, "same");
+eq("the same phone, written differently, and initials that fit", samePerson({ name: "K. Thiyagamoorthy", phone: "+94771234567" }, cv).strength, "same");
 eq("the same full name at the same company", samePerson({ name: "Kajan Thiyagamoorthy", company: "SWEN Container Line (Pvt) Ltd" }, cv), { strength: "same", reasons: ["Same name", "Both at SWEN Container Line"] });
 eq("…or a company they worked at before", samePerson({ name: "Kajan Thiyagamoorthy", company: "Pacific Container Line" }, cv).strength, "same");
 
@@ -47,6 +47,16 @@ eq(
   "none",
 );
 eq("a similar name is not the same name", samePerson({ name: "Kajendran Thiyagarajah", company: "SWEN Container Line" }, cv).strength, "none");
+
+console.log("\nshared contact details are not proof on their own (1 Oct)");
+eq("same phone, a different name: a TA checks", samePerson({ name: "Nimal Perera", phone: "+94771234567" }, cv).strength, "possible");
+eq("same email, no name to compare: a TA checks", samePerson({ email: "kajan.t@gmail.com" }, cv).strength, "possible");
+eq("a company inside another's name is not the same company", companyMatch("Bank of Ceylon", "Commercial Bank of Ceylon"), "close");
+eq("…so the same name there is only possible", samePerson({ name: "Nimal Perera", company: "Bank of Ceylon" }, { fullName: "Nimal Perera", currentEmployer: "Commercial Bank of Ceylon" }).strength, "possible");
+eq("the same company, written differently, is the same", companyMatch("SWEN Container Line (Pvt) Ltd", "Swen Container Line"), "same");
+eq("self employed is nobody's company", companyMatch("Self Employed", "Self-employed"), null);
+eq("names agree: initials", namesAgree("W.M.K. Perera", "Wijesinghe Mudiyanselage Kasun Perera"), true);
+eq("names disagree", namesAgree("Nimal Perera", "Kasun Perera"), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

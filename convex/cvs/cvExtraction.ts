@@ -854,6 +854,7 @@ CRITICAL INSTRUCTION: If the document is NOT a CV, Resume, or Candidate Profile 
 5. If currentTitle or currentEmployer are not explicitly stated as "current" or "present", infer them from the most recent job in their work experience by considering the dates.
 6. Extract any referees or professional references explicitly mentioned in the CV (including name, designation/title, company, contact number/phone, email, relationship to candidate, and any notes). Return as an array of objects under "referees".
 7. Return gender as "Male" or "Female" only when the CV states it, gives the candidate a title (Mr., Ms., Mrs., Miss), or refers to the candidate as he or she. Pronouns and titles for referees describe the referee, not the candidate. Never decide it from the name or a photo. Otherwise return null.
+8. email and phone are the CANDIDATE'S OWN only. Never return an agency's or recruiter's contact (a header or footer added by whoever sent the CV), a referee's, an employer's office line or switchboard, or a family member's. If the candidate's own is not given, return null — a wrong one joins this CV to someone else's record.
 
 JSON Target Schema:
 {

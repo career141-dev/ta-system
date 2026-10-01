@@ -701,6 +701,23 @@ function CvStatus({
           Their record
         </Link>
         {m?.reasons.length ? <span className="text-ink-faint">· {m.reasons.join(", ")}</span> : null}
+        {/* Linked by the matching on its own: a TA can say it is someone else
+            (1 Oct — profiles were landing on the wrong person). */}
+        {m && m.candidateId === r.candidateId && m.decided !== "same" && (
+          <form onSubmit={(e) => decide.run(submitted(e).formData)} className="inline">
+            <input type="hidden" name="openingId" value={openingId} />
+            <input type="hidden" name="entryId" value={r.id} />
+            <button
+              name="decision"
+              value="different"
+              disabled={decide.pending}
+              className="rounded-full border border-rule-strong bg-surface px-2.5 py-0.5 text-[11.5px] font-medium text-ink hover:border-danger hover:text-danger disabled:opacity-60"
+            >
+              Not this person
+            </button>
+          </form>
+        )}
+        <ActionNote result={decide.result} className="w-full" />
       </div>
     );
   }

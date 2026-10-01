@@ -127,13 +127,45 @@ const COMPANY_NOISE = /\b(pvt|private|ltd|limited|plc|llc|inc|co|company|group|h
 const companyWords = (c: string | null | undefined) =>
   (c ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(COMPANY_NOISE, " ").split(/\s+/).filter((w) => w.length > 1);
 
-/** Two employer names are one company: every distinctive word of the shorter is in the longer. */
-export function sameCompany(a: string | null | undefined, b: string | null | undefined): boolean {
+/**
+ * How closely two employer names agree.
+ *
+ *   "same"  — the same distinctive words: "SWEN Container Line (Pvt) Ltd" and
+ *             "Swen Container Line".
+ *   "close" — one name's words all sit inside the other's: "Bank of Ceylon"
+ *             and "Commercial Bank of Ceylon". Often a different company, so it
+ *             only ever makes a match "possible" (1 Oct: profiles were linked to
+ *             the wrong person on exactly this).
+ *   null    — no agreement. Generic words ("self employed", "freelance") never agree.
+ */
+export function companyMatch(a: string | null | undefined, b: string | null | undefined): "same" | "close" | null {
   const x = companyWords(a);
   const y = companyWords(b);
-  if (!x.length || !y.length) return false;
+  if (!x.length || !y.length) return null;
+  if (x.every((w) => GENERIC_EMPLOYER.has(w)) || y.every((w) => GENERIC_EMPLOYER.has(w))) return null;
+  const sx = [...new Set(x)].sort().join(" ");
+  const sy = [...new Set(y)].sort().join(" ");
+  if (sx === sy) return "same";
   const [short, long] = x.length <= y.length ? [x, y] : [y, x];
-  return short.every((w) => long.includes(w));
+  return short.every((w) => long.includes(w)) ? "close" : null;
+}
+
+const GENERIC_EMPLOYER = new Set(["self", "employed", "freelance", "freelancer", "consultant", "independent", "unemployed", "student", "na", "none"]);
+
+/** Two employer names are one company, or one sits inside the other (see companyMatch). */
+export function sameCompany(a: string | null | undefined, b: string | null | undefined): boolean {
+  return companyMatch(a, b) !== null;
+}
+
+/**
+ * Do these two names belong to one person, as far as a merge may assume?
+ * A shared phone or email is only proof when the names agree too: an agency's
+ * number on a scoop CV, a referee's email or a company switchboard are shared
+ * by unrelated people, and merging on them put one person's CV on another
+ * person's record (1 Oct). No name on either side is no proof.
+ */
+export function namesAgree(a: string | null | undefined, b: string | null | undefined): boolean {
+  return compareNames(a, b) !== null;
 }
 
 const TITLE_NOISE = /\b(senior|junior|sr|jr|assistant|associate|executive|officer|of|and|the|at|in|for|lead|head|chief|deputy)\b/g;
@@ -159,15 +191,27 @@ export function samePerson(p: Profile, c: Held): Verdict {
     return slugP === slugC ? { strength: "same", reasons: ["Same LinkedIn profile"] } : { strength: "none", reasons: ["A different LinkedIn profile is on their record"] };
   }
   const email = (s: string | null | undefined) => (s ?? "").trim().toLowerCase();
-  if (email(p.email) && email(p.email) === email(c.email)) return { strength: "same", reasons: ["Same email"] };
   const phone = phoneKey(p.phone);
-  if (phone && phone === phoneKey(c.phone)) return { strength: "same", reasons: ["Same phone number"] };
+  const contact =
+    email(p.email) && email(p.email) === email(c.email) ? "Same email"
+    : phone && phone === phoneKey(c.phone) ? "Same phone number"
+    : null;
+  // A shared email or phone is certain only with the name agreeing (1 Oct): on
+  // its own it may be an agency's, a referee's or a company's. A TA confirms.
+  if (contact) {
+    return namesAgree(p.name, c.fullName)
+      ? { strength: "same", reasons: [contact, "Same name"] }
+      : { strength: "possible", reasons: [contact, p.name ? "but a different name" : "no name to compare"] };
+  }
 
   const name = compareNames(p.name, c.fullName);
   if (!name) return { strength: "none", reasons: [] };
 
   const employers = [c.currentEmployer, ...(c.employers ?? [])];
-  const employer = employers.find((e) => sameCompany(p.company, e));
+  // The exact company first, then one that only sits inside another's name.
+  const employer =
+    employers.find((e) => companyMatch(p.company, e) === "same") ?? employers.find((e) => companyMatch(p.company, e) === "close");
+  const employerSame = !!employer && companyMatch(p.company, employer) === "same";
   const title = similarTitle(p.title, c.currentTitle);
   const place = samePlace(p.location, c.location);
   const reasons = [
@@ -177,7 +221,7 @@ export function samePerson(p: Profile, c: Held): Verdict {
     place ? "Same place" : null,
   ].filter((r): r is string => Boolean(r));
 
-  if (name === "exact" && employer) return { strength: "same", reasons };
+  if (name === "exact" && employerSame) return { strength: "same", reasons };
   if (employer || title || place) return { strength: "possible", reasons };
   // The same name and nothing else agreeing: two people, as far as we can tell.
   return { strength: "none", reasons };

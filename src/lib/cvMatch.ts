@@ -84,11 +84,20 @@ export async function matchUnchecked(openingId: Id, actorId?: Id, max = 10): Pro
 export async function decideMatch(entryId: Id, decision: "same" | "different", actorId?: Id): Promise<boolean> {
   const e = repo.linkEntry(entryId);
   if (!e?.cvMatch) return false;
+  // "Different" also undoes a link the matching made on its own (1 Oct): the
+  // row stands alone again, and the LinkedIn address it put on the other
+  // person's record comes off, so the mistake is not repeated next time.
+  const unlink = decision === "different" && e.candidateId === e.cvMatch.candidateId;
   repo.updateLink(entryId, {
     cvMatch: { ...e.cvMatch, decided: decision },
-    candidateId: decision === "same" ? e.cvMatch.candidateId : e.candidateId,
+    candidateId: decision === "same" ? e.cvMatch.candidateId : unlink ? null : e.candidateId,
   });
   if (decision === "same") await rememberLinkedin(e.cvMatch.candidateId, e.linkedinUrl, actorId);
+  if (unlink && isConvex() && actorId) {
+    await convexMutation("ta/candidates:forgetLinkedin", { actorId, candidateId: e.cvMatch.candidateId, linkedinUrl: e.linkedinUrl }).catch((err) =>
+      console.warn(`[cvMatch] taking the LinkedIn address off ${e.cvMatch!.candidateId}:`, (err as Error).message),
+    );
+  }
   return true;
 }
 

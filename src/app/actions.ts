@@ -489,6 +489,14 @@ export async function decideCvMatch(formData: FormData) {
   const decision = String(formData.get("decision")) === "same" ? "same" : "different";
   const e = repo.linkEntry(entryId);
   if (!e || e.openingId !== openingId) await fail("That row no longer exists. Reload the page.");
+  // Unlinking a row whose person is already on this opening's pipeline would
+  // leave that application on the wrong record: it is dealt with there first.
+  if (decision === "different" && e!.candidateId) {
+    const onPipeline = repo.applicationsForCandidate(e!.candidateId).find((a) => a.openingId === openingId);
+    if (onPipeline) {
+      await fail(`${e!.cvMatch?.fullName ?? "They"} ${e!.cvMatch?.fullName ? "is" : "are"} already on this opening's pipeline from this row. Reject or drop them there first, then mark this row as a different person.`);
+    }
+  }
   if (!(await decideMatch(entryId, decision, user.id))) await fail("There is no match on that row to answer.");
   revalidateLinks(openingId);
   await done(decision === "same" ? `Linked to ${e!.cvMatch!.fullName}'s record.` : "Noted: a different person. The row stays on its own.");

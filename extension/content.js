@@ -146,9 +146,16 @@
   }
 
   function recruiterLockup() {
-    const nameEl = document.querySelector(
-      '[data-test-row-lockup-full-name] a[data-test-lockup-name-button], a[data-test-lockup-name-button], [data-test-profile-header-name], .artdeco-entity-lockup__title',
-    );
+    // In order of trust, not page order (1 Oct): the open profile's own header
+    // first. A list row or a sidebar card ("People also viewed") is someone
+    // else, and reading their name put profiles on the wrong person.
+    const nameEl = [
+      "[data-test-profile-header-name]",
+      "[data-test-row-lockup-full-name] a[data-test-lockup-name-button]",
+      "a[data-test-lockup-name-button]",
+    ]
+      .map((s) => document.querySelector(s))
+      .find(Boolean);
     if (!nameEl) return null;
     const degreeText = recruiterField("[data-test-lockup-degree] .artdeco-entity-lockup__degree");
     const degreeMatch = degreeText && degreeText.match(/\b(1st|2nd|3rd)\b/);
@@ -167,8 +174,9 @@
       if (n) return n;
     }
 
-    // 2. Recruiter lockup
-    if (recruiter?.fullName) {
+    // 2. Recruiter lockup — on Recruiter pages only. On a public profile the
+    // page's own h1 is the person; a lockup there is a sidebar card (1 Oct).
+    if (recruiter?.fullName && window.location.pathname.startsWith("/talent/")) {
       const n = cleanName(recruiter.fullName);
       if (n) return n;
     }

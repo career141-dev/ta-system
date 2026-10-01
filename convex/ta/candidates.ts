@@ -596,6 +596,24 @@ export const findSamePerson = internalQuery({
 });
 
 /**
+ * The other half of "Not this person" on an Excel Tables row (1 Oct): the
+ * LinkedIn address a wrong match put on this record comes off again, or every
+ * later look at that profile would land on the wrong person. Only that exact
+ * profile; any other address on the record is theirs and stays.
+ */
+export const forgetLinkedin = internalMutation({
+  args: { actorId: v.optional(v.string()), candidateId: v.string(), linkedinUrl: v.string() },
+  handler: async (ctx, a) => {
+    await requireActor(ctx, a.actorId);
+    const c = await ctx.db.get(a.candidateId as Id<"candidates">);
+    const slug = profileSlug(a.linkedinUrl);
+    if (!c || !slug || profileSlug(c.linkedinUrl) !== slug) return { ok: true, changed: false };
+    await ctx.db.patch(c._id, { linkedinUrl: undefined });
+    return { ok: true, changed: true };
+  },
+});
+
+/**
  * Their LinkedIn address, onto the record we matched them to, when it has
  * none — so the next time this profile turns up it is matched at once.
  * Never replaces an address already there.
