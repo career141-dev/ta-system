@@ -674,6 +674,7 @@ export const publishJob = mutation({
     if (job.reverseMatchOnPublish) {
        await ctx.db.patch(jobId, { reverseMatchStatus: "running" });
        await ctx.scheduler.runAfter(0, api.matching.agent2.runReverseMatch, { jobId });
+       await scheduleReverseMatchWatchdog(ctx, jobId);
     }
     
     await adjustGlobalStat(ctx, "new_job");
@@ -970,6 +971,7 @@ export const saveReverseMatchResults = internalMutation({
     status: v.union(v.literal("done"), v.literal("error"), v.literal("running")),
   },
   handler: async (ctx, args) => {
+    if (args.status === "running") await scheduleReverseMatchWatchdog(ctx, args.jobId);
     const patchObj: any = {
       reverseMatchStatus: args.status,
       reverseMatchedAt: new Date().toISOString(),
@@ -1082,6 +1084,37 @@ export const triggerReverseMatch = mutation({
       jobId: args.jobId,
       customPreferences: args.customPreferences,
     });
+    await scheduleReverseMatchWatchdog(ctx, args.jobId);
+  },
+});
+
+/**
+ * 1 Oct: an opening's matching sat on "running" for good. The engine only
+ * writes `done` or `error` at the end of its own run, so a run the platform
+ * killed (action time limit, a restart or deploy mid-run) left the status
+ * behind, and nothing ever cleared it. Every "running" write now schedules
+ * this check; it marks the run `error` when the engine has written nothing for
+ * longer than an action can live, and leaves a newer run alone (each run's
+ * "running" write refreshes `reverseMatchedAt`).
+ */
+const REVERSE_MATCH_WATCHDOG_MS = 15 * 60_000;
+const REVERSE_MATCH_DEAD_AFTER_MS = 12 * 60_000;
+
+async function scheduleReverseMatchWatchdog(
+  ctx: { scheduler: { runAfter: (ms: number, fn: any, args: any) => Promise<unknown> } },
+  jobId: Id<"jobs">,
+) {
+  await ctx.scheduler.runAfter(REVERSE_MATCH_WATCHDOG_MS, internal.jobs.jobs.expireStaleReverseMatch, { jobId });
+}
+
+export const expireStaleReverseMatch = internalMutation({
+  args: { jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const job = await ctx.db.get(args.jobId);
+    if (!job || job.reverseMatchStatus !== "running") return;
+    const last = job.reverseMatchedAt ? Date.parse(job.reverseMatchedAt) : 0;
+    if (Date.now() - last < REVERSE_MATCH_DEAD_AFTER_MS) return;
+    await ctx.db.patch(args.jobId, { reverseMatchStatus: "error" });
   },
 });
 
