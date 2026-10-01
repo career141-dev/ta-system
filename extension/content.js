@@ -583,7 +583,12 @@
       }
       if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
-      setState(res.status === "updated" ? "Updated in the table" : "Shortlisted in the table", "ok");
+      setState(
+        res.status === "updated"
+          ? `Already in the table${res.addedByName ? ` — added by ${res.addedByName}` : ""}. Updated, not added again`
+          : "Shortlisted in the table",
+        "ok",
+      );
     } catch (err) {
       const msg = /context invalidated/i.test(err?.message || "")
         ? "Extension reloaded — refresh (F5)"

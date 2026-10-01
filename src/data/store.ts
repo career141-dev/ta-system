@@ -11,7 +11,8 @@
  * it is what the Convex swap will inherit conceptually — read, decide, commit.
  */
 
-import { profileLink } from "@/lib/url";
+import { linkKey, profileLink } from "@/lib/url";
+import { companyMatch, compareNames } from "../../convex/lib/samePerson";
 import { isDueForPurge, purgeAt } from "@/lib/bin";
 import fs from "node:fs";
 import path from "node:path";
@@ -2072,7 +2073,23 @@ const rawRepo = {
     // "linkedin.com/in/nimal-perera", and they are different people.
     const want = canonical.toLowerCase();
     return load().linkVault.find(
-      (l) => l.openingId === openingId && (profileLink(l.linkedinUrl)?.key ?? l.linkedinUrl.toLowerCase()) === want,
+      (l) => l.openingId === openingId && (linkKey(l.linkedinUrl) ?? l.linkedinUrl.toLowerCase()) === want,
+    );
+  },
+
+  /**
+   * A row on this opening that is plainly this person by name and company
+   * (1 Oct): the same profile saved once from LinkedIn and once from
+   * Recruiter has two different addresses, and became two rows. The same full
+   * name at the same company on one opening is the same person.
+   */
+  findLinkByPerson(openingId: Id, name: string | null | undefined, company: string | null | undefined): LinkVaultEntry | undefined {
+    if (!name || !company) return undefined;
+    return load().linkVault.find(
+      (l) =>
+        l.openingId === openingId &&
+        compareNames(l.name ?? l.capture?.fullName, name) === "exact" &&
+        companyMatch(l.company ?? l.capture?.currentCompany, company) === "same",
     );
   },
 

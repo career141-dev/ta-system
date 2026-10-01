@@ -112,7 +112,12 @@ $("capture").addEventListener("click", async () => {
     const res = await send({ type: "capture", profile: read.profile });
     if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
-    say(res.status === "updated" ? `${res.name} updated in ${res.openingTitle}` : `${res.name} shortlisted in ${res.openingTitle}`, "ok");
+    say(
+      res.status === "updated"
+        ? `${res.name} is already in ${res.openingTitle}${res.addedByName ? ` — added by ${res.addedByName}` : ""}. Updated, not added again.`
+        : `${res.name} shortlisted in ${res.openingTitle}`,
+      "ok",
+    );
     paintHistory();
   } catch (e) {
     say(e.message, "bad");

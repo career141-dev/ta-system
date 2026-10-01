@@ -28,6 +28,7 @@ export function LinkVaultTable({
   status = "",
   level = 0,
   addons = false,
+  by = "",
   page = 1,
 }: {
   openingId: string;
@@ -40,6 +41,8 @@ export function LinkVaultTable({
   level?: number;
   /** Add-ons only. */
   addons?: boolean;
+  /** Only the rows this person added; "" is everyone's. */
+  by?: string;
   page?: number;
 }) {
   const users = repo.users();
@@ -64,28 +67,34 @@ export function LinkVaultTable({
       return [r.id, { app, interest: interestOf(r, app) }] as const;
     }),
   );
-  const pass = (r: (typeof everyRow)[number]["row"], f: { status: string; level: number; addons: boolean }) => {
+  type F = { status: string; level: number; addons: boolean; by: string };
+  const pass = (r: (typeof everyRow)[number]["row"], f: F) => {
     const x = facts.get(r.id)!;
-    return (!f.status || x.interest === f.status) && (!f.level || r.level === f.level) && (!f.addons || !!r.isAddOn);
+    return (!f.status || x.interest === f.status) && (!f.level || r.level === f.level) && (!f.addons || !!r.isAddOn) && (!f.by || r.addedBy === f.by);
   };
   const searched = everyRow.filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber));
-  const matching = searched.filter(({ row }) => pass(row, { status, level, addons }));
-  const params = (next: Partial<{ status: string; level: number; addons: boolean }>) => {
-    const f = { status, level, addons, ...next };
+  const matching = searched.filter(({ row }) => pass(row, { status, level, addons, by }));
+  const params = (next: Partial<F>) => {
+    const f = { status, level, addons, by, ...next };
     const out: Record<string, string> = {};
     if (q) out.q = q;
     if (f.status) out.status = f.status;
     if (f.level) out.level = String(f.level);
     if (f.addons) out.addons = "1";
+    if (f.by) out.by = f.by;
     return out;
   };
-  const keep = (next: Partial<{ status: string; level: number; addons: boolean }>) => {
+  const keep = (next: Partial<F>) => {
     const qs = new URLSearchParams(params(next)).toString();
     return `/openings/${openingId}/hh/links${qs ? `?${qs}` : ""}`;
   };
   // A tab's count is what pressing it would show, with the other filters kept.
-  const count = (next: Partial<{ status: string; level: number; addons: boolean }>) =>
-    searched.filter(({ row }) => pass(row, { status, level, addons, ...next })).length;
+  const count = (next: Partial<F>) =>
+    searched.filter(({ row }) => pass(row, { status, level, addons, by, ...next })).length;
+  // Everyone who added a row here, the viewer first as "Me" (1 Oct).
+  const adders = [...new Set(everyRow.map(({ row }) => row.addedBy))].sort((a, b) =>
+    a === user.id ? -1 : b === user.id ? 1 : (userNames[a] ?? "").localeCompare(userNames[b] ?? ""),
+  );
   // The sheets: All, then the viewer's own L's (started with + in the
   // sidebar). An L number from someone else's link still gets a tab.
   const sheets = repo.linkLevels(openingId, user.id);
@@ -113,7 +122,23 @@ export function LinkVaultTable({
             </a>
           ))}
         </nav>
-        <div className="pb-2">
+        <div className="flex flex-wrap items-center gap-3 pb-2">
+          {adders.length > 1 && (
+            <nav aria-label="Added by" className="flex flex-wrap items-center gap-1 text-[12px]">
+              <span className="text-ink-faint">Added by</span>
+              {["", ...adders].map((id) => (
+                <a
+                  key={id || "all"}
+                  href={keep({ by: id })}
+                  aria-current={by === id ? "true" : undefined}
+                  className={`rounded-full border px-2.5 py-0.5 ${by === id ? "border-ink bg-ink text-white" : "border-rule text-ink-soft hover:bg-tag"}`}
+                >
+                  {id === "" ? "Everyone" : id === user.id ? "Me" : (userNames[id] ?? "Someone")}{" "}
+                  <span className={by === id ? "text-white/70" : "text-ink-faint"}>{count({ by: id })}</span>
+                </a>
+              ))}
+            </nav>
+          )}
           <LinkFilters
             status={status}
             options={INTEREST_TABS.map((t) => ({ key: t.key, label: t.label, count: count({ status: t.key }), href: keep({ status: t.key }) }))}
