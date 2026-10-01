@@ -6,6 +6,7 @@ import { Generate } from "@/components/hh/Generate";
 import { runSuggestionsInline, keepSuggestion, dismissSuggestion } from "@/app/actions";
 import { MAX_ROUNDS } from "@/lib/sourcing";
 import { SuggestionName } from "@/components/hh/ProfilePanel";
+import { FindCvButton } from "@/components/FindCvButton";
 import { dateAt } from "@/lib/format";
 import { Assistant } from "@/components/hh/Assistant";
 import { getCurrentUser } from "@/lib/session";
@@ -217,6 +218,10 @@ export default async function Page({
                       <p className="mt-0.5 text-[12px] text-ink-faint">
                         {[s.company, s.location].filter(Boolean).join(" · ")}
                       </p>
+                    )}
+                    {/* Before adding them: are they already in our database? (1 Oct) */}
+                    {s.status === "new" && s.linkedinUrl && !takenBy.get(s.id) && (
+                      <FindCvButton openingId={id} suggestionId={s.id} />
                     )}
                   </div>
 

@@ -14,6 +14,7 @@ import {
   toggleLinkAddOnInline,
   updateLinkInline,
 } from "@/app/actions";
+import { FindCvButton } from "./FindCvButton";
 import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
 import Link from "next/link";
 import { inputClass } from "./form";
@@ -751,5 +752,11 @@ function CvStatus({
       </form>
     );
   }
-  return <p className="mt-1.5 text-[12px] text-ink-faint">Not in our database — CV not available yet</p>;
+  return (
+    <>
+      <p className="mt-1.5 text-[12px] text-ink-faint">Not matched to anyone in our database yet</p>
+      {/* The matching only links when certain; Find CV asks on demand (1 Oct). */}
+      <FindCvButton openingId={openingId} entryId={r.id} />
+    </>
+  );
 }

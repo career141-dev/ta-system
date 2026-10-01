@@ -3,7 +3,7 @@
  * The two ways it can go wrong both matter: a second record for the same
  * person, and one person's CV shown for somebody else with the same name.
  */
-import { companyMatch, compareNames, linkedinVariants, namesAgree, phoneKey, profileSlug, sameCompany, samePerson } from "../convex/lib/samePerson";
+import { companyMatch, compareNames, cvSearchScore, linkedinVariants, namesAgree, phoneKey, profileSlug, sameCompany, samePerson } from "../convex/lib/samePerson";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -57,6 +57,28 @@ eq("the same company, written differently, is the same", companyMatch("SWEN Cont
 eq("self employed is nobody's company", companyMatch("Self Employed", "Self-employed"), null);
 eq("names agree: initials", namesAgree("W.M.K. Perera", "Wijesinghe Mudiyanselage Kasun Perera"), true);
 eq("names disagree", namesAgree("Nimal Perera", "Kasun Perera"), false);
+
+console.log("\nFind CV: who a TA is shown, best first (1 Oct)");
+{
+  const held = { fullName: "Kasun Perera", currentEmployer: "John Keells Holdings", currentTitle: "Finance Manager", employers: ["Hayleys"] };
+  eq("certain: same name at the same company", cvSearchScore({ name: "Kasun Perera", company: "John Keells Holdings" }, held)?.strength, "same");
+  eq("the same name at a NEW company is still shown — the matching misses these", cvSearchScore({ name: "Kasun Perera", company: "Dialog Axiata" }, held)?.strength, "name");
+  eq("…below a certain match", (cvSearchScore({ name: "Kasun Perera", company: "Dialog Axiata" }, held)?.score ?? 0) < 100, true);
+  eq("a longer name with the same first name and surname is shown", cvSearchScore({ name: "Kasun Perera" }, { fullName: "Kasun Madushanka Perera" })?.reasons, ["Name partly the same"]);
+  eq("only the surname shared: not shown", cvSearchScore({ name: "Nimal Perera" }, held), null);
+  // The extension reads their whole LinkedIn history: a job change since the CV still matches.
+  eq(
+    "moved on since their CV: LinkedIn says Dialog now, John Keells before — the same person",
+    samePerson({ name: "Kasun Perera", company: "Dialog Axiata", employers: ["Dialog Axiata", "John Keells Holdings PLC"] }, held).strength,
+    "same",
+  );
+  eq(
+    "…but a shared past company with a different name is nobody",
+    samePerson({ name: "Ruwan Silva", company: "Dialog Axiata", employers: ["John Keells Holdings"] }, held).strength,
+    "none",
+  );
+  eq("a different LinkedIn profile on their record: not shown", cvSearchScore({ name: "Kasun Perera", linkedinUrl: "linkedin.com/in/kasun-a" }, { ...held, linkedinUrl: "linkedin.com/in/kasun-b" }), null);
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

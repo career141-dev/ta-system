@@ -13,7 +13,7 @@
 // "no text" and "text lives in R2" need different handling upstream.
 
 import { liveFacts } from "../lib/candidateFacts";
-import { linkedinVariants, phoneKey, profileSlug, samePerson } from "../lib/samePerson";
+import { cvSearchScore, linkedinVariants, phoneKey, profileSlug, samePerson } from "../lib/samePerson";
 import { v } from "convex/values";
 import { internalMutation, internalQuery, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -527,6 +527,8 @@ export const findSamePerson = internalQuery({
     company: v.optional(v.string()),
     title: v.optional(v.string()),
     location: v.optional(v.string()),
+    /** Every company on their LinkedIn experience (the extension's capture). */
+    employers: v.optional(v.array(v.string())),
     /** People a TA already said are someone else. */
     notThese: v.optional(v.array(v.string())),
   },
@@ -565,7 +567,7 @@ export const findSamePerson = internalQuery({
         .first();
       const career = (resume?.jobHistory?.length ? resume.jobHistory : c.jobHistory) ?? [];
       const verdict = samePerson(
-        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location },
+        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location, employers: a.employers },
         {
           fullName: c.fullName,
           linkedinUrl: c.linkedinUrl,
@@ -592,6 +594,90 @@ export const findSamePerson = internalQuery({
       reasons: best.reasons,
       hasCv: Boolean(c.cvUploadId || c.cvFileName || c.rawTextKey || c.rawText),
     };
+  },
+});
+
+/**
+ * "Find CV" (1 Oct): everyone in the database who might be this LinkedIn
+ * person, best first, for the TA to pick from — by LinkedIn address, email,
+ * phone and name, each judged by convex/lib/samePerson cvSearchScore with
+ * their whole career. Wider than findSamePerson, which links on its own: here
+ * a TA looks, so a person whose company changed since their CV is still shown.
+ */
+export const searchSamePerson = internalQuery({
+  args: {
+    actorId: v.optional(v.string()),
+    linkedinUrl: v.optional(v.string()),
+    name: v.optional(v.string()),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    company: v.optional(v.string()),
+    title: v.optional(v.string()),
+    location: v.optional(v.string()),
+    employers: v.optional(v.array(v.string())),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, a) => {
+    await optionalActor(ctx, a.actorId);
+    const found = new Map<string, Doc<"candidates">>();
+    const add = (c: Doc<"candidates"> | null) => {
+      if (c && !c.mergedInto && !c.isDuplicateOf) found.set(c._id, c);
+    };
+    const slug = profileSlug(a.linkedinUrl);
+    if (slug) {
+      for (const url of linkedinVariants(slug)) {
+        add(await ctx.db.query("candidates").withIndex("by_linkedinUrl", (q) => q.eq("linkedinUrl", url)).first());
+      }
+    }
+    const email = (a.email ?? "").trim().toLowerCase();
+    if (email) for (const c of await ctx.db.query("candidates").withIndex("by_email", (q) => q.eq("email", email)).take(5)) add(c);
+    const phone = phoneKey(a.phone);
+    if (phone) {
+      for (const p of [phone, `0${phone}`, `94${phone}`]) {
+        for (const c of await ctx.db.query("candidates").withIndex("by_phoneClean", (q) => q.eq("phoneClean", p)).take(5)) add(c);
+      }
+    }
+    if ((a.name ?? "").trim().length >= 3) {
+      for (const c of await ctx.db.query("candidates").withSearchIndex("search_name", (q) => q.search("fullName", a.name!)).take(25)) add(c);
+    }
+
+    const hits = [];
+    for (const c of found.values()) {
+      const resume = await ctx.db
+        .query("candidateResumes")
+        .withIndex("by_candidateId", (q) => q.eq("candidateId", c._id))
+        .first();
+      const career = (resume?.jobHistory?.length ? resume.jobHistory : c.jobHistory) ?? [];
+      const hit = cvSearchScore(
+        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location, employers: a.employers },
+        {
+          fullName: c.fullName,
+          linkedinUrl: c.linkedinUrl,
+          email: c.email,
+          phone: c.phone,
+          currentEmployer: c.currentEmployer,
+          currentTitle: c.currentJobTitle ?? c.currentTitle,
+          location: c.location ?? c.locationStructured?.raw_text,
+          employers: career.map((j) => j.company),
+        },
+      );
+      if (!hit) continue;
+      hits.push({
+        candidateId: c._id as string,
+        fullName: c.fullName ?? "",
+        currentTitle: c.currentJobTitle ?? c.currentTitle ?? null,
+        currentEmployer: c.currentEmployer ?? null,
+        location: c.location ?? c.locationStructured?.raw_text ?? null,
+        linkedinUrl: c.linkedinUrl ?? null,
+        email: c.email ?? null,
+        phone: c.phone ?? null,
+        pastEmployers: [...new Set(career.map((j) => j.company).filter(Boolean))].slice(0, 4),
+        hasCv: Boolean(c.cvUploadId || c.cvFileName || c.rawTextKey || c.rawText),
+        ...hit,
+      });
+    }
+    hits.sort((x, y) => y.score - x.score);
+    return hits.slice(0, Math.min(a.limit ?? 5, 10));
   },
 });
 

@@ -31,6 +31,11 @@ export interface Profile {
   company?: string | null;
   title?: string | null;
   location?: string | null;
+  /**
+   * Every company on their LinkedIn experience, as the extension read it (1
+   * Oct). A CV a year old names their old employer; LinkedIn names both.
+   */
+  employers?: (string | null | undefined)[];
 }
 
 export interface Held {
@@ -208,10 +213,16 @@ export function samePerson(p: Profile, c: Held): Verdict {
   if (!name) return { strength: "none", reasons: [] };
 
   const employers = [c.currentEmployer, ...(c.employers ?? [])];
-  // The exact company first, then one that only sits inside another's name.
-  const employer =
-    employers.find((e) => companyMatch(p.company, e) === "same") ?? employers.find((e) => companyMatch(p.company, e) === "close");
-  const employerSame = !!employer && companyMatch(p.company, employer) === "same";
+  // Their whole LinkedIn history against their whole CV career (1 Oct): a
+  // person who has changed jobs since their CV shares a past company, not a
+  // current one. The exact company first, then one inside another's name.
+  const theirs = [p.company, ...(p.employers ?? [])].filter(Boolean);
+  const pair = (kind: "same" | "close") => {
+    for (const mine of theirs) for (const e of employers) if (companyMatch(mine, e) === kind) return e;
+    return undefined;
+  };
+  const employer = pair("same") ?? pair("close");
+  const employerSame = !!employer && pair("same") !== undefined;
   const title = similarTitle(p.title, c.currentTitle);
   const place = samePlace(p.location, c.location);
   const reasons = [
@@ -225,4 +236,35 @@ export function samePerson(p: Profile, c: Held): Verdict {
   if (employer || title || place) return { strength: "possible", reasons };
   // The same name and nothing else agreeing: two people, as far as we can tell.
   return { strength: "none", reasons };
+}
+
+export interface CvSearchHit {
+  strength: "same" | "possible" | "name";
+  score: number;
+  reasons: string[];
+}
+
+/**
+ * How well a database candidate fits a LinkedIn profile, for the TA's
+ * "Find CV" search (1 Oct). Wider than samePerson: a candidate with only the
+ * same name, or the same surname, is still shown — lower down — because the
+ * TA decides, and a person the matching missed is usually one whose company
+ * or title has changed since their CV. Null when nothing ties them, or their
+ * record carries a different LinkedIn profile.
+ */
+export function cvSearchScore(p: Profile, c: Held): CvSearchHit | null {
+  const v = samePerson(p, c);
+  if (v.strength === "same") return { strength: "same", score: 100, reasons: v.reasons };
+  if (v.strength === "possible") return { strength: "possible", score: 60 + 5 * v.reasons.length, reasons: v.reasons };
+  if (v.reasons.some((r) => r.startsWith("A different LinkedIn profile"))) return null;
+  const name = compareNames(p.name, c.fullName);
+  if (name === "exact") return { strength: "name", score: 40, reasons: ["Same name"] };
+  if (name === "initials") return { strength: "name", score: 30, reasons: ["Same surname, and initials that fit"] };
+  const mine = nameWords(p.name).filter((w) => w.length > 1);
+  const theirs = nameWords(c.fullName);
+  const surname = mine.at(-1);
+  if (surname && mine.length >= 2 && theirs.includes(surname) && mine.some((w) => w !== surname && theirs.includes(w))) {
+    return { strength: "name", score: 20, reasons: ["Name partly the same"] };
+  }
+  return null;
 }

@@ -46,8 +46,8 @@ import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
-import { profileLink } from "@/lib/url";
-import { matchLink, decideMatch } from "@/lib/cvMatch";
+import { linkKey, profileLink } from "@/lib/url";
+import { decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
@@ -3301,12 +3301,118 @@ export async function keepSuggestion(formData: FormData) {
   repo.setSuggestionStatus(id, "kept", "more_like_this", user.id);
   let held: CvMatch | null = null;
   if (s!.linkedinUrl) {
+    const already = linkFor(openingId, s!);
+    if (already) {
+      revalidatePath(`/openings/${openingId}/hh`, "layout");
+      await note(`${s!.name ?? "They"} ${s!.name ? "is" : "are"} already in Excel Tables${already.addedBy !== user.id ? `, added by ${repo.user(already.addedBy)?.name ?? "another TA"}` : ""}.`);
+    }
     const entryId = repo.addLink(openingId, s!.linkedinUrl, user.id);
     repo.updateLink(entryId, { name: s!.name, title: s!.headline, company: s!.company });
     held = await matchLink(entryId, user.id);
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   await back(`${heldLine(held)}${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
+}
+
+/** The Excel Tables row a suggestion already has on this opening — by its address, or name and company (1 Oct). */
+function linkFor(openingId: string, s: { linkedinUrl: string | null; name: string; company: string | null }) {
+  const key = linkKey(s.linkedinUrl);
+  return (key ? repo.findLinkByUrl(openingId, key) : undefined) ?? repo.findLinkByPerson(openingId, s.name, s.company);
+}
+
+/**
+ * "Find CV" (1 Oct): who in our database might be this LinkedIn person — an
+ * Excel Tables row, or a Suggestions result — for the TA to choose from.
+ * Returns the people to the button; nothing is changed here.
+ */
+export async function findCv(input: {
+  openingId: string;
+  entryId?: string;
+  suggestionId?: string;
+}): Promise<{ ok: true; hits: CvHit[] } | { ok: false; message: string }> {
+  await primeStore({ openingId: input.openingId });
+  const user = await getCurrentUser();
+  const assignment = repo.assignmentFor(input.openingId, user.id) ?? null;
+  const allowed = can(user, "opening.sourcing", { openingId: input.openingId, assignment });
+  if (!allowed.ok) return { ok: false, message: allowed.message };
+  const profile = profileFor(input);
+  if (!profile) return { ok: false, message: "That profile is no longer here. Reload the page." };
+  try {
+    return { ok: true, hits: await findCvCandidates(profile, user.id) };
+  } catch (e) {
+    console.warn("[findCv]", (e as Error).message);
+    return { ok: false, message: "The search could not run just now. Try again." };
+  }
+}
+
+/** What is known about a LinkedIn person on this opening, for "Find CV". */
+function profileFor(input: { openingId: string; entryId?: string; suggestionId?: string }) {
+  if (input.entryId) {
+    const e = repo.linkEntry(input.entryId);
+    if (!e || e.openingId !== input.openingId) return null;
+    const cap = e.capture ?? null;
+    return {
+      linkedinUrl: e.linkedinUrl,
+      name: e.name ?? cap?.fullName ?? null,
+      phone: e.phoneNumber ?? cap?.phone ?? null,
+      email: cap?.email ?? null,
+      company: e.company ?? cap?.currentCompany ?? null,
+      title: e.title ?? cap?.currentTitle ?? cap?.headline ?? null,
+      location: cap?.location ?? null,
+      employers: (cap?.experience ?? []).map((x) => x.company).filter(Boolean),
+    };
+  }
+  const s = input.suggestionId ? repo.suggestions(input.openingId).find((x) => x.id === input.suggestionId) : null;
+  if (!s) return null;
+  return { linkedinUrl: s.linkedinUrl, name: s.name, company: s.company, title: s.headline, location: s.location };
+}
+
+/**
+ * The TA chose who this LinkedIn person is in our database (1 Oct): the row is
+ * linked to that candidate, so their CV is used and no second record is made.
+ * From Suggestions, the profile goes to Excel Tables already linked. The
+ * chosen person is checked against a fresh search — only someone offered can
+ * be chosen.
+ */
+export async function chooseCv(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const entryId = String(formData.get("entryId") ?? "") || undefined;
+  const suggestionId = String(formData.get("suggestionId") ?? "") || undefined;
+  const user = entryId
+    ? await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" })
+    : await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
+  const profile = profileFor({ openingId, entryId, suggestionId });
+  if (!profile) return fail("That profile is no longer here. Reload the page.");
+  const candidateId = String(formData.get("candidateId") ?? "");
+  const hit = (await findCvCandidates(profile, user.id).catch(() => [] as CvHit[])).find((h) => h.candidateId === candidateId);
+  if (!hit) return fail("That person is no longer offered for this profile. Press Find CV again.");
+
+  let rowId = entryId;
+  if (!rowId) {
+    const s = repo.suggestions(openingId).find((x) => x.id === suggestionId)!;
+    if (!s.linkedinUrl) return fail("This suggestion has no LinkedIn profile to add.");
+    rowId = linkFor(openingId, s)?.id;
+    if (!rowId) {
+      rowId = repo.addLink(openingId, s.linkedinUrl, user.id);
+      repo.updateLink(rowId, { name: s.name, title: s.headline, company: s.company });
+    }
+    repo.setSuggestionStatus(s.id, "kept", "more_like_this", user.id);
+  } else {
+    // A row already put on the pipeline as someone is changed there, not here.
+    const e = repo.linkEntry(rowId)!;
+    if (e.candidateId && e.candidateId !== hit.candidateId && repo.applicationsForCandidate(e.candidateId).some((a) => a.openingId === openingId)) {
+      return fail("This row is already on the pipeline as someone else. Reject or drop them there first.");
+    }
+  }
+  await linkRowTo(rowId, hit, user.id);
+  revalidateLinks(openingId);
+  revalidatePath(`/openings/${openingId}/hh`, "layout");
+  return done(`Linked to ${hit.fullName}'s record${hit.hasCv ? " — their CV on file is used" : ""}. No new record was made.`);
+}
+
+export async function chooseCvInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => chooseCv(formData));
 }
 
 export async function dismissSuggestion(formData: FormData) {

@@ -3,7 +3,7 @@ import { repo } from "@/data/store";
 import { isConvex } from "@/data/mode";
 import type { CvMatch, Id } from "@/data/types";
 import { convexMutation, convexQuery } from "@/lib/convexServer";
-import { samePerson } from "../../convex/lib/samePerson";
+import { cvSearchScore, samePerson } from "../../convex/lib/samePerson";
 
 /**
  * Match an Excel Tables row — a LinkedIn profile — to the candidate we already
@@ -26,13 +26,15 @@ export async function matchLink(entryId: Id, actorId?: Id): Promise<CvMatch | nu
     company: e.company ?? cap?.currentCompany ?? null,
     title: e.title ?? cap?.currentTitle ?? null,
     location: cap?.location ?? null,
+    // Their whole LinkedIn history, so a job change since the CV still matches (1 Oct).
+    employers: (cap?.experience ?? []).map((x) => x.company).filter(Boolean),
   };
 
   let found: Omit<CvMatch, "checkedAt" | "decided"> | null = null;
   if (isConvex()) {
     found = await convexQuery<Omit<CvMatch, "checkedAt"> | null>("ta/candidates:findSamePerson", {
       actorId,
-      ...Object.fromEntries(Object.entries(profile).filter(([, v]) => v)),
+      ...Object.fromEntries(Object.entries(profile).filter(([, v]) => (Array.isArray(v) ? v.length : v))),
     }).catch((err) => {
       console.warn(`[cvMatch ${entryId}]`, (err as Error).message);
       return null;
@@ -106,4 +108,74 @@ async function rememberLinkedin(candidateId: Id, linkedinUrl: string, actorId?: 
   await convexMutation("ta/candidates:rememberLinkedin", { actorId, candidateId, linkedinUrl }).catch((err) =>
     console.warn(`[cvMatch] remembering the LinkedIn address on ${candidateId}:`, (err as Error).message),
   );
+}
+
+/** One person "Find CV" offers the TA (ta/candidates:searchSamePerson). */
+export interface CvHit {
+  candidateId: Id;
+  fullName: string;
+  currentTitle: string | null;
+  currentEmployer: string | null;
+  location: string | null;
+  linkedinUrl: string | null;
+  email: string | null;
+  phone: string | null;
+  pastEmployers: string[];
+  hasCv: boolean;
+  strength: "same" | "possible" | "name";
+  score: number;
+  reasons: string[];
+}
+
+/**
+ * "Find CV" (1 Oct): who in our database might be this LinkedIn person, best
+ * first, for the TA to choose from. The matching links on its own only when
+ * certain; this is for the people it missed — a new company, a changed title.
+ */
+export async function findCvCandidates(
+  profile: { linkedinUrl?: string | null; name?: string | null; email?: string | null; phone?: string | null; company?: string | null; title?: string | null; location?: string | null; employers?: string[] },
+  actorId?: Id,
+): Promise<CvHit[]> {
+  const args = Object.fromEntries(Object.entries(profile).filter(([, v]) => (Array.isArray(v) ? v.length : v)));
+  if (isConvex()) return convexQuery<CvHit[]>("ta/candidates:searchSamePerson", { actorId, ...args, limit: 5 });
+  const hits: CvHit[] = [];
+  for (const c of repo.candidates()) {
+    const hit = cvSearchScore(profile, {
+      fullName: c.fullName,
+      linkedinUrl: c.linkedinUrl,
+      email: c.email,
+      phone: c.phone,
+      currentEmployer: c.currentEmployer,
+      currentTitle: c.currentTitle,
+      location: c.location,
+      employers: c.workHistory.map((w) => w.employer),
+    });
+    if (!hit) continue;
+    hits.push({
+      candidateId: c.id,
+      fullName: c.fullName,
+      currentTitle: c.currentTitle,
+      currentEmployer: c.currentEmployer,
+      location: c.location,
+      linkedinUrl: c.linkedinUrl,
+      email: c.email,
+      phone: c.phone,
+      pastEmployers: [...new Set(c.workHistory.map((w) => w.employer).filter(Boolean))].slice(0, 4),
+      hasCv: Boolean(c.cvFileName),
+      ...hit,
+    });
+  }
+  return hits.sort((x, y) => y.score - x.score).slice(0, 5);
+}
+
+/** The TA chose who this row is: linked, answered, and their LinkedIn address remembered. */
+export async function linkRowTo(entryId: Id, hit: Pick<CvHit, "candidateId" | "fullName" | "hasCv">, actorId?: Id) {
+  const e = repo.linkEntry(entryId);
+  if (!e) return false;
+  repo.updateLink(entryId, {
+    candidateId: hit.candidateId,
+    cvMatch: { candidateId: hit.candidateId, fullName: hit.fullName, strength: "same", reasons: ["Chosen by a TA (Find CV)"], hasCv: hit.hasCv, checkedAt: Date.now(), decided: "same" },
+  });
+  await rememberLinkedin(hit.candidateId, e.linkedinUrl, actorId);
+  return true;
 }
