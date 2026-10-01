@@ -91,7 +91,9 @@ export function scopeLinks(
   const out: Scoped<LinkVaultEntry>[] = [];
   for (const r of rows) {
     if (r.addedBy === user.id || addedByDeskWide(r.addedBy)) out.push({ row: r, takenBy: null });
-    else if (r.outcome === "shortlisted") out.push({ row: r, takenBy: r.addedBy });
+    // A headhunted CV uploaded for the row is a claim too: it was hidden from
+    // everyone else, so a colleague started on the same person (1 Oct).
+    else if (r.outcome === "shortlisted" || r.outcome === "cv_received") out.push({ row: r, takenBy: r.addedBy });
   }
   return out;
 }

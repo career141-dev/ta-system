@@ -30,8 +30,11 @@ export function CvFrame({
 
   useEffect(() => {
     setLoading(true);
-    // PDF plugin inside iframe might not always dispatch standard DOM onLoad event
-    const timer = setTimeout(() => setLoading(false), 1200);
+    // Until the frame says it has loaded (onLoad below). This was a fixed 1.2
+    // seconds, so a Word CV still being converted showed as an empty, broken
+    // viewer (1 Oct). The long timer only covers a PDF viewer that never
+    // reports loading.
+    const timer = setTimeout(() => setLoading(false), 45_000);
     return () => clearTimeout(timer);
   }, [src]);
 
@@ -130,7 +133,7 @@ export function CvFrame({
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                 </svg>
-                <span>Loading document…</span>
+                <span>{/\.(docx?|rtf|odt)$/i.test(fileName ?? "") ? "Preparing the Word CV… this can take a few seconds" : "Loading document…"}</span>
               </div>
             </div>
           )}

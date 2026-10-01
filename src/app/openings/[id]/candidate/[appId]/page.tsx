@@ -276,7 +276,15 @@ export default async function CandidateDrawer({
             <div className="mt-4 flex flex-wrap items-center gap-3">
               {locked ? (
                 <p className="rounded-lg border border-rule bg-paper px-3.5 py-2 text-[12px] text-ink-soft">
-                  Shortlisted by <span className="text-ink">{owner?.name}</span> — you cannot contact
+                  {/* Locked for a viewer or someone not on the opening too, where
+                      nobody has shortlisted them: it read "Shortlisted by —" (1 Oct). */}
+                  {owner ? (
+                    <>Shortlisted by <span className="text-ink">{owner.name}</span> — you cannot contact</>
+                  ) : app.ownerTaId ? (
+                    "Shortlisted by another recruiter — you cannot contact"
+                  ) : (
+                    "View only — you are not working this opening"
+                  )}
                 </p>
               ) : !app.ownerTaId ? (
                 <form action={claimCandidate}>

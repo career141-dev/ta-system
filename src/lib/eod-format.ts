@@ -115,7 +115,10 @@ export function dayTotal(values: Partial<Record<EffortKey, number | string | nul
 /** The SETS cell as sent: "2 · 14 CVs" — the set, then the day's total. */
 export function setsCell(sets: number | string | null | undefined, total: number): string {
   const cvs = `${total} ${total === 1 ? "CV" : "CVs"}`;
-  return sets === null || sets === undefined || sets === "" ? cvs : `${sets} · ${cvs}`;
+  // A TA who typed the cell the way the email shows it ("2 · 14 CVs") got the
+  // count twice (1 Oct): whatever CV count they typed gives way to the real one.
+  const typed = String(sets ?? "").replace(/\s*·?\s*\d+\s*CVs?\s*$/i, "").trim();
+  return typed ? `${typed} · ${cvs}` : cvs;
 }
 
 /** Who is copied on every end-of-day email, until it is changed on the People page. */
