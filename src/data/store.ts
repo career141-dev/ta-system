@@ -88,6 +88,7 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
+import { isDeskWide } from "@/lib/auth";
 import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
 import { WORKING_STAGES, workingStageKey } from "@/lib/workingStage";
@@ -774,7 +775,15 @@ const rawRepo = {
       case "offer": return viaApp(db.offers.find((x) => x.id === id)?.applicationId);
       case "call": return viaApp(db.aiCalls.find((x) => x.id === id)?.applicationId);
       case "post": return plain(db.jobPosts.find((x) => x.id === id));
-      case "link": return plain(db.linkVault.find((x) => x.id === id));
+      case "link": {
+        // A row belongs to the TA who added it, unless a lead put it in (that
+        // one is handed to the TAs). The collision lock reads this, so one TA
+        // cannot edit, log against or move another TA's sourcing (2 Oct).
+        const row = db.linkVault.find((x) => x.id === id);
+        const adder = row ? db.users.find((u) => u.id === row.addedBy) : undefined;
+        const mine = row && adder && !isDeskWide(adder) ? row.addedBy : null;
+        return row ? { found: true, openingId: row.openingId, ownerTaId: mine } : { found: false, openingId: null, ownerTaId: null };
+      }
       case "benchmark": return plain(db.benchmarks.find((x) => x.id === id));
       case "suggestion": return plain(db.suggestions.find((x) => x.id === id));
       case "placement": return plain(db.placements.find((x) => x.id === id));

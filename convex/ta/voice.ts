@@ -23,7 +23,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK } from "./guard";
 import { allJobQuestions, callBrief, candidateSpoke, detailsToCollect, screeningQuestions, standardAnswers, transcriptText, type CallAnswers } from "../lib/screeningCall";
 import { answersById } from "../lib/followUpScope";
 import { checkAndAdvanceFollowUp, updateFollowUpFlags } from "../pipeline/followUpHelper";
@@ -44,6 +44,7 @@ export const prepareWebCall = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("That application no longer exists.");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    assertNotAnotherTasCandidate(user, app);
     if (app.isActive === false) throw new Error("This application is closed.");
 
     const candidate = await ctx.db.get(app.candidateId);

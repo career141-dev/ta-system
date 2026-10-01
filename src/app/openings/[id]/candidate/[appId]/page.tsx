@@ -7,7 +7,7 @@ import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
-import { seatFor } from "@/lib/visibility";
+import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { STAGE_LABEL } from "@/data/types";
 import { timeAt } from "@/lib/format";
 import { claimCandidate } from "@/app/actions";
@@ -131,6 +131,8 @@ export default async function CandidateDrawer({
   const seat = seatFor(user, assignment?.role ?? null);
   if (!allows(user, "opening.read", { openingId: id, assignment })) notFound();
   if (seat.stages !== null && !seat.stages.includes(app.stage)) notFound();
+  // Another TA's candidate is not a page this TA can open, whatever the address.
+  if (visibleToSeat([app], seat).length === 0) notFound();
   const c = repo.candidate(app.candidateId);
   const client = repo.client(opening.clientId);
   if (!c || !client) notFound();
@@ -200,7 +202,7 @@ export default async function CandidateDrawer({
   const interview = interviews.find((i) => i.outcome === "pending") ?? interviews.at(-1);
 
   // Prev / next within the same stage, in the order the list shows them.
-  const siblings = repo.applications(id).filter((a) => a.stage === app.stage);
+  const siblings = visibleToSeat(repo.applications(id), seat).filter((a) => a.stage === app.stage);
   const index = siblings.findIndex((s) => s.id === appId);
   const prev = index > 0 ? siblings[index - 1] : null;
   const next = index < siblings.length - 1 ? siblings[index + 1] : null;

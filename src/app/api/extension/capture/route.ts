@@ -2,7 +2,8 @@ import { repo } from "@/data/store";
 import { canonicalProfile } from "@/lib/serper";
 import { linkKey } from "@/lib/url";
 import { authorised, normaliseCapture, preflight, reply } from "@/lib/extension";
-import { can } from "@/lib/auth";
+import { can, isDeskWide } from "@/lib/auth";
+import { rowIsAnotherTas } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { revalidatePath } from "next/cache";
 import { matchLink } from "@/lib/cvMatch";
@@ -71,6 +72,16 @@ export async function POST(req: Request) {
   const existing =
     (key ? repo.findLinkByUrl(openingId, key) : undefined) ??
     repo.findLinkByPerson(openingId, capture.fullName, capture.currentCompany);
+  // Another TA's row is theirs. Capturing over it rewrote their name, title and
+  // company; the capture is refused and says whose it is, so neither TA works
+  // the same person (2 Oct).
+  if (existing && rowIsAnotherTas(existing, user, (id) => { const u = repo.user(id); return !!u && isDeskWide(u); })) {
+    const owner = repo.user(existing.addedBy)?.name ?? "another TA";
+    return reply({
+      error: "taken",
+      message: `${existing.name ?? capture.fullName ?? "That profile"} is already in the table, added by ${owner}. It is theirs to work — leave this one alone.`,
+    }, 409);
+  }
   const id = existing?.id ?? repo.addLink(openingId, url, userId);
 
   // A capture fills what the row is missing and refreshes what it already has,

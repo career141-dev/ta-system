@@ -12,6 +12,7 @@ import { JobDetailsSummary } from "@/components/JobDetailsSummary";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
 import { allows } from "@/lib/auth";
+import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { MatchingStatus } from "@/components/MatchingStatus";
 
@@ -32,11 +33,18 @@ export default async function OverviewPage({
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
-  const counts = stageCounts(id);
+  const deskSeat = seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null);
+  const counts = deskSeat.ownDeskOf
+    ? visibleToSeat(repo.applications(id), deskSeat).reduce(
+        (m, a) => { m[a.stage] = (m[a.stage] ?? 0) + 1; return m; },
+        {} as ReturnType<typeof stageCounts>,
+      )
+    : stageCounts(id);
   // This person's own sets — each TA numbers their own.
   const sets = setsForOpening(id);
   const openSet = sets.find((s) => s.status === "open" && s.taId === user.id);
-  const apps = repo.applications(id);
+  // A TA's overview is their own desk; a lead's is both TAs' (2 Oct).
+  const apps = visibleToSeat(repo.applications(id), seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null));
   const posts = repo.jobPosts(id).filter((p) => p.status === "live");
   const cvsToday = posts.reduce((n, p) => n + p.cvCountToday, 0);
   const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
