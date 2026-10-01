@@ -181,6 +181,16 @@ export function LinkRow({
                 >
                   {r.name ?? profileLink(r.linkedinUrl)?.guessedName ?? "Unnamed profile"}
                 </a>
+                {r.candidateId && (
+                  <Link
+                    href={`/candidates/${encodeURIComponent(r.candidateId)}`}
+                    target="_blank"
+                    title={`The person we already hold${r.cvMatch?.reasons.length ? ` — ${r.cvMatch.reasons.join(", ")}` : ""}. Opens their record.`}
+                    className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand hover:underline"
+                  >
+                    In database{r.cvMatch ? ` · ${r.cvMatch.fullName}` : ""}
+                  </Link>
+                )}
                 {!r.name && profileLink(r.linkedinUrl)?.guessedName && (
                   <span className="text-[11px] italic text-ink-faint">name read from the link</span>
                 )}
