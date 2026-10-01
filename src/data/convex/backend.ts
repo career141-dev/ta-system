@@ -126,6 +126,8 @@ export async function createOpening(
     taLeadId?: string | null;
     directorId?: string | null;
     notesMarkdown?: string;
+    briefKind?: "management_to_lead" | "lead_to_ta";
+    briefExtracted?: unknown;
     priorityTier?: string;
     autoFollowUp?: boolean;
   },
