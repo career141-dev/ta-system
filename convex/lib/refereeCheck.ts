@@ -18,6 +18,14 @@ const DUTY_VERBS = new Set([
   "carried", "executed", "improved", "reduced", "increased", "built", "set", "introduced", "liaised",
 ]);
 
+const NON_PERSON_NAMES = new Set([
+  "colombo", "sri lanka", "kandy", "galle", "jaffna", "negombo", "matara", "kurunegala", "gampaha",
+  "singapore", "dubai", "london", "uk", "usa", "uae", "india", "australia", "canada", "maldives",
+  "summary", "profile", "objective", "references", "referees", "initiatives", "declaration",
+  "projects", "education", "experience", "skills", "contact", "address", "activities",
+  "website", "portfolio", "github", "linkedin", "email", "phone", "mobile", "curriculum vitae",
+]);
+
 export function looksLikePersonName(raw: string | null | undefined): boolean {
   const name = (raw ?? "").trim();
   if (name.length < 3 || name.length > 60) return false;
@@ -27,6 +35,8 @@ export function looksLikePersonName(raw: string | null | undefined): boolean {
   if (/[a-z]{3,}\.$/i.test(name) && !/^(mrs?|ms|dr|prof|rev|capt|col|maj|gen|lt|eng)\.?$/i.test(name.split(/\s+/).pop()!.replace(/\.$/, ""))) {
     return false;
   }
+  const clean = name.toLowerCase().replace(/[^a-z\s]/g, "").trim();
+  if (NON_PERSON_NAMES.has(clean)) return false;
   const words = name.split(/\s+/).filter(Boolean);
   if (words.length > 7) return false;
   const first = words[0].replace(/[^a-z]/gi, "").toLowerCase();

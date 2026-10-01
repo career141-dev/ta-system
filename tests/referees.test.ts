@@ -43,5 +43,33 @@ console.log("\na CV that names nobody");
   eq("empty text is no referees", parseRefereesRegex(""), []);
 }
 
+console.log("\nsidebar format with inline phone/email and no honorifics (Mohamed Zafir format)");
+{
+  const cvZafir = `AREA OF EXPERTISE
+• Critical thinking & Problem Solving
+• Team Building
+
+REFERENCE
+Vipula S Anandapiya
+Lecturer / Director Adlux Software (Pvt) Ltd
++94 777079697, vipula@adlux.asia
+
+Gamindu Hemachandra
+Chief Academic Officer Asia Pacific
+Institute of Information Technology
++94 777318470, gamindu@apiit.lk
+
+INITIATIVES
+Secretary Jan 2024 - Jun 2025`;
+  const refs = parseRefereesRegex(cvZafir);
+  eq("Zafir referees count", refs.length, 2);
+  eq("Zafir referee 1 name", refs[0].name, "Vipula S Anandapiya");
+  eq("Zafir referee 1 phone", refs[0].contactNo, "+94 777079697");
+  eq("Zafir referee 1 email", refs[0].email, "vipula@adlux.asia");
+  eq("Zafir referee 2 name", refs[1].name, "Gamindu Hemachandra");
+  eq("Zafir referee 2 phone", refs[1].contactNo, "+94 777318470");
+  eq("Zafir referee 2 email", refs[1].email, "gamindu@apiit.lk");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

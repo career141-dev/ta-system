@@ -297,6 +297,8 @@ function extractRawPdfStreamTextFallback(buffer: ArrayBuffer): string {
   }
 }
 
+import { extractPageTextWithLayout } from "../lib/pdfLayout";
+
 async function extractTextFromPdfWithPdfJs(buffer: ArrayBuffer): Promise<string> {
   try {
     ensureDOMMatrixPolyfill();
@@ -315,11 +317,12 @@ async function extractTextFromPdfWithPdfJs(buffer: ArrayBuffer): Promise<string>
 
     for (let i = 1; i <= pdfDocument.numPages; i++) {
       const page = await pdfDocument.getPage(i);
+      const viewport = page.getViewport({ scale: 1 });
       const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item: any) => ("str" in item ? item.str : ""))
-        .join(" ");
-      fullText += pageText + "\n";
+      const pageText = extractPageTextWithLayout(textContent.items, viewport.width, viewport.height);
+      if (pageText) {
+        fullText += (fullText ? "\n\n" : "") + pageText;
+      }
     }
 
     return fullText.trim();
@@ -834,9 +837,9 @@ export async function callOpenRouterLLM(
   cvUploadId?: Id<"cvUploads">,
   sourceChannel?: string
 ): Promise<CvExtractionResult | null> {
-  // 6 000 chars (~1 500 tokens) comfortably covers all 16 structured fields.
-  // Fewer tokens = faster first-token latency and faster generation on DeepSeek.
-  const MAX_CHARS = 6000;
+  // 16 000 chars (~4 000 tokens) covers full multi-page CVs including end-of-CV references
+  // without exceeding LLM context or budget.
+  const MAX_CHARS = 16000;
   const textToSend =
     rawText.length > MAX_CHARS
       ? rawText.slice(0, MAX_CHARS).replace(/\s+\S*$/, "")
