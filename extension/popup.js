@@ -112,10 +112,18 @@ $("capture").addEventListener("click", async () => {
     const res = await send({ type: "capture", profile: read.profile });
     if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
+    // What our database said about them, as the button on the page says it (1 Oct).
+    const m = res.match;
+    const held =
+      m && m.strength === "same"
+        ? ` In our database: ${m.fullName}${m.hasCv ? " — CV on file" : " — no CV yet"}.`
+        : m && m.strength === "possible"
+          ? ` Possibly ${m.fullName}, already in our database — check the row in Excel Tables.`
+          : " Not in our database yet — a new person.";
     say(
-      res.status === "updated"
+      (res.status === "updated"
         ? `${res.name} is already in ${res.openingTitle}${res.addedByName ? ` — added by ${res.addedByName}` : ""}. Updated, not added again.`
-        : `${res.name} shortlisted in ${res.openingTitle}`,
+        : `${res.name} shortlisted in ${res.openingTitle}.`) + held,
       "ok",
     );
     paintHistory();

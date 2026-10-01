@@ -3,7 +3,7 @@
  * The two ways it can go wrong both matter: a second record for the same
  * person, and one person's CV shown for somebody else with the same name.
  */
-import { companyMatch, compareNames, cvSearchScore, linkedinVariants, namesAgree, phoneKey, profileSlug, sameCompany, samePerson } from "../convex/lib/samePerson";
+import { companyMatch, compareNames, cvSearchScore, jobYears, sameSchool, linkedinVariants, namesAgree, phoneKey, profileSlug, sameCompany, samePerson } from "../convex/lib/samePerson";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -78,6 +78,35 @@ console.log("\nFind CV: who a TA is shown, best first (1 Oct)");
     "none",
   );
   eq("a different LinkedIn profile on their record: not shown", cvSearchScore({ name: "Kasun Perera", linkedinUrl: "linkedin.com/in/kasun-a" }, { ...held, linkedinUrl: "linkedin.com/in/kasun-b" }), null);
+}
+
+console.log("\njob years and university make it certain (1 Oct)");
+{
+  eq("LinkedIn dates read as years", jobYears("Jan 2018 - Dec 2022 · 5 yrs"), { from: 2018, to: 2022 });
+  eq("…still there", jobYears("Mar 2019 - Present · 5 yrs 7 mos"), { from: 2019, to: null });
+  eq("no dates", jobYears(null), { from: null, to: null });
+  eq("the same university, written two ways", sameSchool("University of Moratuwa", "Moratuwa University"), true);
+  eq("two different universities", sameSchool("University of Moratuwa", "University of Kelaniya"), false);
+  const cvHeld = {
+    fullName: "Kasun Perera",
+    currentEmployer: "Hayleys PLC",
+    jobs: [{ company: "John Keells Holdings", from: 2018, to: 2022 }, { company: "Hayleys PLC", from: 2022 }],
+    schools: ["University of Moratuwa"],
+  };
+  eq(
+    "initials, and the same company from the same year: certain",
+    samePerson({ name: "K. Perera", jobs: [{ company: "John Keells Holdings PLC", from: 2018, to: 2022 }] }, cvHeld).strength,
+    "same",
+  );
+  eq(
+    "…the same company in other years is only possible",
+    samePerson({ name: "K. Perera", jobs: [{ company: "John Keells Holdings", from: 2010, to: 2012 }] }, cvHeld).strength,
+    "possible",
+  );
+  const near = samePerson({ name: "Kasun Perera", company: "Commercial Bank of Ceylon", schools: ["Moratuwa University"] }, { ...cvHeld, currentEmployer: "Bank of Ceylon", jobs: [] });
+  eq("the same name, a company inside another's, and the same university: certain", near.strength, "same");
+  eq("…and says why", near.reasons.includes("Both studied at Moratuwa University"), true);
+  eq("the same name and university alone: only possible", samePerson({ name: "Kasun Perera", schools: ["University of Moratuwa"] }, { ...cvHeld, jobs: [], currentEmployer: null }).strength, "possible");
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

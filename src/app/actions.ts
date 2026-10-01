@@ -47,7 +47,7 @@ import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type 
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
 import { linkKey, profileLink } from "@/lib/url";
-import { decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
+import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboLocalToInstant } from "@/lib/calendar";
@@ -3360,6 +3360,7 @@ function profileFor(input: { openingId: string; entryId?: string; suggestionId?:
       title: e.title ?? cap?.currentTitle ?? cap?.headline ?? null,
       location: cap?.location ?? null,
       employers: (cap?.experience ?? []).map((x) => x.company).filter(Boolean),
+      ...captureHistory(cap),
     };
   }
   const s = input.suggestionId ? repo.suggestions(input.openingId).find((x) => x.id === input.suggestionId) : null;

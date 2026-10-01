@@ -92,7 +92,7 @@ export async function POST(req: Request) {
   });
 
   // Someone we already hold? Linked now if certain, left to confirm if not (lib/cvMatch).
-  await matchLink(id, userId);
+  const held = await matchLink(id, userId);
 
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
@@ -106,6 +106,9 @@ export async function POST(req: Request) {
     // Who has the row already, so a TA unsure whether they added someone
     // hears "already in the table — added by Hassan" (1 Oct).
     addedByName: existing ? (repo.users().find((u) => u.id === existing.addedBy)?.name ?? null) : null,
+    // What our database said about them, for the extension to show (1 Oct):
+    // already held (with or without a CV), possibly someone to check, or new.
+    match: held && held.decided !== "different" ? { strength: held.decided === "same" ? "same" : held.strength, fullName: held.fullName, hasCv: held.hasCv } : null,
     name: capture.fullName,
     openingTitle: opening.title,
     openingUrl: `/openings/${openingId}/hh/links`,

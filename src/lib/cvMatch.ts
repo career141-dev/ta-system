@@ -3,7 +3,7 @@ import { repo } from "@/data/store";
 import { isConvex } from "@/data/mode";
 import type { CvMatch, Id } from "@/data/types";
 import { convexMutation, convexQuery } from "@/lib/convexServer";
-import { cvSearchScore, samePerson } from "../../convex/lib/samePerson";
+import { cvSearchScore, jobYears, samePerson, type Job } from "../../convex/lib/samePerson";
 
 /**
  * Match an Excel Tables row — a LinkedIn profile — to the candidate we already
@@ -28,6 +28,7 @@ export async function matchLink(entryId: Id, actorId?: Id): Promise<CvMatch | nu
     location: cap?.location ?? null,
     // Their whole LinkedIn history, so a job change since the CV still matches (1 Oct).
     employers: (cap?.experience ?? []).map((x) => x.company).filter(Boolean),
+    ...captureHistory(cap),
   };
 
   let found: Omit<CvMatch, "checkedAt" | "decided"> | null = null;
@@ -51,6 +52,8 @@ export async function matchLink(entryId: Id, actorId?: Id): Promise<CvMatch | nu
         currentTitle: c.currentTitle,
         location: c.location,
         employers: c.workHistory.map((w) => w.employer),
+        jobs: c.workHistory.map((w) => ({ company: w.employer, from: w.fromYear, to: w.toYear })),
+        schools: [c.educationInstitution],
       });
       if (v.strength === "none") continue;
       found = { candidateId: c.id, fullName: c.fullName, strength: v.strength, reasons: v.reasons, hasCv: Boolean(c.cvFileName) };
@@ -110,6 +113,22 @@ async function rememberLinkedin(candidateId: Id, linkedinUrl: string, actorId?: 
   );
 }
 
+/**
+ * The extension's LinkedIn jobs with their years, and where they studied (1
+ * Oct): with the name, the same company in the same years or the same
+ * university makes a match certain. Empty values are left out for the backend.
+ */
+export function captureHistory(cap: { experience?: { company: string; dates: string | null }[]; education?: { school: string }[] } | null | undefined) {
+  const jobs = (cap?.experience ?? [])
+    .filter((x) => x.company)
+    .map((x) => {
+      const y = jobYears(x.dates);
+      return { company: x.company, ...(y.from ? { from: y.from } : {}), ...(y.to ? { to: y.to } : {}) };
+    });
+  const schools = (cap?.education ?? []).map((e) => e.school).filter(Boolean);
+  return { ...(jobs.length ? { jobs } : {}), ...(schools.length ? { schools } : {}) };
+}
+
 /** One person "Find CV" offers the TA (ta/candidates:searchSamePerson). */
 export interface CvHit {
   candidateId: Id;
@@ -133,7 +152,7 @@ export interface CvHit {
  * certain; this is for the people it missed — a new company, a changed title.
  */
 export async function findCvCandidates(
-  profile: { linkedinUrl?: string | null; name?: string | null; email?: string | null; phone?: string | null; company?: string | null; title?: string | null; location?: string | null; employers?: string[] },
+  profile: { linkedinUrl?: string | null; name?: string | null; email?: string | null; phone?: string | null; company?: string | null; title?: string | null; location?: string | null; employers?: string[]; jobs?: Job[]; schools?: string[] },
   actorId?: Id,
 ): Promise<CvHit[]> {
   const args = Object.fromEntries(Object.entries(profile).filter(([, v]) => (Array.isArray(v) ? v.length : v)));
@@ -149,6 +168,8 @@ export async function findCvCandidates(
       currentTitle: c.currentTitle,
       location: c.location,
       employers: c.workHistory.map((w) => w.employer),
+      jobs: c.workHistory.map((w) => ({ company: w.employer, from: w.fromYear, to: w.toYear })),
+      schools: [c.educationInstitution],
     });
     if (!hit) continue;
     hits.push({

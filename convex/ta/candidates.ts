@@ -13,7 +13,7 @@
 // "no text" and "text lives in R2" need different handling upstream.
 
 import { liveFacts } from "../lib/candidateFacts";
-import { cvSearchScore, linkedinVariants, phoneKey, profileSlug, samePerson } from "../lib/samePerson";
+import { cvSearchScore, jobYears, linkedinVariants, phoneKey, profileSlug, samePerson } from "../lib/samePerson";
 import { v } from "convex/values";
 import { internalMutation, internalQuery, type QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
@@ -529,6 +529,9 @@ export const findSamePerson = internalQuery({
     location: v.optional(v.string()),
     /** Every company on their LinkedIn experience (the extension's capture). */
     employers: v.optional(v.array(v.string())),
+    /** Their LinkedIn jobs with years, and where they studied (1 Oct). */
+    jobs: v.optional(v.array(v.object({ company: v.optional(v.string()), from: v.optional(v.number()), to: v.optional(v.number()) }))),
+    schools: v.optional(v.array(v.string())),
     /** People a TA already said are someone else. */
     notThese: v.optional(v.array(v.string())),
   },
@@ -567,7 +570,7 @@ export const findSamePerson = internalQuery({
         .first();
       const career = (resume?.jobHistory?.length ? resume.jobHistory : c.jobHistory) ?? [];
       const verdict = samePerson(
-        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location, employers: a.employers },
+        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location, employers: a.employers, jobs: a.jobs, schools: a.schools },
         {
           fullName: c.fullName,
           linkedinUrl: c.linkedinUrl,
@@ -577,6 +580,8 @@ export const findSamePerson = internalQuery({
           currentTitle: c.currentJobTitle ?? c.currentTitle,
           location: c.location ?? c.locationStructured?.raw_text,
           employers: career.map((j) => j.company),
+          jobs: career.map((j) => ({ company: j.company, from: jobYears(j.startDate).from, to: jobYears(j.endDate).from })),
+          schools: [c.educationInstitution, ...(c.education ?? []).map((e) => e.institution)],
         },
       );
       if (verdict.strength === "none") continue;
@@ -615,6 +620,8 @@ export const searchSamePerson = internalQuery({
     title: v.optional(v.string()),
     location: v.optional(v.string()),
     employers: v.optional(v.array(v.string())),
+    jobs: v.optional(v.array(v.object({ company: v.optional(v.string()), from: v.optional(v.number()), to: v.optional(v.number()) }))),
+    schools: v.optional(v.array(v.string())),
     limit: v.optional(v.number()),
   },
   handler: async (ctx, a) => {
@@ -649,7 +656,7 @@ export const searchSamePerson = internalQuery({
         .first();
       const career = (resume?.jobHistory?.length ? resume.jobHistory : c.jobHistory) ?? [];
       const hit = cvSearchScore(
-        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location, employers: a.employers },
+        { linkedinUrl: a.linkedinUrl, name: a.name, email: a.email, phone: a.phone, company: a.company, title: a.title, location: a.location, employers: a.employers, jobs: a.jobs, schools: a.schools },
         {
           fullName: c.fullName,
           linkedinUrl: c.linkedinUrl,
@@ -659,6 +666,8 @@ export const searchSamePerson = internalQuery({
           currentTitle: c.currentJobTitle ?? c.currentTitle,
           location: c.location ?? c.locationStructured?.raw_text,
           employers: career.map((j) => j.company),
+          jobs: career.map((j) => ({ company: j.company, from: jobYears(j.startDate).from, to: jobYears(j.endDate).from })),
+          schools: [c.educationInstitution, ...(c.education ?? []).map((e) => e.institution)],
         },
       );
       if (!hit) continue;

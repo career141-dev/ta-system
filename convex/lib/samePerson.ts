@@ -36,6 +36,17 @@ export interface Profile {
    * Oct). A CV a year old names their old employer; LinkedIn names both.
    */
   employers?: (string | null | undefined)[];
+  /** Their LinkedIn jobs with the years, "Jan 2018 - Dec 2022" read as 2018–2022. */
+  jobs?: Job[];
+  /** Universities and colleges on their LinkedIn education. */
+  schools?: (string | null | undefined)[];
+}
+
+/** One job, with the years it started and ended (null end: still there). */
+export interface Job {
+  company?: string | null;
+  from?: number | null;
+  to?: number | null;
 }
 
 export interface Held {
@@ -48,6 +59,47 @@ export interface Held {
   location?: string | null;
   /** Every employer in their career, current one included. */
   employers?: (string | null | undefined)[];
+  /** Their CV's jobs with years, where the CV gives them. */
+  jobs?: Job[];
+  /** Where they studied, from their CV. */
+  schools?: (string | null | undefined)[];
+}
+
+/**
+ * The years in a job's dates, however written: "Jan 2018 - Dec 2022 · 5 yrs",
+ * "2018 – Present", "03/2019". The first year is the start; a second is the
+ * end; "Present" (or no second year) is still there.
+ */
+export function jobYears(dates: string | null | undefined): { from: number | null; to: number | null } {
+  const years = [...(dates ?? "").matchAll(/\b(19[5-9]\d|20\d{2})\b/g)].map((m) => Number(m[1]));
+  return { from: years[0] ?? null, to: years[1] ?? null };
+}
+
+const SCHOOL_NOISE = /\b(university|universiti|college|institute|institution|school|campus|faculty|of|the|and|for|sri|lanka|colombo|pvt|ltd)\b/g;
+const schoolWords = (s: string | null | undefined) =>
+  (s ?? "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(SCHOOL_NOISE, " ").split(/\s+/).filter((w) => w.length > 1);
+
+/**
+ * The same university or college: the same distinctive words ("University of
+ * Moratuwa" and "Moratuwa University"). One generic word in common is not it.
+ */
+export function sameSchool(a: string | null | undefined, b: string | null | undefined): boolean {
+  const x = schoolWords(a);
+  const y = schoolWords(b);
+  if (!x.length || !y.length) return false;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  return short.every((w) => long.includes(w));
+}
+
+/** A company they both name, starting within a year of each other there: a very strong sign. */
+function sameJobYears(p: Job[] | undefined, c: Job[] | undefined): { company: string; from: number } | null {
+  for (const a of p ?? []) {
+    if (!a.from) continue;
+    for (const b of c ?? []) {
+      if (b.from && Math.abs(a.from - b.from) <= 1 && companyMatch(a.company, b.company)) return { company: b.company ?? "", from: b.from };
+    }
+  }
+  return null;
 }
 
 export interface Verdict {
@@ -212,11 +264,11 @@ export function samePerson(p: Profile, c: Held): Verdict {
   const name = compareNames(p.name, c.fullName);
   if (!name) return { strength: "none", reasons: [] };
 
-  const employers = [c.currentEmployer, ...(c.employers ?? [])];
+  const employers = [c.currentEmployer, ...(c.employers ?? []), ...(c.jobs ?? []).map((j) => j.company)];
   // Their whole LinkedIn history against their whole CV career (1 Oct): a
   // person who has changed jobs since their CV shares a past company, not a
   // current one. The exact company first, then one inside another's name.
-  const theirs = [p.company, ...(p.employers ?? [])].filter(Boolean);
+  const theirs = [p.company, ...(p.employers ?? []), ...(p.jobs ?? []).map((j) => j.company)].filter(Boolean);
   const pair = (kind: "same" | "close") => {
     for (const mine of theirs) for (const e of employers) if (companyMatch(mine, e) === kind) return e;
     return undefined;
@@ -225,15 +277,22 @@ export function samePerson(p: Profile, c: Held): Verdict {
   const employerSame = !!employer && pair("same") !== undefined;
   const title = similarTitle(p.title, c.currentTitle);
   const place = samePlace(p.location, c.location);
+  // The same company in the same years, and the same university (1 Oct): with
+  // the name, either makes it certain where a company alone only suggests it.
+  const years = sameJobYears(p.jobs, c.jobs);
+  const school = (p.schools ?? []).find((s) => (c.schools ?? []).some((h) => sameSchool(s, h)));
   const reasons = [
     name === "exact" ? "Same name" : "Same surname, and initials that fit",
-    employer ? `Both at ${employer}` : null,
+    years ? `Both at ${years.company} from ${years.from}` : employer ? `Both at ${employer}` : null,
+    school ? `Both studied at ${school}` : null,
     title ? "Similar job title" : null,
     place ? "Same place" : null,
   ].filter((r): r is string => Boolean(r));
 
-  if (name === "exact" && employerSame) return { strength: "same", reasons };
-  if (employer || title || place) return { strength: "possible", reasons };
+  if (name === "exact" && (employerSame || years)) return { strength: "same", reasons };
+  if (name === "exact" && employer && school) return { strength: "same", reasons };
+  if (name === "initials" && (years || (employerSame && school))) return { strength: "same", reasons };
+  if (employer || years || school || title || place) return { strength: "possible", reasons };
   // The same name and nothing else agreeing: two people, as far as we can tell.
   return { strength: "none", reasons };
 }
