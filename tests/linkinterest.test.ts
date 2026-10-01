@@ -36,6 +36,11 @@ eq("Declined off the pipeline is Not interested", interestOf({ outcome: "decline
 eq("on the pipeline is Interested", interestOf({ outcome: "contacted" }, { stage: "ta_follow_up" }), "interested");
 eq("rejected on the pipeline is Not interested", interestOf({ outcome: "shortlisted" }, { stage: "rejected" }), "not_interested");
 eq("dropped out is Not interested", interestOf({ outcome: "shortlisted" }, { stage: "dropped_out" }), "not_interested");
+// 1 Oct: Ajith, linked to his record, sat in Database matches; the row said
+// Interested, so the Interested button was hidden and nobody could move him on.
+eq("in Database matches, not yet taken on by a TA, is Pending", interestOf({ outcome: "shortlisted" }, { stage: "matched" }), "pending");
+eq("…and in New CVs", interestOf({ outcome: "shortlisted" }, { stage: "new_cv" }), "pending");
+eq("…and on the AI's own shortlist", interestOf({ outcome: "shortlisted" }, { stage: "ai_follow_up" }), "pending");
 
 console.log("\nPending → Interested → Not interested, one person throughout");
 {

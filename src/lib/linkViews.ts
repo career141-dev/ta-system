@@ -24,9 +24,16 @@ const CLOSED = new Set(["rejected", "dropped_out"]);
  * (New rows arrive Shortlisted, so the outcome alone cannot mean Interested.)
  */
 export function interestOf(row: { outcome: string }, app: { stage: string } | null | undefined): Interest {
-  if (app) return CLOSED.has(app.stage) ? "not_interested" : "interested";
+  if (app && CLOSED.has(app.stage)) return "not_interested";
+  // Matched to the opening by the system — Database matches, New CVs, the
+  // AI's own shortlist — is not a TA's Interested (1 Oct). It read as
+  // Interested, so the Interested button was hidden and the TA had no way to
+  // take them on from the row. Pending until a TA does.
+  if (app && !SYSTEM_ONLY.has(app.stage)) return "interested";
   return row.outcome === "declined" ? "not_interested" : "pending";
 }
+
+const SYSTEM_ONLY = new Set(["matched", "new_cv", "ai_follow_up"]);
 
 export const INTEREST_LABEL: Record<Interest, string> = {
   pending: "Pending",
