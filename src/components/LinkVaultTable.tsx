@@ -8,7 +8,7 @@ import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
 import { LinkFilters } from "./LinkFilters";
-import { movedBackToTables } from "@/lib/pipeline";
+import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 
 const PAGE_SIZE = 25;
 
@@ -60,7 +60,9 @@ export function LinkVaultTable({
         : undefined;
       // Someone moved back here from the pipeline is off it: the row offers
       // "Add to pipeline" again and reads Pending (29 Sep).
-      const app = found && !movedBackToTables(found) ? found : null;
+      // Nor is someone only suggested to the opening by the database matcher:
+      // they are not shortlisted until the TA presses it (1 Oct).
+      const app = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
       return [r.id, { app, interest: interestOf(r, app) }] as const;
     }),
   );

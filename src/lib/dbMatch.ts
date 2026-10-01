@@ -71,6 +71,15 @@ export async function refreshCandidateVectors() {
   return r;
 }
 
+/**
+ * People already on this opening's Excel Tables, matched to our database. They
+ * are headhunted, not suggested: matching them again filed the same person
+ * twice — once in Excel Tables, once under Database CVs (1 Oct).
+ */
+export function linkedCandidates(openingId: string): Set<string> {
+  return new Set(repo.linkVault(openingId).map((l) => l.candidateId).filter((id): id is string => Boolean(id)));
+}
+
 /** The hard rules, with the reason a person fails, for tests and for the run note. */
 export function failsHardRules(
   c: Candidate,
@@ -123,7 +132,7 @@ async function matchViaEngine(
   const run = await backend.runReverseMatch({ id: null }, o.id);
   if (!run.ok) return null;
 
-  const onOpening = new Set(repo.applications(o.id).map((a) => a.candidateId));
+  const onOpening = new Set([...repo.applications(o.id).map((a) => a.candidateId), ...linkedCandidates(o.id)]);
   const excluded = repo.matchExcluded(o.id);
   const fresh = run.results.filter((r) => !onOpening.has(r.cvId) && !excluded.has(r.cvId));
   await primeStore({ candidateIds: fresh.map((r) => r.cvId) });
@@ -241,7 +250,7 @@ export async function findDatabaseMatches(
   if (!job.ok) return { ok: false, reason: `embeddings: ${job.reason}` };
   const jobVec = openingVector(o.id)!;
 
-  const onOpening = new Set(repo.applications(o.id).map((a) => a.candidateId));
+  const onOpening = new Set([...repo.applications(o.id).map((a) => a.candidateId), ...linkedCandidates(o.id)]);
   const excluded = repo.matchExcluded(o.id);
   const near = await nearestCandidates(jobVec, LIMITS.nearest, (id) => !onOpening.has(id) && !excluded.has(id));
 

@@ -35,6 +35,16 @@ export function movedBackToTables(app: { stage: Stage; droppedOutReason?: string
   return app.stage === "dropped_out" && app.droppedOutReason === BACK_TO_TABLES_REASON;
 }
 
+/**
+ * An unclaimed database match (or new CV) is a suggestion, not a place on the
+ * pipeline. When the same person is also an Excel Tables row, the row must
+ * still offer "Add to pipeline" — it showed "In Database match →" instead and
+ * the TA could not shortlist them from the row (1 Oct).
+ */
+export function awaitingShortlist(app: { stage: Stage }): boolean {
+  return app.stage === "matched" || app.stage === "new_cv";
+}
+
 /** On the pipeline, and put there from one of this opening's Excel Tables rows. */
 export function cameFromTables(
   app: { stage: Stage; candidateId: string },

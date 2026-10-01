@@ -11,6 +11,7 @@ import { requireSourcingSeat } from "../sourcingGate";
 import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { MatchingStatus } from "@/components/MatchingStatus";
+import { linkedCandidates } from "@/lib/dbMatch";
 
 export default async function DatabasePage({
   params,
@@ -24,13 +25,16 @@ export default async function DatabasePage({
   await primeStore({ openingId: id });
   await requireSourcingSeat(id);
   const user = await getCurrentUser();
+  // Someone also on this opening's Excel Tables lives there, not here twice.
+  const inTables = linkedCandidates(id);
   const everyone = repo
     .applications(id)
     // Database picks not yet shortlisted. Every database pick is saved as
     // SCOOP, so filtering on the channel kept people here after they had moved
     // on — each showing an "In director shortlist" box on a search screen
     // (testing, 21 Sep). Once shortlisted they belong to the pipeline pages.
-    .filter((a) => a.stage === "matched" || (a.sourcingChannel === "SCOOP" && a.stage === "new_cv"));
+    .filter((a) => a.stage === "matched" || (a.sourcingChannel === "SCOOP" && a.stage === "new_cv"))
+    .filter((a) => !inTables.has(a.candidateId));
   const apps = applyFilters(everyone, filters, user.id);
   const unclaimed = everyone.filter((a) => !a.ownerTaId).length;
   // A starting sentence for the database search. Only the title — an opening's
