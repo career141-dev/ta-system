@@ -691,7 +691,12 @@ function CvStatus({
     const hasCv = m ? m.hasCv : null;
     return (
       <div className={`${pill} bg-brand-soft text-brand`}>
-        <span>{hasCv === false ? "In our database — no CV yet" : "In our database"}{m ? `: ${m.fullName}` : ""}</span>
+        {/* Said as a match, so the TA can see it may be wrong (1 Oct): from a
+            LinkedIn profile there is often only a name and a company to go on. */}
+        <span>
+          {m ? <>Matched to <strong>{m.fullName}</strong> in our database</> : "In our database"}
+          {hasCv === false ? " — no CV yet" : ""}
+        </span>
         {hasCv !== false && (
           <a href={`/api/cv/${encodeURIComponent(r.candidateId)}`} target="_blank" rel="noreferrer" className={linkCls}>
             View CV
@@ -711,9 +716,10 @@ function CvStatus({
               name="decision"
               value="different"
               disabled={decide.pending}
+              title="This LinkedIn profile is someone else. The row is unlinked from this candidate, and their CV and details stay out of it."
               className="rounded-full border border-rule-strong bg-surface px-2.5 py-0.5 text-[11.5px] font-medium text-ink hover:border-danger hover:text-danger disabled:opacity-60"
             >
-              Not this person
+              Not the same person
             </button>
           </form>
         )}

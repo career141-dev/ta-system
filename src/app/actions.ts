@@ -533,7 +533,11 @@ export async function decideCvMatch(formData: FormData) {
   }
   if (!(await decideMatch(entryId, decision, user.id))) await fail("There is no match on that row to answer.");
   revalidateLinks(openingId);
-  await done(decision === "same" ? `Linked to ${e!.cvMatch!.fullName}'s record.` : "Noted: a different person. The row stays on its own.");
+  await done(
+    decision === "same"
+      ? `Linked to ${e!.cvMatch!.fullName}'s record.`
+      : `Done — not the same person. This row is no longer linked to ${e!.cvMatch!.fullName}.`,
+  );
 }
 
 export async function addLink(formData: FormData) {
