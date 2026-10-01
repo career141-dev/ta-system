@@ -26,8 +26,8 @@ export type BackendStage =
 export type TaStage =
   | "new_cv"
   | "matched"
-  | "ai_follow_up"
   | "ta_follow_up"
+  | "ai_follow_up"
   | "director_review"
   | "director_shortlist"
   | "client_shortlist"

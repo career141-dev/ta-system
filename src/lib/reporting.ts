@@ -27,7 +27,7 @@ export * from "./reportSpec";
 // ─── the datasets ────────────────────────────────────────────────────────────
 
 const STAGES: Stage[] = [
-  "new_cv", "matched", "ai_follow_up", "ta_follow_up",
+  "new_cv", "matched", "ta_follow_up", "ai_follow_up",
   "director_review", "director_shortlist", "client_shortlist",
   "interview", "offer", "placed", "rejected", "dropped_out",
 ];
