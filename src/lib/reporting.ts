@@ -15,6 +15,7 @@
 
 import { repo, setsForOpening, stageCounts } from "@/data/store";
 import { PRIORITY_TARGET, STAGE_LABEL, type Stage } from "@/data/types";
+import { colomboDaysBetween } from "./calendar";
 import {
   AGGS, PERIODS, bucketKey, bucketLabel, cellText, datasetMeta, toCsv,
   type Agg, type Column, type DatasetKey, type FieldType,
@@ -43,7 +44,7 @@ function openingRows(): Row[] {
     const vault = repo.linkVault(o.id);
     const apps = repo.applications(o.id);
     const target = PRIORITY_TARGET[o.priorityTier].days;
-    const days = o.assignedAt ? Math.floor((Date.now() - o.assignedAt) / 86_400_000) : null;
+    const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : null;
 
     return {
       id: o.id,

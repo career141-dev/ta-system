@@ -2,7 +2,7 @@ import Link from "next/link";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { computeAlerts } from "@/lib/sla";
 import { PRIORITY_TARGET } from "@/data/types";
-import { relDays } from "@/lib/format";
+import { colomboDaysBetween, relDays } from "@/lib/format";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 import { linkedinStatus, type LinkedInStatus } from "@/lib/linkedinStatus";
@@ -65,7 +65,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
   const scope = theirs.length > 0 ? theirs : openings;
 
   const stale = scope.filter(roleMatches).filter((o) => {
-    const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
+    const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
     return days > PRIORITY_TARGET[o.priorityTier].days;
   });
   const unassigned = scope.filter(roleMatches).filter((o) => o.assignedTaIds.length === 0);
@@ -197,7 +197,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                     </p>
                   </Link>
                 ) : (() => {
-                  const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
+                  const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
                   return (
                     <Link key={`s-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
                       <p className="text-[13.5px]">{o.title}</p>

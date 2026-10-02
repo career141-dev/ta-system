@@ -3,7 +3,7 @@ import { BulkBar, BulkConfirm } from "@/components/BulkSelect";
 import { deleteClients } from "@/app/actions";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { PRIORITY_TARGET } from "@/data/types";
-import { relDays } from "@/lib/format";
+import { colomboDaysBetween, relDays } from "@/lib/format";
 import { AddClient } from "@/components/AddClient";
 import { ClientCard } from "@/components/ClientCard";
 import { ClientsToolbar } from "@/components/ClientsToolbar";
@@ -164,7 +164,7 @@ export default async function ClientsPage({
                   taNames: o.assignedTaIds.map((t) => users.find((u) => u.id === t)?.name ?? "—"),
                   followUp: (counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0),
                   setsClosed: setsForOpening(o.id).filter((x) => x.status === "closed").length,
-                  days: Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000),
+                  days: o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0,
                   target: PRIORITY_TARGET[o.priorityTier].days,
                 };
               })}

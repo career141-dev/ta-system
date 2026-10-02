@@ -1,4 +1,5 @@
-import { colomboDayLabel, colomboDayStart, groupByColomboDay } from "@/lib/calendar";
+import { colomboDayLabel, colomboDaysBetween, colomboDayStart, groupByColomboDay } from "@/lib/calendar";
+import { relDays } from "@/lib/format";
 
 let passed = 0;
 let failed = 0;
@@ -49,6 +50,20 @@ const lastYear = colomboDayLabel(colombo(2025, 12, 31), now);
 ok("last year shows the year", lastYear === "Wed 31 Dec 2025", `got "${lastYear}"`);
 
 ok("empty list", groupByColomboDay([], () => 0).length === 0);
+
+// Calendar days difference & relDays
+const todayMorning = colombo(2026, 9, 30, 9);
+const yesterdayAfternoon = colombo(2026, 9, 29, 16);
+const twoDaysAgo = colombo(2026, 9, 28, 11);
+
+ok("colomboDaysBetween: today is 0", colomboDaysBetween(todayMorning, now) === 0);
+ok("colomboDaysBetween: yesterday is 1", colomboDaysBetween(yesterdayAfternoon, now) === 1);
+ok("colomboDaysBetween: 2 days ago is 2", colomboDaysBetween(twoDaysAgo, now) === 2);
+
+ok("relDays: today is 'today'", relDays(todayMorning, now) === "today");
+ok("relDays: yesterday afternoon is 'yesterday' even if < 24h ago", relDays(yesterdayAfternoon, now) === "yesterday");
+ok("relDays: 2 days ago is '2d ago'", relDays(twoDaysAgo, now) === "2d ago");
+ok("relDays: null is '—'", relDays(null, now) === "—");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

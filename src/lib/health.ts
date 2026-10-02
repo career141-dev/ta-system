@@ -8,6 +8,7 @@
 
 import type { Application, Opening, Stage } from "@/data/types";
 import { PRIORITY_TARGET } from "@/data/types";
+import { colomboDaysBetween } from "./calendar";
 
 // ─────────────────────────────────────────────── where a candidate really is ──
 
@@ -89,7 +90,7 @@ export function healthFor(input: {
   const progress = upstream + downstream === 0 ? 50 : clamp((downstream / (upstream + downstream)) * 140);
 
   // 4. How much of the clock is gone?
-  const days = Math.floor((now - (o.assignedAt ?? now)) / 86_400_000);
+  const days = o.assignedAt ? colomboDaysBetween(o.assignedAt, now) : 0;
   const target = PRIORITY_TARGET[o.priorityTier].days;
   const time = clamp(100 - (days / target) * 100);
 

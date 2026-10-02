@@ -139,6 +139,17 @@ export function colomboDayStart(at: number): number {
 }
 
 /**
+ * Calendar days between two instants in Colombo timezone (UTC+05:30).
+ * Returns 0 if `from` is on the same Colombo calendar day as `to`.
+ * Returns 1 if `from` was yesterday in Colombo, etc.
+ */
+export function colomboDaysBetween(from: number, to = Date.now()): number {
+  const startFrom = colomboDayStart(from);
+  const startTo = colomboDayStart(to);
+  return Math.max(0, Math.round((startTo - startFrom) / 86_400_000));
+}
+
+/**
  * "Today", "Yesterday", or "Mon 28 Sep" for the Colombo day containing `at` —
  * with the year once it is not this year's.
  */

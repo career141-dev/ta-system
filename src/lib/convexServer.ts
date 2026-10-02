@@ -111,18 +111,22 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
   } catch {
     parsed = null;
   }
-  const body = parsed as { status?: string; value?: T; errorMessage?: string } | null;
+  const body = parsed as { status?: string; value?: T; errorMessage?: string; message?: string; error?: string } | null;
 
   if (!res.ok || !body || body.status !== "success") {
     // The server's message only. The request carries the admin key and must
     // never appear in a log or an error a user can see.
-    const detail = body?.errorMessage ?? `HTTP ${res.status}`;
+    const detail =
+      body?.errorMessage ||
+      body?.message ||
+      body?.error ||
+      (!body && raw ? `Invalid JSON response: ${raw.slice(0, 100)}` : `HTTP ${res.status}`);
     throw new ConvexCallError(`Convex refused ${path}: ${detail.slice(0, 300)}`, res.status);
   }
   return body.value as T;
 }
 
-const RETRYABLE = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network/i;
+const RETRYABLE = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network|invalid json response|http 502|http 503|http 504/i;
 
 export async function convexQuery<T>(path: string, args: Record<string, unknown> = {}): Promise<T> {
   for (let attempt = 1; ; attempt++) {
