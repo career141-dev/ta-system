@@ -3,6 +3,7 @@ import { internalAction, internalMutation, internalQuery } from "../_generated/s
 import { api, internal } from "../_generated/api";
 import { sendMetaFreeText } from "./metaDirectSender";
 import { followUpCancelledReason } from "../lib/graphMail";
+import { isFollowUpStage } from "../ta/stages";
 
 /**
  * The Meta `phone_number_id` for the line an opening sends from.
@@ -157,8 +158,43 @@ export const getJobOutboundWhatsAppNumber = internalQuery({
  * nobody is talking to can no longer swallow a live reply.
  */
 export async function findCandidateByPhone(ctx: any, targetPhone: string) {
+  const matches = await candidatesWithPhone(ctx, targetPhone);
+  if (matches.length === 0) return null;
+  if (matches.length === 1) return matches[0];
+
+  // More than one record holds this number. Prefer whoever is mid-conversation.
+  const LIVE = ["follow_up", "ta_shortlist", "matched_candidates"];
+  let best = null;
+  let bestRank = -1;
+  for (const c of matches) {
+    const apps = await ctx.db
+      .query("applications")
+      .withIndex("by_candidateId", (q: any) => q.eq("candidateId", c._id))
+      .collect();
+    const open = apps.filter((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
+    const rank = open.some((a: any) => LIVE.includes(a.currentStage)) ? 2 : open.length > 0 ? 1 : 0;
+    if (rank > bestRank || (rank === bestRank && best && c._creationTime > best._creationTime)) {
+      best = c;
+      bestRank = rank;
+    }
+  }
+
+  console.warn(
+    `[WhatsApp Inbound] ${matches.length} candidate records share the number ${targetPhone}. ` +
+      `Matched ${best?.fullName ?? best?._id} (rank ${bestRank}: 2=in an active follow-up stage, ` +
+      `1=has an open application, 0=none). Merge the duplicates to make this unambiguous.`,
+  );
+  return best;
+}
+
+/**
+ * Every candidate record holding this number, in any of its spellings.
+ * Split out of findCandidateByPhone (2 Oct) so the do-not-contact check
+ * (contactGuard.ts) sees all of them, not just the one a reply is filed on.
+ */
+export async function candidatesWithPhone(ctx: any, targetPhone: string): Promise<any[]> {
   const cleanDigits = targetPhone.replace(/\D/g, "");
-  if (!cleanDigits) return null;
+  if (!cleanDigits) return [];
 
   /** Every spelling of this number that might be on a record. */
   const phones = new Set<string>([targetPhone, `+${cleanDigits}`]);
@@ -208,33 +244,7 @@ export async function findCandidateByPhone(ctx: any, targetPhone: string) {
     }
   }
 
-  const matches = [...found.values()];
-  if (matches.length === 0) return null;
-  if (matches.length === 1) return matches[0];
-
-  // More than one record holds this number. Prefer whoever is mid-conversation.
-  const LIVE = ["follow_up", "ta_shortlist", "matched_candidates"];
-  let best = null;
-  let bestRank = -1;
-  for (const c of matches) {
-    const apps = await ctx.db
-      .query("applications")
-      .withIndex("by_candidateId", (q: any) => q.eq("candidateId", c._id))
-      .collect();
-    const open = apps.filter((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
-    const rank = open.some((a: any) => LIVE.includes(a.currentStage)) ? 2 : open.length > 0 ? 1 : 0;
-    if (rank > bestRank || (rank === bestRank && best && c._creationTime > best._creationTime)) {
-      best = c;
-      bestRank = rank;
-    }
-  }
-
-  console.warn(
-    `[WhatsApp Inbound] ${matches.length} candidate records share the number ${targetPhone}. ` +
-      `Matched ${best?.fullName ?? best?._id} (rank ${bestRank}: 2=in an active follow-up stage, ` +
-      `1=has an open application, 0=none). Merge the duplicates to make this unambiguous.`,
-  );
-  return best;
+  return [...found.values()];
 }
 
 export const sendWhatsApp = internalAction({
@@ -371,7 +381,7 @@ export const sendWhatsApp = internalAction({
 
       console.log(`[WhatsApp Outbound] Sending message to +${cleanPhone}${logNote} via Meta Cloud API`);
 
-      const result = await sendMetaFreeText(phoneId, cleanPhone, args.body, metaAccessToken);
+      const result = await sendMetaFreeText(phoneId, cleanPhone, args.body, metaAccessToken, ctx);
 
       if (result.success) {
         await ctx.runMutation(internal.communications.whatsappOutbound.updateStatus, {
@@ -480,6 +490,11 @@ export const checkAndRecordFollowUpReply = internalMutation({
         (a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed"
       );
     }
+    // An application in Follow-up wins over one that is not: that is the
+    // conversation the assistant is having (2 Oct).
+    if (!activeApp || !isFollowUpStage(activeApp.currentStage)) {
+      activeApp = apps.find((a: any) => isFollowUpStage(a.currentStage)) ?? activeApp;
+    }
 
     console.log(`[checkAndRecordFollowUpReply] Sender: ${args.senderPhone} -> Candidate: ${candidate.fullName} (${candidate._id}). Active stage: ${activeApp?.currentStage || "NONE"}. Text length: ${args.textBody?.length || 0}. Text preview: "${(args.textBody || "").substring(0, 100)}"`);
 
@@ -523,8 +538,16 @@ export const checkAndRecordFollowUpReply = internalMutation({
       lastCandidateReplyAt: Date.now(),
     });
 
-    // ONLY run text extraction if textBody is non-empty (> 2 chars to skip trivial "ok", "hi")
-    if (args.textBody && args.textBody.trim().length > 2) {
+    // Chase only an application in Follow-up, the same rule as email
+    // (ta/stages.ts isFollowUpStage). This skipped only rejected and placed, so
+    // a candidate at interview or offer was asked again for their details
+    // (2 Oct). Anywhere else the message is recorded above and a TA answers.
+    // Still "handled" for the webhook, so no keyword or pre-application reply
+    // goes out instead.
+    if (!isFollowUpStage(activeApp.currentStage)) {
+      console.log(`[checkAndRecordFollowUpReply] Application ${activeApp._id} is in ${activeApp.currentStage}, not Follow-up. Recorded; no AI reply.`);
+    } else if (args.textBody && args.textBody.trim().length > 2) {
+      // ONLY run text extraction if textBody is non-empty (> 2 chars to skip trivial "ok", "hi")
       // Run text extraction in background to parse details
       await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
         candidateId: candidate._id,

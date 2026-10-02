@@ -1356,8 +1356,15 @@ export default defineSchema({
     errorMessage: v.optional(v.string()),
 
     fromCredentials: v.optional(v.string()),
+    /**
+     * The provider's id for an inbound message (Graph `message.id`), so the
+     * same email is recorded and answered once however many polls see it
+     * (2 Oct). Absent on older rows and on outbound ones.
+     */
+    externalMessageId: v.optional(v.string()),
   })
     .index("by_candidate_time", ["candidateId", "sentAt"])
+    .index("by_externalMessageId", ["externalMessageId"])
     .index("by_applicationId", ["applicationId"])
     .index("by_channel_time", ["channel", "sentAt"])
     .index("by_app_sequence", ["applicationId", "sequenceDay"])

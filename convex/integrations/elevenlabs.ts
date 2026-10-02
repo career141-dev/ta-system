@@ -4,6 +4,7 @@ import { internalAction } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { v } from "convex/values";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
+import { doNotContactRefusal, outreachLive } from "../lib/outreachSafety";
 
 export const triggerIntakeCall = internalAction({
   args: {
@@ -33,7 +34,17 @@ export const triggerIntakeCall = internalAction({
 
     // Test mode recipient resolution
     const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-    const isTestMode = 
+    // Not live unless outreachSafety says so (OUTREACH_LIVE=true): these
+    // switches alone rang real candidates while messages were held (2 Oct).
+    // Do-not-contact is checked here too — the callers check it, but this is
+    // the call that dials.
+    const refusal = doNotContactRefusal([candidate]);
+    if (refusal) {
+      console.warn(`[DoNotContact] Refused voice call to candidate ${args.candidateId}: ${refusal}`);
+      return { success: false, conversationId: "suppressed_do_not_contact" };
+    }
+    const isTestMode =
+      !outreachLive() ||
       process.env.CALL_TEST_MODE === "true" || 
       process.env.OUTREACH_TEST_MODE === "true" || 
       process.env.TEST_MODE === "true" || 
@@ -160,7 +171,17 @@ export const triggerFollowUpCall = internalAction({
 
     // Test mode recipient resolution
     const systemSettings = await ctx.runQuery(internal.admin.settings.getInternalSystemSettings);
-    const isTestMode = 
+    // Not live unless outreachSafety says so (OUTREACH_LIVE=true): these
+    // switches alone rang real candidates while messages were held (2 Oct).
+    // Do-not-contact is checked here too — the callers check it, but this is
+    // the call that dials.
+    const refusal = doNotContactRefusal([candidate]);
+    if (refusal) {
+      console.warn(`[DoNotContact] Refused voice call to candidate ${args.candidateId}: ${refusal}`);
+      return { success: false, conversationId: "suppressed_do_not_contact" };
+    }
+    const isTestMode =
+      !outreachLive() ||
       process.env.CALL_TEST_MODE === "true" || 
       process.env.OUTREACH_TEST_MODE === "true" || 
       process.env.TEST_MODE === "true" || 

@@ -3,6 +3,8 @@ import { internalAction, internalMutation, internalQuery } from "../_generated/s
 import { internal } from "../_generated/api";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { resolveRecipient } from "../lib/outreachSafety";
+import { refuseIfDoNotContact } from "../lib/doNotContact";
+import { followUpCancelledReason } from "../lib/graphMail";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -59,12 +61,52 @@ export const sendMetaTemplate = internalAction({
     }
 
     const resolvedJobId = app?.jobId || args.jobId;
-    let job = resolvedJobId
+    const job = resolvedJobId
       ? await ctx.runQuery(internal.communications.metaTemplateSender.getJobById, { jobId: resolvedJobId })
       : null;
 
+    // Every refusal below is written onto the row, so the conversation says
+    // why nothing went instead of showing a message that never existed.
+    const refuse = async (reason: string) => {
+      console.warn(`[Meta Template Sender] ${reason}`);
+      await ctx.runMutation(internal.communications.metaTemplateSender.logTemplateCommunication, {
+        communicationId: args.communicationId,
+        applicationId: app?._id,
+        candidateId: resolvedCandidateId,
+        jobId: resolvedJobId,
+        body: `[${args.templateType} template not sent] ${reason}`,
+        status: "failed",
+        error: reason,
+      });
+    };
+
+    // No job, no template. This used to fall back to the first active job in
+    // the database, so a candidate whose job could not be found was messaged
+    // by name about somebody else's opening (2 Oct).
     if (!job) {
-      job = await ctx.runQuery(internal.communications.metaTemplateSender.getFirstActiveJob, {});
+      await refuse("Not sent: the job this message is about could not be found.");
+      return;
+    }
+
+    const refusal = await refuseIfDoNotContact(ctx, "WhatsApp template", {
+      candidateId: resolvedCandidateId,
+      phone: candidate.phone,
+    });
+    if (refusal) {
+      await refuse(refusal);
+      return;
+    }
+
+    // A template is a chase, so it gets the same guard as the free-text sender
+    // and the follow-up email: one queued before the TA stopped the sequence,
+    // or before the candidate moved on, used to go anyway (2 Oct).
+    const queued = args.communicationId
+      ? await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, { communicationId: args.communicationId })
+      : null;
+    const cancelled = followUpCancelledReason(queued, app);
+    if (cancelled) {
+      await refuse(cancelled);
+      return;
     }
 
     // 2. Resolve sender phone number and phone_number_id
@@ -91,16 +133,7 @@ export const sendMetaTemplate = internalAction({
     // most needs the gate, and the one that never had it.
     const decision = resolveRecipient("whatsapp", candidate.phone);
     if (!decision.ok) {
-      console.warn(`[Meta Template Sender] ${decision.reason}`);
-      await ctx.runMutation(internal.communications.metaTemplateSender.logTemplateCommunication, {
-        communicationId: args.communicationId,
-        applicationId: app?._id,
-        candidateId: resolvedCandidateId,
-        jobId: resolvedJobId || job?._id,
-        body: `[${args.templateType} template not sent] ${decision.reason}`,
-        status: "failed",
-        error: decision.reason,
-      });
+      await refuse(decision.reason);
       return;
     }
     const cleanRecipientPhone = decision.to;
@@ -122,7 +155,7 @@ export const sendMetaTemplate = internalAction({
 
     const cleanName = (candidate.fullName || "Candidate").replace(/\s*\([+0-9\s-]+\)\s*$/g, "").trim();
     const candidateName = sanitizeParam(cleanName || "Candidate");
-    const jobTitle = sanitizeParam(job?.title || "the role");
+    const jobTitle = sanitizeParam(job.title || "the role");
 
     if (args.templateType === "initial_outreach") {
       templateName = "career141_initial_outreach";
@@ -258,7 +291,7 @@ export const sendMetaTemplate = internalAction({
       communicationId: args.communicationId,
       applicationId: app?._id,
       candidateId: resolvedCandidateId,
-      jobId: resolvedJobId || job?._id,
+      jobId: resolvedJobId,
       body: loggedBody,
       status: sentSuccess ? "sent" : "failed",
       error: errorMessage || undefined,
@@ -332,34 +365,22 @@ export const getJobById = internalQuery({
   },
 });
 
-export const getFirstActiveJob = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    const active = await ctx.db
-      .query("jobs")
-      .withIndex("by_status", (q) => q.eq("status", "active"))
-      .first();
-    if (active) return active;
-    return await ctx.db.query("jobs").first();
-  },
-});
-
+/**
+ * The candidate's application for this job, or null.
+ *
+ * It used to fall back to the candidate's newest application for ANY job, so a
+ * template meant for one opening went out naming another (2 Oct). No job, or
+ * no application for it, now means no application.
+ */
 export const getApplicationForCandidate = internalQuery({
   args: { candidateId: v.id("candidates"), jobId: v.optional(v.id("jobs")) },
   handler: async (ctx, args) => {
-    if (args.jobId) {
-      const match = await ctx.db
-        .query("applications")
-        .withIndex("by_candidate_job", (q) =>
-          q.eq("candidateId", args.candidateId).eq("jobId", args.jobId!)
-        )
-        .first();
-      if (match) return match;
-    }
+    if (!args.jobId) return null;
     return await ctx.db
       .query("applications")
-      .withIndex("by_candidateId", (q) => q.eq("candidateId", args.candidateId))
-      .order("desc")
+      .withIndex("by_candidate_job", (q) =>
+        q.eq("candidateId", args.candidateId).eq("jobId", args.jobId!)
+      )
       .first();
   },
 });

@@ -23,7 +23,7 @@ export interface StructuredEmailContent {
   senderEmail?: string;
 }
 
-function escHtml(value: string): string {
+export function escHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

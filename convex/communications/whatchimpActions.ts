@@ -126,7 +126,7 @@ export const processInboundMedia = internalAction({
            replyMessage = "We already have this exact CV on file for this position. We'll be in touch if your profile matches our requirements. Thank you!";
         }
         const metaAccessToken = process.env.META_ACCESS_TOKEN || "";
-        await sendMetaFreeText(phoneNumberId, cleanFrom, replyMessage, metaAccessToken)
+        await sendMetaFreeText(phoneNumberId, cleanFrom, replyMessage, metaAccessToken, ctx)
           .then(r => { if (!r.success) console.error("[WhatsApp Webhook] CV ack reply failed:", r.error); })
           .catch(console.error);
       }

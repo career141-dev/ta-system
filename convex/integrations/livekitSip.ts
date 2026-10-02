@@ -9,6 +9,7 @@ import {
   resolveOutboundRecipient,
 } from "./livekitSipPolicy";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
+import { outreachLive } from "../lib/outreachSafety";
 
 const MAX_CALL_DURATION_SECONDS = 5 * 60;
 const RINGING_TIMEOUT_SECONDS = 25;
@@ -169,6 +170,7 @@ export const dispatchManualVoiceCall = internalAction({
       {},
     );
     const isTestMode = isOutboundCallTestMode({
+      outreachLive: outreachLive(),
       callTestMode: process.env.CALL_TEST_MODE,
       outreachTestMode: process.env.OUTREACH_TEST_MODE,
       globalTestMode: process.env.TEST_MODE,

@@ -6,13 +6,23 @@ export function e164Phone(value: string | undefined): string | null {
   return E164_PHONE.test(trimmed) ? trimmed : null;
 }
 
+/**
+ * Whether an outbound call goes to the test recipient instead of the candidate.
+ *
+ * `outreachLive` is outreachSafety's decision (OUTREACH_LIVE=true). A real call
+ * needs it as well as the call switches: CALL_TEST_MODE=false and a database
+ * setting were enough on their own to ring real candidates while every
+ * message to them was held in test mode (2 Oct).
+ */
 export function isOutboundCallTestMode(input: {
+  outreachLive: boolean;
   callTestMode: string | undefined;
   outreachTestMode: string | undefined;
   globalTestMode: string | undefined;
   settingsTestMode: boolean | undefined;
 }) {
   return (
+    !input.outreachLive ||
     input.callTestMode !== "false" ||
     input.outreachTestMode === "true" ||
     input.globalTestMode === "true" ||

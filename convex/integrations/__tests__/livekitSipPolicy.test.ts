@@ -18,6 +18,7 @@ test("accepts only canonical E.164 phone numbers", () => {
 test("test mode is fail-closed unless both controls explicitly disable it", () => {
   assert.equal(
     isOutboundCallTestMode({
+      outreachLive: true,
       callTestMode: undefined,
       outreachTestMode: undefined,
       globalTestMode: undefined,
@@ -27,6 +28,7 @@ test("test mode is fail-closed unless both controls explicitly disable it", () =
   );
   assert.equal(
     isOutboundCallTestMode({
+      outreachLive: true,
       callTestMode: "false",
       outreachTestMode: undefined,
       globalTestMode: undefined,
@@ -34,8 +36,20 @@ test("test mode is fail-closed unless both controls explicitly disable it", () =
     }),
     false,
   );
+  // With outreach not live, every call is a test call whatever else says (2 Oct).
   assert.equal(
     isOutboundCallTestMode({
+      outreachLive: false,
+      callTestMode: "false",
+      outreachTestMode: undefined,
+      globalTestMode: undefined,
+      settingsTestMode: false,
+    }),
+    true,
+  );
+  assert.equal(
+    isOutboundCallTestMode({
+      outreachLive: true,
       callTestMode: "false",
       outreachTestMode: "true",
       globalTestMode: undefined,

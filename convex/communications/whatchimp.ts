@@ -220,7 +220,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
           if (phoneNumberId && !fullJob?.muteDefaultWhatsappReply) {
             const replyMessage = `Thank you for your interest in the ${matchedJob.title} position.\n\nPlease upload your latest CV to continue your application.`;
             const metaAccessToken = process.env.META_ACCESS_TOKEN || "";
-            await sendMetaFreeText(phoneNumberId, cleanSender, replyMessage, metaAccessToken)
+            await sendMetaFreeText(phoneNumberId, cleanSender, replyMessage, metaAccessToken, ctx)
               .then(r => { if (!r.success) console.error("[WhatsApp Webhook] Keyword reply failed:", r.error); })
               .catch(console.error);
           } else if (fullJob?.muteDefaultWhatsappReply) {
@@ -347,7 +347,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
         const phoneNumberId = fetchedPhoneId || process.env.META_PHONE_NUMBER_ID || "965783109962872";
         const replyMessage = `Thank you for your interest in the ${evalResult.jobTitle} position.\n\nPlease upload your latest CV to continue your application.`;
         const metaAccessToken = process.env.META_ACCESS_TOKEN || "";
-        await sendMetaFreeText(phoneNumberId, cleanFrom, replyMessage, metaAccessToken)
+        await sendMetaFreeText(phoneNumberId, cleanFrom, replyMessage, metaAccessToken, ctx)
           .then(r => { if (!r.success) console.error("[WhatsApp Webhook] Keyword reply failed:", r.error); })
           .catch(console.error);
       }
@@ -379,7 +379,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
         ? `Hello! Thank you for reaching out to Career141.\n\nWe have your CV on file. Could you please let us know how we can assist you with your application?`
         : `Hello! Thank you for reaching out to Career141.\n\nWhich position are you interested in applying for? Please reply with the job title or keyword (e.g., Graphic Designer, Video Editor) or upload your CV as a PDF to apply!`;
       const metaAccessToken = process.env.META_ACCESS_TOKEN || "";
-      await sendMetaFreeText(phoneNumberId, cleanFrom, replyMessage, metaAccessToken)
+      await sendMetaFreeText(phoneNumberId, cleanFrom, replyMessage, metaAccessToken, ctx)
         .then(r => { if (!r.success) console.error("[WhatsApp Webhook] Job prompt reply failed:", r.error); })
         .catch(console.error);
       return new Response("OK", { status: 200 });
@@ -941,7 +941,7 @@ async function sendReply(ctx: any, phone: string, jobId: any, message: string) {
     if (fetchedId) phoneNumberId = fetchedId;
   }
   const metaAccessToken = process.env.META_ACCESS_TOKEN || "";
-  await sendMetaFreeText(phoneNumberId, phone, message, metaAccessToken)
+  await sendMetaFreeText(phoneNumberId, phone, message, metaAccessToken, ctx)
     .then((r: any) => { if (!r.success) console.error("[PreApp Chat] Meta send failed:", r.error); })
     .catch(console.error);
 }

@@ -118,3 +118,26 @@ export function mayReplyTo(channel: OutreachChannel, originalSender: string | un
     reason: `Test mode: blocked a thread reply to ${who || "an unknown sender"} — only the test recipient may be replied to.`,
   };
 }
+
+/**
+ * Why a message or call must not go to this person, or null when it may.
+ *
+ * `records` is every candidate record the recipient matches — by id, by email
+ * and by phone — because the same person sits on several records (CVs, Excel
+ * Tables, headhunting) and the do-not-contact flag is set on only one of them.
+ * One flagged record is enough: someone who asked us to stop asked once.
+ *
+ * Until 2 Oct only the follow-up cron, the TA desk's dispatch and the voice
+ * paths looked at the flag. The stage machine's automatic Day 0 outreach, the
+ * Graph emails, the WhatsApp sender, the Meta templates and the AI's replies
+ * to inbound messages all went to a candidate who had asked not to be
+ * contacted. Every one of those now asks contactGuard.ts, which asks this.
+ */
+export function doNotContactRefusal(
+  records: ({ doNotContact?: boolean; doNotContactReason?: string } | null | undefined)[],
+): string | null {
+  const flagged = records.find((r) => r?.doNotContact === true);
+  if (!flagged) return null;
+  const why = (flagged.doNotContactReason ?? "").trim();
+  return `Not sent: the candidate is marked do-not-contact${why ? ` (${why})` : ""}.`;
+}
