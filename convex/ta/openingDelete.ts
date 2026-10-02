@@ -74,7 +74,44 @@ const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   ["matchRuns", "by_opening", "openingId"],
   ["matchExclusions", "by_opening", "openingId"],
   ["reviewRounds", "by_opening", "openingId"],
+  // Left behind until 2 Oct: the job id is required on most of these, so a
+  // row outliving its opening points at nothing.
+  ["whatsappSessions", "by_jobId", "jobId"],
+  ["notifications", "by_jobId", "jobId"],
+  ["match_scores", "by_job_score", "jobId"],
+  ["job_assets", "by_jobId", "jobId"],
+  ["custom_filters", "by_jobId", "jobId"],
+  ["pipeline_health_reports", "by_job_date", "jobId"],
+  ["voiceSimulationReservations", "by_jobId", "jobId"],
 ];
+
+/**
+ * Rows that are not the opening's and stay, but name it: the reference is
+ * cleared. Intake rows keep their CV (see the top of this file); a saved search
+ * is its owner's; a candidate is never deleted.
+ */
+const OPENING_REFERENCES: [table: string, index: string, field: string, cleared: null | undefined][] = [
+  ["intakeItems", "by_opening", "openingId", null],
+  ["savedSearches", "by_opening", "openingId", null],
+  ["candidates", "by_firstSourceJobId", "firstSourceJobId", undefined],
+];
+
+/**
+ * Rows that name the opening inside an array, which no index can find: read a
+ * page per step, the cursor carried to the next step in its arguments.
+ */
+const SCANS: Record<string, (row: any, jobId: string) => Record<string, unknown> | null> = {
+  mailIntakeMessages: (row, jobId) =>
+    (row.openingIds ?? []).includes(jobId)
+      ? { openingIds: row.openingIds.filter((id: string) => id !== jobId) }
+      : null,
+  intakeItems: (row, jobId) =>
+    (row.alsoFiledTo ?? []).some((f: { openingId: string }) => f.openingId === jobId)
+      ? { alsoFiledTo: row.alsoFiledTo.filter((f: { openingId: string }) => f.openingId !== jobId) }
+      : null,
+};
+const SCAN_ORDER = Object.keys(SCANS);
+const SCAN_PAGE = 200;
 
 /** What deleting would take, for the confirmation. */
 export const preview = internalQuery({
@@ -95,7 +132,11 @@ export const preview = internalQuery({
 
 /** One batch. Reschedules itself until the opening is gone. */
 export const step = internalMutation({
-  args: { jobId: v.id("jobs") },
+  args: {
+    jobId: v.id("jobs"),
+    /** Where the array scans (SCANS) have got to; absent until they start. */
+    scan: v.optional(v.object({ table: v.string(), cursor: v.union(v.string(), v.null()) })),
+  },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) return { done: true };
@@ -134,18 +175,45 @@ export const step = internalMutation({
       }
     }
 
-    // 3. CVs that came in for this job stay, without the job.
-    const intake = await ctx.db
-      .query("intakeItems")
-      .withIndex("by_opening", (q: any) => q.eq("openingId", args.jobId))
-      .take(Math.max(1, budget));
-    for (const item of intake) {
-      await ctx.db.patch(item._id, { openingId: null } as never);
-      budget--;
+    // 3. Rows that stay, without the job: CVs that came in for it, saved
+    // searches, and candidates whose first source it was.
+    for (const [table, index, field, cleared] of OPENING_REFERENCES) {
+      const rows = await ctx.db
+        .query(table as never)
+        .withIndex(index as never, (q: any) => q.eq(field, args.jobId))
+        .take(Math.max(1, budget));
+      for (const r of rows) {
+        await ctx.db.patch((r as { _id: string })._id as never, { [field]: cleared } as never);
+        budget--;
+      }
+      if (budget <= 0) {
+        await ctx.scheduler.runAfter(0, internal.ta.openingDelete.step, { jobId: args.jobId });
+        return { done: false, stage: table };
+      }
     }
-    if (intake.length > 0 && budget <= 0) {
-      await ctx.scheduler.runAfter(0, internal.ta.openingDelete.step, { jobId: args.jobId });
-      return { done: false, stage: "intakeItems" };
+
+    // 3b. The job inside arrays — one page per step, as Convex allows a
+    // single paginated read per transaction.
+    const scan = args.scan ?? { table: SCAN_ORDER[0], cursor: null };
+    const pick = SCANS[scan.table];
+    if (pick) {
+      const page = await ctx.db
+        .query(scan.table as never)
+        .paginate({ numItems: SCAN_PAGE, cursor: scan.cursor });
+      for (const r of page.page) {
+        const patch = pick(r, args.jobId as string);
+        if (patch) await ctx.db.patch((r as { _id: string })._id as never, patch as never);
+      }
+      const next = page.isDone
+        ? SCAN_ORDER[SCAN_ORDER.indexOf(scan.table) + 1]
+        : scan.table;
+      if (next) {
+        await ctx.scheduler.runAfter(0, internal.ta.openingDelete.step, {
+          jobId: args.jobId,
+          scan: { table: next, cursor: page.isDone ? null : page.continueCursor },
+        });
+        return { done: false, stage: scan.table };
+      }
     }
 
     // 4. The opening.

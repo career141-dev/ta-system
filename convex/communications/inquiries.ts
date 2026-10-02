@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { requireUser } from "../lib/permissions";
 
@@ -7,7 +7,7 @@ import { requireUser } from "../lib/permissions";
  * List candidate inquiries with database indexing & safety limit cap (max 100 items per batch).
  * Prevents full-table memory scans to guarantee high performance & server stability.
  */
-export const listInquiries = query({
+export const listInquiries = internalQuery({
   args: {
     channel: v.optional(v.union(v.literal("all"), v.literal("whatsapp"), v.literal("email"))),
     status: v.optional(v.union(v.literal("all"), v.literal("unresolved"), v.literal("answered_by_ai"), v.literal("resolved_by_ta"))),
@@ -87,7 +87,7 @@ export const listInquiries = query({
 /**
  * Bounded summary metrics for inquiries top-level cards (uses indexed queries).
  */
-export const getInquirySummaryStats = query({
+export const getInquirySummaryStats = internalQuery({
   args: {},
   handler: async (ctx) => {
     // Bounded queries using status index (max 500 records) to protect server performance
@@ -193,7 +193,7 @@ export const createInquiry = internalMutation({
 /**
  * TA Action: Resolve inquiry via WhatsApp reply.
  */
-export const resolveInquiryViaWhatsApp = mutation({
+export const resolveInquiryViaWhatsApp = internalMutation({
   args: {
     inquiryId: v.id("candidateInquiries"),
     responseText: v.string(),
@@ -242,7 +242,7 @@ export const resolveInquiryViaWhatsApp = mutation({
 /**
  * TA Action: Resolve inquiry via Email reply.
  */
-export const resolveInquiryViaEmail = mutation({
+export const resolveInquiryViaEmail = internalMutation({
   args: {
     inquiryId: v.id("candidateInquiries"),
     subject: v.string(),
@@ -297,7 +297,7 @@ export const resolveInquiryViaEmail = mutation({
 /**
  * TA Action: Mark inquiry as resolved without sending outbound reply.
  */
-export const dismissInquiry = mutation({
+export const dismissInquiry = internalMutation({
   args: {
     inquiryId: v.id("candidateInquiries"),
     note: v.optional(v.string()),
@@ -321,7 +321,7 @@ export const dismissInquiry = mutation({
 /**
  * Cleanup Mutation: Purge invalid raw HTML inquiries created by naive email URL query string matching.
  */
-export const purgeInvalidHtmlInquiries = mutation({
+export const purgeInvalidHtmlInquiries = internalMutation({
   args: {
     batchSize: v.optional(v.number()),
   },

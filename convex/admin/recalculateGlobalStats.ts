@@ -1,6 +1,6 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 
-export const run = mutation({
+export const run = internalMutation({
   handler: async (ctx) => {
     // 1. Recount Global Stats across all tables
     const candidates = await ctx.db.query("candidates").collect();

@@ -1,7 +1,7 @@
 "use node";
 
 import { internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 
 /**
  * Background Healer Worker — runs every 31 minutes (see crons.ts "bg-healer-cv-extractor").
@@ -22,7 +22,7 @@ export const healNextUnparsedCandidate = internalAction({
     for (let i = 0; i < targets.length; i++) {
       const target = targets[i];
       try {
-        await ctx.scheduler.runAfter(3000 + i * 5000, api.cvs.cvExtraction.processCvExtraction, {
+        await ctx.scheduler.runAfter(3000 + i * 5000, internal.cvs.cvExtraction.processCvExtraction, {
           cvUploadId: target.cvUploadId,
           storageId: target.storageId,
           s3Key: target.s3Key || undefined,

@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, internalQuery, internalMutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 
 import type { Doc, Id } from "../_generated/dataModel";
 
@@ -59,7 +59,7 @@ export const getCandidatesSummaryBatch = internalQuery({
   },
 });
 
-export const getCandidatesBatchPublic = query({
+export const getCandidatesBatchPublic = internalQuery({
   args: { candidateIds: v.array(v.string()) },
   handler: async (ctx, args) => {
     const validCandidateIds = args.candidateIds
@@ -183,7 +183,7 @@ export const updateJobEmbedding = internalMutation({
   },
 });
 
-export const getRecentCandidates = query({
+export const getRecentCandidates = internalQuery({
   args: { limit: v.number() },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -222,7 +222,7 @@ export const getApplicationsByJobIdInternal = internalQuery({
   },
 });
 
-export const getEmbeddingStats = query({
+export const getEmbeddingStats = internalQuery({
   args: {},
   handler: async (ctx) => {
     const withEmbeddingPage = await ctx.db.query("candidateResumes").withIndex("by_hasEmbedding", q => q.eq("hasEmbedding", true)).take(100);
@@ -249,7 +249,7 @@ export const getAllResumesWithEmbeddings = internalQuery({
   },
 });
 
-export const getPaginatedResumesWithEmbeddings = query({
+export const getPaginatedResumesWithEmbeddings = internalQuery({
   args: {
     limit: v.number(),
     cursor: v.optional(v.union(v.string(), v.null())),

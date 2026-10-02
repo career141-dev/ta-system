@@ -1,12 +1,13 @@
 import { MutationCtx } from "../_generated/server";
-import { Id } from "../_generated/dataModel";
+import { Doc, Id } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
 import { requireUser, requireJobAssignment } from "../lib/permissions";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "./followUpHelper";
 import { adjustJobStageStat } from "../jobs/stats";
 import { adjustGlobalStat } from "../stats/statsHelper";
-import { expectedSalaryOnFile, noticePeriodOnFile } from "../ta/stages";
+import { expectedSalaryOnFile, noticePeriodOnFile, needsReviewDetails } from "../ta/stages";
+import { isDeskWideUser } from "../ta/guard";
 
 export const PIPELINE_STAGES = [
   "new_cvs",
@@ -52,6 +53,19 @@ export interface TransitionOptions {
    * sends only when a person presses Send; stopping on leave still happens.
    */
   skipAutoOutreach?: boolean;
+  /**
+   * The Director's or the client's own shortlist (mailIntake/shortlist.ts):
+   * the reviewer has decided, so the follow-up details are not asked for on
+   * the way past Director Review.
+   */
+  decidedByReviewer?: boolean;
+}
+
+/** The UTC date a placement was counted under (stats/statsHelper.ts counts by UTC day). */
+function placedOn(app: { stageHistory?: { stage: string; enteredAt: string }[]; lastStageChangedAt?: number }): string | null {
+  const entry = [...(app.stageHistory ?? [])].reverse().find((h) => h.stage === "placed");
+  const at = entry ? Date.parse(entry.enteredAt) : app.lastStageChangedAt;
+  return at && Number.isFinite(at) ? new Date(at).toISOString().slice(0, 10) : null;
 }
 
 /**
@@ -61,7 +75,7 @@ export async function executeStageTransition(
   ctx: MutationCtx,
   opts: TransitionOptions
 ) {
-  const { applicationId, targetStage, actorId, reason, bypassRoleCheck, skipAutoOutreach } = opts;
+  const { applicationId, targetStage, actorId, reason, bypassRoleCheck, skipAutoOutreach, decidedByReviewer } = opts;
 
   const app = await ctx.db.get(applicationId);
   if (!app) throw new Error(`[StateMachine] Application ${applicationId} not found`);
@@ -83,8 +97,10 @@ export async function executeStageTransition(
 
   // 3. Permission & Role Checks
   let actorDisplayId = actorId || "system";
+  let actingUser: Doc<"users"> | null = null;
   if (!bypassRoleCheck) {
     const user = await requireUser(ctx);
+    actingUser = user;
     actorDisplayId = user._id;
 
     if (["director_shortlist", "client_review"].includes(targetStage)) {
@@ -100,8 +116,25 @@ export async function executeStageTransition(
     }
   }
 
+  // A placement is undone only by someone who looks after the whole desk.
+  // Moves the state machine does not list were only logged (TA moves bypass
+  // the check), so any TA could turn a placement back into a rejection
+  // (2 Oct). The automation never moves anyone out of Placed.
+  if (currentStage === "placed") {
+    if (!actingUser && actorId) {
+      const id = ctx.db.normalizeId("users", String(actorId));
+      actingUser = id ? await ctx.db.get(id) : null;
+    }
+    if (!actingUser || !isDeskWideUser(actingUser)) {
+      throw new Error("Only a TA lead, a director, ops or an admin can move somebody out of Placed.");
+    }
+  }
+
   // 4. Stage Specific Validation Gates
-  if (targetStage === "second_shortlist") {
+  // Director Review's details are needed to enter it, and to go past it
+  // without stopping there: a move straight from Follow-up to the Director's
+  // or the client's shortlist skipped the check (2 Oct).
+  if (needsReviewDetails(currentStage, targetStage, decidedByReviewer === true)) {
     const candidate = await ctx.db.get(app.candidateId);
     if (!candidate) throw new Error("Candidate not found for application");
     const hasCV =
@@ -123,7 +156,9 @@ export async function executeStageTransition(
       if (!hasExpectedSalary) missing.push("expected salary");
       if (!hasNoticePeriod) missing.push("notice period");
       throw new Error(
-        `Cannot move to Director Review: still missing ${missing.join(", ")}. Finish the follow-up first.`
+        targetStage === "second_shortlist"
+          ? `Cannot move to Director Review: still missing ${missing.join(", ")}. Finish the follow-up first.`
+          : `Cannot skip Director Review: still missing ${missing.join(", ")}. Finish the follow-up first.`
       );
     }
   }
@@ -186,6 +221,16 @@ export async function executeStageTransition(
 
   // 6. Statistics Adjustments
   await adjustJobStageStat(ctx, app.jobId, currentStage, targetStage);
+
+  // A placement that falls through comes off the day it was counted on —
+  // it used to stay counted for good (2 Oct).
+  if (currentStage === "placed") {
+    const dateStr = placedOn(app as any);
+    const daily = dateStr
+      ? await ctx.db.query("dailyStats").withIndex("by_dateStr", (q: any) => q.eq("dateStr", dateStr)).first()
+      : null;
+    if (daily && (daily.placements ?? 0) > 0) await ctx.db.patch(daily._id, { placements: daily.placements - 1 });
+  }
 
   if (targetStage === "placed") {
     await adjustGlobalStat(ctx, "placement");

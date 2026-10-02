@@ -1,9 +1,9 @@
-import { mutation, internalMutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { adjustJobStageStat } from "../jobs/stats";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 
-export const addCandidateToJobFollowUp = mutation({
+export const addCandidateToJobFollowUp = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),

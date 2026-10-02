@@ -1,11 +1,11 @@
-import { mutation, query } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireFullAccess, requireUser } from "../lib/permissions";
 
 /**
  * Anonymize or Delete Candidate Data for Privacy & Governance Compliance (GDPR)
  */
-export const anonymizeCandidate = mutation({
+export const anonymizeCandidate = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     reason: v.optional(v.string()),
@@ -31,7 +31,7 @@ export const anonymizeCandidate = mutation({
   },
 });
 
-export const setCommunicationSuppression = mutation({
+export const setCommunicationSuppression = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     doNotContact: v.boolean(),
@@ -52,7 +52,7 @@ export const setCommunicationSuppression = mutation({
   },
 });
 
-export const checkSuppressionStatus = query({
+export const checkSuppressionStatus = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const candidate = await ctx.db.get(args.candidateId);

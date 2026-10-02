@@ -88,6 +88,11 @@ export const createMailSubscription = internalAction({
     taEmail: v.string(),
   },
   handler: async (ctx, args) => {
+    // The webhook drops every notification whose clientState does not match
+    // this (convex/http.ts, 2 Oct 2026), so a subscription made without it
+    // would be ignored.
+    const clientState = process.env.MS_GRAPH_CLIENT_STATE;
+    if (!clientState) throw new Error("[Graph Subscriptions] MS_GRAPH_CLIENT_STATE is not set");
     const token = await getGraphToken();
     const notificationUrl = `${process.env.CONVEX_SITE_URL ?? process.env.NEXT_PUBLIC_CONVEX_SITE_URL}/api/graph-webhook`;
 
@@ -107,6 +112,7 @@ export const createMailSubscription = internalAction({
         notificationUrl,
         resource: `users/${args.taEmail}/mailFolders/inbox/messages`,
         expirationDateTime,
+        clientState,
       }),
     });
 

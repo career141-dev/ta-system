@@ -1,9 +1,9 @@
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { extractSearchRequirements } from "../lib/jdParser";
 import { internal } from "../_generated/api";
 
-export const extractRequirementsAction = action({
+export const extractRequirementsAction = internalAction({
   args: { description: v.string() },
   handler: async (ctx, args) => {
     const result = await extractSearchRequirements(args.description, "job_description");

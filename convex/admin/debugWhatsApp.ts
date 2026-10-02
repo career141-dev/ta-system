@@ -1,5 +1,5 @@
-import { query } from "../_generated/server";
-export const getRecentWhatsAppCVs = query(async (ctx) => {
+import { internalQuery } from "../_generated/server";
+export const getRecentWhatsAppCVs = internalQuery(async (ctx) => {
   const uploads = await ctx.db.query("cvUploads")
     .filter(q => q.eq(q.field("source"), "whatsapp"))
     .order("desc")

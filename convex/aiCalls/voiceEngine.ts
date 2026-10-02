@@ -1,10 +1,10 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { getOpenAI, OPENROUTER_CV_EXTRACTION_MODEL } from "../lib/llm";
 
-export const generateVoicePrescreeningReply = action({
+export const generateVoicePrescreeningReply = internalAction({
   args: {
     candidateName: v.string(),
     jobTitle: v.string(),

@@ -11,7 +11,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
-const EXTS = [".ts", ".tsx", "/index.ts", "/index.tsx"];
+// ".js" last, for convex/_generated (api.js, server.js), which the backend
+// modules import without an extension (2 Oct).
+const EXTS = [".ts", ".tsx", "/index.ts", "/index.tsx", ".js"];
 
 function firstFile(base) {
   for (const ext of ["", ...EXTS]) {

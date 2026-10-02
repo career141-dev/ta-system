@@ -1,9 +1,9 @@
 import { v } from "convex/values";
-import { mutation, query } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { Id } from "../_generated/dataModel";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 
-export const createBatch = mutation({
+export const createBatch = internalMutation({
   args: {
     sourceChannel: v.string(),
     totalCount: v.number(),
@@ -23,7 +23,7 @@ export const createBatch = mutation({
   },
 });
 
-export const updateBatchProgress = mutation({
+export const updateBatchProgress = internalMutation({
   args: {
     batchId: v.id("ingestionBatches"),
     status: v.union(v.literal("completed"), v.literal("failed")),
@@ -53,14 +53,14 @@ export const updateBatchProgress = mutation({
   },
 });
 
-export const getBatch = query({
+export const getBatch = internalQuery({
   args: { batchId: v.id("ingestionBatches") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.batchId);
   },
 });
 
-export const getBatchLogs = query({
+export const getBatchLogs = internalQuery({
   args: { batchId: v.id("ingestionBatches") },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -71,7 +71,7 @@ export const getBatchLogs = query({
   },
 });
 
-export const updateLogStage = mutation({
+export const updateLogStage = internalMutation({
   args: {
     logId: v.id("ingestionLog"),
     stage: v.string(),
@@ -93,7 +93,7 @@ export const updateLogStage = mutation({
   },
 });
 
-export const getLatestActiveBatch = query({
+export const getLatestActiveBatch = internalQuery({
   args: {},
   handler: async (ctx) => {
     // Find the most recent batch that is in_progress
@@ -107,25 +107,25 @@ export const getLatestActiveBatch = query({
   },
 });
 
-export const pauseBatch = mutation({
+export const pauseBatch = internalMutation({
   args: { batchId: v.id("ingestionBatches") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.batchId, { paused: true });
   },
 });
 
-export const resumeBatchIngestion = mutation({
+export const resumeBatchIngestion = internalMutation({
   args: { batchId: v.id("ingestionBatches") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.batchId, { paused: false });
     // Immediately check and trigger next chunk
-    await ctx.scheduler.runAfter(0, api.cvs.cvUploads.checkAndTriggerNextBatch, {
+    await ctx.scheduler.runAfter(0, internal.cvs.cvUploads.checkAndTriggerNextBatch, {
       batchId: args.batchId,
     });
   },
 });
 
-export const cancelBatch = mutation({
+export const cancelBatch = internalMutation({
   args: { batchId: v.id("ingestionBatches") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.batchId, {

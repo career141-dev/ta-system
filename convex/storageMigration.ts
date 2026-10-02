@@ -1,8 +1,8 @@
-import { query, mutation } from "./_generated/server";
+import { internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
-export const inspectSampleCandidateUploads = query({
+export const inspectSampleCandidateUploads = internalQuery({
   args: {},
   handler: async (ctx) => {
     const cvUploads = await ctx.db.query("cvUploads").take(15);
@@ -11,14 +11,14 @@ export const inspectSampleCandidateUploads = query({
   },
 });
 
-export const generateUploadUrl = mutation({
+export const generateUploadUrl = internalMutation({
   args: {},
   handler: async (ctx) => {
     return await ctx.storage.generateUploadUrl();
   },
 });
 
-export const linkHistoricalCvFile = mutation({
+export const linkHistoricalCvFile = internalMutation({
   args: {
     oldStorageId: v.string(),
     newStorageId: v.id("_storage"),
@@ -84,7 +84,7 @@ export const linkHistoricalCvFile = mutation({
   },
 });
 
-export const cleanExistingReverseMatches = mutation({
+export const cleanExistingReverseMatches = internalMutation({
   args: {},
   handler: async (ctx) => {
     const jobs = await ctx.db.query("jobs").collect();

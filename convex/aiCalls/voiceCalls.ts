@@ -1,11 +1,4 @@
-import {
-  internalQuery,
-  internalMutation,
-  mutation,
-  query,
-  type MutationCtx,
-  type QueryCtx,
-} from "../_generated/server";
+import { internalQuery, internalMutation, type MutationCtx, type QueryCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { v } from "convex/values";
 import { requireJobAssignment, requireUser } from "../lib/permissions";
@@ -225,7 +218,7 @@ export const claimVoiceAgentNonce = internalMutation({
  * persisted only by the internal mutations below after the server has created
  * and validated a live voice-call session.
  */
-export const recordVoiceCallSession = mutation({
+export const recordVoiceCallSession = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
@@ -317,7 +310,7 @@ export const recordVoiceCallSession = mutation({
  * Server-authoritative context used to mint a simulation token. The caller
  * cannot substitute a candidate/job/application combination or prompt fields.
  */
-export const getVoiceSimulationContext = query({
+export const getVoiceSimulationContext = internalQuery({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
@@ -373,7 +366,7 @@ export const getVoiceSimulationContext = query({
   },
 });
 
-export const getCandidateVoiceCalls = query({
+export const getCandidateVoiceCalls = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -401,7 +394,7 @@ export const getCandidateVoiceCalls = query({
 });
 
 /** Atomically reserve bounded simulation capacity before creating a room. */
-export const reserveVoiceSimulationSession = mutation({
+export const reserveVoiceSimulationSession = internalMutation({
   args: {
     sessionId: v.string(),
     candidateId: v.id("candidates"),
@@ -480,7 +473,7 @@ export const reserveVoiceSimulationSession = mutation({
 });
 
 /** Release a reservation if room creation fails before a token is issued. */
-export const releaseVoiceSimulationReservation = mutation({
+export const releaseVoiceSimulationReservation = internalMutation({
   args: { sessionId: v.string() },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);

@@ -1,6 +1,6 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 
-export const removeBatch = mutation({
+export const removeBatch = internalMutation({
   args: {},
   handler: async (ctx) => {
     const candidates = await ctx.db

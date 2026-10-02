@@ -1,10 +1,11 @@
 import { internalAction, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
 import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod } from "../lib/answered";
 import { buildStructuredEmailHtml } from "./emailHtml";
+import { isFollowUpStage } from "../ta/stages";
 
 export const extractDetailsFromText = internalAction({
   args: {
@@ -42,7 +43,7 @@ export const extractDetailsFromText = internalAction({
           applicationId: args.applicationId,
           candidateId: args.candidateId,
         })
-      : await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, {
+      : await ctx.runQuery(internal.candidates.candidates.getActiveFollowUpApplication, {
           candidateId: args.candidateId,
         });
 
@@ -50,14 +51,27 @@ export const extractDetailsFromText = internalAction({
       console.log(`[Inbound Extraction] Candidate ${args.candidateId} has no active follow-up application. Skipping details update.`);
       return;
     }
+    // Only an application in Follow-up is chased for details. Neither lookup
+    // above checked the stage, so a candidate at interview or offer who wrote
+    // in was asked again for their CV and salary (2 Oct).
+    if (!isFollowUpStage(activeApp.currentStage)) {
+      console.log(`[Inbound Extraction] Application ${activeApp._id} is in ${activeApp.currentStage}, not Follow-up. Message recorded; no AI reply.`);
+      return;
+    }
 
-    const job = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: activeApp.jobId });
+    const job = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: activeApp.jobId });
     if (!job) {
       console.error(`[Inbound Extraction] Job ${activeApp.jobId} not found.`);
       return;
     }
 
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
+    // The senders refuse a do-not-contact candidate too; stopping here also
+    // spares the model call and leaves their record untouched (2 Oct).
+    if (candidate?.doNotContact) {
+      console.warn(`[DoNotContact] Refused AI reply to candidate ${args.candidateId}: marked do-not-contact.`);
+      return;
+    }
 
     const missingFields: string[] = [];
     const hasCV = activeApp.followUpCvReceived === true || !!candidate?.cvUploadId;
@@ -408,7 +422,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       if (hasUpdates || isQuestion || isEta || args.textBody.trim().length > 0) {
         if (hasUpdates) {
           console.log(`[Inbound Extraction] Extracted updates for candidate ${args.candidateId}:`, updates);
-          await ctx.runMutation(api.candidates.candidates.updateCandidateDetails, {
+          await ctx.runMutation(internal.candidates.candidates.updateCandidateDetails, {
             candidateId: args.candidateId,
             applicationId: activeApp._id,
             ...updates,
@@ -425,8 +439,8 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         }
 
         // Re-fetch updated application and candidate data post-update
-        const updatedCandidate = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
-        const updatedApp = await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, { candidateId: args.candidateId });
+        const updatedCandidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
+        const updatedApp = await ctx.runQuery(internal.candidates.candidates.getActiveFollowUpApplication, { candidateId: args.candidateId });
 
         // Fields still missing after this reply (plain names, used in prompt and reply messages)
         const appRecord = updatedApp || activeApp;
@@ -494,10 +508,15 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           });
 
           if (!isCompleted && extracted.intent !== "provided_eta" && extracted.intent !== "promised_eta") {
+            // The NEXT nudge, not this reply. It stored replyMessage — the
+            // answer being sent a few lines below — and the follow-up cron
+            // later sent it again word for word, on WhatsApp and by email
+            // (2 Oct). The reminder only names what is still missing.
+            const firstName = updatedCandidate?.fullName?.split(" ")[0] || "there";
             await ctx.runMutation(internal.communications.followUpMutations.scheduleDynamicFollowUp, {
               applicationId: activeApp._id,
               nextActionTimeHours: hours,
-              messageBody: replyMessage,
+              messageBody: `Hi ${firstName}, a quick reminder about your application for *${job.title}*. To move it forward we still need:\n${remainingMissing.map((m) => `• ${m}`).join("\n")}\n\nPlease reply when you can. Thank you!`,
               replyChannel: args.channel === "email" ? "email" : "whatsapp",
             });
           }

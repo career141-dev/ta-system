@@ -1,9 +1,9 @@
-import { mutation, query, internalMutation } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { paginationOptsValidator } from "convex/server";
 import type { Id } from "../_generated/dataModel";
 import { v } from "convex/values";
 import { requireRole, requireUser } from "../lib/permissions";
-import { internal, api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { adjustGlobalStat } from "../stats/statsHelper";
 
 // convex/jobs.ts — generateKeyword helper function
@@ -14,7 +14,7 @@ function generateKeyword(title: string): string {
   return `${prefix}${year}${rand}`;
 }
 
-export const createJobKeyword = mutation({
+export const createJobKeyword = internalMutation({
   args: { title: v.string() },
   handler: async (ctx, { title }) => {
     const user = await requireRole(ctx, ["admin", "ta_manager", "senior_ta", "test_ta"]);
@@ -32,7 +32,7 @@ export const createJobKeyword = mutation({
   },
 });
 
-export const createJob = mutation({
+export const createJob = internalMutation({
   args: {
     title: v.string(),
     clientName: v.string(),
@@ -141,7 +141,7 @@ export const createJob = mutation({
   },
 });
 
-export const createDraftJob = mutation({
+export const createDraftJob = internalMutation({
   args: {
     title: v.string(),
     description: v.string(),
@@ -264,7 +264,7 @@ export const createDraftJob = mutation({
   },
 });
 
-export const updateJobDetails = mutation({
+export const updateJobDetails = internalMutation({
   args: {
     jobId: v.id("jobs"),
     title: v.optional(v.string()),
@@ -347,7 +347,7 @@ export const updateJobDetails = mutation({
   },
 });
 
-export const assignTeamToJob = mutation({
+export const assignTeamToJob = internalMutation({
   args: {
     jobId: v.id("jobs"),
     primaryRecruiterId: v.id("users"),
@@ -410,7 +410,7 @@ export const assignTeamToJob = mutation({
   },
 });
 
-export const updateJobChannels = mutation({
+export const updateJobChannels = internalMutation({
   args: {
     jobId: v.id("jobs"),
     channels: v.array(v.object({
@@ -519,7 +519,7 @@ export const updateJobChannels = mutation({
   },
 });
 
-export const updateJobAiConfig = mutation({
+export const updateJobAiConfig = internalMutation({
   args: {
     jobId: v.id("jobs"),
     minMatchScoreToShow: v.number(),
@@ -610,7 +610,7 @@ export const updateJobAiConfig = mutation({
   },
 });
 
-export const publishJob = mutation({
+export const publishJob = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, { jobId }) => {
     const user = await requireRole(ctx, ["admin", "ta_manager", "senior_ta", "test_ta"]);
@@ -670,10 +670,10 @@ export const publishJob = mutation({
     });
 
     // Always generate the embedding for AI semantic search
-    await ctx.scheduler.runAfter(0, api.matching.agent2.generateJobEmbedding, { jobId });
+    await ctx.scheduler.runAfter(0, internal.matching.agent2.generateJobEmbedding, { jobId });
     if (job.reverseMatchOnPublish) {
        await ctx.db.patch(jobId, { reverseMatchStatus: "running" });
-       await ctx.scheduler.runAfter(0, api.matching.agent2.runReverseMatch, { jobId });
+       await ctx.scheduler.runAfter(0, internal.matching.agent2.runReverseMatch, { jobId });
        await scheduleReverseMatchWatchdog(ctx, jobId);
     }
     
@@ -683,7 +683,7 @@ export const publishJob = mutation({
   },
 });
 
-export const updateJobStatus = mutation({
+export const updateJobStatus = internalMutation({
   args: {
     jobId: v.id("jobs"),
     status: v.union(
@@ -720,7 +720,7 @@ export const updateJobStatus = mutation({
   },
 });
 
-export const deleteJob = mutation({
+export const deleteJob = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     const user = await requireRole(ctx, ["admin"]);
@@ -751,7 +751,7 @@ export const deleteJob = mutation({
   },
 });
 
-export const list = query({
+export const list = internalQuery({
   args: {},
   handler: async (ctx) => {
     const jobs = await ctx.db.query("jobs").order("desc").take(100);
@@ -787,7 +787,7 @@ export const list = query({
   },
 });
 
-export const listPaginated = query({
+export const listPaginated = internalQuery({
   args: {
     paginationOpts: paginationOptsValidator,
     status: v.optional(v.string()),
@@ -844,7 +844,7 @@ export const listPaginated = query({
   },
 });
 
-export const getJobCounts = query({
+export const getJobCounts = internalQuery({
   args: {},
   handler: async (ctx) => {
     const jobs = await ctx.db.query("jobs").collect();
@@ -869,7 +869,7 @@ export const getJobCounts = query({
 
 
 
-export const getJob = query({
+export const getJob = internalQuery({
   args: { jobId: v.string() },
   handler: async (ctx, args) => {
     const normalizedId = ctx.db.normalizeId("jobs", args.jobId);
@@ -880,7 +880,7 @@ export const getJob = query({
   },
 });
 
-export const getJobChannels = query({
+export const getJobChannels = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -890,7 +890,7 @@ export const getJobChannels = query({
   },
 });
 
-export const getJobAssets = query({
+export const getJobAssets = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -900,7 +900,7 @@ export const getJobAssets = query({
   },
 });
 
-export const getMyAssignment = query({
+export const getMyAssignment = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -919,7 +919,7 @@ export const getMyAssignment = query({
   },
 });
 
-export const getByKeyword = query({
+export const getByKeyword = internalQuery({
   args: { keyword: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db.query('jobs')
@@ -1049,7 +1049,7 @@ export const addCandidateToReverseMatchResults = internalMutation({
   },
 });
 
-export const updateTaPreferences = mutation({
+export const updateTaPreferences = internalMutation({
   args: {
     jobId: v.id("jobs"),
     taPreferences: v.optional(v.string()),
@@ -1061,7 +1061,7 @@ export const updateTaPreferences = mutation({
   },
 });
 
-export const triggerReverseMatch = mutation({
+export const triggerReverseMatch = internalMutation({
   args: {
     jobId: v.id("jobs"),
     customPreferences: v.optional(v.string()),
@@ -1080,7 +1080,7 @@ export const triggerReverseMatch = mutation({
       reverseMatchStatus: "running",
     });
 
-    await ctx.scheduler.runAfter(0, api.matching.agent2.runReverseMatch, {
+    await ctx.scheduler.runAfter(0, internal.matching.agent2.runReverseMatch, {
       jobId: args.jobId,
       customPreferences: args.customPreferences,
     });
@@ -1118,7 +1118,7 @@ export const expireStaleReverseMatch = internalMutation({
   },
 });
 
-export const stopReverseMatch = mutation({
+export const stopReverseMatch = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.jobId, {
@@ -1140,7 +1140,7 @@ export const updateTaPreferencesInternal = internalMutation({
   },
 });
 
-export const getActiveJobsBasicInfo = query({
+export const getActiveJobsBasicInfo = internalQuery({
   args: {},
   handler: async (ctx) => {
     const activeJobs = await ctx.db.query("jobs")
@@ -1184,7 +1184,7 @@ export async function syncJobTitleToCandidates(ctx: any, jobId: Id<"jobs">, newT
   }
 }
 
-export const setMuteDefaultWhatsappReply = mutation({
+export const setMuteDefaultWhatsappReply = internalMutation({
   args: {
     jobId: v.id("jobs"),
     mute: v.boolean(),
@@ -1197,7 +1197,7 @@ export const setMuteDefaultWhatsappReply = mutation({
   },
 });
 
-export const setJobCustomQuestions = mutation({
+export const setJobCustomQuestions = internalMutation({
   args: {
     jobId: v.id("jobs"),
     customFollowUpQuestions: v.array(v.string()),

@@ -1,5 +1,5 @@
 // convex/pipeline/stages.ts
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireUser, requireJobAssignment } from "../lib/permissions";
 import { internal } from "../_generated/api";
@@ -9,7 +9,7 @@ import { adjustJobStageStat } from "../jobs/stats";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { executeStageTransition, PipelineStage } from "./pipelineStateMachine";
 
-export const moveToTAShortlist = mutation({
+export const moveToTAShortlist = internalMutation({
   args: { applicationId: v.id("applications"), note: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);
@@ -69,7 +69,7 @@ export const moveToTAShortlist = mutation({
   },
 });
 
-export const directorApprove = mutation({
+export const directorApprove = internalMutation({
   args: { applicationId: v.id("applications"), note: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);
@@ -101,7 +101,7 @@ export const directorApprove = mutation({
   },
 });
 
-export const rejectCandidate = mutation({
+export const rejectCandidate = internalMutation({
   args: { applicationId: v.id("applications"), reason: v.string() },
   handler: async (ctx, { applicationId, reason }) => {
     const entry = await ctx.db.get(applicationId);
@@ -128,7 +128,7 @@ export const rejectCandidate = mutation({
   },
 });
 
-export const setPipelineStage = mutation({
+export const setPipelineStage = internalMutation({
   args: { 
     applicationId: v.id("applications"), 
     newStage: v.string(), // "new_cvs" | "ta_shortlist" | "interview" | "offer" | "placed" | "rejected" | etc
@@ -143,7 +143,7 @@ export const setPipelineStage = mutation({
   },
 });
 
-export const directorReject = mutation({
+export const directorReject = internalMutation({
   args: { applicationId: v.id("applications"), reason: v.string() },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);
@@ -188,7 +188,7 @@ export const directorReject = mutation({
   },
 });
 
-export const directorRequestChanges = mutation({
+export const directorRequestChanges = internalMutation({
   args: { applicationId: v.id("applications"), note: v.string() },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);
@@ -229,7 +229,7 @@ export const directorRequestChanges = mutation({
   },
 });
 
-export const clientApprove = mutation({
+export const clientApprove = internalMutation({
   args: { applicationId: v.id("applications"), note: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);
@@ -264,7 +264,7 @@ export const clientApprove = mutation({
   },
 });
 
-export const clientHold = mutation({
+export const clientHold = internalMutation({
   args: { applicationId: v.id("applications"), note: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);
@@ -291,7 +291,7 @@ export const clientHold = mutation({
   },
 });
 
-export const clientReject = mutation({
+export const clientReject = internalMutation({
   args: { applicationId: v.id("applications"), reason: v.string() },
   handler: async (ctx, args) => {
     const entry = await ctx.db.get(args.applicationId);

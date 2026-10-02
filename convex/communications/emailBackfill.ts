@@ -1,8 +1,8 @@
 "use node";
 
-import { action, internalAction } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
 import { extractText } from "../cvs/cvExtraction";
@@ -254,7 +254,7 @@ export const executeMailboxDiscoveryPhase = internalAction({
 
       // Persist discovered count in mailboxCheckpoints table
       await ctx.runMutation(
-        api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+        internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
         {
           mailboxEmail,
           folder,
@@ -481,13 +481,13 @@ export const executeMailboxScanBackground = internalAction({
 
             // Check for job cancellation on each message for instant stop responsiveness
             const loopStatus = await ctx.runQuery(
-              api.communications.emailBackfillMutations.checkJobStatus,
+              internal.communications.emailBackfillMutations.checkJobStatus,
               { jobId }
             );
             if (loopStatus === "stopped" || loopStatus === "paused") {
               // Save checkpoint immediately
               await ctx.runMutation(
-                api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+                internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
                 {
                   mailboxEmail,
                   folder,
@@ -523,12 +523,12 @@ export const executeMailboxScanBackground = internalAction({
             for (const att of attachments) {
               // Check for job cancellation on each individual attachment
               const attStatus = await ctx.runQuery(
-                api.communications.emailBackfillMutations.checkJobStatus,
+                internal.communications.emailBackfillMutations.checkJobStatus,
                 { jobId }
               );
               if (attStatus === "stopped" || attStatus === "paused") {
                 await ctx.runMutation(
-                  api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+                  internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
                   {
                     mailboxEmail,
                     folder,
@@ -591,7 +591,7 @@ export const executeMailboxScanBackground = internalAction({
 
                 // Pre-upload Deduplication Check: Check if this file already exists in cvUploads
                 const isDuplicate = await ctx.runQuery(
-                  api.communications.emailBackfillMutations.checkCvDuplicateByHash,
+                  internal.communications.emailBackfillMutations.checkCvDuplicateByHash,
                   { fileHash }
                 );
 
@@ -666,7 +666,7 @@ export const executeMailboxScanBackground = internalAction({
                     await s3.send(uploadCmd);
 
                     // Trigger Agent 1 -> Agent 6 Ingestion Pipeline
-                    await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+                    await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
                       sourceChannel: "email",
                       rawSender: senderEmail,
                       s3Key,
@@ -766,7 +766,7 @@ export const executeMailboxScanBackground = internalAction({
 
           // Continually persist checkpoint on each page transition for zero-loss resumption
           await ctx.runMutation(
-            api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+            internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
             {
               mailboxEmail,
               folder,
@@ -791,7 +791,7 @@ export const executeMailboxScanBackground = internalAction({
 
             // Save checkpoint upon yielding so progress and next pagination cursor are persistent
             await ctx.runMutation(
-              api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+              internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
               {
                 mailboxEmail,
                 folder,
@@ -860,7 +860,7 @@ export const executeMailboxScanBackground = internalAction({
 
       // Save persistent checkpoint on completion
       await ctx.runMutation(
-        api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+        internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
         {
           mailboxEmail,
           folder,
@@ -898,7 +898,7 @@ export const executeMailboxScanBackground = internalAction({
       // 1. Immediately persist whatever progress was achieved before the crash
       try {
         await ctx.runMutation(
-          api.communications.emailBackfillMutations.saveMailboxCheckpoint,
+          internal.communications.emailBackfillMutations.saveMailboxCheckpoint,
           {
             mailboxEmail,
             folder,
@@ -1018,7 +1018,7 @@ export const executeMailboxScanBackground = internalAction({
  * Action: Finds a candidate's CV attachment in Microsoft 365, uploads it to Cloudflare R2,
  * and links the s3Key to the candidate profile and cvUpload record.
  */
-export const repairAndLinkCandidateCv = action({
+export const repairAndLinkCandidateCv = internalAction({
   args: {
     candidateEmail: v.string(),
     candidateId: v.optional(v.id("candidates")),
@@ -1116,7 +1116,7 @@ export const repairAndLinkCandidateCv = action({
 
           // Update cvUploads
           if (args.cvUploadId) {
-            await ctx.runMutation(api.communications.emailBackfillMutations.updateCvUploadWithR2Key, {
+            await ctx.runMutation(internal.communications.emailBackfillMutations.updateCvUploadWithR2Key, {
               cvUploadId: args.cvUploadId,
               candidateId: args.candidateId,
               s3Key,

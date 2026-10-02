@@ -1,5 +1,5 @@
 import { internalAction, internalMutation } from "../_generated/server";
-import { internal, api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { adjustGlobalStat } from "../stats/statsHelper";
 
@@ -286,7 +286,7 @@ export const insertCvRecord = internalMutation({
           candidateName: "Unknown — Re-triggering Extraction",
         } as any);
 
-        await ctx.scheduler.runAfter(0, api.cvs.cvExtraction.processCvExtraction, {
+        await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {
           cvUploadId: existingFile._id,
           storageId: args.storageId ?? existingFile.storageId,
           s3Key: args.s3Key ?? existingFile.s3Key,
@@ -394,7 +394,7 @@ export const insertCvRecord = internalMutation({
       await ctx.db.patch(logId, { stage: "paused" });
       console.log(`[insertCvRecord] WhatsApp is paused. CV ${cvUploadId} queued for later.`);
     } else {
-      await ctx.scheduler.runAfter(0, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {
         cvUploadId,
         storageId: args.storageId,
         s3Key: args.s3Key,
@@ -432,7 +432,7 @@ export const resumePausedUploads = internalMutation({
         await ctx.db.patch(log._id, { stage: "queued" });
       }
 
-      await ctx.scheduler.runAfter(0, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {
         cvUploadId: upload._id,
         storageId: upload.storageId,
         s3Key: upload.s3Key,

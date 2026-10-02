@@ -1,9 +1,9 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 
-export const processCvIngestion = mutation({
+export const processCvIngestion = internalMutation({
   args: {
     jobId: v.optional(v.id("jobs")),
     sourceChannel: v.string(),
@@ -88,7 +88,7 @@ export const processCvIngestion = mutation({
             } as any);
             // Scored against this opening like any new applicant, so a strong
             // returning candidate reaches the shortlist instead of waiting unread.
-            await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+            await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
               candidateId: existingFile.candidateId!,
               jobId,
             });
@@ -151,7 +151,7 @@ export const processCvIngestion = mutation({
         } as any);
 
         const delayMs = args.extractionDelayMs || 0;
-        await ctx.scheduler.runAfter(delayMs, api.cvs.cvExtraction.processCvExtraction, {
+        await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
           storageId: args.storageId ?? existingFile.storageId,
           s3Key: args.s3Key ?? existingFile.s3Key,
           storageProvider: args.storageProvider ?? existingFile.storageProvider,
@@ -259,7 +259,7 @@ export const processCvIngestion = mutation({
     } else {
       // Trigger Agent 1 (CV Parsing) with optional delay to prevent I/O and API spikes
       const delayMs = args.extractionDelayMs || 0;
-      await ctx.scheduler.runAfter(delayMs, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: args.storageId,
         s3Key: args.s3Key,
         storageProvider: args.storageProvider,

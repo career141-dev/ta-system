@@ -1,9 +1,9 @@
 // convex/stats/statsQueries.ts
-import { query, internalQuery, action } from "../_generated/server";
+import { internalQuery, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 
-export const countAllCandidatesAction = action({
+export const countAllCandidatesAction = internalAction({
   args: {},
   handler: async (ctx) => {
     let total = 0;
@@ -22,7 +22,7 @@ export const countAllCandidatesAction = action({
   },
 });
 
-export const countAllCvUploadsAction = action({
+export const countAllCvUploadsAction = internalAction({
   args: {},
   handler: async (ctx) => {
     let total = 0;

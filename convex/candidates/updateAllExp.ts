@@ -1,7 +1,7 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { deriveTotalExperienceYears } from "./derivations";
 
-export default mutation({
+export default internalMutation({
   handler: async (ctx) => {
     const candidates = await ctx.db.query("candidates").collect();
     let updatedCount = 0;

@@ -14,7 +14,7 @@
 
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK } from "./guard";
 import { claimForTa } from "./applications";
@@ -63,7 +63,7 @@ export const queue = internalMutation({
       candidateName: args.fileName,
       rawSender: user._id as string,
     } as never);
-    await ctx.scheduler.runAfter(0, api.cvs.cvExtraction.processCvExtraction, {
+    await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {
       storageId: args.storageId,
       storageProvider: "convex",
       fileType: args.fileType,
@@ -102,13 +102,27 @@ export const fileHeadhunt = internalMutation({
       .first();
     if (!app) return { handled: false };
 
+    // Owner first, as ta/scoopUpload.ts does. A refused claim used to still
+    // relabel the owner's candidate HH and log them on the uploader's sheet
+    // as "CV received" — the owner's channel and the uploader's counts both
+    // went wrong (2 Oct).
+    if (app.ownerTaId && app.ownerTaId !== user._id) {
+      const owner = await ctx.db.get(app.ownerTaId);
+      await ctx.db.patch(upload._id, {
+        routeNote: `Already claimed on this opening by ${owner?.fullName ?? "another TA"}.`,
+      });
+      return { handled: true, claimed: false };
+    }
     await ctx.db.patch(app._id, { taSourcingChannel: "HH" });
     const claimed = await claimForTa(ctx, user, app);
     if (!claimed.ok) {
+      // Cannot happen inside this transaction after the check above; kept so
+      // a change to claimForTa's rule still reports rather than files.
       const owner = await ctx.db.get(claimed.ownerTaId as Id<"users">);
       await ctx.db.patch(upload._id, {
         routeNote: `Already claimed on this opening by ${owner?.fullName ?? "another TA"}.`,
       });
+      return { handled: true, claimed: false };
     }
 
     // On the headhunting sheet, so its counts include this person.

@@ -1,13 +1,15 @@
 // @ts-nocheck
 import { v } from "convex/values";
-import { query, mutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { initiateFollowUpOutreach } from "./followUpHelper";
+import { escHtml } from "../communications/emailHtml";
 import { requireJobAssignment, requireUser } from "../lib/permissions";
 import { assertNoPendingVoiceCall } from "../aiCalls/voiceCallGuards";
+import { colomboDayStart } from "../../src/lib/calendar";
 
 // Get AI Calls for Outreach dashboard
-export const getAiCalls = query({
+export const getAiCalls = internalQuery({
   args: {
     jobId: v.optional(v.id("jobs")),
     outcome: v.optional(v.string()),
@@ -52,15 +54,14 @@ export const getAiCalls = query({
       });
     }
 
+    // Colombo days, not the server's (UTC): "Today" left out every call made
+    // before 05:30 Colombo time (2 Oct).
     if (args.dateRange === "Today") {
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(c => c.calledAt >= startOfToday.getTime());
+      const startOfToday = colomboDayStart(Date.now());
+      filtered = filtered.filter(c => c.calledAt >= startOfToday);
     } else if (args.dateRange === "Last 7 Days") {
-      const startOf7Days = new Date();
-      startOf7Days.setDate(startOf7Days.getDate() - 7);
-      startOf7Days.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(c => c.calledAt >= startOf7Days.getTime());
+      const startOf7Days = colomboDayStart(Date.now()) - 7 * 86_400_000;
+      filtered = filtered.filter(c => c.calledAt >= startOf7Days);
     }
 
     return filtered;
@@ -68,7 +69,7 @@ export const getAiCalls = query({
 });
 
 // Trigger a new AI call
-export const triggerAiCall = mutation({
+export const triggerAiCall = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
@@ -119,7 +120,7 @@ export const triggerAiCall = mutation({
 });
 
 // Get communications
-export const getCommunications = query({
+export const getCommunications = internalQuery({
   args: {
     jobId: v.optional(v.id("jobs")),
   },
@@ -151,7 +152,7 @@ export const getCommunications = query({
 });
 
 // Send message
-export const sendMessage = mutation({
+export const sendMessage = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.optional(v.id("jobs")),
@@ -210,7 +211,8 @@ export const sendMessage = mutation({
       const toAddress = candidate?.email;
 
       if (taEmail && toAddress) {
-        const htmlBody = args.body.replace(/\n/g, "<br>");
+        // Escaped: the body is typed text, and a "<" in it was read as HTML (2 Oct).
+        const htmlBody = escHtml(args.body).replace(/\n/g, "<br>");
         await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {
           communicationId: commId,
           candidateJobId: commId as string,
@@ -249,7 +251,7 @@ export const sendMessage = mutation({
 
 
 // Get follow-up candidates
-export const getFollowUpCandidates = query({
+export const getFollowUpCandidates = internalQuery({
   args: {
     jobId: v.optional(v.id("jobs")),
   },
@@ -305,7 +307,7 @@ export const getFollowUpCandidates = query({
 });
 
 // Force trigger an AI call for a follow up candidate
-export const forceTriggerFollowUpCall = mutation({
+export const forceTriggerFollowUpCall = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -350,7 +352,7 @@ export const forceTriggerFollowUpCall = mutation({
 });
 
 // Trigger manual follow-up WhatsApp message
-export const triggerWhatsAppFollowUp = mutation({
+export const triggerWhatsAppFollowUp = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -361,7 +363,7 @@ export const triggerWhatsAppFollowUp = mutation({
 });
 
 // Trigger manual follow-up Email message
-export const triggerEmailFollowUp = mutation({
+export const triggerEmailFollowUp = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -428,7 +430,9 @@ export const triggerEmailFollowUp = mutation({
     const candidateEmail = candidate.email;
 
     if (taEmail && candidateEmail) {
-      const htmlBody = body.replace(/\n/g, "<br>");
+      // Escaped: the candidate's name and the job title come from CVs and
+      // forms, and went into the email as raw HTML (2 Oct).
+      const htmlBody = escHtml(body).replace(/\n/g, "<br>");
       await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {
         communicationId: emailCommId,
         candidateJobId: app._id as string,
@@ -455,7 +459,7 @@ export const triggerEmailFollowUp = mutation({
 
 
 // Trigger bulk manual follow-up outreach for multiple applications
-export const triggerBulkFollowUp = mutation({
+export const triggerBulkFollowUp = internalMutation({
   args: {
     applicationIds: v.array(v.id("applications")),
   },
@@ -468,7 +472,7 @@ export const triggerBulkFollowUp = mutation({
 });
 
 // Get communication status by ID for frontend polling
-export const getCommunicationStatus = query({
+export const getCommunicationStatus = internalQuery({
   args: {
     communicationId: v.id("communications"),
   },

@@ -1,7 +1,7 @@
-import { query } from "../_generated/server";
+import { internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 
-export const getTimeline = query({
+export const getTimeline = internalQuery({
   args: {
     applicationId: v.id("applications"),
   },

@@ -8,6 +8,7 @@ import { buildStructuredEmailHtml } from "./emailHtml";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { mayReplyTo } from "../lib/outreachSafety";
 import { followUpCancelledReason, isEmail, sendFollowUpMail } from "../lib/graphMail";
+import { refuseIfDoNotContact } from "../lib/doNotContact";
 
 export { buildStructuredEmailHtml };
 
@@ -34,7 +35,9 @@ export const sendGraphEmail = internalAction({
     const appRecord = commRecord?.applicationId
       ? await ctx.runQuery(internal.communications.whatsappOutbound.getApplicationRecord, { applicationId: commRecord.applicationId })
       : null;
-    const cancelled = followUpCancelledReason(commRecord, appRecord, args.isReplyToCandidate === true);
+    const cancelled =
+      followUpCancelledReason(commRecord, appRecord, args.isReplyToCandidate === true) ??
+      (await refuseIfDoNotContact(ctx, "email", { candidateId: commRecord?.candidateId, email: args.toAddress }));
     if (cancelled) {
       console.log(`[Graph Email] ${cancelled} (communication ${args.communicationId})`);
       if (commRecord?.deliveryStatus !== "failed") {
@@ -168,12 +171,37 @@ export const replyToMessage = internalAction({
       await refuse(decision.reason);
       return;
     }
+    const comm = args.communicationId
+      ? await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, { communicationId: args.communicationId })
+      : null;
+    const doNotContact = await refuseIfDoNotContact(ctx, "email reply", {
+      candidateId: comm?.candidateId,
+      email: args.originalSender,
+    });
+    if (doNotContact) {
+      await refuse(doNotContact);
+      return;
+    }
+    const markSent = async () => {
+      if (args.communicationId) {
+        await ctx.runMutation(internal.communications.graphEmailMutations.updateEmailStatus, {
+          communicationId: args.communicationId,
+          status: "sent",
+        });
+      }
+    };
     const token = await getGraphToken();
 
     // Rich HTML thread reply: create a reply draft (preserves conversation
     // context / In-Reply-To / References headers), patch the HTML body, then send.
-    // Falls back to the simple text-comment reply if the draft flow fails.
+    //
+    // Falls back to the plain /reply ONLY when the draft could not be made or
+    // filled in — then nothing has gone. Once /send has been called, a timeout
+    // or a 5xx does not prove Graph did not send it, and falling back sent the
+    // candidate the same answer twice (2 Oct). A failed send is now logged and
+    // left, not resent.
     if (args.replyHtml) {
+      let draftId: string | null = null;
       try {
         const createReplyRes = await fetch(
           `${GRAPH_BASE}/users/${encodeURIComponent(args.taEmail)}/messages/${args.messageId}/createReply`,
@@ -194,7 +222,7 @@ export const replyToMessage = internalAction({
         }
 
         const draft = await createReplyRes.json();
-        const draftId = draft.id;
+        draftId = draft.id as string;
 
         const patchRes = await fetch(
           `${GRAPH_BASE}/users/${encodeURIComponent(args.taEmail)}/messages/${draftId}`,
@@ -215,27 +243,36 @@ export const replyToMessage = internalAction({
             `Draft body patch failed (${patchRes.status}): ${await patchRes.text()}`
           );
         }
-
-        const sendRes = await fetch(
-          `${GRAPH_BASE}/users/${encodeURIComponent(args.taEmail)}/messages/${draftId}/send`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-
-        if (!sendRes.ok) {
-          throw new Error(
-            `Draft send failed (${sendRes.status}): ${await sendRes.text()}`
-          );
-        }
-
-        console.log(`[Graph Email] Rich HTML thread reply sent to message ${args.messageId}`);
-        return;
       } catch (err: any) {
+        draftId = null;
         console.warn(
-          `[Graph Email] Rich HTML reply path failed (${err.message}). Falling back to text reply.`
+          `[Graph Email] Rich HTML reply draft failed (${err.message}). Nothing was sent; falling back to text reply.`
         );
+      }
+
+      if (draftId) {
+        let sendError: string | null = null;
+        try {
+          const sendRes = await fetch(
+            `${GRAPH_BASE}/users/${encodeURIComponent(args.taEmail)}/messages/${draftId}/send`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            }
+          );
+          if (!sendRes.ok) sendError = `Draft send failed (${sendRes.status}): ${await sendRes.text()}`;
+        } catch (err: any) {
+          sendError = `Draft send did not answer: ${err.message}`;
+        }
+        if (sendError) {
+          await refuse(
+            `${sendError}. Not retried — Graph may already have sent it, and a second try would reach the candidate twice. Check the mailbox's Sent Items.`,
+          );
+          return;
+        }
+        console.log(`[Graph Email] Rich HTML thread reply sent to message ${args.messageId}`);
+        await markSent();
+        return;
       }
     }
 
@@ -255,11 +292,11 @@ export const replyToMessage = internalAction({
 
     if (!res.ok) {
       const errorText = await res.text();
-      throw new Error(
-        `[Graph Email] Reply failed (${res.status}): ${errorText}`
-      );
+      await refuse(`Reply failed (${res.status}): ${errorText.slice(0, 500)}`);
+      return;
     }
 
     console.log(`[Graph Email] Reply sent to message ${args.messageId}`);
+    await markSent();
   },
 });

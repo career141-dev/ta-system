@@ -78,10 +78,10 @@ import { resolveGender } from "./genderFromCv";
 import { Jimp } from "jimp";
 
 import { v } from "convex/values";
-import { action, internalAction } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { filePosts, postRoutingOn } from "../pipeline/postFiling";
 import OpenAI from "openai";
 import crypto from "crypto";
@@ -1019,14 +1019,14 @@ export async function runCvExtraction(
     return null;
   }
 
-  await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+  await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
     cvUploadId,
     status: "processing",
     processingStartedAt: Date.now(),
   });
 
   if (args.logId) {
-    await ctx.runMutation(api.cvs.batches.updateLogStage, {
+    await ctx.runMutation(internal.cvs.batches.updateLogStage, {
       logId: args.logId,
       stage: "parsing"
     });
@@ -1045,11 +1045,11 @@ export async function runCvExtraction(
     const effectiveStorageProvider = args.storageProvider || cvUpload.storageProvider || (effectiveS3Key ? "r2" : "convex");
 
     if (effectiveS3Key && effectiveStorageProvider === "r2") {
-      url = await ctx.runAction(api.storage.r2.generateDownloadUrl, { key: effectiveS3Key });
+      url = await ctx.runAction(internal.storage.r2.generateDownloadUrl, { key: effectiveS3Key });
     } else if (effectiveStorageId) {
       url = await ctx.storage.getUrl(effectiveStorageId);
     } else if (effectiveS3Key) {
-      url = await ctx.runAction(api.storage.r2.generateDownloadUrl, { key: effectiveS3Key });
+      url = await ctx.runAction(internal.storage.r2.generateDownloadUrl, { key: effectiveS3Key });
     }
 
     if (!url) throw new Error("File URL not found (neither R2 nor Convex storage)");
@@ -1071,7 +1071,7 @@ export async function runCvExtraction(
     if (existingCandidate) {
       console.log(`[CvExtraction] Duplicate CV detected (hash: ${fileHash}). Candidate ID: ${existingCandidate._id}. Skipping extraction.`);
 
-      const jobId = await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+      const jobId = await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
         cvUploadId,
         status: "processed",
         fileHash,
@@ -1079,7 +1079,7 @@ export async function runCvExtraction(
       }) as string | undefined | null;
 
       if (jobId) {
-        await ctx.runMutation(api.applications.applications.createApplication, {
+        await ctx.runMutation(internal.applications.applications.createApplication, {
           candidateId: existingCandidate._id,
           jobId: jobId as any,
           cvFileId: cvUploadId,
@@ -1092,7 +1092,7 @@ export async function runCvExtraction(
 
         // Trigger scoring for this duplicate CV on the new job too
         if (!skipLLM) {
-          await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+          await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
             candidateId: existingCandidate._id,
             jobId: jobId as any,
           });
@@ -1118,7 +1118,7 @@ export async function runCvExtraction(
       }
 
       if (args.logId) {
-        await ctx.runMutation(api.cvs.batches.updateLogStage, {
+        await ctx.runMutation(internal.cvs.batches.updateLogStage, {
           logId: args.logId,
           stage: "completed",
           candidateName: existingCandidate.fullName || "Duplicate Candidate",
@@ -1126,11 +1126,11 @@ export async function runCvExtraction(
       }
 
       if (args.batchId) {
-        await ctx.runMutation(api.cvs.batches.updateBatchProgress, {
+        await ctx.runMutation(internal.cvs.batches.updateBatchProgress, {
           batchId: args.batchId,
           status: "completed",
         });
-        await ctx.runMutation(api.cvs.cvUploads.checkAndTriggerNextBatch, {
+        await ctx.runMutation(internal.cvs.cvUploads.checkAndTriggerNextBatch, {
           batchId: args.batchId,
         });
       }
@@ -1162,13 +1162,13 @@ export async function runCvExtraction(
 
     if (trimmed.length < 50) {
       console.warn(`[CvExtraction] Extracted text is too short (${trimmed.length} chars < 50 threshold). Flagging upload ${cvUploadId} for human review (needs_review).`);
-      await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
         cvUploadId,
         status: "needs_review",
         errorMessage: `Low-confidence OCR text (${trimmed.length} chars < 50 threshold). Tesseract failed or produced thin text. Flagged for manual TA human review.`,
       });
       if (args.logId) {
-        await ctx.runMutation(api.cvs.batches.updateLogStage, {
+        await ctx.runMutation(internal.cvs.batches.updateLogStage, {
           logId: args.logId,
           stage: "needs_review",
           errorMessage: "Low-confidence OCR text (< 50 chars). Flagged for TA review.",
@@ -1195,7 +1195,7 @@ export async function runCvExtraction(
 
     if (cvUpload.candidateId) {
       candidateId = cvUpload.candidateId;
-      await ctx.runMutation(api.candidates.candidates.updateCandidateFields, {
+      await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
         candidateId,
         rawTextKey,
         fileHash,
@@ -1205,7 +1205,7 @@ export async function runCvExtraction(
       });
     } else {
       createdStub = true;
-      candidateId = await ctx.runMutation(api.candidates.candidates.createCandidate, {
+      candidateId = await ctx.runMutation(internal.candidates.candidates.createCandidate, {
         rawTextKey,
         sourceChannel: sourceChannel ?? undefined,
         fileHash,
@@ -1216,7 +1216,7 @@ export async function runCvExtraction(
       });
     }
 
-    await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+    await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
       cvUploadId,
       status: "processing",
       fileHash,
@@ -1260,7 +1260,7 @@ export async function runCvExtraction(
       }
     } else {
       if (args.logId) {
-        await ctx.runMutation(api.cvs.batches.updateLogStage, {
+        await ctx.runMutation(internal.cvs.batches.updateLogStage, {
           logId: args.logId,
           stage: "ai_extraction"
         });
@@ -1301,7 +1301,7 @@ export async function runCvExtraction(
           // STRICT LOW-CONFIDENCE / THIN-TEXT CHECK (< 50 characters)
           if (cleanedTesseract.length < 50) {
             console.warn(`[CvExtraction] Tesseract OCR output is too short (${cleanedTesseract.length} chars < 50 threshold). Flagging upload ${cvUploadId} for human review.`);
-            await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+            await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
               cvUploadId,
               status: "needs_review",
               errorMessage: `Low-confidence OCR text (${cleanedTesseract.length} chars < 50 threshold). Flagged for manual TA human review.`,
@@ -1381,7 +1381,7 @@ export async function runCvExtraction(
         }
       }
 
-      const updateRes: any = await ctx.runMutation(api.candidates.candidates.updateCandidateFields, {
+      const updateRes: any = await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
         candidateId,
         rawTextKey,
         ...safeExtractedWithoutReferees,
@@ -1429,7 +1429,7 @@ export async function runCvExtraction(
           }));
 
         if (validReferees.length > 0) {
-          await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
+          await ctx.runMutation(internal.candidates.referees.saveExtractedReferees, {
             candidateId,
             referees: validReferees,
             ...(keepDetails ? { onlyIfNone: true } : {}),
@@ -1449,7 +1449,7 @@ export async function runCvExtraction(
 
     const resolvedCandidateId = candidateId;
 
-    const jobId = await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+    const jobId = await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
       cvUploadId,
       status: "processed",
       fileHash,
@@ -1457,7 +1457,7 @@ export async function runCvExtraction(
     }) as string | undefined | null;
 
     if (jobId) {
-      await ctx.runMutation(api.applications.applications.createApplication, {
+      await ctx.runMutation(internal.applications.applications.createApplication, {
         candidateId: resolvedCandidateId,
         jobId: jobId as any,
         cvFileId: cvUploadId,
@@ -1469,7 +1469,7 @@ export async function runCvExtraction(
       });
 
       if (!skipLLM) {
-        await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+        await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
           candidateId: resolvedCandidateId,
           jobId: jobId as any,
         });
@@ -1510,19 +1510,19 @@ export async function runCvExtraction(
     }
 
     if (args.logId) {
-      await ctx.runMutation(api.cvs.batches.updateLogStage, {
+      await ctx.runMutation(internal.cvs.batches.updateLogStage, {
         logId: args.logId,
         stage: "completed",
         candidateName: extracted?.fullName ?? undefined,
       });
     }
     if (args.batchId) {
-      await ctx.runMutation(api.cvs.batches.updateBatchProgress, {
+      await ctx.runMutation(internal.cvs.batches.updateBatchProgress, {
         batchId: args.batchId,
         status: "completed"
       });
       // Trigger the next batch automatically if this batch is complete
-      await ctx.runMutation(api.cvs.cvUploads.checkAndTriggerNextBatch, {
+      await ctx.runMutation(internal.cvs.cvUploads.checkAndTriggerNextBatch, {
         batchId: args.batchId,
       });
     }
@@ -1557,8 +1557,8 @@ export async function runCvExtraction(
     // A document that is not a CV is not an applicant: remove the empty row this
     // run created for it, and put nobody in New CVs.
     if (isNotACV && candidateId && createdStub) {
-      await ctx.runMutation(api.candidates.candidates.deleteCandidate, { candidateId, preserveUpload: true });
-      await ctx.runMutation(api.candidates.candidates.updateCvUpload, { cvUploadId, status: "processed", clearCandidate: true });
+      await ctx.runMutation(internal.candidates.candidates.deleteCandidate, { candidateId, preserveUpload: true });
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, status: "processed", clearCandidate: true });
       candidateId = null;
     }
 
@@ -1572,7 +1572,7 @@ export async function runCvExtraction(
           ? cvUpload.fileName.replace(/\.[^/.]+$/, "").replace(/[_\-]/g, " ")
           : "Applicant");
 
-      await ctx.runMutation(api.candidates.candidates.updateCandidateFields, {
+      await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
         candidateId,
         fullName: fallbackName,
         isParsed: false,
@@ -1581,7 +1581,7 @@ export async function runCvExtraction(
 
       const assignedJobId = cvUpload?.assignToJob;
       if (assignedJobId) {
-        await ctx.runMutation(api.applications.applications.createApplication, {
+        await ctx.runMutation(internal.applications.applications.createApplication, {
           candidateId,
           jobId: assignedJobId as any,
           cvFileId: cvUploadId,
@@ -1615,13 +1615,13 @@ export async function runCvExtraction(
       const reason = isRateLimit ? "Nvidia API Rate Limit (429)" : "LLM API Timeout/Invalid Response";
       console.log(`[CvExtraction] ${reason}. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${nextRetryCount})`);
 
-      await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
         cvUploadId,
         status: "pending_retry",
         errorMessage: `${reason}. Retrying automatically in ${(delayMs / 1000).toFixed(1)}s...`,
       });
 
-      await ctx.scheduler.runAfter(delayMs, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
         ...args,
         isRetry: true,
         retryCount: nextRetryCount
@@ -1633,7 +1633,7 @@ export async function runCvExtraction(
       ? "processed"
       : (attempts >= 1 ? "extraction_failed_permanent" : "failed");
 
-    await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+    await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
       cvUploadId,
       status: finalStatus,
       errorMessage: isInsufficientBalance
@@ -1644,19 +1644,19 @@ export async function runCvExtraction(
     });
 
     if (args.logId) {
-      await ctx.runMutation(api.cvs.batches.updateLogStage, {
+      await ctx.runMutation(internal.cvs.batches.updateLogStage, {
         logId: args.logId,
         stage: isInsufficientBalance ? "completed" : finalStatus,
         errorMessage: message
       });
     }
     if (args.batchId) {
-      await ctx.runMutation(api.cvs.batches.updateBatchProgress, {
+      await ctx.runMutation(internal.cvs.batches.updateBatchProgress, {
         batchId: args.batchId,
         status: isInsufficientBalance ? "completed" : "failed"
       });
       // Trigger the next batch automatically if this batch is complete
-      await ctx.runMutation(api.cvs.cvUploads.checkAndTriggerNextBatch, {
+      await ctx.runMutation(internal.cvs.cvUploads.checkAndTriggerNextBatch, {
         batchId: args.batchId,
       });
     }
@@ -1670,7 +1670,7 @@ export async function runCvExtraction(
 // Public Action — callable from client
 // ──────────────────────────────────────────────────
 
-export const processCvExtraction = action({
+export const processCvExtraction = internalAction({
   args: ExtractionActionArgs,
   handler: async (ctx, args): Promise<string | null> => {
     try {
@@ -1678,7 +1678,7 @@ export const processCvExtraction = action({
     } catch (err: any) {
       console.error(`[processCvExtraction] Top-level uncaught action error for upload ${args.cvUploadId}:`, err?.message || err);
       try {
-        await ctx.runMutation(api.candidates.candidates.updateCvUpload, {
+        await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
           cvUploadId: args.cvUploadId,
           status: "failed",
           errorMessage: err?.message || String(err),
@@ -1695,7 +1695,7 @@ export const processCvExtraction = action({
 // Batch Resume — rate limited queue worker
 // ──────────────────────────────────────────────────
 
-export const resumeFailedUploads = action({
+export const resumeFailedUploads = internalAction({
   args: { batchId: v.optional(v.id("ingestionBatches")) },
   handler: async (ctx, args): Promise<{ queued: number }> => {
     await ctx.runAction(internal.cvs.cvExtraction.resumeBatch, {
@@ -1710,14 +1710,14 @@ export const resumeFailedUploads = action({
 export const resumeBatch = internalAction({
   args: { cursor: v.optional(v.string()), totalQueued: v.number(), batchId: v.optional(v.id("ingestionBatches")) },
   handler: async (ctx, args): Promise<void> => {
-    const result = await ctx.runQuery(api.candidates.candidates.listFailedUploads, {
+    const result = await ctx.runQuery(internal.candidates.candidates.listFailedUploads, {
       limit: 5,
       cursor: args.cursor,
     });
 
     for (let i = 0; i < result.page.length; i++) {
       const upload = result.page[i];
-      await ctx.runMutation(api.cvs.cvUploads.queueManualExtraction, {
+      await ctx.runMutation(internal.cvs.cvUploads.queueManualExtraction, {
         cvUploadId: upload._id,
         storageId: upload.storageId as Id<"_storage"> | undefined,
         s3Key: upload.s3Key,
@@ -1745,10 +1745,10 @@ export const resumeBatch = internalAction({
   },
 });
 
-export const startBatchExtraction = action({
+export const startBatchExtraction = internalAction({
   args: { batchId: v.id("ingestionBatches") },
   handler: async (ctx, args) => {
-    await ctx.runMutation(api.cvs.cvUploads.checkAndTriggerNextBatch, {
+    await ctx.runMutation(internal.cvs.cvUploads.checkAndTriggerNextBatch, {
       batchId: args.batchId,
     });
   },
@@ -1774,7 +1774,7 @@ export const processNextBatch = internalAction({
       cvUploadIds.push(upload._id);
 
       // Update status to "queued" and schedule extraction with a 2-second stagger
-      await ctx.runMutation(api.cvs.cvUploads.queueManualExtraction, {
+      await ctx.runMutation(internal.cvs.cvUploads.queueManualExtraction, {
         cvUploadId: upload._id,
         storageId: upload.storageId as Id<"_storage"> | undefined,
         s3Key: upload.s3Key,
@@ -1803,7 +1803,7 @@ export const matchExtractedCandidateToActiveJobs = internalAction({
   },
   handler: async (ctx, args) => {
     try {
-      const activeJobs = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
+      const activeJobs = await ctx.runQuery(internal.jobs.jobs.getActiveJobsBasicInfo);
       if (!activeJobs || activeJobs.length === 0) return;
 
       const candidate = await ctx.runQuery(internal.matching.queries.getCandidate, {
@@ -1873,7 +1873,7 @@ Respond ONLY with a valid JSON object in this exact format:
                 cvUploadId: args.cvUploadId,
               });
             } else {
-              await ctx.runMutation(api.applications.applications.createApplication, {
+              await ctx.runMutation(internal.applications.applications.createApplication, {
                 candidateId: args.candidateId,
                 jobId: resultObj.matchedJobId as any,
                 cvFileId: args.cvUploadId,
@@ -1884,7 +1884,7 @@ Respond ONLY with a valid JSON object in this exact format:
                 metaHeadline: cvUpload?.metaHeadline,
               });
 
-              await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+              await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
                 candidateId: args.candidateId,
                 jobId: resultObj.matchedJobId as any,
               });
@@ -1935,7 +1935,7 @@ export const processUnextractedQueueCron = internalAction({
     // Stagger individual extractions by 2.5 seconds to prevent rate limits and run each in an independent execution sandbox
     for (let i = 0; i < claimed.length; i++) {
       const upload = claimed[i];
-      await ctx.scheduler.runAfter(i * 2500, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(i * 2500, internal.cvs.cvExtraction.processCvExtraction, {
         cvUploadId: upload._id,
         storageId: upload.storageId,
         s3Key: upload.s3Key,

@@ -1,5 +1,5 @@
 // convex/users.ts
-import { mutation, query } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireRole } from "../lib/permissions";
 
@@ -14,7 +14,7 @@ function formatNameFromEmail(email?: string): string {
 }
 
 // Called from Next.js on every login via useConvexAuth / onAuthStateChange
-export const syncCurrentUser = mutation({
+export const syncCurrentUser = internalMutation({
   args: { 
     name: v.string(), 
     email: v.string(), 
@@ -76,7 +76,7 @@ export const syncCurrentUser = mutation({
 });
 
 // Admin / TA Manager — assign role to a user
-export const assignRole = mutation({
+export const assignRole = internalMutation({
   args: { targetUserId: v.id("users"), newRole: v.string(), reason: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const admin = await requireRole(ctx, ["admin"]);
@@ -104,7 +104,7 @@ export const assignRole = mutation({
 });
 
 // Admin / TA Manager — update team member name / email
-export const updateUser = mutation({
+export const updateUser = internalMutation({
   args: {
     targetUserId: v.id("users"),
     fullName: v.string(),
@@ -123,7 +123,7 @@ export const updateUser = mutation({
   },
 });
 
-export const deactivate = mutation({
+export const deactivate = internalMutation({
   args: { targetUserId: v.id("users"), reason: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const admin = await requireRole(ctx, ["admin"]);
@@ -144,7 +144,7 @@ export const deactivate = mutation({
   },
 });
 
-export const activate = mutation({
+export const activate = internalMutation({
   args: { targetUserId: v.id("users"), reason: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const admin = await requireRole(ctx, ["admin"]);
@@ -166,7 +166,7 @@ export const activate = mutation({
 });
 
 
-export const getTeamMembers = query({
+export const getTeamMembers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").collect();
@@ -185,7 +185,7 @@ export const getTeamMembers = query({
   },
 });
 
-export const getCurrentUser = query({
+export const getCurrentUser = internalQuery({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -207,7 +207,7 @@ export const getCurrentUser = query({
   },
 });
 
-export const listByRoles = query({
+export const listByRoles = internalQuery({
   args: { roles: v.array(v.string()) },
   handler: async (ctx, args) => {
     const userGroups = await Promise.all(
@@ -222,7 +222,7 @@ export const listByRoles = query({
   },
 });
 
-export const getAllUsers = query({
+export const getAllUsers = internalQuery({
   args: {},
   handler: async (ctx) => {
     const users = await ctx.db.query("users").collect();
@@ -231,37 +231,5 @@ export const getAllUsers = query({
       fullName: (!u.fullName || u.fullName === "Unknown User") ? formatNameFromEmail(u.email) : u.fullName,
     }));
   }
-});
-
-export const fixAllUserRolesToAdmin = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const users = await ctx.db.query("users").collect();
-    for (const u of users) {
-      await ctx.db.patch(u._id, {
-        role: "admin",
-        isActive: true,
-        isOnboarded: true,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-    return { success: true, count: users.length };
-  },
-});
-
-export const setUserRoleByEmail = mutation({
-  args: { email: v.string(), role: v.string() },
-  handler: async (ctx, args) => {
-    const users = await ctx.db.query("users").collect();
-    const target = users.find((u) => u.email.toLowerCase() === args.email.toLowerCase());
-    if (target) {
-      await ctx.db.patch(target._id, {
-        role: args.role as any,
-        updatedAt: new Date().toISOString(),
-      });
-      return { success: true, email: args.email, newRole: args.role };
-    }
-    return { success: false, error: "User not found" };
-  },
 });
 

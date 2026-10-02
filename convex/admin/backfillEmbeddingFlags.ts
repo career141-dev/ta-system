@@ -1,8 +1,8 @@
-import { mutation, action } from "../_generated/server";
-import { api } from "../_generated/api";
+import { internalMutation, internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 
-export const backfillEmbeddingFlags = mutation({
+export const backfillEmbeddingFlags = internalMutation({
   args: { cursor: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const page = await ctx.db.query("candidateResumes").paginate({
@@ -28,7 +28,7 @@ export const backfillEmbeddingFlags = mutation({
   }
 });
 
-export const runAllBackfillFlags = action({
+export const runAllBackfillFlags = internalAction({
   args: {},
   handler: async (ctx) => {
     let cursor: string | undefined = undefined;
@@ -37,7 +37,7 @@ export const runAllBackfillFlags = action({
     let totalBackfilled = 0;
 
     while (!isDone) {
-      const result: { processed: number; backfilled: number; continueCursor: string; isDone: boolean } = await ctx.runMutation(api.admin.backfillEmbeddingFlags.backfillEmbeddingFlags, {
+      const result: { processed: number; backfilled: number; continueCursor: string; isDone: boolean } = await ctx.runMutation(internal.admin.backfillEmbeddingFlags.backfillEmbeddingFlags, {
         cursor,
       });
       totalProcessed += result.processed;

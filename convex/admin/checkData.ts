@@ -1,6 +1,6 @@
-import { query } from "../_generated/server";
+import { internalQuery } from "../_generated/server";
 
-export const checkDb = query({
+export const checkDb = internalQuery({
   handler: async (ctx) => {
     const sysStat = await ctx.db.query("systemStats")
       .withIndex("by_singletonKey", q => q.eq("singletonKey", "global_stats"))
@@ -48,7 +48,7 @@ export const checkDb = query({
   }
 });
 
-export const getWorkableUploads = query({
+export const getWorkableUploads = internalQuery({
   handler: async (ctx) => {
     const uploads = await ctx.db.query("cvUploads")
       .filter(q => q.eq(q.field("source"), "Workable"))
@@ -67,14 +67,14 @@ export const getWorkableUploads = query({
   }
 });
 
-export const getWorkableJobDetails = query({
+export const getWorkableJobDetails = internalQuery({
   handler: async (ctx) => {
     const job = await ctx.db.query("workableImports").order("desc").first();
     return job;
   }
 });
 
-export const getAllSourcesBreakdown = query({
+export const getAllSourcesBreakdown = internalQuery({
   handler: async (ctx) => {
     const candidates = await ctx.db.query("candidates").order("desc").take(1000);
     const candidateSourceCounts: Record<string, number> = {};
@@ -129,7 +129,7 @@ export const getAllSourcesBreakdown = query({
   },
 });
 
-export const getDeepSeekStats = query({
+export const getDeepSeekStats = internalQuery({
   handler: async (ctx) => {
     const candidates = await ctx.db.query("candidates").order("desc").take(300);
     
@@ -179,7 +179,7 @@ export const getDeepSeekStats = query({
   },
 });
 
-export const getDeepSeekTokenReport = query({
+export const getDeepSeekTokenReport = internalQuery({
   handler: async (ctx) => {
     const logs = await ctx.db.query("nvidiaTokenLogs").order("desc").take(500);
 

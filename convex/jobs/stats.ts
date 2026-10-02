@@ -1,4 +1,4 @@
-import { mutation, internalMutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 
@@ -68,7 +68,7 @@ export const adjustStats = internalMutation({
  * - Aging Jobs: Jobs created over 1 month ago (>= 30 days) that remain open/unfilled
  * - Stalled Candidates: Candidates in active stages past SLA thresholds
  */
-export const getNeedsAttention = query({
+export const getNeedsAttention = internalQuery({
   args: {
     jobFilter: v.optional(v.string()),
   },

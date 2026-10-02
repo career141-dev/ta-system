@@ -1,5 +1,5 @@
-import { query, mutation, internalMutation } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalMutation, internalQuery } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { requireUser, requireJobAssignment } from "../lib/permissions";
 import { checkAndAdvanceFollowUp, updateFollowUpFlags, initiateFollowUpOutreach } from "../pipeline/followUpHelper";
@@ -7,7 +7,7 @@ import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { adjustJobStageStat } from "../jobs/stats";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { assertNoPendingVoiceCall } from "../aiCalls/voiceCallGuards";
-export const getApplicationsByCandidateId = query({
+export const getApplicationsByCandidateId = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -17,7 +17,7 @@ export const getApplicationsByCandidateId = query({
   }
 });
 
-export const triggerManualAiCall = mutation({
+export const triggerManualAiCall = internalMutation({
   args: {
     applicationId: v.id("applications"),
     candidateId: v.id("candidates"),
@@ -67,7 +67,7 @@ export const triggerManualAiCall = mutation({
   }
 });
 
-export const getByJobId = query({
+export const getByJobId = internalQuery({
   args: { jobId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
@@ -141,7 +141,7 @@ export const getByJobId = query({
 });
 
 // All applications for a single candidate, joined with job details
-export const getByCandidate = query({
+export const getByCandidate = internalQuery({
   args: { candidateId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
@@ -173,7 +173,7 @@ export const getByCandidate = query({
 });
 
 // Unresponsive candidates for a specific job (to show inside the Follow-up tab)
-export const getUnresponsiveForJob = query({
+export const getUnresponsiveForJob = internalQuery({
   args: { jobId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
@@ -275,7 +275,7 @@ export const getUnresponsiveForJob = query({
 
 
 // Chronological event log for a candidate (newest first)
-export const getCandidateTimeline = query({
+export const getCandidateTimeline = internalQuery({
   args: { candidateId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
@@ -311,7 +311,7 @@ export const getCandidateTimeline = query({
 });
 
 // AI call log for a candidate (newest first)
-export const getCandidateAiCalls = query({
+export const getCandidateAiCalls = internalQuery({
   args: { candidateId: v.string() },
   handler: async (ctx, args) => {
     await requireUser(ctx);
@@ -346,7 +346,7 @@ export const getCandidateAiCalls = query({
   },
 });
 
-export const createApplication = mutation({
+export const createApplication = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
@@ -438,7 +438,7 @@ export const createApplication = mutation({
 
       // Trigger AI scoring if score is missing or when adding from database / manual directory
       if (!existing.aiMatchScore && isDatabaseOrManual) {
-        await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+        await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
           candidateId: targetCandidateId,
           jobId: args.jobId,
         });
@@ -475,7 +475,7 @@ export const createApplication = mutation({
     });
 
     if (isDatabaseOrManual) {
-      await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+      await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
         candidateId: args.candidateId,
         jobId: args.jobId,
       });
@@ -498,7 +498,7 @@ export const createApplication = mutation({
   },
 });
 
-export const logManualCall = mutation({
+export const logManualCall = internalMutation({
   args: {
     applicationId: v.id("applications"),
     candidateId: v.id("candidates"),
@@ -660,7 +660,7 @@ export const logManualCall = mutation({
   },
 });
 
-export const rejectApplication = mutation({
+export const rejectApplication = internalMutation({
   args: {
     applicationId: v.id("applications"),
     reason: v.string(),
@@ -697,7 +697,7 @@ export const rejectApplication = mutation({
   },
 });
 
-export const triggerAiCall = mutation({
+export const triggerAiCall = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -739,7 +739,7 @@ export const triggerAiCall = mutation({
   },
 });
 
-export const createHeadhuntApplication = mutation({
+export const createHeadhuntApplication = internalMutation({
   args: {
     jobId: v.id("jobs"),
     fullName: v.string(),
@@ -823,7 +823,7 @@ export const createHeadhuntApplication = mutation({
   },
 });
 
-export const removeApplication = mutation({
+export const removeApplication = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -839,7 +839,7 @@ export const removeApplication = mutation({
   }
 });
 
-export const updatePipelineCandidateDetails = mutation({
+export const updatePipelineCandidateDetails = internalMutation({
   args: {
     applicationId: v.id("applications"),
     candidateId: v.id("candidates"),
@@ -894,7 +894,7 @@ export const updatePipelineCandidateDetails = mutation({
 });
 
 // Twilio webhook helper: find aiCalls record by Twilio CallSid
-export const findAiCallBySid = query({
+export const findAiCallBySid = internalQuery({
   args: { twilioCallSid: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -904,7 +904,7 @@ export const findAiCallBySid = query({
   },
 });
 
-export const findAiCallByElevenLabsId = query({
+export const findAiCallByElevenLabsId = internalQuery({
   args: { conversationId: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -915,7 +915,7 @@ export const findAiCallByElevenLabsId = query({
 });
 
 // Twilio webhook helper: update call status + IVR response
-export const updateAiCallStatus = mutation({
+export const updateAiCallStatus = internalMutation({
   args: {
     aiCallId: v.id("aiCalls"),
     callStatus: v.union(
@@ -955,7 +955,7 @@ export const updateAiCallStatus = mutation({
   },
 });
 
-export const saveCustomQuestionAnswers = mutation({
+export const saveCustomQuestionAnswers = internalMutation({
   args: {
     aiCallId: v.id("aiCalls"),
     customQuestionAnswers: v.array(v.object({ question: v.string(), answer: v.string() })),
@@ -969,7 +969,7 @@ export const saveCustomQuestionAnswers = mutation({
 
 /** Sets the timestamp when a candidate entered the Follow-up stage.
  *  Used by webhooks and mutations to start the precise 7-day clock. */
-export const setFollowUpEnteredAt = mutation({
+export const setFollowUpEnteredAt = internalMutation({
   args: {
     applicationId: v.id("applications"),
     enteredAt: v.number(),
@@ -986,7 +986,7 @@ export const setFollowUpEnteredAt = mutation({
 
 /** Writes individual per-application follow-up completion flags.
  *  Called by ElevenLabs webhooks after a call captures partial data. */
-export const setApplicationFlags = mutation({
+export const setApplicationFlags = internalMutation({
   args: {
     applicationId: v.id("applications"),
     followUpCvReceived: v.optional(v.boolean()),
@@ -1016,7 +1016,7 @@ export const setApplicationFlags = mutation({
   },
 });
 
-export const getApplication = query({
+export const getApplication = internalQuery({
   args: { id: v.string() },
   handler: async (ctx, args) => {
     const actualId = ctx.db.normalizeId("applications", args.id);
@@ -1025,7 +1025,7 @@ export const getApplication = query({
   },
 });
 
-export const rollbackFollowUpState = mutation({
+export const rollbackFollowUpState = internalMutation({
   args: { applicationId: v.id("applications") },
   handler: async (ctx, args) => {
     const app = await ctx.db.get(args.applicationId);
@@ -1043,7 +1043,7 @@ export const rollbackFollowUpState = mutation({
   }
 });
 
-export const moveToFollowUp = mutation({
+export const moveToFollowUp = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },

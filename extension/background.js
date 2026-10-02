@@ -63,7 +63,10 @@ async function capture(profile) {
 chrome.runtime.onMessage.addListener((msg, _sender, respond) => {
   const run = async () => {
     if (msg?.type === "capture") return { ok: true, ...(await capture(msg.profile)) };
-    if (msg?.type === "openings") return { ok: true, ...(await get("/api/extension/openings")) };
+    // The platform lists only the chosen recruiter's own openings (2 Oct).
+    if (msg?.type === "openings") {
+      return { ok: true, ...(await get(`/api/extension/openings?userId=${encodeURIComponent(msg.userId || "")}`)) };
+    }
     throw new Error("unknown message");
   };
   run()

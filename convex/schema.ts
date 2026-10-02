@@ -911,6 +911,8 @@ export default defineSchema({
     .index("by_firstSourceChannel", ["firstSourceChannel"])
     .index("by_isHealAttempted", ["isHealAttempted"])
     .index("by_isParsed", ["isParsed"])
+    // Deleting an opening clears it as their first source (ta/openingDelete.ts, 2 Oct).
+    .index("by_firstSourceJobId", ["firstSourceJobId"])
     .searchIndex("search_skills", {
       searchField: "skills",
     })
@@ -1318,7 +1320,9 @@ export default defineSchema({
     .index("by_sessionId", ["sessionId"])
     .index("by_user_createdAt", ["userId", "createdAt"])
     .index("by_user_expiresAt", ["userId", "expiresAt"])
-    .index("by_status_expiresAt", ["status", "expiresAt"]),
+    .index("by_status_expiresAt", ["status", "expiresAt"])
+    // Deleting an opening removes its reservations (ta/openingDelete.ts, 2 Oct).
+    .index("by_jobId", ["jobId"]),
 
   communications: defineTable({
     candidateId: v.id("candidates"),
@@ -1356,8 +1360,15 @@ export default defineSchema({
     errorMessage: v.optional(v.string()),
 
     fromCredentials: v.optional(v.string()),
+    /**
+     * The provider's id for an inbound message (Graph `message.id`), so the
+     * same email is recorded and answered once however many polls see it
+     * (2 Oct). Absent on older rows and on outbound ones.
+     */
+    externalMessageId: v.optional(v.string()),
   })
     .index("by_candidate_time", ["candidateId", "sentAt"])
+    .index("by_externalMessageId", ["externalMessageId"])
     .index("by_applicationId", ["applicationId"])
     .index("by_channel_time", ["channel", "sentAt"])
     .index("by_app_sequence", ["applicationId", "sequenceDay"])
@@ -1930,7 +1941,9 @@ export default defineSchema({
     createdAt: v.string(),
   })
     .index("by_user", ["userId"])
-    .index("by_user_and_read", ["userId", "read"]),
+    .index("by_user_and_read", ["userId", "read"])
+    // Deleting an opening removes its notifications (ta/openingDelete.ts, 2 Oct).
+    .index("by_jobId", ["jobId"]),
 
   dashboardStatsCache: defineTable({
     singletonKey: v.string(), // "global_dashboard_stats"
@@ -2047,7 +2060,9 @@ export default defineSchema({
     // Timestamp of last outbound bot reply — used to prevent duplicate replies
     // when the same message triggers multiple code paths.
     lastBotReplyAt: v.optional(v.number()),
-  }).index("by_phone", ["phone"]),
+  }).index("by_phone", ["phone"])
+    // Deleting an opening removes its sessions (ta/openingDelete.ts, 2 Oct).
+    .index("by_jobId", ["jobId"]),
 
   systemStats: defineTable({
     singletonKey: v.string(), // e.g. "global_stats"
@@ -2579,7 +2594,9 @@ export default defineSchema({
     lastRunAt: v.optional(v.union(v.number(), v.null())),
     /** The count when it was last run, so "12 new since Tuesday" is possible. */
     lastResultCount: v.optional(v.union(v.number(), v.null())),
-  }).index("by_owner", ["ownerId"]),
+  }).index("by_owner", ["ownerId"])
+    // Deleting an opening clears it from saved searches (ta/openingDelete.ts, 2 Oct).
+    .index("by_opening", ["openingId"]),
 
   /** The spec is stored, never the numbers, so a reopened report is current. */
   savedReports: defineTable({

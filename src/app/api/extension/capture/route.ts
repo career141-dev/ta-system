@@ -1,7 +1,7 @@
 import { repo } from "@/data/store";
 import { canonicalProfile } from "@/lib/serper";
 import { linkKey } from "@/lib/url";
-import { authorised, normaliseCapture, preflight, reply } from "@/lib/extension";
+import { authorised, extensionUser, normaliseCapture, preflight, reply } from "@/lib/extension";
 import { can, isDeskWide } from "@/lib/auth";
 import { rowIsAnotherTas } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
@@ -37,8 +37,10 @@ export async function POST(req: Request) {
 
   const opening = repo.opening(openingId);
   if (!opening) return reply({ error: "unknown_opening", message: "Opening not found." }, 404);
-  const user = repo.user(userId);
-  if (!user) return reply({ error: "unknown_user", message: "User not found. Please open the extension and select your name." }, 404);
+  // Only an active recruiter can be named (lib/extension, 2 Oct): naming a
+  // lead or an admin let any token holder file onto any opening.
+  const user = extensionUser(userId);
+  if (!user) return reply({ error: "unknown_user", message: "Choose your own recruiter name in the extension. It files for active recruiters only." }, 403);
 
   // The token proves the extension is ours; it does not prove who is using it.
   // The named person still has to be allowed to source on this opening, so a

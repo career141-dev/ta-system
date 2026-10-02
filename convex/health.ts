@@ -1,18 +1,18 @@
-import { query, action, mutation } from "./_generated/server";
-import { api } from "./_generated/api";
+import { internalQuery, internalMutation, internalAction } from "./_generated/server";
+import { internal } from "./_generated/api";
 import OpenAI from "openai";
 import { Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { initiateFollowUpOutreach } from "./pipeline/followUpHelper";
 
-export const ping = query({
+export const ping = internalQuery({
   args: {},
   handler: async () => {
     return "ok";
   },
 });
 
-export const getRecentUploads = query({
+export const getRecentUploads = internalQuery({
   args: {},
   handler: async (ctx) => {
     const recentCvUploads = await ctx.db
@@ -25,7 +25,7 @@ export const getRecentUploads = query({
 
 
 
-export const getBacklogCompositionMetrics = query({
+export const getBacklogCompositionMetrics = internalQuery({
   args: {},
   handler: async (ctx) => {
     const uploaded = await ctx.db
@@ -84,7 +84,7 @@ export const getBacklogCompositionMetrics = query({
   },
 });
 
-export const resetStuckProcessingToUploaded = mutation({
+export const resetStuckProcessingToUploaded = internalMutation({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 100;
@@ -108,7 +108,7 @@ export const resetStuckProcessingToUploaded = mutation({
   },
 });
 
-export const getCandidateDetailsForQa = query({
+export const getCandidateDetailsForQa = internalQuery({
   args: { candidateId: v.string() },
   handler: async (ctx, args) => {
     const validId = ctx.db.normalizeId("candidates", args.candidateId);
@@ -126,13 +126,13 @@ export const getCandidateDetailsForQa = query({
   },
 });
 
-export const triggerTestCV = action({
+export const triggerTestCV = internalAction({
   args: {},
   handler: async (ctx) => {
     const testHash = "e6ab5333bdce41b47020c775aa17f63cb39bedba6a59ae09577aba88ccb240e6";
     const testKey = "cvs/2026-07/1784723522530-JAYANDHARAN_P_.pdf";
     
-    await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+    await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
       jobId: "m17abwpzg8ekcqq34e4kw5y6jx8b1p7r" as any,
       sourceChannel: "linkedin",
       rawSender: "test-linkedin-app@career141.com",
@@ -149,7 +149,7 @@ export const triggerTestCV = action({
   },
 });
 
-export const deleteItDummy = mutation({
+export const deleteItDummy = internalMutation({
   args: {},
   handler: async (ctx) => {
     const candidateId = "j978zd52crzdy6fmb3skxqpkn58b0e69" as Id<"candidates">;
@@ -198,7 +198,7 @@ export const deleteItDummy = mutation({
   },
 });
 
-export const reprocessFailedITUploads = mutation({
+export const reprocessFailedITUploads = internalMutation({
   args: {},
   handler: async (ctx) => {
     const all = await ctx.db.query("cvUploads").collect();
@@ -213,7 +213,7 @@ export const reprocessFailedITUploads = mutation({
       await ctx.db.patch(upload._id, { status: "pending", errorMessage: undefined });
       
       const delayOffset = count * 4000;
-      await ctx.scheduler.runAfter(delayOffset, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(delayOffset, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider,
@@ -228,14 +228,14 @@ export const reprocessFailedITUploads = mutation({
   },
 });
 
-export const getUploadById = query({
+export const getUploadById = internalQuery({
   args: { cvUploadId: v.id("cvUploads") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.cvUploadId);
   },
 });
 
-export const getIngestionLogForFile = query({
+export const getIngestionLogForFile = internalQuery({
   args: { cvFileId: v.id("cvUploads") },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -245,7 +245,7 @@ export const getIngestionLogForFile = query({
   },
 });
 
-export const getIngestionLogShabeen = query({
+export const getIngestionLogShabeen = internalQuery({
   args: {},
   handler: async (ctx) => {
     return await ctx.db
@@ -255,7 +255,7 @@ export const getIngestionLogShabeen = query({
   },
 });
 
-export const getUploadStatusDetails = query({
+export const getUploadStatusDetails = internalQuery({
   args: {},
   handler: async (ctx) => {
     const ids = [
@@ -273,22 +273,22 @@ export const getUploadStatusDetails = query({
   },
 });
 
-export const setUploadPending = mutation({
+export const setUploadPending = internalMutation({
   args: { cvUploadId: v.id("cvUploads") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.cvUploadId, { status: "pending", errorMessage: undefined });
   },
 });
 
-export const reprocessSingleUpload = action({
+export const reprocessSingleUpload = internalAction({
   args: { cvUploadId: v.id("cvUploads") },
   handler: async (ctx, args) => {
-    const upload = await ctx.runQuery(api.health.getUploadById, { cvUploadId: args.cvUploadId });
+    const upload = await ctx.runQuery(internal.health.getUploadById, { cvUploadId: args.cvUploadId });
     if (!upload) return { success: false, reason: "not_found" };
     
-    await ctx.runMutation(api.health.setUploadPending, { cvUploadId: args.cvUploadId });
+    await ctx.runMutation(internal.health.setUploadPending, { cvUploadId: args.cvUploadId });
     
-    await ctx.runAction(api.cvs.cvExtraction.processCvExtraction, {
+    await ctx.runAction(internal.cvs.cvExtraction.processCvExtraction, {
       storageId: upload.storageId,
       s3Key: upload.s3Key,
       storageProvider: upload.storageProvider,
@@ -302,7 +302,7 @@ export const reprocessSingleUpload = action({
   },
 });
 
-export const resetBinathToNewCvs = mutation({
+export const resetBinathToNewCvs = internalMutation({
   args: {},
   handler: async (ctx) => {
     const job = await ctx.db
@@ -348,7 +348,7 @@ export const resetBinathToNewCvs = mutation({
   },
 });
 
-export const triggerShortlistFollowUpInternal = mutation({
+export const triggerShortlistFollowUpInternal = internalMutation({
   args: { applicationId: v.id("applications") },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.applicationId, {
@@ -361,7 +361,7 @@ export const triggerShortlistFollowUpInternal = mutation({
   },
 });
 
-export const addTestCandidateForDevJob = mutation({
+export const addTestCandidateForDevJob = internalMutation({
   args: {
     email: v.optional(v.string()),
     phone: v.optional(v.string()),
@@ -461,7 +461,7 @@ export const addTestCandidateForDevJob = mutation({
 
 
 
-export const listStuckScheduledTasks = query({
+export const listStuckScheduledTasks = internalQuery({
   args: {},
   handler: async (ctx) => {
     const scheduled = await ctx.db.system.query("_scheduled_functions").collect();
@@ -475,7 +475,7 @@ export const listStuckScheduledTasks = query({
   },
 });
 
-export const cancelStuckScheduledTasks = mutation({
+export const cancelStuckScheduledTasks = internalMutation({
   args: {},
   handler: async (ctx) => {
     const scheduled = await ctx.db.system.query("_scheduled_functions").collect();
@@ -502,7 +502,7 @@ export const cancelStuckScheduledTasks = mutation({
   },
 });
 
-export const inspectProcessingUploads = query({
+export const inspectProcessingUploads = internalQuery({
   args: {},
   handler: async (ctx) => {
     const list = await ctx.db
@@ -520,7 +520,7 @@ export const inspectProcessingUploads = query({
   },
 });
 
-export const recoverStuckUploadsDirect = mutation({
+export const recoverStuckUploadsDirect = internalMutation({
   args: {},
   handler: async (ctx) => {
     const stuck = await ctx.db

@@ -12,7 +12,7 @@
  */
 
 import crypto from "node:crypto";
-import type { ProfileCapture } from "@/data/types";
+import type { ProfileCapture, User } from "@/data/types";
 import { repo } from "@/data/store";
 
 /**
@@ -54,6 +54,20 @@ export function authorised(req: Request): boolean {
   const a = Buffer.from(sent);
   const b = Buffer.from(real);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * The person the extension says is pressing the button, if it may say so.
+ *
+ * The token is shared by every install, so whoever holds it can name any user
+ * id. Until 2 Oct that included an admin's or a lead's, whose `can` allows
+ * sourcing on every opening — any TA could file into work that was not theirs
+ * by picking a desk-wide name. Only an active recruiter (role "ta") can be
+ * named now; their own assignments then decide where they may file.
+ */
+export function extensionUser(userId: unknown): User | null {
+  const user = typeof userId === "string" && userId ? repo.user(userId) : null;
+  return user && user.isActive && user.role === "ta" ? user : null;
 }
 
 /** Anything the extension sends is untrusted page content: trim it, cap it,

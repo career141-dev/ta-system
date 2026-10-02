@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { handleWhatChimpWebhook } from "./communications/whatchimp";
 import { verifyElevenLabsSignature, verifyTokenMatches } from "./lib/webhookSecurity";
 import type { Id } from "./_generated/dataModel";
@@ -75,200 +75,13 @@ http.route({
 });
 
 
-// A simple REST endpoint to test Job Creation via Postman
-http.route({
-  path: "/api/test-job",
-  method: "POST",
-  handler: httpAction(async (ctx, request) => {
-    try {
-      const adminKeyHeader = request.headers.get("x-admin-key") || request.headers.get("authorization")?.replace("Bearer ", "");
-      const expectedAdminKey = process.env.CONVEX_SELF_HOSTED_ADMIN_KEY || process.env.ADMIN_KEY;
-      
-      if (!expectedAdminKey || adminKeyHeader !== expectedAdminKey) {
-        return new Response(JSON.stringify({ error: "Unauthorized: Invalid or missing x-admin-key header" }), {
-          status: 401,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+// /api/test-job, a Postman endpoint that created and published a job, was
+// removed on 2 Oct 2026: it compared the deployment admin key with `!==` on a
+// public route, and nothing calls it.
 
-      const body = await request.json();
-
-      // Look up a fallback user to assign as the recruiter for this test
-      const defaultUser = await ctx.runQuery(api.users.users.getTeamMembers);
-      if (!defaultUser || defaultUser.length === 0) {
-        return new Response(JSON.stringify({ 
-          error: "No users found in database. Please log in via the UI at least once to create a user." 
-        }), { status: 400 });
-      }
-
-      // Step 1: Create Job
-      const { jobId, keyword } = await ctx.runMutation(api.jobs.jobs.createJob, {
-        title: body.title || "Postman API Tester",
-        clientName: body.clientName || "API Inc.",
-        clientIndustry: body.clientIndustry || "Technology",
-        recruitmentType: "both",
-        isConfidential: false,
-        jobDescription: body.jobDescription || "Test description generated via Postman REST request.",
-        requiredSkills: body.requiredSkills || ["Postman", "REST APIs"],
-        niceToHaveSkills: ["GraphQL", "Convex"],
-        seniorityLevel: "mid_level",
-        experienceMinYears: 3,
-        experienceMaxYears: 5,
-        location: "Remote",
-        salaryMin: 50000,
-        salaryMax: 90000,
-        salaryCurrency: "USD",
-        primaryRecruiterId: defaultUser[0]._id as any,
-      });
-
-      // Step 2: Update Channels
-      await ctx.runMutation(api.jobs.jobs.updateJobChannels, {
-        jobId,
-        channels: body.channels || [
-          {
-            channelType: "whatsapp",
-            isEnabled: true,
-            whatsappNumber: "+1234567890",
-          },
-          {
-            channelType: "email",
-            isEnabled: true,
-            emailInbox: "postman@career141.com",
-          }
-        ]
-      });
-
-      // Step 3: Update AI Config
-      await ctx.runMutation(api.jobs.jobs.updateJobAiConfig, {
-        jobId,
-        minMatchScoreToShow: body.aiConfig?.minMatchScoreToShow ?? 60,
-        reverseMatchOnPublish: body.aiConfig?.reverseMatchOnPublish ?? true,
-        scoreWeightSkills: 35,
-        scoreWeightExperience: 15,
-        scoreWeightJobTitle: 30,
-        scoreWeightIndustry: 15,
-        scoreWeightLocation: 5,
-        agent3Enabled: true,
-        agent3Day2Channel: "email",
-        agent3Day7Channel: "whatsapp",
-        agent3AfterDay7: "trigger_agent5",
-        agent5Enabled: true,
-        agent5Trigger: "all_new_applicants",
-        agent5CallScript: "default",
-        agent5CustomQuestions: ["What is your notice period?"],
-        agent5NoAnswerAction: "trigger_agent3",
-        agent5HideCompany: false,
-        directorReviewEnabled: false,
-        clientReviewEnabled: false,
-        clientAccessLevel: "view_only",
-        esaCheckEnabled: true,
-        rejectionLoopAction: "restart_from_new_cvs",
-        slaNoNewCvsDays: 1,
-        slaTaReviewDays: 1,
-        slaAiCallDays: 1,
-        slaSecondShortlistDays: 1,
-        slaDirectorReviewDays: 1,
-        slaClientReviewDays: 1,
-        slaEsaDays: 1,
-        slaInterviewDays: 1,
-        slaOfferDays: 1,
-      });
-
-      // Step 4: Publish Job instantly for this test
-      await ctx.runMutation(api.jobs.jobs.publishJob, { jobId });
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        message: "Job successfully created and published via Postman!",
-        jobId, 
-        keyword 
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (e: any) {
-      return new Response(JSON.stringify({ success: false, error: e.message }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-  }),
-});
-
-// Twilio Call Status Callback — auto-advances AI Call → 2nd Shortlist on success
-http.route({
-  path: "/api/twilio-callback",
-  method: "POST",
-  handler: httpAction(async (ctx, request) => {
-    try {
-      const body = await request.text();
-      const params = new URLSearchParams(body);
-
-      const callStatus = params.get("CallStatus"); // completed | no-answer | busy | failed | canceled
-      const callSid = params.get("CallSid");
-      const digits = params.get("Digits"); // IVR response: 1=interested, 2=declined, 3=connect recruiter
-
-      // Find the aiCalls record matching this CallSid
-      const aiCallRecord = callSid
-        ? await ctx.runQuery(api.applications.applications.findAiCallBySid, { twilioCallSid: callSid })
-        : null;
-
-      if (!aiCallRecord) {
-        console.warn("[Twilio] No aiCalls record found for CallSid:", callSid);
-        return new Response("OK", { status: 200 });
-      }
-
-      const applicationId = aiCallRecord.applicationId;
-      const ivrResponse = digits === "1"
-        ? "pressed_1_interested"
-        : digits === "2"
-        ? "pressed_2_declined"
-        : digits === "3"
-        ? "pressed_3_connect_recruiter"
-        : "no_response";
-
-      // Map Twilio callStatus → our enum
-      const mappedStatus =
-        callStatus === "completed" ? "completed"
-        : callStatus === "no-answer" ? "no_answer"
-        : callStatus === "busy" ? "no_answer"
-        : callStatus === "failed" ? "failed"
-        : callStatus === "canceled" ? "failed"
-        : "in_progress";
-
-      // Update the aiCalls record
-      await ctx.runMutation(api.applications.applications.updateAiCallStatus, {
-        aiCallId: aiCallRecord._id,
-        callStatus: mappedStatus as any,
-        ivrResponse: ivrResponse as any,
-        twilioCallSid: callSid ?? undefined,
-      });
-
-      // Auto-advance: completed + pressed_1 → second_shortlist
-      if (applicationId && mappedStatus === "completed" && ivrResponse === "pressed_1_interested") {
-        await ctx.runMutation(api.pipeline.stages.setPipelineStage, {
-          applicationId,
-          newStage: "second_shortlist",
-          note: "Auto-advanced: AI call completed, candidate pressed 1 (Interested)",
-        });
-      }
-
-      // Auto-reject: pressed_2 (declined)
-      if (applicationId && ivrResponse === "pressed_2_declined") {
-        await ctx.runMutation(api.applications.applications.rejectApplication, {
-          applicationId,
-          reason: "Candidate pressed 2 — Declined during AI call",
-          stage: "ai_call",
-        });
-      }
-
-      return new Response("OK", { status: 200 });
-    } catch (e: any) {
-      console.error("[Twilio] Callback error:", e);
-      return new Response("Error", { status: 500 });
-    }
-  }),
-});
+// /api/twilio-callback was removed on 2 Oct 2026. Nothing places Twilio calls
+// any more, and the route checked no signature, so anyone could post a CallSid
+// and advance or reject an application.
 
 // ==========================================
 // ELEVENLABS WEBHOOKS
@@ -290,6 +103,10 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     try {
       const rawBody = await request.text();
+      // Signed like post-call-webhook (2 Oct 2026). Without it anyone could
+      // write salary and notice period onto any candidate by id. Fails closed
+      // when ELEVENLABS_WEBHOOK_SECRET is unset.
+      await verifyElevenLabsSecret(request, rawBody);
       const body = JSON.parse(rawBody);
       console.log("[save-intake] Received tool payload from AI:", body);
 
@@ -310,7 +127,7 @@ http.route({
 
       // Idempotency: Check if already processed
       if (conversation_id) {
-        aiCall = await ctx.runQuery(api.applications.applications.findAiCallByElevenLabsId, { conversationId: conversation_id });
+        aiCall = await ctx.runQuery(internal.applications.applications.findAiCallByElevenLabsId, { conversationId: conversation_id });
         if (aiCall && aiCall.currentSalary === current_salary && aiCall.expectedSalary === expected_salary && aiCall.noticePeriodDays === notice_period_days) {
            return new Response(JSON.stringify({ success: true, note: "Already processed" }), { status: 200 });
         }
@@ -355,7 +172,7 @@ http.route({
       }
 
       // 1. Write to global candidate profile
-      await ctx.runMutation(api.candidates.candidates.updateCandidateDetails, {
+      await ctx.runMutation(internal.candidates.candidates.updateCandidateDetails, {
         candidateId: candidate_id as any,
         currentSalary: finalCurrentSalary,
         expectedSalary: finalExpectedSalary,
@@ -366,7 +183,7 @@ http.route({
 
       // 1b. Save custom question answers to aiCalls if available
       if (aiCall && custom_question_answers && Array.isArray(custom_question_answers)) {
-        await ctx.runMutation(api.applications.applications.saveCustomQuestionAnswers, {
+        await ctx.runMutation(internal.applications.applications.saveCustomQuestionAnswers, {
           aiCallId: aiCall._id,
           customQuestionAnswers: custom_question_answers,
         });
@@ -378,7 +195,7 @@ http.route({
       let foundValidApp = false;
       
       if (application_id) {
-        const existingApp = await ctx.runQuery(api.applications.applications.getApplication, { id: application_id as any }).catch(() => null);
+        const existingApp = await ctx.runQuery(internal.applications.applications.getApplication, { id: application_id as any }).catch(() => null);
         if (existingApp) {
           appIdsToUpdate.push(application_id);
           foundValidApp = true;
@@ -387,7 +204,7 @@ http.route({
       
       if (!foundValidApp && candidate_id) {
         // Fallback: find any application for this candidate in follow_up or ai_call stage
-        const apps = await ctx.runQuery(api.applications.applications.getApplicationsByCandidateId, { candidateId: candidate_id as any });
+        const apps = await ctx.runQuery(internal.applications.applications.getApplicationsByCandidateId, { candidateId: candidate_id as any });
         if (apps) {
           for (const app of apps) {
             if (app.currentStage === "follow_up" || app.currentStage === "ai_call" || app.currentStage === "ta_shortlist") {
@@ -404,7 +221,7 @@ http.route({
         if (finalNotice !== undefined && finalNotice !== null) flagUpdates.followUpNoticePeriod = true;
 
         if (Object.keys(flagUpdates).length > 0) {
-          await ctx.runMutation(api.applications.applications.setApplicationFlags, {
+          await ctx.runMutation(internal.applications.applications.setApplicationFlags, {
             applicationId: appId as any,
             ...flagUpdates,
           });
@@ -413,7 +230,7 @@ http.route({
       
       // Update aiCall to reflect saved data for idempotency tracking
       if (conversation_id) {
-        const aiCall = await ctx.runQuery(api.applications.applications.findAiCallByElevenLabsId, { conversationId: conversation_id });
+        const aiCall = await ctx.runQuery(internal.applications.applications.findAiCallByElevenLabsId, { conversationId: conversation_id });
         if (aiCall) {
           // You don't have a specific mutation to update aiCall data in applications.ts, but updateAiCallStatus is there.
           // Idempotency relies on currentSalary/expectedSalary which we just verified above. We need a way to store them.
@@ -435,6 +252,9 @@ http.route({
   handler: httpAction(async (ctx, request) => {
     try {
       const rawBody = await request.text();
+      // Signed like post-call-webhook (2 Oct 2026). Unsigned, anyone could mark
+      // any candidate do-not-contact or reject an application by id.
+      await verifyElevenLabsSecret(request, rawBody);
       const body = JSON.parse(rawBody);
       const candidate_id = body.candidate_id;
       const application_id = body.application_id;
@@ -444,22 +264,22 @@ http.route({
       if (!candidate_id) throw new Error("Missing candidate_id");
 
       if (conversation_id) {
-        const aiCall = await ctx.runQuery(api.applications.applications.findAiCallByElevenLabsId, { conversationId: conversation_id });
+        const aiCall = await ctx.runQuery(internal.applications.applications.findAiCallByElevenLabsId, { conversationId: conversation_id });
         if (aiCall && aiCall.callStatus === "failed") { // If we mark it failed/rejected already
            // Idempotency: if already processed, return 200
         }
       }
 
       if (reason === "opt_out") {
-        await ctx.runMutation(api.candidates.candidates.setDoNotContact, {
+        await ctx.runMutation(internal.candidates.candidates.setDoNotContact, {
           candidateId: candidate_id as any,
           reason: "Opted out via AI Call",
         });
         
         if (application_id) {
-          const app = await ctx.runQuery(api.applications.applications.getApplication, { id: application_id as any });
+          const app = await ctx.runQuery(internal.applications.applications.getApplication, { id: application_id as any });
           if (app && app.currentStage !== "rejected") {
-            await ctx.runMutation(api.applications.applications.rejectApplication, {
+            await ctx.runMutation(internal.applications.applications.rejectApplication, {
               applicationId: application_id as any,
               reason: "Candidate opted out via AI Call",
               stage: "rejected",
@@ -468,16 +288,16 @@ http.route({
         }
       } else if (reason === "bad_timing" || reason === "not_interested") {
         if (application_id) {
-          const app = await ctx.runQuery(api.applications.applications.getApplication, { id: application_id as any });
+          const app = await ctx.runQuery(internal.applications.applications.getApplication, { id: application_id as any });
           if (app && app.currentStage !== "follow_up" && app.currentStage !== "rejected") {
             const now = Date.now();
-            await ctx.runMutation(api.pipeline.stages.setPipelineStage, {
+            await ctx.runMutation(internal.pipeline.stages.setPipelineStage, {
               applicationId: application_id as any,
               newStage: "follow_up",
               note: `AI call declined. Reason: ${reason}`,
             });
             // Set the 7-day clock entry point
-            await ctx.runMutation(api.applications.applications.setFollowUpEnteredAt, {
+            await ctx.runMutation(internal.applications.applications.setFollowUpEnteredAt, {
               applicationId: application_id as any,
               enteredAt: now,
             });
@@ -509,7 +329,7 @@ http.route({
       const noticePeriodDays = body.notice_period_days;
       const candidateQuestions = body.candidate_questions;
       
-      const aiCall = await ctx.runQuery(api.applications.applications.findAiCallByElevenLabsId, { conversationId });
+      const aiCall = await ctx.runQuery(internal.applications.applications.findAiCallByElevenLabsId, { conversationId });
       if (!aiCall) {
         console.warn("[ElevenLabs] No aiCalls record found for conversation:", conversationId);
         return new Response("OK", { status: 200 });
@@ -524,7 +344,7 @@ http.route({
       if (status === "done" || status === "success") mappedStatus = "completed";
       else if (status === "failed") mappedStatus = "failed";
 
-      await ctx.runMutation(api.applications.applications.updateAiCallStatus, {
+      await ctx.runMutation(internal.applications.applications.updateAiCallStatus, {
         aiCallId: aiCall._id,
         callStatus: mappedStatus as any,
       });
@@ -538,7 +358,7 @@ http.route({
 
         // Write salary/notice and questions to candidate global profile
         if (currentSalary !== undefined || expectedSalary !== undefined || noticePeriodDays !== undefined || candidateQuestions !== undefined) {
-          await ctx.runMutation(api.candidates.candidates.updateCandidateDetails, {
+          await ctx.runMutation(internal.candidates.candidates.updateCandidateDetails, {
             candidateId: aiCall.candidateId,
             currentSalary,
             expectedSalary,
@@ -551,13 +371,13 @@ http.route({
 
         if (allThreeCaptured) {
           // All 3 collected on first AI call → skip Follow-up, go straight to 2nd Shortlist
-          await ctx.runMutation(api.applications.applications.setApplicationFlags, {
+          await ctx.runMutation(internal.applications.applications.setApplicationFlags, {
             applicationId: aiCall.applicationId,
             followUpCurrentSalary: true,
             followUpExpectedSalary: true,
             followUpNoticePeriod: true,
           });
-          await ctx.runMutation(api.pipeline.stages.setPipelineStage, {
+          await ctx.runMutation(internal.pipeline.stages.setPipelineStage, {
             applicationId: aiCall.applicationId,
             newStage: "second_shortlist",
             note: "AI call completed — all 3 fields captured. Skipping Follow-up.",
@@ -570,21 +390,21 @@ http.route({
           if (noticePeriodDays !== undefined && noticePeriodDays !== null) flagUpdates.followUpNoticePeriod = true;
 
           if (Object.keys(flagUpdates).length > 0) {
-            await ctx.runMutation(api.applications.applications.setApplicationFlags, {
+            await ctx.runMutation(internal.applications.applications.setApplicationFlags, {
               applicationId: aiCall.applicationId,
               ...flagUpdates,
             });
           }
 
-          const app = await ctx.runQuery(api.applications.applications.getApplication, { id: aiCall.applicationId });
+          const app = await ctx.runQuery(internal.applications.applications.getApplication, { id: aiCall.applicationId });
           if (app && app.currentStage !== "follow_up") {
-            await ctx.runMutation(api.pipeline.stages.setPipelineStage, {
+            await ctx.runMutation(internal.pipeline.stages.setPipelineStage, {
               applicationId: aiCall.applicationId,
               newStage: "follow_up",
               note: "AI call completed — missing data fields. Entering Follow-up.",
             });
             // Set precise 7-day clock start
-            await ctx.runMutation(api.applications.applications.setFollowUpEnteredAt, {
+            await ctx.runMutation(internal.applications.applications.setFollowUpEnteredAt, {
               applicationId: aiCall.applicationId,
               enteredAt: now,
             });
@@ -594,14 +414,14 @@ http.route({
         // Call not answered or failed → move to Follow-up
         if (aiCall.applicationId) {
           const now = Date.now();
-          const app = await ctx.runQuery(api.applications.applications.getApplication, { id: aiCall.applicationId });
+          const app = await ctx.runQuery(internal.applications.applications.getApplication, { id: aiCall.applicationId });
           if (app && app.currentStage !== "follow_up") {
-            await ctx.runMutation(api.pipeline.stages.setPipelineStage, {
+            await ctx.runMutation(internal.pipeline.stages.setPipelineStage, {
               applicationId: aiCall.applicationId,
               newStage: "follow_up",
               note: `AI call ${mappedStatus} — entering Follow-up for outreach.`,
             });
-            await ctx.runMutation(api.applications.applications.setFollowUpEnteredAt, {
+            await ctx.runMutation(internal.applications.applications.setFollowUpEnteredAt, {
               applicationId: aiCall.applicationId,
               enteredAt: now,
             });
@@ -653,11 +473,23 @@ http.route({
         `[Graph Webhook] Received ${notifications.length} notification(s)`
       );
 
+      /*
+       * clientState is the only proof a notification came from our own
+       * subscription (2 Oct 2026). It used to be checked only when both sides
+       * had one, so a POST without it — or any POST when the variable was
+       * unset — was trusted. Now a missing or wrong value is dropped, and no
+       * MS_GRAPH_CLIENT_STATE means nothing is accepted. Nothing is lost: the
+       * crons in crons.ts poll the same inboxes every few minutes.
+       */
+      const expectedClientState = process.env.MS_GRAPH_CLIENT_STATE;
+      if (!expectedClientState) {
+        console.error("[Graph Webhook] MS_GRAPH_CLIENT_STATE is not set — ignoring every notification.");
+        return new Response(null, { status: 202 });
+      }
+
       for (const notification of notifications) {
-        // Validate clientState if configured
-        const expectedClientState = process.env.MS_GRAPH_CLIENT_STATE;
-        if (expectedClientState && notification.clientState && notification.clientState !== expectedClientState) {
-          console.warn("[Graph Webhook] Invalid clientState received:", notification.clientState);
+        if (!verifyTokenMatches(typeof notification.clientState === "string" ? notification.clientState : null, expectedClientState)) {
+          console.warn("[Graph Webhook] Dropped a notification with a missing or wrong clientState.");
           continue;
         }
 
@@ -676,7 +508,7 @@ http.route({
         // Schedule the inbox read action to retrieve the new messages
         await ctx.scheduler.runAfter(
           0,
-          api.communications.emailAgent.pollEmailInbox,
+          internal.communications.emailAgent.pollEmailInbox,
           { inboxEmail: taEmail }
         );
 
@@ -692,30 +524,11 @@ http.route({
   }),
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// R2 File Proxy (GET)
-// ─────────────────────────────────────────────────────────────────────────────
-http.route({
-  path: "/api/r2-file",
-  method: "GET",
-  handler: httpAction(async (ctx, request) => {
-    const url = new URL(request.url);
-    const key = url.searchParams.get("key");
-    if (!key) {
-      return new Response("Missing key", { status: 400 });
-    }
-
-    try {
-      const signedUrl = await ctx.runAction(api.storage.r2.generateDownloadUrl, { key });
-      return new Response(null, {
-        status: 302,
-        headers: { Location: signedUrl },
-      });
-    } catch (e: any) {
-      return new Response(e.message, { status: 500 });
-    }
-  }),
-});
+// /api/r2-file was removed on 2 Oct 2026. It redirected anyone who asked to a
+// signed link for whatever bucket key they named — every CV in R2. The TA app
+// never called it: it reads the key out of getCvUploadUrl's `/api/r2-file?key=`
+// answer and signs it server-side after checking the person's access
+// (src/data/convex/backend.ts, cvLink).
 
 // Authenticated write bridge for the external LiveKit worker. All state writes
 // remain internal mutations; the shared secret never grants a public mutation.

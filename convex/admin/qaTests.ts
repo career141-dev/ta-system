@@ -1,7 +1,7 @@
 // convex/admin/qaTests.ts
-import { mutation, query, action } from "../_generated/server";
+import { internalQuery, internalMutation, internalAction } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 import { adjustJobStageStat } from "../jobs/stats";
 import { classifyMessage } from "../communications/messageClassifier";
@@ -14,38 +14,29 @@ function assert(condition: any, message: string) {
   }
 }
 
-/**
- * Mutation to seed initial users and setup necessary environment tables
+/*
+ * The admin the QA suite acts as (2 Oct 2026).
+ *
+ * This was `seedTestUser`, a public mutation that inserted an admin account
+ * when none existed — anyone with the backend URL could call it. The suite
+ * only needs an existing admin's id, so it now reads one and creates nothing.
  */
-export const seedTestUser = mutation({
+export const findAdminUserId = internalQuery({
   args: {},
   handler: async (ctx) => {
-    // 1. Verify or create a test admin user for the tests
-    let testUser = await ctx.db
+    const admin = await ctx.db
       .query("users")
       .filter((q) => q.eq(q.field("role"), "admin"))
       .first();
-
-    if (!testUser) {
-      const newUserId = await ctx.db.insert("users", {
-        fullName: "QA Admin Bot",
-        email: "qa.admin@career141.local",
-        role: "admin",
-        isActive: true,
-        isOnboarded: true,
-        tokenIdentifier: "qa-admin-token-id",
-        createdAt: new Date().toISOString(),
-      } as any);
-      testUser = await ctx.db.get(newUserId);
-    }
-    return testUser!._id;
+    if (!admin) throw new Error("No admin user found");
+    return admin._id;
   },
 });
 
 /**
  * Deduplication (Agent 6) QA Test Case
  */
-export const runDeduplicationTest = mutation({
+export const runDeduplicationTest = internalMutation({
   args: {},
   handler: async (ctx) => {
     console.log("--> Starting Deduplication (Agent 6) QA Test...");
@@ -100,7 +91,7 @@ export const runDeduplicationTest = mutation({
 /**
  * Job matching, Scoring, and Follow-up Sweep QA Test Cases
  */
-export const runCorePipelineTest = mutation({
+export const runCorePipelineTest = internalMutation({
   args: { adminUserId: v.id("users") },
   handler: async (ctx, args) => {
     console.log("--> Starting Core Pipeline (Agents 1, 2, 3, 8) QA Test...");
@@ -245,7 +236,7 @@ export const runCorePipelineTest = mutation({
 /**
  * Job Lifecycle, Source Ingestion Routing, and Reverse Matching QA Test Case
  */
-export const runJobLifecycleAndRoutingTest = mutation({
+export const runJobLifecycleAndRoutingTest = internalMutation({
   args: { adminUserId: v.id("users") },
   handler: async (ctx, args) => {
     console.log("--> Starting Job Lifecycle & Source Ingestion Routing QA Test...");
@@ -400,7 +391,7 @@ export const runJobLifecycleAndRoutingTest = mutation({
  *  6. After fix: both CVs must route to the CORRECT job despite the "+" prefix.
  *  7. All test records are cleaned up after assertions pass.
  */
-export const runWhatsAppRoutingTest = mutation({
+export const runWhatsAppRoutingTest = internalMutation({
   args: {},
   handler: async (ctx) => {
     console.log("--> Starting WhatsApp Session Routing QA Test...");
@@ -413,7 +404,7 @@ export const runWhatsAppRoutingTest = mutation({
     const user = await ctx.db.query("users")
       .filter((q) => q.eq(q.field("role"), "admin"))
       .first();
-    if (!user) throw new Error("No admin user found — run seedTestUser first");
+    if (!user) throw new Error("No admin user found — create one first");
 
     // Minimal valid job — all required schema fields included
     const baseJob = {
@@ -592,7 +583,7 @@ export const runWhatsAppRoutingTest = mutation({
  * 6. Questions are identified with `hasQuestion: true`
  * 7. Session state correctly updates `cvReceived`, `portfolioUrls`, `employmentPreference`, and `lastBotReplyAt`
  */
-export const runChatbotStateAndClassificationTest = mutation({
+export const runChatbotStateAndClassificationTest = internalMutation({
   args: {},
   handler: async (ctx) => {
     console.log("--> Starting Chatbot State & Classification QA Test...");
@@ -702,7 +693,7 @@ export const runChatbotStateAndClassificationTest = mutation({
 /**
  * Unified Test Suite Action
  */
-export const runFullQaSuite = action({
+export const runFullQaSuite = internalAction({
   args: {},
   handler: async (ctx): Promise<{
     deduplicationTest: string;
@@ -716,25 +707,25 @@ export const runFullQaSuite = action({
     console.log("   RUNNING CAREER141 LOCAL QA TEST SUITE   ");
     console.log("=========================================");
 
-    const adminUserId = await ctx.runMutation(api.admin.qaTests.seedTestUser);
+    const adminUserId = await ctx.runQuery(internal.admin.qaTests.findAdminUserId);
     
     // Test Deduplication
-    const dedupResult = await ctx.runMutation(api.admin.qaTests.runDeduplicationTest);
+    const dedupResult = await ctx.runMutation(internal.admin.qaTests.runDeduplicationTest);
     
     // Test Core Pipeline
-    const coreResult = await ctx.runMutation(api.admin.qaTests.runCorePipelineTest, { adminUserId });
+    const coreResult = await ctx.runMutation(internal.admin.qaTests.runCorePipelineTest, { adminUserId });
 
     // Test Job Lifecycle, Source Routing & Reverse Matching
-    const lifecycleResult = await ctx.runMutation(api.admin.qaTests.runJobLifecycleAndRoutingTest, { adminUserId });
+    const lifecycleResult = await ctx.runMutation(internal.admin.qaTests.runJobLifecycleAndRoutingTest, { adminUserId });
 
     // Test WhatsApp session routing fix (phone normalisation)
-    const waRoutingResult = await ctx.runMutation(api.admin.qaTests.runWhatsAppRoutingTest);
+    const waRoutingResult = await ctx.runMutation(internal.admin.qaTests.runWhatsAppRoutingTest);
 
     // Test Chatbot state machine & classification
-    const chatbotResult = await ctx.runMutation(api.admin.qaTests.runChatbotStateAndClassificationTest);
+    const chatbotResult = await ctx.runMutation(internal.admin.qaTests.runChatbotStateAndClassificationTest);
 
     // Test Chatbot Follow-up, Role Isolation & Tone Engine
-    const chatbotFollowUpToneResult = await ctx.runMutation(api.admin.qaTests.runChatbotFollowUpAndToneSuite);
+    const chatbotFollowUpToneResult = await ctx.runMutation(internal.admin.qaTests.runChatbotFollowUpAndToneSuite);
 
     console.log("=========================================");
     console.log("   ALL QA TESTS COMPLETED SUCCESSFULLY!  ");
@@ -753,11 +744,11 @@ export const runFullQaSuite = action({
 /**
  * QA Test Case: Extract and populate referees for up to 10 candidates
  */
-export const runRefereeExtractionTest = action({
+export const runRefereeExtractionTest = internalAction({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<any> => {
     console.log("--> Starting Referee Extraction (10 Candidates) QA Test...");
-    const result: any = await ctx.runAction(api.candidates.refereeActions.extractRefereesForCandidateBatch, {
+    const result: any = await ctx.runAction(internal.candidates.refereeActions.extractRefereesForCandidateBatch, {
       limit: args.limit || 10,
     });
     console.log(`[PASS] Processed ${result?.totalCandidatesProcessed || 0} candidates. Success count: ${result?.successfulCount || 0}`);
@@ -765,7 +756,7 @@ export const runRefereeExtractionTest = action({
   },
 });
 
-export const seedFollowUpTestJob = mutation({
+export const seedFollowUpTestJob = internalMutation({
   args: {
     userEmail: v.optional(v.string()),
     phone: v.optional(v.string()),
@@ -844,7 +835,7 @@ export const seedFollowUpTestJob = mutation({
   },
 });
 
-export const seedSanjeevInTaShortlist = mutation({
+export const seedSanjeevInTaShortlist = internalMutation({
   args: {
     fullName: v.optional(v.string()),
     email: v.optional(v.string()),
@@ -941,7 +932,7 @@ export const seedSanjeevInTaShortlist = mutation({
   },
 });
 
-export const simulateInboundMessage = mutation({
+export const simulateInboundMessage = internalMutation({
   args: {
     senderPhone: v.string(),
     textBody: v.string(),
@@ -985,7 +976,7 @@ export const simulateInboundMessage = mutation({
   },
 });
 
-export const deduplicateJobApplications = mutation({
+export const deduplicateJobApplications = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     const apps = await ctx.db
@@ -1017,7 +1008,7 @@ export const deduplicateJobApplications = mutation({
   },
 });
 
-export const wipeSanjeevFieldsCompletely = mutation({
+export const wipeSanjeevFieldsCompletely = internalMutation({
   args: {},
   handler: async (ctx) => {
     const candByEmail = await ctx.db
@@ -1072,7 +1063,7 @@ export const wipeSanjeevFieldsCompletely = mutation({
   },
 });
 
-export const getSanjeevInspectionStatus = query({
+export const getSanjeevInspectionStatus = internalQuery({
   args: {},
   handler: async (ctx) => {
     const candidatesByPhone1 = await ctx.db
@@ -1137,7 +1128,7 @@ export const getSanjeevInspectionStatus = query({
   },
 });
 
-export const resetCandidateTestDetails = mutation({
+export const resetCandidateTestDetails = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     applicationId: v.id("applications"),
@@ -1164,7 +1155,7 @@ export const resetCandidateTestDetails = mutation({
   },
 });
 
-export const processPausedCvForCandidate = mutation({
+export const processPausedCvForCandidate = internalMutation({
   args: {
     cvUploadId: v.id("cvUploads"),
     candidateId: v.id("candidates"),
@@ -1191,7 +1182,7 @@ export const processPausedCvForCandidate = mutation({
       lastStageChangedAt: Date.now(),
     });
 
-    await ctx.scheduler.runAfter(0, api.cvs.cvExtraction.processCvExtraction, {
+    await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {
       storageId: cvUpload.storageId,
       s3Key: cvUpload.s3Key,
       storageProvider: cvUpload.storageProvider,
@@ -1205,7 +1196,7 @@ export const processPausedCvForCandidate = mutation({
   },
 });
 
-export const createTestCandidateForFollowUp = mutation({
+export const createTestCandidateForFollowUp = internalMutation({
   args: {
     fullName: v.string(),
     phone: v.string(),
@@ -1247,7 +1238,7 @@ export const createTestCandidateForFollowUp = mutation({
   },
 });
 
-export const seedUnresponsiveTestCandidate = mutation({
+export const seedUnresponsiveTestCandidate = internalMutation({
   args: {
     jobId: v.id("jobs"),
     fullName: v.optional(v.string()),
@@ -1289,7 +1280,7 @@ export const seedUnresponsiveTestCandidate = mutation({
   },
 });
 
-export const testTriggerMetaTemplate = mutation({
+export const testTriggerMetaTemplate = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -1298,7 +1289,7 @@ export const testTriggerMetaTemplate = mutation({
   },
 });
 
-export const fixGihanDetails = mutation({
+export const fixGihanDetails = internalMutation({
   args: {},
   handler: async (ctx) => {
     const recentCandidates = await ctx.db
@@ -1359,7 +1350,7 @@ export const fixGihanDetails = mutation({
   },
 });
 
-export const addTestCandidateToFollowUp = mutation({
+export const addTestCandidateToFollowUp = internalMutation({
   args: {
     phone: v.optional(v.string()),
     jobId: v.optional(v.id("jobs")),
@@ -1468,7 +1459,7 @@ export const addTestCandidateToFollowUp = mutation({
   },
 });
 
-export const enableVideoEditorWhatsApp = mutation({
+export const enableVideoEditorWhatsApp = internalMutation({
   args: {},
   handler: async (ctx) => {
     // 1. Activate primary Video Editor job m1701y7wb8sbrac9fpkh2gpz0d8ccjsv
@@ -1487,7 +1478,7 @@ export const enableVideoEditorWhatsApp = mutation({
   },
 });
 
-export const runChatbotFollowUpAndToneSuite = mutation({
+export const runChatbotFollowUpAndToneSuite = internalMutation({
   args: {},
   handler: async (ctx) => {
     console.log("=================================================");

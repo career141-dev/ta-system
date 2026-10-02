@@ -7,6 +7,8 @@
  * presets live here; anything that touches data lives in `reporting.ts`.
  */
 
+import { COLOMBO_OFFSET_MS, TIMEZONE } from "./calendar";
+
 // ─── the spec ────────────────────────────────────────────────────────────────
 
 export type DatasetKey = "openings" | "candidates" | "outreach" | "placements";
@@ -240,44 +242,57 @@ export function cellText(value: string | number | null, type: FieldType): string
   if (type === "date") {
     const n = Number(value);
     if (!Number.isFinite(n)) return String(value);
-    return new Date(n).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+    return new Date(n).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: TIMEZONE });
   }
   return String(value);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+/**
+ * A Date whose UTC fields read as the Colombo wall clock. Buckets are Colombo
+ * days, weeks and months: on the UTC server, everything done before 05:30
+ * Colombo time fell into the previous day's bucket (2 Oct).
+ */
+function colomboClock(ms: number): Date {
+  return new Date(ms + COLOMBO_OFFSET_MS);
+}
+
+/** Monday of the Colombo week containing `ms`, on the Colombo clock. */
+function colomboMonday(ms: number): Date {
+  const d = colomboClock(ms);
+  return new Date(d.getTime() - ((d.getUTCDay() + 6) % 7) * 86_400_000);
+}
+
 /** A label a person reads, from a moment. Ordering is handled separately, by
  *  the sequence the engine hands back — never by sorting these strings. */
 export function bucketLabel(ms: number, bucket: Bucket): string {
-  const d = new Date(ms);
-  const y = d.getFullYear();
+  const d = colomboClock(ms);
+  const y = d.getUTCFullYear();
   switch (bucket) {
-    case "day": return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+    case "day": return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
     case "week": {
       // Monday of that week — a week label that moves is worse than no label.
-      const m = new Date(d);
-      m.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-      return `w/c ${m.getDate()} ${MONTHS[m.getMonth()]}`;
+      const m = colomboMonday(ms);
+      return `w/c ${m.getUTCDate()} ${MONTHS[m.getUTCMonth()]}`;
     }
-    case "quarter": return `Q${Math.floor(d.getMonth() / 3) + 1} ${y}`;
-    default: return `${MONTHS[d.getMonth()]} ${y}`;
+    case "quarter": return `Q${Math.floor(d.getUTCMonth() / 3) + 1} ${y}`;
+    default: return `${MONTHS[d.getUTCMonth()]} ${y}`;
   }
 }
 
 /** The sortable form, used only to order the buckets. */
 export function bucketKey(ms: number, bucket: Bucket): string {
-  const d = new Date(ms);
+  const d = colomboClock(ms);
   const p = (n: number) => String(n).padStart(2, "0");
   switch (bucket) {
-    case "day": return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+    case "day": return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
     case "week": {
-      const m = new Date(d);
-      m.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-      return `${m.getFullYear()}-${p(m.getMonth() + 1)}-${p(m.getDate())}`;
+      const m = colomboMonday(ms);
+      return `${m.getUTCFullYear()}-${p(m.getUTCMonth() + 1)}-${p(m.getUTCDate())}`;
     }
-    case "quarter": return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
-    default: return `${d.getFullYear()}-${p(d.getMonth() + 1)}`;
+    case "quarter": return `${d.getUTCFullYear()}-Q${Math.floor(d.getUTCMonth() / 3) + 1}`;
+    default: return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}`;
   }
 }
 

@@ -1,6 +1,6 @@
-import { action, internalAction, internalMutation, query, internalQuery } from "../_generated/server";
+import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
 
@@ -13,6 +13,8 @@ function inboxChannel(inbox: string): string {
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
 import { followUpCancelledReason, isEmail, sendFollowUpMail } from "../lib/graphMail";
+import { refuseIfDoNotContact } from "../lib/doNotContact";
+import { isFollowUpStage } from "../ta/stages";
 
 
 // ----------------------------------------------------------------------------------
@@ -215,7 +217,7 @@ async function sendConfirmationEmail(toEmail: string, jobId: string) {
 
 
 // Runs as a scheduled Convex action — polls email every 2 minutes
-export const pollEmailInbox = action({
+export const pollEmailInbox = internalAction({
   args: { 
     inboxEmail: v.string(), 
     jobId: v.optional(v.id("jobs")),
@@ -335,7 +337,7 @@ export const pollEmailInbox = action({
 
       // Fetch active jobs for LLM to evaluate — the old routing, used only
       // while post routing is off.
-      const activeJobs = postRoutingOn() ? [] : await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
+      const activeJobs = postRoutingOn() ? [] : await ctx.runQuery(internal.jobs.jobs.getActiveJobsBasicInfo);
       
       if (!resolvedJobId && activeJobs.length > 0) {
         // Fallback 1: Fast direct title / keyword matching from email subject
@@ -540,7 +542,7 @@ export const scheduleEmailPolling = internalAction({
       const { emailInbox, jobId } = toProcess[i];
       await ctx.scheduler.runAfter(
         i * 15_000,
-        api.communications.emailAgent.pollEmailInbox,
+        internal.communications.emailAgent.pollEmailInbox,
         { inboxEmail: emailInbox, jobId }
       );
     }
@@ -585,11 +587,31 @@ export const checkAndRecordEmailReply = internalMutation({
 
     if (!candidate) return { isFollowUpReply: false, isCandidateMatched: false };
 
-    const activeApp = await ctx.db
+    // Recorded once per Graph message. Two pollEmailInbox runs overlapping (the
+    // cron and a manual poll, or a slow run still going when the next began)
+    // both saw the same unread email and each scheduled an AI reply, so the
+    // candidate got two (2 Oct). This runs in a mutation, so the check and the
+    // insert are one transaction: the second run sees the first one's row.
+    if (args.messageId) {
+      const seen = await ctx.db
+        .query("communications")
+        .withIndex("by_externalMessageId", (q: any) => q.eq("externalMessageId", args.messageId))
+        .first();
+      if (seen) {
+        console.log(`[EmailAgent] Message ${args.messageId} was already recorded (communication ${seen._id}). Not recording or answering it again.`);
+        return { isCandidateMatched: true, isFollowUpReply: false, duplicate: true };
+      }
+    }
+
+    const apps = await ctx.db
       .query("applications")
       .withIndex("by_candidateId", (q: any) => q.eq("candidateId", candidate._id))
       .order("desc")
-      .first();
+      .collect();
+    // The newest application in Follow-up is the one the assistant may chase
+    // for; it used to take the newest application in ANY stage (2 Oct).
+    const followUpApp = apps.find((a: any) => isFollowUpStage(a.currentStage));
+    const activeApp = followUpApp ?? apps[0];
 
     await ctx.db.insert("communications", {
       candidateId: candidate._id,
@@ -602,19 +624,24 @@ export const checkAndRecordEmailReply = internalMutation({
       deliveryStatus: "read",
       sentAt: Date.now(),
       stoppedSequence: false,
+      externalMessageId: args.messageId,
     });
 
-    // Run text extraction in background to parse details and trigger dynamic email reply
-    await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
-      candidateId: candidate._id,
-      textBody: args.body,
-      channel: "email",
-      inboxEmail: args.inboxEmail,
-      messageId: args.messageId,
-      senderEmail: args.senderEmail,
-      // The application this email was matched to, just above.
-      applicationId: activeApp?._id,
-    });
+    if (followUpApp) {
+      // Run text extraction in background to parse details and trigger dynamic email reply
+      await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
+        candidateId: candidate._id,
+        textBody: args.body,
+        channel: "email",
+        inboxEmail: args.inboxEmail,
+        messageId: args.messageId,
+        senderEmail: args.senderEmail,
+        // The application this email was matched to, just above.
+        applicationId: followUpApp._id,
+      });
+    } else {
+      console.log(`[EmailAgent] Email from candidate ${candidate._id} recorded; no application in Follow-up (${activeApp?.currentStage ?? "none"}), so no AI reply — a TA answers it.`);
+    }
 
 
     const isFollowUp =
@@ -641,18 +668,22 @@ export const generateAndSendAiEmailReply = internalAction({
     incomingBody: v.string(),
   },
   handler: async (ctx, args) => {
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidate, {
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, {
       id: args.candidateId,
     });
-    const job = await ctx.runQuery(api.jobs.jobs.getJob, {
+    const job = await ctx.runQuery(internal.jobs.jobs.getJob, {
       jobId: args.jobId,
     });
-    const app = await ctx.runQuery(api.applications.applications.getApplication, {
+    const app = await ctx.runQuery(internal.applications.applications.getApplication, {
       id: args.applicationId,
     });
 
     if (!candidate || !job || !app) {
       console.error("[EmailAgent AI Reply] Missing candidate, job, or application context.");
+      return;
+    }
+    if (!isFollowUpStage(app.currentStage)) {
+      console.log(`[EmailAgent AI Reply] Application ${args.applicationId} is not in Follow-up (${app.currentStage}). No AI reply.`);
       return;
     }
 
@@ -703,14 +734,14 @@ Do not mention database fields, variables, or system internals. Write the email 
     });
 
     console.log(`[EmailAgent AI Reply] Dispatching reply through Microsoft Graph to ${candidate.email}...`);
+    // replyToMessage marks the row sent once Graph accepts it, or failed with
+    // the reason. This used to mark it sent here regardless, so a reply the
+    // gates refused showed in the conversation as sent (2 Oct).
     await ctx.runAction(internal.communications.graphEmail.replyToMessage, {
       taEmail: args.inboxEmail,
       messageId: args.messageId,
       replyText: replyText,
       originalSender: candidate.email,
-    });
-
-    await ctx.runMutation(internal.communications.emailAgent.markOutboundEmailAsSent, {
       communicationId: commId,
     });
   },
@@ -797,7 +828,7 @@ export const extractAndApplyEmailBodyDetails = internalAction({
       }
     }
 
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidateByEmail, {
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidateByEmail, {
       email: lookupEmail,
     });
 
@@ -854,7 +885,7 @@ export const updateLastEmailFetchTimestamp = internalMutation({
   }
 });
 
-export const checkFileHashExists = query({
+export const checkFileHashExists = internalQuery({
   args: { fileHash: v.string() },
   handler: async (ctx, { fileHash }) => {
     const existing = await ctx.db
@@ -865,7 +896,7 @@ export const checkFileHashExists = query({
   },
 });
 
-export const processSingleRecoveredEmail = action({
+export const processSingleRecoveredEmail = internalAction({
   args: {
     targetInboxEmail: v.string(),
     messageId: v.string(),
@@ -891,7 +922,7 @@ export const processSingleRecoveredEmail = action({
     }
 
     if (!resolvedJobId && !postRoutingOn()) {
-      const activeJobs = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
+      const activeJobs = await ctx.runQuery(internal.jobs.jobs.getActiveJobsBasicInfo);
       if (activeJobs.length > 0) {
         try {
           const openai = getOpenAI("email_routing");
@@ -996,7 +1027,7 @@ Respond ONLY with a valid JSON object in this exact format:
           fileType: attachMeta.contentType || "application/pdf",
         });
       } else {
-        await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+        await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
           jobId: resolvedJobId || undefined,
           jobPostId: postRoute?.jobPostId,
           alsoTo: postRoute?.alsoTo.length ? postRoute.alsoTo : undefined,
@@ -1021,7 +1052,7 @@ Respond ONLY with a valid JSON object in this exact format:
 export const processSingleWeekendEmail = processSingleRecoveredEmail;
 export const processSingleBulkIngestionEmail = processSingleRecoveredEmail;
 
-export const recoverMailboxCVs = action({
+export const recoverMailboxCVs = internalAction({
   args: {
     inboxEmail: v.optional(v.string()), // Defaults to "cv@career141.com"
     targetJobId: v.optional(v.id("jobs")),
@@ -1087,7 +1118,7 @@ export const recoverMailboxCVs = action({
         contentBytes: a.contentBytes
       }));
 
-      await ctx.scheduler.runAfter(scheduleDelaySecs * 1000, api.communications.emailAgent.processSingleRecoveredEmail, {
+      await ctx.scheduler.runAfter(scheduleDelaySecs * 1000, internal.communications.emailAgent.processSingleRecoveredEmail, {
         targetInboxEmail,
         messageId: message.id,
         subject,
@@ -1107,7 +1138,7 @@ export const recoverMailboxCVs = action({
   }
 });
 
-export const recoverCvFullInbox = action({
+export const recoverCvFullInbox = internalAction({
   args: {
     targetJobId: v.optional(v.id("jobs")),
     daysLookback: v.optional(v.number()),
@@ -1115,7 +1146,7 @@ export const recoverCvFullInbox = action({
   handler: async (ctx, args): Promise<{ success: boolean; totalMessagesChecked: number; cvEmailsQueued: number }> => {
     const targetInboxEmail = "cv@career141.com";
     console.log(`[CV Full Recovery] Triggering recovery for ${targetInboxEmail}...`);
-    return await ctx.runAction(api.communications.emailAgent.recoverMailboxCVs, {
+    return await ctx.runAction(internal.communications.emailAgent.recoverMailboxCVs, {
       inboxEmail: targetInboxEmail,
       targetJobId: args.targetJobId,
       daysLookback: args.daysLookback ?? 60,
@@ -1158,6 +1189,24 @@ export const sendFollowUpEmail = internalAction({
         return { success: false, error: cancelled };
       }
       candidateJobId = comm?.applicationId ? String(comm.applicationId) : undefined;
+    }
+
+    const comm = args.communicationId
+      ? await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, { communicationId: args.communicationId })
+      : null;
+    const refusal = await refuseIfDoNotContact(ctx, "follow-up email", {
+      candidateId: comm?.candidateId,
+      email: args.candidateEmail,
+    });
+    if (refusal) {
+      if (args.communicationId) {
+        await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {
+          communicationId: args.communicationId,
+          status: "failed",
+          errorMessage: refusal,
+        });
+      }
+      return { success: false, error: refusal };
     }
 
     // Sent through Microsoft Graph, gates first (lib/graphMail.ts), from the
@@ -1248,13 +1297,13 @@ export const processSingleEmailAttachment = internalAction({
         .map(b => b.toString(16).padStart(2, "0"))
         .join("");
 
-      const isAlreadyIngested = await ctx.runQuery(api.communications.emailAgent.checkFileHashExists, { fileHash });
+      const isAlreadyIngested = await ctx.runQuery(internal.communications.emailAgent.checkFileHashExists, { fileHash });
       if (isAlreadyIngested) {
         // The same CV sent for another job: with post routing, file the
         // person we already have to that job instead of dropping the email.
         // Nothing is uploaded again — ingestion links the existing candidate.
         if (postRoutingOn() && args.resolvedJobId) {
-          await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+          await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
             jobId: args.resolvedJobId,
             jobPostId: args.jobPostId,
             alsoTo: args.alsoTo,
@@ -1297,7 +1346,7 @@ export const processSingleEmailAttachment = internalAction({
           fileType: args.contentType || "application/pdf",
         });
       } else {
-        await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+        await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
           jobId: args.resolvedJobId || undefined,
           jobPostId: args.jobPostId,
           alsoTo: args.alsoTo,

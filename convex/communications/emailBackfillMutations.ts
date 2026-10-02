@@ -1,11 +1,11 @@
-import { mutation, query, internalMutation, internalQuery } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 
 /**
  * Query to check whether a CV with the given SHA-256 hash already exists in cvUploads.
  */
-export const checkCvDuplicateByHash = query({
+export const checkCvDuplicateByHash = internalQuery({
   args: {
     fileHash: v.string(),
   },
@@ -22,7 +22,7 @@ export const checkCvDuplicateByHash = query({
 /**
  * Creates a new mailbox scanning job record.
  */
-export const createScanJob = mutation({
+export const createScanJob = internalMutation({
   args: {
     mailboxEmail: v.string(),
     folder: v.string(),
@@ -72,7 +72,7 @@ export const createScanJob = mutation({
 /**
  * Updates scan progress, counters, phase, and stage.
  */
-export const updateScanProgress = mutation({
+export const updateScanProgress = internalMutation({
   args: {
     jobId: v.id("mailboxScanJobs"),
     phase: v.optional(
@@ -164,7 +164,7 @@ export const updateScanProgress = mutation({
 /**
  * Updates status of a scan job.
  */
-export const setScanJobStatus = mutation({
+export const setScanJobStatus = internalMutation({
   args: {
     jobId: v.id("mailboxScanJobs"),
     status: v.union(
@@ -272,7 +272,7 @@ export const setScanJobStatus = mutation({
 /**
  * Public mutation to request stopping, pausing, resuming or resetting a scan job from the UI.
  */
-export const requestJobControl = mutation({
+export const requestJobControl = internalMutation({
   args: {
     jobId: v.id("mailboxScanJobs"),
     action: v.union(
@@ -392,7 +392,7 @@ export const requestJobControl = mutation({
 /**
  * Public reactive query: Returns the latest scan job for a mailbox or general latest.
  */
-export const getLatestScanJob = query({
+export const getLatestScanJob = internalQuery({
   args: {
     mailboxEmail: v.optional(v.string()),
   },
@@ -417,7 +417,7 @@ export const getLatestScanJob = query({
 /**
  * Public query: Gets a specific scan job by ID.
  */
-export const getScanJob = query({
+export const getScanJob = internalQuery({
   args: {
     jobId: v.id("mailboxScanJobs"),
   },
@@ -429,7 +429,7 @@ export const getScanJob = query({
 /**
  * Public query: Lists recent scan jobs for audit history.
  */
-export const listScanJobs = query({
+export const listScanJobs = internalQuery({
   args: {
     limit: v.optional(v.number()),
   },
@@ -446,7 +446,7 @@ export const listScanJobs = query({
 /**
  * Query to check if job was cancelled or paused.
  */
-export const checkJobStatus = query({
+export const checkJobStatus = internalQuery({
   args: {
     jobId: v.id("mailboxScanJobs"),
   },
@@ -459,7 +459,7 @@ export const checkJobStatus = query({
 /**
  * Public query: Gets persistent scan checkpoint for a mailbox + folder.
  */
-export const getMailboxCheckpoint = query({
+export const getMailboxCheckpoint = internalQuery({
   args: {
     mailboxEmail: v.string(),
     folder: v.optional(v.string()),
@@ -479,7 +479,7 @@ export const getMailboxCheckpoint = query({
 /**
  * Public mutation: Saves/updates persistent checkpoint with discovered counts and pagination cursor.
  */
-export const saveMailboxCheckpoint = mutation({
+export const saveMailboxCheckpoint = internalMutation({
   args: {
     mailboxEmail: v.string(),
     folder: v.optional(v.string()),
@@ -548,7 +548,7 @@ export const saveMailboxCheckpoint = mutation({
 /**
  * Public mutation: Resets persistent checkpoint to start scan over from the beginning.
  */
-export const resetMailboxCheckpoint = mutation({
+export const resetMailboxCheckpoint = internalMutation({
   args: {
     mailboxEmail: v.string(),
     folder: v.string(),
@@ -573,7 +573,7 @@ export const resetMailboxCheckpoint = mutation({
 /**
  * Public query: Gets count of unparsed / unextracted candidates safely via index.
  */
-export const getUnextractedCandidatesCount = query({
+export const getUnextractedCandidatesCount = internalQuery({
   args: {},
   handler: async (ctx) => {
     const unparsed = await ctx.db
@@ -588,7 +588,7 @@ export const getUnextractedCandidatesCount = query({
 /**
  * Public mutation: Requeues extraction for unextracted candidate stubs.
  */
-export const reparseAllUnextractedCandidates = mutation({
+export const reparseAllUnextractedCandidates = internalMutation({
   args: {},
   handler: async (ctx) => {
     const unparsedCandidates = await ctx.db
@@ -613,7 +613,7 @@ export const reparseAllUnextractedCandidates = mutation({
         candidateId: candidate._id,
       });
 
-      await ctx.scheduler.runAfter(requeued * 2000, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(requeued * 2000, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId as any,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider || "r2",
@@ -633,7 +633,7 @@ export const reparseAllUnextractedCandidates = mutation({
 /**
  * Public mutation: Starts or resumes a mailbox scan job instantaneously in the background.
  */
-export const startMailboxScan = mutation({
+export const startMailboxScan = internalMutation({
   args: {
     mailboxEmail: v.string(),
     folder: v.optional(v.string()),
@@ -793,7 +793,7 @@ export const startMailboxScan = mutation({
 /**
  * Public reactive query: Gets currently active background scan job for Ingestion Monitor.
  */
-export const getActiveBackgroundScan = query({
+export const getActiveBackgroundScan = internalQuery({
   args: {
     mailboxEmail: v.optional(v.string()),
   },
@@ -913,7 +913,7 @@ export const recoverStalledMailboxScans = internalMutation({
 /**
  * Mutation: Patches an existing cvUpload record with an R2 s3Key and metadata.
  */
-export const updateCvUploadWithR2Key = mutation({
+export const updateCvUploadWithR2Key = internalMutation({
   args: {
     cvUploadId: v.id("cvUploads"),
     candidateId: v.optional(v.id("candidates")),
@@ -949,14 +949,14 @@ export const updateCvUploadWithR2Key = mutation({
 /**
  * Mutation: Schedules CV repair and R2 linking action safely in the background queue.
  */
-export const scheduleRepairCv = mutation({
+export const scheduleRepairCv = internalMutation({
   args: {
     candidateEmail: v.string(),
     candidateId: v.optional(v.id("candidates")),
     cvUploadId: v.optional(v.id("cvUploads")),
   },
   handler: async (ctx, args) => {
-    await ctx.scheduler.runAfter(0, (api as any).communications.emailBackfill.repairAndLinkCandidateCv, {
+    await ctx.scheduler.runAfter(0, (internal as any).communications.emailBackfill.repairAndLinkCandidateCv, {
       candidateEmail: args.candidateEmail,
       candidateId: args.candidateId,
       cvUploadId: args.cvUploadId,

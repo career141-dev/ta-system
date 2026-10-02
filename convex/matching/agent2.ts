@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { v } from "convex/values";
-import { action, internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel.d.ts";
 import { mapJobSeniorityTo10LevelRank, checkSeniorityConflict, scoreCandidateAgainstRequirements, getSkillDomain } from "../cvs/cvScoring";
 import { classifyJobRoleFamily, classifyCurrentRolesBatch } from "../lib/currentRoleClassifier";
@@ -145,7 +145,7 @@ export const generateAndStoreEmbedding = internalAction({
       if (resume?.rawText) {
         rawText = resume.rawText;
       } else if (resume?.rawTextKey) {
-        rawText = (await ctx.runAction(api.storage.r2.getResumeRawText, { rawTextKey: resume.rawTextKey })) ?? undefined;
+        rawText = (await ctx.runAction(internal.storage.r2.getResumeRawText, { rawTextKey: resume.rawTextKey })) ?? undefined;
       }
     }
     if (!rawText || !rawText.trim()) return;
@@ -172,10 +172,10 @@ export const generateAndStoreEmbedding = internalAction({
   },
 });
 
-export const generateJobEmbedding = action({
+export const generateJobEmbedding = internalAction({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args): Promise<void> => {
-    const job = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: args.jobId });
+    const job = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: args.jobId });
     if (!job) return;
 
     const jobRequirementsText = `
@@ -240,7 +240,7 @@ function cosineSimilarity(vecA: number[], vecB: number[]): number {
 /**
  * Reverse Match using Vector Search and Keyword Matching
  */
-export const runReverseMatch = action({
+export const runReverseMatch = internalAction({
   args: {
     jobId: v.id("jobs"),
     customPreferences: v.optional(v.string()),
@@ -248,7 +248,7 @@ export const runReverseMatch = action({
   handler: async (ctx, args): Promise<void> => {
     const tokenLogs: any[] = [];
     try {
-      const job = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: args.jobId });
+      const job = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: args.jobId });
       if (!job) return;
 
       // If customPreferences is provided, save it on the job record
@@ -431,7 +431,7 @@ Return ONLY valid JSON matching this schema:
       const termsToSearch = terms.slice(0, 3);
       const batches = await Promise.all(
         termsToSearch.map((term) =>
-          ctx.runQuery(api.matching.search.searchCandidates, {
+          ctx.runQuery(internal.matching.search.searchCandidates, {
             query: term,
             industry: job.clientIndustry ?? undefined,
             seniority: job.seniorityLevel ?? undefined,
@@ -680,7 +680,7 @@ Return ONLY valid JSON matching this schema:
         });
 
         if (dbUpdates.length > 0) {
-          await ctx.runMutation(api.candidates.candidates.updateCandidateRoleCacheBatch, { updates: dbUpdates });
+          await ctx.runMutation(internal.candidates.candidates.updateCandidateRoleCacheBatch, { updates: dbUpdates });
         }
       }
 
@@ -967,7 +967,7 @@ Return ONLY valid JSON matching this schema:
 
     } catch (e) {
       console.error("Reverse match vector search error:", e);
-      const job = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: args.jobId });
+      const job = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: args.jobId });
       await ctx.runMutation(internal.jobs.jobs.saveReverseMatchResults, {
         jobId: args.jobId,
         results: job?.reverseMatchResults || [],
@@ -992,7 +992,7 @@ Return ONLY valid JSON matching this schema:
  * Paced at 40 candidates per run with 12s delay to respect NVIDIA rate limits (40 RPM).
  * At this pace: 115,000 / 40 = 2,875 batches x 12s = ~9.5 hours for full corpus.
  */
-export const backfillCandidateEmbeddings = action({
+export const backfillCandidateEmbeddings = internalAction({
   args: { batchSize: v.optional(v.number()), cursor: v.optional(v.string()) },
   handler: async (ctx, args): Promise<{ processed: number; remaining: number; continueCursor?: string }> => {
     const limit = args.batchSize ?? 40;
@@ -1008,7 +1008,7 @@ export const backfillCandidateEmbeddings = action({
     if (missing.length === 0) {
       if (!result.isDone) {
         // If we hit the end of this batch's scan but there are still pages left in the DB, schedule next page scan
-        await ctx.scheduler.runAfter(12000, api.matching.agent2.backfillCandidateEmbeddings, {
+        await ctx.scheduler.runAfter(12000, internal.matching.agent2.backfillCandidateEmbeddings, {
           batchSize: limit,
           cursor: result.continueCursor ?? undefined,
         });
@@ -1079,7 +1079,7 @@ export const backfillCandidateEmbeddings = action({
     if (!result.isDone) {
       // Pacing delay: 12 seconds between batches — safe under NVIDIA NIM 40 RPM rate limit
       // (40 candidates per batch at ~15 API calls = well within 40 RPM)
-      await ctx.scheduler.runAfter(12000, api.matching.agent2.backfillCandidateEmbeddings, {
+      await ctx.scheduler.runAfter(12000, internal.matching.agent2.backfillCandidateEmbeddings, {
         batchSize: limit,
         cursor: result.continueCursor ?? undefined,
       });
@@ -1093,12 +1093,12 @@ export const backfillCandidateEmbeddings = action({
   },
 });
 
-export const runEmpiricalVectorBenchmark = action({
+export const runEmpiricalVectorBenchmark = internalAction({
   args: {},
   handler: async (ctx): Promise<any> => {
     // 1. Fetch sample jobs & candidates
-    const recentCandidates = await ctx.runQuery(api.matching.queries.getRecentCandidates, { limit: 100 });
-    const jobs = await ctx.runQuery(api.jobs.jobs.list, {});
+    const recentCandidates = await ctx.runQuery(internal.matching.queries.getRecentCandidates, { limit: 100 });
+    const jobs = await ctx.runQuery(internal.jobs.jobs.list, {});
     
     if (!jobs || jobs.length === 0 || !recentCandidates || recentCandidates.length === 0) {
       return { error: "Insufficient sample data in database" };

@@ -1,11 +1,11 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { batchUpsertCandidateVectors, candidateVectorPayload, ensureCandidateCollection, QDRANT_VECTOR_DIM, type CandidateVectorPoint } from "../lib/qdrant";
 
-export const syncAllCandidateVectorsToQdrant = action({
+export const syncAllCandidateVectorsToQdrant = internalAction({
   args: {
     batchSize: v.optional(v.number()),
   },
@@ -35,7 +35,7 @@ export const syncAllCandidateVectorsToQdrant = action({
 
     // 1. Process candidate resumes with embeddings page by page
     while (!isDone) {
-      const page: any = await ctx.runQuery(api.matching.queries.getPaginatedResumesWithEmbeddings, {
+      const page: any = await ctx.runQuery(internal.matching.queries.getPaginatedResumesWithEmbeddings, {
         limit: batchLimit,
         cursor,
       });

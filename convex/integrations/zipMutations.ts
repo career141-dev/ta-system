@@ -1,15 +1,15 @@
 // V8 runtime — mutations and queries for ZIP bulk export import job management
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { ConvexError } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel.d.ts";
 
 /**
  * Called after uploading a file to Cloudflare R2 storage during ZIP bulk import.
  * Creates the cvUploads record and schedules background CV text extraction.
  */
-export const createCvFromZip = mutation({
+export const createCvFromZip = internalMutation({
   args: {
     s3Key: v.string(),
     fileName: v.string(),
@@ -40,7 +40,7 @@ export const createCvFromZip = mutation({
 
     // Schedule background CV extraction with a small staggered delay
     const delayMs = Math.floor(Math.random() * 3000);
-    await ctx.scheduler.runAfter(delayMs, api.cvs.cvExtraction.processCvExtraction, {
+    await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
       s3Key: args.s3Key,
       storageProvider: "r2",
       fileType: args.fileType,
@@ -57,7 +57,7 @@ export const createCvFromZip = mutation({
 /**
  * Returns true if a CV with this file hash already exists (SHA-256 duplicate check).
  */
-export const checkDuplicateHash = mutation({
+export const checkDuplicateHash = internalMutation({
   args: { fileHash: v.string() },
   handler: async (ctx, args): Promise<boolean> => {
     const existingUpload = await ctx.db
@@ -89,7 +89,7 @@ export const checkDuplicateHash = mutation({
 
 // ─── Create a new ZIP import job ──────────────────────────────────────────────
 
-export const createJob = mutation({
+export const createJob = internalMutation({
   args: {
     urls: v.array(v.string()),
   },
@@ -120,7 +120,7 @@ export const createJob = mutation({
 
 // ─── Pause / Resume / Stop status ─────────────────────────────────────────────
 
-export const setStatus = mutation({
+export const setStatus = internalMutation({
   args: {
     jobId: v.id("zipImportJobs"),
     status: v.union(
@@ -138,7 +138,7 @@ export const setStatus = mutation({
 
 // ─── Update progress from client loop ─────────────────────────────────────────
 
-export const updateProgressPublic = mutation({
+export const updateProgressPublic = internalMutation({
   args: {
     jobId: v.id("zipImportJobs"),
     currentUrlIndex: v.number(),
@@ -175,14 +175,14 @@ export const updateProgressPublic = mutation({
 
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
-export const getJob = query({
+export const getJob = internalQuery({
   args: { jobId: v.id("zipImportJobs") },
   handler: async (ctx, args) => {
     return ctx.db.get(args.jobId);
   },
 });
 
-export const listJobs = query({
+export const listJobs = internalQuery({
   args: {},
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();

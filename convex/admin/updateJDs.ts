@@ -1,6 +1,6 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 
-export default mutation({
+export default internalMutation({
   handler: async (ctx) => {
     const techLeadJobId = "m17dhspq4653q094kwet2nng4d8a31e7" as any;
     const procurementJobId = "m170pg8bem9h6g60rdva2385hh8a2jdz" as any;
