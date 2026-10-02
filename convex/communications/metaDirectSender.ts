@@ -10,14 +10,23 @@ import { phoneAllowed, suppressed } from "../lib/outboundGuard";
  */
 
 import { resolveRecipient } from "../lib/outreachSafety";
+import { refuseIfDoNotContact } from "../lib/doNotContact";
 
 export async function sendMetaFreeText(
   phoneNumberId: string,
   recipientPhone: string,
   message: string,
-  accessToken: string
+  accessToken: string,
+  /**
+   * For the do-not-contact check. Required, not optional, so no caller can
+   * forget it: until 2 Oct the AI's replies to inbound WhatsApp went to people
+   * who had asked us to stop.
+   */
+  ctx: { runQuery: (ref: any, args: any) => Promise<any> },
 ): Promise<{ success: boolean; messageId?: string; error?: string; outsideWindow?: boolean }> {
   // Every free-text WhatsApp — follow-ups, nudges, AI auto-replies — passes here.
+  const refusal = await refuseIfDoNotContact(ctx, "WhatsApp message", { phone: recipientPhone });
+  if (refusal) return { success: false, error: refusal };
   const decision = resolveRecipient("whatsapp", recipientPhone);
   if (!decision.ok) {
     console.warn(`[Meta Direct Sender] ${decision.reason}`);

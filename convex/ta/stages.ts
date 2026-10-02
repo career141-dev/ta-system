@@ -82,6 +82,21 @@ export function toTaStage(stage: string | null | undefined): TaStage {
   return TO_TA[stage as BackendStage] ?? "new_cv";
 }
 
+/**
+ * Whether an application is in Follow-up — AI or TA — the only stages where
+ * the assistant chases a candidate for their details.
+ *
+ * The AI answered inbound email whatever the stage: a candidate at interview
+ * or offer who wrote in was asked again for their CV and salary. WhatsApp
+ * skipped only rejected and placed, so it did the same (2 Oct). Both now ask
+ * this one rule; anywhere else the message is recorded and a TA answers it.
+ */
+export function isFollowUpStage(stage: string | null | undefined): boolean {
+  if (!stage) return false;
+  const ta = toTaStage(stage);
+  return ta === "ai_follow_up" || ta === "ta_follow_up";
+}
+
 /** A TA stage as it must be stored. Throws on an unknown one — a write is not
  *  a place to guess. */
 export function toBackendStage(stage: string): BackendStage {

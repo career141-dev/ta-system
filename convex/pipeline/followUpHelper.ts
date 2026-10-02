@@ -213,6 +213,18 @@ export async function initiateFollowUpOutreach(
 
   const candidate = await ctx.db.get(app.candidateId);
   if (!candidate) return;
+  // Every move into Follow-up starts this outreach — the stage machine's
+  // automatic Day 0 included — and it never looked at the flag, so a
+  // candidate who asked not to be contacted was messaged the moment they were
+  // shortlisted (2 Oct). The senders refuse it too (lib/doNotContact.ts).
+  if (candidate.doNotContact) {
+    console.warn(`[DoNotContact] Refused follow-up outreach for application ${applicationId}: candidate is marked do-not-contact.`);
+    if (options?.report) {
+      options.report.sent = false;
+      options.report.blocked = true;
+    }
+    return;
+  }
 
   const job = await ctx.db.get(app.jobId);
   if (!job) return;

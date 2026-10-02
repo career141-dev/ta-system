@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internalQuery, internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { initiateFollowUpOutreach } from "./followUpHelper";
+import { escHtml } from "../communications/emailHtml";
 import { requireJobAssignment, requireUser } from "../lib/permissions";
 import { assertNoPendingVoiceCall } from "../aiCalls/voiceCallGuards";
 
@@ -210,7 +211,8 @@ export const sendMessage = internalMutation({
       const toAddress = candidate?.email;
 
       if (taEmail && toAddress) {
-        const htmlBody = args.body.replace(/\n/g, "<br>");
+        // Escaped: the body is typed text, and a "<" in it was read as HTML (2 Oct).
+        const htmlBody = escHtml(args.body).replace(/\n/g, "<br>");
         await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {
           communicationId: commId,
           candidateJobId: commId as string,
@@ -428,7 +430,9 @@ export const triggerEmailFollowUp = internalMutation({
     const candidateEmail = candidate.email;
 
     if (taEmail && candidateEmail) {
-      const htmlBody = body.replace(/\n/g, "<br>");
+      // Escaped: the candidate's name and the job title come from CVs and
+      // forms, and went into the email as raw HTML (2 Oct).
+      const htmlBody = escHtml(body).replace(/\n/g, "<br>");
       await ctx.scheduler.runAfter(0, internal.communications.graphEmail.sendGraphEmail, {
         communicationId: emailCommId,
         candidateJobId: app._id as string,

@@ -13,6 +13,8 @@ function inboxChannel(inbox: string): string {
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 import { outreachLive, resolveRecipient } from "../lib/outreachSafety";
 import { followUpCancelledReason, isEmail, sendFollowUpMail } from "../lib/graphMail";
+import { refuseIfDoNotContact } from "../lib/doNotContact";
+import { isFollowUpStage } from "../ta/stages";
 
 
 // ----------------------------------------------------------------------------------
@@ -585,11 +587,31 @@ export const checkAndRecordEmailReply = internalMutation({
 
     if (!candidate) return { isFollowUpReply: false, isCandidateMatched: false };
 
-    const activeApp = await ctx.db
+    // Recorded once per Graph message. Two pollEmailInbox runs overlapping (the
+    // cron and a manual poll, or a slow run still going when the next began)
+    // both saw the same unread email and each scheduled an AI reply, so the
+    // candidate got two (2 Oct). This runs in a mutation, so the check and the
+    // insert are one transaction: the second run sees the first one's row.
+    if (args.messageId) {
+      const seen = await ctx.db
+        .query("communications")
+        .withIndex("by_externalMessageId", (q: any) => q.eq("externalMessageId", args.messageId))
+        .first();
+      if (seen) {
+        console.log(`[EmailAgent] Message ${args.messageId} was already recorded (communication ${seen._id}). Not recording or answering it again.`);
+        return { isCandidateMatched: true, isFollowUpReply: false, duplicate: true };
+      }
+    }
+
+    const apps = await ctx.db
       .query("applications")
       .withIndex("by_candidateId", (q: any) => q.eq("candidateId", candidate._id))
       .order("desc")
-      .first();
+      .collect();
+    // The newest application in Follow-up is the one the assistant may chase
+    // for; it used to take the newest application in ANY stage (2 Oct).
+    const followUpApp = apps.find((a: any) => isFollowUpStage(a.currentStage));
+    const activeApp = followUpApp ?? apps[0];
 
     await ctx.db.insert("communications", {
       candidateId: candidate._id,
@@ -602,19 +624,24 @@ export const checkAndRecordEmailReply = internalMutation({
       deliveryStatus: "read",
       sentAt: Date.now(),
       stoppedSequence: false,
+      externalMessageId: args.messageId,
     });
 
-    // Run text extraction in background to parse details and trigger dynamic email reply
-    await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
-      candidateId: candidate._id,
-      textBody: args.body,
-      channel: "email",
-      inboxEmail: args.inboxEmail,
-      messageId: args.messageId,
-      senderEmail: args.senderEmail,
-      // The application this email was matched to, just above.
-      applicationId: activeApp?._id,
-    });
+    if (followUpApp) {
+      // Run text extraction in background to parse details and trigger dynamic email reply
+      await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
+        candidateId: candidate._id,
+        textBody: args.body,
+        channel: "email",
+        inboxEmail: args.inboxEmail,
+        messageId: args.messageId,
+        senderEmail: args.senderEmail,
+        // The application this email was matched to, just above.
+        applicationId: followUpApp._id,
+      });
+    } else {
+      console.log(`[EmailAgent] Email from candidate ${candidate._id} recorded; no application in Follow-up (${activeApp?.currentStage ?? "none"}), so no AI reply — a TA answers it.`);
+    }
 
 
     const isFollowUp =
@@ -653,6 +680,10 @@ export const generateAndSendAiEmailReply = internalAction({
 
     if (!candidate || !job || !app) {
       console.error("[EmailAgent AI Reply] Missing candidate, job, or application context.");
+      return;
+    }
+    if (!isFollowUpStage(app.currentStage)) {
+      console.log(`[EmailAgent AI Reply] Application ${args.applicationId} is not in Follow-up (${app.currentStage}). No AI reply.`);
       return;
     }
 
@@ -703,14 +734,14 @@ Do not mention database fields, variables, or system internals. Write the email 
     });
 
     console.log(`[EmailAgent AI Reply] Dispatching reply through Microsoft Graph to ${candidate.email}...`);
+    // replyToMessage marks the row sent once Graph accepts it, or failed with
+    // the reason. This used to mark it sent here regardless, so a reply the
+    // gates refused showed in the conversation as sent (2 Oct).
     await ctx.runAction(internal.communications.graphEmail.replyToMessage, {
       taEmail: args.inboxEmail,
       messageId: args.messageId,
       replyText: replyText,
       originalSender: candidate.email,
-    });
-
-    await ctx.runMutation(internal.communications.emailAgent.markOutboundEmailAsSent, {
       communicationId: commId,
     });
   },
@@ -1158,6 +1189,24 @@ export const sendFollowUpEmail = internalAction({
         return { success: false, error: cancelled };
       }
       candidateJobId = comm?.applicationId ? String(comm.applicationId) : undefined;
+    }
+
+    const comm = args.communicationId
+      ? await ctx.runQuery(internal.communications.whatsappOutbound.getCommunicationRecord, { communicationId: args.communicationId })
+      : null;
+    const refusal = await refuseIfDoNotContact(ctx, "follow-up email", {
+      candidateId: comm?.candidateId,
+      email: args.candidateEmail,
+    });
+    if (refusal) {
+      if (args.communicationId) {
+        await ctx.runMutation(internal.communications.emailAgent.updateCommunicationStatus, {
+          communicationId: args.communicationId,
+          status: "failed",
+          errorMessage: refusal,
+        });
+      }
+      return { success: false, error: refusal };
     }
 
     // Sent through Microsoft Graph, gates first (lib/graphMail.ts), from the
