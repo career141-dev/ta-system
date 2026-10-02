@@ -5,7 +5,7 @@ import { HealthBar } from "@/components/HealthBar";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { PIPELINE_STAGES, STAGE_LABEL, PRIORITY_TARGET, URGENT_ALERTS } from "@/data/types";
-import { relDays, dateAt } from "@/lib/format";
+import { colomboDaysBetween, dateAt, relDays } from "@/lib/format";
 import { OpeningBrief } from "@/components/OpeningBrief";
 import { JdApproval } from "@/components/JdApproval";
 import { JobDetailsSummary } from "@/components/JobDetailsSummary";
@@ -39,7 +39,7 @@ export default async function OverviewPage({
   const apps = repo.applications(id);
   const posts = repo.jobPosts(id).filter((p) => p.status === "live");
   const cvsToday = posts.reduce((n, p) => n + p.cvCountToday, 0);
-  const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
+  const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
   const health = repo.health(id);
   const target = PRIORITY_TARGET[o.priorityTier];
   const users = repo.users();

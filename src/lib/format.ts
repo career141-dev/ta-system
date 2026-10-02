@@ -1,6 +1,10 @@
-export function relDays(ts: number | null): string {
+import { colomboDaysBetween } from "./calendar";
+
+export { colomboDaysBetween };
+
+export function relDays(ts: number | null, now = Date.now()): string {
   if (!ts) return "—";
-  const d = Math.floor((Date.now() - ts) / 86_400_000);
+  const d = colomboDaysBetween(ts, now);
   if (d <= 0) return "today";
   if (d === 1) return "yesterday";
   return `${d}d ago`;

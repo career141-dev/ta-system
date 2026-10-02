@@ -10,7 +10,7 @@ import { OpeningsToolbar } from "@/components/OpeningsToolbar";
 import { assignableTas } from "@/lib/assignable";
 import { PRIORITY_TARGET } from "@/data/types";
 import { computeAlerts } from "@/lib/sla";
-import { relDays } from "@/lib/format";
+import { colomboDaysBetween, relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
@@ -227,7 +227,7 @@ export default async function OpeningsPage({
             const posts = repo.jobPosts(o.id);
             const live = posts.filter((p) => p.status === "live");
             const cvsToday = live.reduce((n, p) => n + p.cvCountToday, 0);
-            const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
+            const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
             const target = PRIORITY_TARGET[o.priorityTier].days;
             const urgent = liveAlerts.filter((a) => a.openingId === o.id && a.urgent).length;
 

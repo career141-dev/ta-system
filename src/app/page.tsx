@@ -2,7 +2,7 @@ import Link from "next/link";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { PRIORITY_TARGET } from "@/data/types";
-import { inHours, relDays } from "@/lib/format";
+import { colomboDaysBetween, inHours, relDays } from "@/lib/format";
 import { alertsFor } from "@/lib/sla";
 import { LeadDashboard } from "@/components/dash/LeadDashboard";
 import { DirectorDashboard } from "@/components/dash/DirectorDashboard";
@@ -152,7 +152,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               const posts = repo.jobPosts(o.id);
               const live = posts.filter((j) => j.status === "live");
               const cvsToday = live.reduce((n, j) => n + j.cvCountToday, 0);
-              const days = Math.floor((Date.now() - (o.assignedAt ?? Date.now())) / 86_400_000);
+              const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
               const target = PRIORITY_TARGET[o.priorityTier].days;
 
               const need =

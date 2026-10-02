@@ -1,5 +1,5 @@
 import { repo, setsForOpening } from "@/data/store";
-import { colomboDayStart } from "@/lib/calendar";
+import { colomboDaysBetween, colomboDayStart } from "@/lib/calendar";
 import { ASSIGNMENT_LABEL, PRIORITY_TARGET, URGENT_ALERTS, type AlertKind, type Id } from "@/data/types";
 import { hasWorkingHours, isWorkingDay, workingHoursBetween } from "./calendar";
 import { extractReplyText, readNumbers } from "./reviewReply";
@@ -121,7 +121,7 @@ function computeAlertsAt(now: number): LiveAlert[] {
     }
 
     // 2. Stale role — measured against the priority tier, not a flat five days.
-    const days = Math.floor((now - (o.assignedAt ?? now)) / DAY);
+    const days = o.assignedAt ? colomboDaysBetween(o.assignedAt, now) : 0;
     const target = PRIORITY_TARGET[o.priorityTier].days;
     if (days > target) {
       out.push({

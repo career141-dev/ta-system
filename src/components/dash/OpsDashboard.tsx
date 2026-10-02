@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { repo } from "@/data/store";
 import { computeAlerts } from "@/lib/sla";
-import { relDays } from "@/lib/format";
+import { colomboDaysBetween, relDays } from "@/lib/format";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 
@@ -69,7 +69,7 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
               <div className="divide-y divide-rule">
                 {clientList.rows.map(({ o, a }) => {
                   const c = repo.candidate(a.candidateId);
-                  const waiting = Math.floor((Date.now() - a.lastStageChangedAt) / 86_400_000);
+                  const waiting = colomboDaysBetween(a.lastStageChangedAt);
                   return (
                     <Link
                       key={a.id}
