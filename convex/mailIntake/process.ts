@@ -326,7 +326,7 @@ async function handleShortlistMessage(
   const candidateIds: Id<"candidates">[] = [];
   const ingest = await ingestCvs(
     ctx, token, mailboxPath, cvs,
-    { jobId: note.openingId ? (note.openingId as Id<"jobs">) : undefined, sourceChannel: "email", fromAddress, subject, campaign: `TA System mail intake — ${m.mailbox}` },
+    { jobId: note.openingId ? (note.openingId as Id<"jobs">) : undefined, sourceChannel: "email", fromAddress, subject, campaign: `TA System mail intake — ${m.mailbox}`, shortlistCopy: true },
     async (candidateId) => { candidateIds.push(candidateId); },
   );
   if (ingest.cvUploadIds.length > 0) {
@@ -412,7 +412,7 @@ async function ingestCvs(
   token: string,
   mailboxPath: string,
   cvs: MailAttachmentMeta[],
-  opts: { jobId?: Id<"jobs">; sourceChannel: string; fromAddress: string; subject: string; campaign: string },
+  opts: { jobId?: Id<"jobs">; sourceChannel: string; fromAddress: string; subject: string; campaign: string; shortlistCopy?: boolean },
   known: (candidateId: Id<"candidates">, fileName: string) => Promise<void>,
 ): Promise<{ cvUploadIds: Id<"cvUploads">[]; notes: string[]; waitingOnOther: boolean }> {
   const cvUploadIds: Id<"cvUploads">[] = [];
@@ -460,6 +460,7 @@ async function ingestCvs(
       fileSizeBytes: bytes.length,
       metaHeadline: opts.subject.slice(0, 200),
       metaCampaignId: opts.campaign,
+      ...(opts.shortlistCopy ? { shortlistCopy: true } : {}),
     })) as { success: boolean; reason?: string; cvUploadId?: Id<"cvUploads">; existingFileId?: Id<"cvUploads"> };
     const uploadId = result.cvUploadId ?? result.existingFileId;
     if (uploadId) cvUploadIds.push(uploadId);

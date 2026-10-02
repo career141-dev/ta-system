@@ -631,6 +631,11 @@ export default defineSchema({
      *  extraction then only fills that candidate's empty fields, and does not
      *  match them to other jobs (convex/lib/fillBlanks.ts). */
     replaceKeepDetails: v.optional(v.boolean()),
+    /** Set on a CV that arrived at shortlists@ (mailIntake/process.ts, 2 Oct).
+     *  It is our own Prepared CV, CAREER141 box on it, sent back to us. When it
+     *  matches someone we hold it is only a record of what was sent: it writes
+     *  nothing onto them and does not replace their CV file. */
+    shortlistCopy: v.optional(v.boolean()),
     /** Set when a TA uploads a scoop CV from the opening's Scoops page
      *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
      *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`

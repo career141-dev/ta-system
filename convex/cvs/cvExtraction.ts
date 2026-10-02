@@ -1013,6 +1013,7 @@ export async function runCvExtraction(
   // The TA replaced this candidate's CV (ta/cv.ts attach): the file changes,
   // the details on file do not — the new CV only fills what is empty (29 Sep).
   const keepDetails = !!cvUpload?.replaceKeepDetails;
+  const shortlistCopy = !!cvUpload?.shortlistCopy;
   if (!cvUpload || cvUpload.status === "cancelled") {
     console.log(`[CvExtraction] Aborting extraction for upload ${cvUploadId} because status is: ${cvUpload?.status}`);
     return null;
@@ -1405,13 +1406,16 @@ export async function runCvExtraction(
         gender: genderRead?.gender,
         genderSource: genderRead?.source,
         ...(keepDetails ? { fillBlanksOnly: true } : {}),
+        ...(shortlistCopy ? { shortlistCopy: true } : {}),
       });
 
       if (updateRes?.targetCandidateId) {
         candidateId = updateRes.targetCandidateId;
       }
+      // A shortlist copy of someone we hold: their referees and embedding stay.
+      const keptAsIs = !!updateRes?.keptAsIs;
 
-      if (extracted.referees && extracted.referees.length > 0) {
+      if (!keptAsIs && extracted.referees && extracted.referees.length > 0) {
         const validReferees = extracted.referees
           .filter((r) => r && r.name && r.name.trim().length > 0)
           .map((r) => ({
@@ -1434,11 +1438,13 @@ export async function runCvExtraction(
       }
 
       // Always schedule embedding as a background task — directly upserts to Qdrant without saving vector arrays in Convex
-      console.log(`[CvExtraction] Scheduling background Qdrant embedding for candidate ${candidateId}...`);
-      await ctx.scheduler.runAfter(0, internal.matching.agent2.generateAndStoreEmbedding, {
-        candidateId,
-        rawText: cappedRawText,
-      });
+      if (!keptAsIs) {
+        console.log(`[CvExtraction] Scheduling background Qdrant embedding for candidate ${candidateId}...`);
+        await ctx.scheduler.runAfter(0, internal.matching.agent2.generateAndStoreEmbedding, {
+          candidateId,
+          rawText: cappedRawText,
+        });
+      }
     }
 
     const resolvedCandidateId = candidateId;
@@ -1487,6 +1493,9 @@ export async function runCvExtraction(
     } else if (postRoutingOn() && isEmailChannel(sourceChannel)) {
       // No post matched the email: the person stays in the database. The
       // guess below put people on jobs they never applied for (22 September).
+    } else if (shortlistCopy) {
+      // shortlists@ files the person itself (mailIntake/process.ts fileShortlist);
+      // it is not an applicant to match against every open job.
     } else if (keepDetails) {
       // A replaced CV is a new file for someone already on their jobs, not an
       // applicant to match against every open job.
