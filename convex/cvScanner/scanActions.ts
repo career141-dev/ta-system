@@ -1,8 +1,8 @@
 "use node";
 
 import { v } from "convex/values";
-import { action, internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 import { extractText } from "../cvs/cvExtraction";
 import { executeLLMWithNvidiaFallback, getNvidiaOpenAI, logLLMUsage } from "../lib/llm";
@@ -11,15 +11,15 @@ import { resolveCandidateLocation } from "../lib/locationResolver";
 const PROMPT_VERSION = "v1.0";
 const EXPANSION_MODEL = "meta/llama-3.1-70b-instruct";
 
-export const evaluateCvForCriteria = action({
+export const evaluateCvForCriteria = internalAction({
   args: {
     resultId: v.id("cvScanResults"),
     scanId: v.id("cvScans"),
   },
   handler: async (ctx, args) => {
     // 1. Fetch scan and result details
-    const scan = await ctx.runQuery(api.cvScanner.scanMutations.getScanSession, { scanId: args.scanId });
-    const results = await ctx.runQuery(api.cvScanner.scanMutations.getScanResults, { scanId: args.scanId });
+    const scan = await ctx.runQuery(internal.cvScanner.scanMutations.getScanSession, { scanId: args.scanId });
+    const results = await ctx.runQuery(internal.cvScanner.scanMutations.getScanResults, { scanId: args.scanId });
     const result = results?.find((r: any) => r._id === args.resultId);
 
     if (!scan || !result) {
@@ -40,7 +40,7 @@ export const evaluateCvForCriteria = action({
       // 2. Fetch raw file buffer from R2 or Convex storage
       let buffer: ArrayBuffer;
       if (result.s3Key) {
-        const downloadUrl = await ctx.runAction(api.storage.r2.generateDownloadUrl, { key: result.s3Key });
+        const downloadUrl = await ctx.runAction(internal.storage.r2.generateDownloadUrl, { key: result.s3Key });
         const res = await fetch(downloadUrl);
         if (!res.ok) {
           throw new Error(`Failed to fetch file from R2 storage (HTTP ${res.status})`);
@@ -249,7 +249,7 @@ ${rawText.slice(0, 15000)}`;
       // Single-retry soft-terminal pattern
       if (currentAttempts < 2) {
         console.log(`[evaluateCvForCriteria] Scheduling retry 2 for result ${args.resultId}...`);
-        await ctx.scheduler.runAfter(2000, api.cvScanner.scanActions.evaluateCvForCriteria, {
+        await ctx.scheduler.runAfter(2000, internal.cvScanner.scanActions.evaluateCvForCriteria, {
           resultId: args.resultId,
           scanId: args.scanId,
         });
@@ -264,15 +264,15 @@ ${rawText.slice(0, 15000)}`;
   },
 });
 
-export const triggerScanBatch = action({
+export const triggerScanBatch = internalAction({
   args: {
     scanId: v.id("cvScans"),
   },
   handler: async (ctx, args) => {
-    const results = await ctx.runQuery(api.cvScanner.scanMutations.getScanResults, { scanId: args.scanId });
+    const results = await ctx.runQuery(internal.cvScanner.scanMutations.getScanResults, { scanId: args.scanId });
     if (!results || results.length === 0) return;
 
-    await ctx.runMutation(api.cvScanner.scanMutations.updateScanStatus, {
+    await ctx.runMutation(internal.cvScanner.scanMutations.updateScanStatus, {
       scanId: args.scanId,
       status: "processing",
     });
@@ -281,7 +281,7 @@ export const triggerScanBatch = action({
     let index = 0;
     for (const res of results) {
       const delayMs = index * 300;
-      await ctx.scheduler.runAfter(delayMs, api.cvScanner.scanActions.evaluateCvForCriteria, {
+      await ctx.scheduler.runAfter(delayMs, internal.cvScanner.scanActions.evaluateCvForCriteria, {
         resultId: res._id,
         scanId: args.scanId,
       });
@@ -290,12 +290,12 @@ export const triggerScanBatch = action({
   },
 });
 
-export const getScanResultDownloadUrl = action({
+export const getScanResultDownloadUrl = internalAction({
   args: {
     resultId: v.id("cvScanResults"),
   },
   handler: async (ctx, args): Promise<{ url: string | null; fileName: string; candidateName?: string }> => {
-    const result: any = await ctx.runQuery(api.cvScanner.scanMutations.getScanResultById, { resultId: args.resultId });
+    const result: any = await ctx.runQuery(internal.cvScanner.scanMutations.getScanResultById, { resultId: args.resultId });
     if (!result) return { url: null, fileName: "Document.pdf" };
 
     let url: string | null = null;
@@ -304,7 +304,7 @@ export const getScanResultDownloadUrl = action({
 
     if (result.s3Key) {
       // Omit downloadFilename for PDFs & Images so R2 serves inline disposition without auto-downloading!
-      url = await ctx.runAction(api.storage.r2.generateDownloadUrl, {
+      url = await ctx.runAction(internal.storage.r2.generateDownloadUrl, {
         key: result.s3Key,
         downloadFilename: isWordDoc ? result.fileName : undefined,
       });
@@ -320,12 +320,12 @@ export const getScanResultDownloadUrl = action({
   },
 });
 
-export const expandCriteriaViaNim = action({
+export const expandCriteriaViaNim = internalAction({
   args: {
     scanId: v.id("cvScans"),
   },
   handler: async (ctx, args) => {
-    const scan = await ctx.runQuery(api.cvScanner.scanMutations.getScanSession, { scanId: args.scanId });
+    const scan = await ctx.runQuery(internal.cvScanner.scanMutations.getScanSession, { scanId: args.scanId });
     if (!scan) {
       throw new Error(`Scan session ${args.scanId} not found`);
     }

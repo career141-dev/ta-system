@@ -1,13 +1,13 @@
 // @ts-nocheck
 import { v } from "convex/values";
-import { query, mutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { initiateFollowUpOutreach } from "./followUpHelper";
 import { requireJobAssignment, requireUser } from "../lib/permissions";
 import { assertNoPendingVoiceCall } from "../aiCalls/voiceCallGuards";
 
 // Get AI Calls for Outreach dashboard
-export const getAiCalls = query({
+export const getAiCalls = internalQuery({
   args: {
     jobId: v.optional(v.id("jobs")),
     outcome: v.optional(v.string()),
@@ -68,7 +68,7 @@ export const getAiCalls = query({
 });
 
 // Trigger a new AI call
-export const triggerAiCall = mutation({
+export const triggerAiCall = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
@@ -119,7 +119,7 @@ export const triggerAiCall = mutation({
 });
 
 // Get communications
-export const getCommunications = query({
+export const getCommunications = internalQuery({
   args: {
     jobId: v.optional(v.id("jobs")),
   },
@@ -151,7 +151,7 @@ export const getCommunications = query({
 });
 
 // Send message
-export const sendMessage = mutation({
+export const sendMessage = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     jobId: v.optional(v.id("jobs")),
@@ -249,7 +249,7 @@ export const sendMessage = mutation({
 
 
 // Get follow-up candidates
-export const getFollowUpCandidates = query({
+export const getFollowUpCandidates = internalQuery({
   args: {
     jobId: v.optional(v.id("jobs")),
   },
@@ -305,7 +305,7 @@ export const getFollowUpCandidates = query({
 });
 
 // Force trigger an AI call for a follow up candidate
-export const forceTriggerFollowUpCall = mutation({
+export const forceTriggerFollowUpCall = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -350,7 +350,7 @@ export const forceTriggerFollowUpCall = mutation({
 });
 
 // Trigger manual follow-up WhatsApp message
-export const triggerWhatsAppFollowUp = mutation({
+export const triggerWhatsAppFollowUp = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -361,7 +361,7 @@ export const triggerWhatsAppFollowUp = mutation({
 });
 
 // Trigger manual follow-up Email message
-export const triggerEmailFollowUp = mutation({
+export const triggerEmailFollowUp = internalMutation({
   args: {
     applicationId: v.id("applications"),
   },
@@ -455,7 +455,7 @@ export const triggerEmailFollowUp = mutation({
 
 
 // Trigger bulk manual follow-up outreach for multiple applications
-export const triggerBulkFollowUp = mutation({
+export const triggerBulkFollowUp = internalMutation({
   args: {
     applicationIds: v.array(v.id("applications")),
   },
@@ -468,7 +468,7 @@ export const triggerBulkFollowUp = mutation({
 });
 
 // Get communication status by ID for frontend polling
-export const getCommunicationStatus = query({
+export const getCommunicationStatus = internalQuery({
   args: {
     communicationId: v.id("communications"),
   },

@@ -1,7 +1,7 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { deriveTotalExperienceYears } from "./derivations";
 
-export default mutation({
+export default internalMutation({
   handler: async (ctx) => {
     const candidate = await ctx.db.query("candidates")
       .filter(q => q.eq(q.field("email"), "sanjaysanjeev2000@gmail.com"))

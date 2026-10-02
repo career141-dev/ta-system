@@ -1,8 +1,8 @@
 import { v } from "convex/values";
-import { query, mutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 
-export const inspectCandidateApplications = query({
+export const inspectCandidateApplications = internalQuery({
   args: {
     candidateId: v.id("candidates"),
   },
@@ -40,7 +40,7 @@ export const inspectCandidateApplications = query({
   },
 });
 
-export const inspectDuplicateCandidatesByPhone = query({
+export const inspectDuplicateCandidatesByPhone = internalQuery({
   args: {
     phone: v.string(),
   },
@@ -99,7 +99,7 @@ export const inspectDuplicateCandidatesByPhone = query({
   },
 });
 
-export const cleanupExtraCandidatesByPhone = mutation({
+export const cleanupExtraCandidatesByPhone = internalMutation({
   args: {
     phone: v.string(),
     keepCandidateId: v.id("candidates"),
@@ -149,7 +149,7 @@ export const cleanupExtraCandidatesByPhone = mutation({
   },
 });
 
-export const keepOnlyTargetJobForCandidate = mutation({
+export const keepOnlyTargetJobForCandidate = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     targetJobTitle: v.string(),

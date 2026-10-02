@@ -1,17 +1,17 @@
 "use node";
 
 import { v } from "convex/values";
-import { action } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { callOpenRouterLLM } from "./cvExtraction";
 
-export const triggerLazyParse = action({
+export const triggerLazyParse = internalAction({
   args: {
     candidateId: v.id("candidates"),
   },
   handler: async (ctx, args) => {
     // 1. Fetch candidate
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidateForParsing, {
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidateForParsing, {
       candidateId: args.candidateId,
     });
     
@@ -61,7 +61,7 @@ Phone: ${candidate.phone || 'Unknown'}
       description: jh.description,
     }));
 
-    await ctx.runMutation(api.candidates.candidates.updateCandidateAfterLazyParse, {
+    await ctx.runMutation(internal.candidates.candidates.updateCandidateAfterLazyParse, {
       candidateId: args.candidateId,
       skills: formattedSkills,
       jobHistory: formattedJobHistory,
@@ -93,7 +93,7 @@ Phone: ${candidate.phone || 'Unknown'}
         }));
 
       if (validReferees.length > 0) {
-        await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
+        await ctx.runMutation(internal.candidates.referees.saveExtractedReferees, {
           candidateId: args.candidateId,
           referees: validReferees,
         });

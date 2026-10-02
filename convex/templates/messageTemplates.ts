@@ -1,8 +1,8 @@
-import { mutation, query } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireUser } from "../lib/permissions";
 
-export const getTemplates = query({
+export const getTemplates = internalQuery({
   args: {
     type: v.optional(v.union(v.literal("initial_outreach"), v.literal("sample_follow_up"), v.literal("general"))),
   },
@@ -26,7 +26,7 @@ export const getTemplates = query({
   },
 });
 
-export const createTemplate = mutation({
+export const createTemplate = internalMutation({
   args: {
     name: v.string(),
     type: v.union(v.literal("initial_outreach"), v.literal("sample_follow_up"), v.literal("general")),
@@ -53,7 +53,7 @@ export const createTemplate = mutation({
   },
 });
 
-export const updateTemplate = mutation({
+export const updateTemplate = internalMutation({
   args: {
     id: v.id("messageTemplates"),
     name: v.optional(v.string()),
@@ -84,7 +84,7 @@ export const updateTemplate = mutation({
   },
 });
 
-export const deleteTemplate = mutation({
+export const deleteTemplate = internalMutation({
   args: {
     id: v.id("messageTemplates"),
   },

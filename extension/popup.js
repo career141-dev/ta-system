@@ -22,7 +22,7 @@ async function load() {
     return;
   }
 
-  const res = await send({ type: "openings" });
+  let res = await send({ type: "openings", userId: s.userId });
   if (!res?.ok) {
     $("settings").hidden = false;
     say(res?.error || "Could not reach the platform", "bad");
@@ -30,6 +30,16 @@ async function load() {
   }
 
   fill($("userId"), res.users.map((u) => [u.id, u.name]), s.userId);
+  // The openings are the chosen recruiter's own (2 Oct), so ask again when the
+  // list settled on someone other than who was remembered.
+  const chosen = $("userId").value;
+  if (chosen && chosen !== s.userId) {
+    res = await send({ type: "openings", userId: chosen });
+    if (!res?.ok) {
+      say(res?.error || "Could not reach the platform", "bad");
+      return;
+    }
+  }
   fill(
     $("openingId"),
     res.openings.map((o) => [o.id, `${o.client} — ${o.title}`]),
@@ -95,7 +105,10 @@ $("connect").addEventListener("click", async () => {
   load();
 });
 
-$("userId").addEventListener("change", remember);
+$("userId").addEventListener("change", async () => {
+  await remember();
+  load();
+});
 $("openingId").addEventListener("change", remember);
 
 $("capture").addEventListener("click", async () => {

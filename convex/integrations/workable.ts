@@ -1,6 +1,6 @@
 // V8 runtime — mutations and queries for Workable import tracking
 import { v } from "convex/values";
-import { internalMutation, internalQuery, mutation, query } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 
 export const createImportJob = internalMutation({
   args: {
@@ -68,7 +68,7 @@ export const getLatestImportJob = internalQuery({
   },
 });
 
-export const stopAllRunningWorkableImports = mutation({
+export const stopAllRunningWorkableImports = internalMutation({
   args: {},
   handler: async (ctx) => {
     const runningJobs = await ctx.db
@@ -127,7 +127,7 @@ export const findCandidateByWorkableId = internalQuery({
   },
 });
 
-export const clearImportHistory = mutation({
+export const clearImportHistory = internalMutation({
   args: {},
   handler: async (ctx) => {
     const jobs = await ctx.db.query("workableImports").take(100);
@@ -138,7 +138,7 @@ export const clearImportHistory = mutation({
   },
 });
 
-export const getLatestImportStatus = query({
+export const getLatestImportStatus = internalQuery({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     let job = null;
@@ -158,7 +158,7 @@ export const getLatestImportStatus = query({
   },
 });
 
-export const getImportStatus = query({
+export const getImportStatus = internalQuery({
   args: { importId: v.id("workableImports") },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.importId);

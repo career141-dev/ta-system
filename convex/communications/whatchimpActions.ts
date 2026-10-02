@@ -1,6 +1,6 @@
 "use node";
 import { internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { sendMetaFreeText } from "./metaDirectSender";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
@@ -56,7 +56,7 @@ export const processInboundMedia = internalAction({
 
       if (text) {
         const upperText = text.toUpperCase();
-        const activeJobs = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
+        const activeJobs = await ctx.runQuery(internal.jobs.jobs.getActiveJobsBasicInfo);
         for (const job of activeJobs) {
           const pausedChannels: string[] = (job as any).pausedChannels || [];
           if (pausedChannels.includes("whatsapp")) continue;
@@ -68,7 +68,7 @@ export const processInboundMedia = internalAction({
       }
 
       if (!resolvedJobId) {
-        const session = await ctx.runQuery(api.communications.whatchimp.getSessionByPhone, {
+        const session = await ctx.runQuery(internal.communications.whatchimp.getSessionByPhone, {
           phone: cleanFrom,
         });
         if (session) {
@@ -80,7 +80,7 @@ export const processInboundMedia = internalAction({
         }
       }
 
-      const ingestionResult = await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+      const ingestionResult = await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
         jobId: resolvedJobId ? (resolvedJobId as any) : undefined,
         fileName: fileName || "cv.pdf",
         fileSizeBytes: fileBuffer.length,
@@ -99,7 +99,7 @@ export const processInboundMedia = internalAction({
       // Mark CV as received in session state so the chatbot never asks for CV again and maintains context
       if (ingestionResult && (ingestionResult as any).reason !== "duplicate_file") {
         if (resolvedJobId) {
-          await ctx.runMutation(api.communications.whatchimp.upsertSession, {
+          await ctx.runMutation(internal.communications.whatchimp.upsertSession, {
             phone: cleanFrom,
             jobId: resolvedJobId as any,
             keyword: "CV_UPLOADED",
@@ -108,7 +108,7 @@ export const processInboundMedia = internalAction({
             metaHeadline,
           });
         }
-        await ctx.runMutation(api.communications.whatchimp.updateSessionState, {
+        await ctx.runMutation(internal.communications.whatchimp.updateSessionState, {
           phone: cleanFrom,
           cvReceived: true,
           lastBotReplyAt: Date.now(),

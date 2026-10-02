@@ -6,7 +6,7 @@
 
 import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { SCORE_STAGGER_MS } from "../lib/jdGate";
 
 /** The most CVs one approval scores; anything past it is scored by hand. */
@@ -25,7 +25,7 @@ export const scoreWaitingCvs = internalMutation({
         .take(MAX_WAITING * 2)
     ).filter((a) => a.aiMatchScore === undefined && a.isActive).slice(0, MAX_WAITING);
     for (const [i, a] of waiting.entries()) {
-      await ctx.scheduler.runAfter(i * SCORE_STAGGER_MS, api.cvs.cvScoringActions.processCvScoring, {
+      await ctx.scheduler.runAfter(i * SCORE_STAGGER_MS, internal.cvs.cvScoringActions.processCvScoring, {
         candidateId: a.candidateId,
         jobId: args.jobId,
       });

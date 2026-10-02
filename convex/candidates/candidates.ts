@@ -1,15 +1,15 @@
 import { v } from "convex/values";
-import { query, mutation, action, internalQuery, internalMutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { paginationOptsValidator } from "convex/server";
 import type { Id } from "../_generated/dataModel";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { checkAndAdvanceFollowUp, updateFollowUpFlags } from "../pipeline/followUpHelper";
 import { requireFullAccess } from "../lib/permissions";
 import { answersById } from "../lib/followUpScope";
 import { CV_FILE_KEYS, fillBlanksOnly } from "../lib/fillBlanks";
 import { findSameCandidate } from "../lib/sameCandidate";
 
-export const listCandidates = query({
+export const listCandidates = internalQuery({
   args: {
     paginationOpts: v.optional(paginationOptsValidator),
     searchQuery: v.optional(v.string()),
@@ -43,7 +43,7 @@ export const listCandidates = query({
   },
 });
 
-export const getCandidatesForJob = query({
+export const getCandidatesForJob = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     const apps = await ctx.db
@@ -56,7 +56,7 @@ export const getCandidatesForJob = query({
   },
 });
 
-export const listCandidatesByIds = query({
+export const listCandidatesByIds = internalQuery({
   args: { ids: v.array(v.id("candidates")) },
   handler: async (ctx, args) => {
     await requireFullAccess(ctx);
@@ -93,7 +93,7 @@ export const listCandidatesByIds = query({
   },
 });
 
-export const listCandidatesPaginated = query({
+export const listCandidatesPaginated = internalQuery({
   args: { 
     paginationOpts: v.any(),
     searchQuery: v.optional(v.string()),
@@ -192,7 +192,7 @@ export const listCandidatesPaginated = query({
   },
 });
 
-export const getCandidate = query({
+export const getCandidate = internalQuery({
   args: { id: v.string() },
   handler: async (ctx, args) => {
     let validId = ctx.db.normalizeId("candidates", args.id);
@@ -237,7 +237,7 @@ export const getCandidate = query({
   },
 });
 
-export const updateCandidateDetails = mutation({
+export const updateCandidateDetails = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     applicationId: v.optional(v.id("applications")),
@@ -289,7 +289,7 @@ export const updateCandidateDetails = mutation({
   },
 });
 
-export const setDoNotContact = mutation({
+export const setDoNotContact = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     reason: v.string(),
@@ -303,14 +303,14 @@ export const setDoNotContact = mutation({
   },
 });
 
-export const getCandidateForParsing = query({
+export const getCandidateForParsing = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.candidateId);
   },
 });
 
-export const updateCandidateAfterLazyParse = mutation({
+export const updateCandidateAfterLazyParse = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     skills: v.optional(v.array(v.string())),
@@ -375,7 +375,7 @@ export const updateCandidateAfterLazyParse = mutation({
 
     for (const app of apps) {
       if (app.isActive) {
-        await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+        await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
           candidateId,
           jobId: app.jobId,
         });
@@ -384,7 +384,7 @@ export const updateCandidateAfterLazyParse = mutation({
   },
 });
 
-export const updateCandidateFields = mutation({
+export const updateCandidateFields = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     fullName: v.optional(v.string()),
@@ -620,7 +620,7 @@ export const updateCandidateFields = mutation({
   },
 });
 
-export const createCandidate = mutation({
+export const createCandidate = internalMutation({
   args: {
     fullName: v.optional(v.string()),
     email: v.optional(v.string()),
@@ -835,7 +835,7 @@ export const createCandidate = mutation({
   },
 });
 
-export const clearAll = mutation({
+export const clearAll = internalMutation({
   handler: async (ctx) => {
     await requireFullAccess(ctx);
     const all = await ctx.db.query("candidates").collect();
@@ -846,7 +846,7 @@ export const clearAll = mutation({
   },
 });
 
-export const clearDocuments = mutation({
+export const clearDocuments = internalMutation({
   handler: async (ctx) => {
     await requireFullAccess(ctx);
     const all = await ctx.db.query("documents").collect();
@@ -857,7 +857,7 @@ export const clearDocuments = mutation({
   },
 });
 
-export const clearOrphanedUploads = mutation({
+export const clearOrphanedUploads = internalMutation({
   handler: async (ctx) => {
     await requireFullAccess(ctx);
     let deletedCount = 0;
@@ -883,7 +883,7 @@ export const clearOrphanedUploads = mutation({
   }
 });
 
-export const updateCvUpload = mutation({
+export const updateCvUpload = internalMutation({
   args: {
     cvUploadId: v.id("cvUploads"),
     status: v.string(),
@@ -909,7 +909,7 @@ export const updateCvUpload = mutation({
   },
 });
 
-export const getCvUploadStatus = query({
+export const getCvUploadStatus = internalQuery({
   args: { cvUploadId: v.id("cvUploads") },
   handler: async (ctx, args) => {
     const upload = await ctx.db.get(args.cvUploadId);
@@ -935,7 +935,7 @@ export const findCandidateByHash = internalQuery({
 });
 
 // Paginated query used by resumeBatch to retry paused/failed uploads
-export const listUploadsByStatus = query({
+export const listUploadsByStatus = internalQuery({
   args: {
     status: v.string(),
     limit: v.optional(v.number()),
@@ -949,7 +949,7 @@ export const listUploadsByStatus = query({
   },
 });
 
-export const listFailedUploads = query({
+export const listFailedUploads = internalQuery({
   args: {
     cursor: v.optional(v.string()),
     limit: v.optional(v.number()),
@@ -976,7 +976,7 @@ export const listFailedUploads = query({
   },
 });
 
-export const getUnextractedCandidatesCount = query({
+export const getUnextractedCandidatesCount = internalQuery({
   args: {},
   handler: async (ctx) => {
     const unparsed = await ctx.db
@@ -995,7 +995,7 @@ export const getUnextractedCandidatesCount = query({
   },
 });
 
-export const reparseAllUnextractedCandidates = mutation({
+export const reparseAllUnextractedCandidates = internalMutation({
   args: {},
   handler: async (ctx) => {
     const unparsedCandidates = await ctx.db
@@ -1027,7 +1027,7 @@ export const reparseAllUnextractedCandidates = mutation({
         candidateId: candidate._id,
       });
 
-      await ctx.scheduler.runAfter(requeued * 2000, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(requeued * 2000, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId as any,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider || "r2",
@@ -1060,7 +1060,7 @@ export const reparseAllUnextractedCandidates = mutation({
         errorMessage: undefined,
       });
 
-      await ctx.scheduler.runAfter(requeued * 2000, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(requeued * 2000, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId as any,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider || "r2",
@@ -1077,7 +1077,7 @@ export const reparseAllUnextractedCandidates = mutation({
   },
 });
 
-export const deleteCvUploadRecord = mutation({
+export const deleteCvUploadRecord = internalMutation({
   args: { cvUploadId: v.id("cvUploads") },
   handler: async (ctx, args) => {
     const doc = await ctx.db.get(args.cvUploadId);
@@ -1098,7 +1098,7 @@ export const deleteCvUploadRecord = mutation({
 
 
 
-export const getCvUploadUrl = query({
+export const getCvUploadUrl = internalQuery({
   args: { cvUploadId: v.string() },
   handler: async (ctx, args) => {
     let validId = ctx.db.normalizeId("cvUploads", args.cvUploadId);
@@ -1150,7 +1150,9 @@ export const getCvUploadUrl = query({
     const resolvedCandidateId = candidate?._id || upload?.candidateId || null;
 
     if ((upload.storageProvider === "r2" || !upload.storageProvider) && upload.s3Key) {
-       // Proxy through Next.js to bypass Nginx routing issues on the VPS
+       // A marker, not a link: the /api/r2-file route is gone (2 Oct 2026).
+       // src/data/convex/backend.ts (cvLink) reads the key out of this and
+       // signs it server-side after checking the person's access.
        url = `/api/r2-file?key=${encodeURIComponent(upload.s3Key)}`;
     } else if (upload.storageId) {
       url = await ctx.storage.getUrl(upload.storageId);
@@ -1194,17 +1196,7 @@ export const getCvUploadUrl = query({
   },
 });
 
-export const listAllUploadsForStorageClean = query({
-  args: {},
-  handler: async (ctx) => {
-    const uploads = await ctx.db.query("cvUploads").collect();
-    return uploads
-      .map((u) => u.storageId)
-      .filter((id): id is Id<"_storage"> => !!id);
-  },
-});
-
-export const fetchBatchForDeletion = query({
+export const fetchBatchForDeletion = internalQuery({
   args: {
     table: v.string(),
     cursor: v.optional(v.string()),
@@ -1218,125 +1210,6 @@ export const fetchBatchForDeletion = query({
       isDone: result.isDone,
       continueCursor: result.continueCursor,
     };
-  },
-});
-
-export const deleteBatch = mutation({
-  args: {
-    table: v.string(),
-    ids: v.array(v.any()),
-  },
-  handler: async (ctx, args) => {
-    for (const id of args.ids) {
-      await ctx.db.delete(id);
-    }
-  },
-});
-
-export const resetSystemStatsMutation = mutation({
-  args: {},
-  handler: async (ctx) => {
-    const statsRow = await ctx.db
-      .query("systemStats")
-      .withIndex("by_singletonKey", (q) => q.eq("singletonKey", "global_stats"))
-      .first();
-    if (statsRow) {
-      await ctx.db.patch(statsRow._id, {
-        totalCandidates: 0,
-        totalCvUploads: 0,
-        totalApplications: 0,
-      });
-    }
-  },
-});
-
-export const clearEverything = action({
-  args: {},
-  handler: async (ctx) => {
-    // 1. Get storage IDs and delete files from storage
-    const uploads = await ctx.runQuery("candidates/candidates:listAllUploadsForStorageClean" as any);
-    for (const sid of uploads) {
-      try {
-        await ctx.storage.delete(sid);
-      } catch {}
-    }
-
-    // 2. Clear out candidate, upload, application, token logs, and metrics tables
-    const tablesToWipe = [
-      "candidates",
-      "candidateResumes",
-      "cvUploads",
-      "applications",
-      "communications",
-      "aiCalls",
-      "pipelineEvents",
-      "ingestionBatches",
-      "ingestionLog",
-      "nvidiaTokenLogs",
-      "dailyTokenStats",
-      "tokenStatsCache",
-      "whatsappSessions",
-      "interviews",
-      "offers",
-      "placements",
-      "directorReviews",
-      "clientReviews",
-      "match_scores",
-      "notifications",
-      "searchHistory",
-      "dailyStats",
-      "dashboardStatsCache",
-      "pipeline_health_reports",
-    ] as const;
-
-    const deletedCounts: Record<string, number> = {};
-
-    for (const table of tablesToWipe) {
-      let count = 0;
-      let hasMore = true;
-      let cursor: string | undefined = undefined;
-
-      while (hasMore) {
-        const batch: any = await ctx.runQuery("candidates/candidates:fetchBatchForDeletion" as any, {
-          table,
-          cursor,
-        });
-
-        if (batch.ids.length > 0) {
-          await ctx.runMutation("candidates/candidates:deleteBatch" as any, {
-            table,
-            ids: batch.ids,
-          });
-          count += batch.ids.length;
-        }
-
-        hasMore = !batch.isDone && batch.continueCursor;
-        cursor = batch.continueCursor;
-      }
-      deletedCounts[table] = count;
-    }
-
-    // 3. Reset systemStats singleton totals (excluding activeJobsCount to preserve jobs)
-    await ctx.runMutation("candidates/candidates:resetSystemStatsMutation" as any);
-
-    return {
-      success: true,
-      storageDeleted: uploads.length,
-      ...deletedCounts,
-    };
-  },
-});
-
-export const seedDummyAdmin = mutation({
-  handler: async (ctx) => {
-    return await ctx.db.insert("users", {
-      tokenIdentifier: "dummy_clerk_id",
-      email: "admin@career141.com",
-      fullName: "Admin Recruiter",
-      role: "admin",
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    });
   },
 });
 
@@ -1465,7 +1338,7 @@ export async function syncCandidateSummaryToApplications(ctx: any, candidateId: 
   }
 }
 
-export const getCandidateByEmail = query({
+export const getCandidateByEmail = internalQuery({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -1475,7 +1348,7 @@ export const getCandidateByEmail = query({
   },
 });
 
-export const deleteCandidate = mutation({
+export const deleteCandidate = internalMutation({
   args: { 
     candidateId: v.id("candidates"),
     preserveUpload: v.optional(v.boolean()),
@@ -1549,7 +1422,7 @@ export const deleteCandidate = mutation({
   }
 });
 
-export const bulkDeleteCandidates = mutation({
+export const bulkDeleteCandidates = internalMutation({
   args: { candidateIds: v.array(v.id("candidates")) },
   handler: async (ctx, args) => {
     for (const candidateId of args.candidateIds) {
@@ -1613,7 +1486,7 @@ export const bulkDeleteCandidates = mutation({
   }
 });
 
-export const getActiveFollowUpApplication = query({
+export const getActiveFollowUpApplication = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const apps = await ctx.db
@@ -1654,7 +1527,7 @@ export const getActiveFollowUpApplication = query({
   },
 });
 
-export const getRecentOutboundComm = query({
+export const getRecentOutboundComm = internalQuery({
   args: {
     candidateId: v.id("candidates"),
     channel: v.string(),
@@ -1676,7 +1549,7 @@ export const getRecentOutboundComm = query({
   },
 });
 
-export const getCandidatesByIds = query({
+export const getCandidatesByIds = internalQuery({
   args: { ids: v.array(v.id("candidates")) },
   handler: async (ctx, args) => {
     const results = await Promise.all(
@@ -1713,7 +1586,7 @@ export const countHeavyCandidates = internalMutation({
   },
 });
 
-export const updateCandidateRoleCacheBatch = mutation({
+export const updateCandidateRoleCacheBatch = internalMutation({
   args: {
     updates: v.array(
       v.object({
@@ -1744,7 +1617,7 @@ export const updateCandidateRoleCacheBatch = mutation({
   },
 });
 
-export const purgeCandidateByPhone = mutation({
+export const purgeCandidateByPhone = internalMutation({
   args: { phone: v.string() },
   handler: async (ctx, args) => {
     const cleanPhone = args.phone.replace(/[^0-9]/g, "");
@@ -1819,7 +1692,7 @@ export const purgeCandidateByPhone = mutation({
 });
 
 // Internal: Move an application to a different job ID (for data correction)
-export const moveApplicationToJob = mutation({
+export const moveApplicationToJob = internalMutation({
   args: {
     applicationId: v.id("applications"),
     targetJobId: v.id("jobs"),
@@ -1835,7 +1708,7 @@ export const moveApplicationToJob = mutation({
   },
 });
 
-export const updateApplicationStageDirect = mutation({
+export const updateApplicationStageDirect = internalMutation({
   args: {
     applicationId: v.id("applications"),
     stage: v.string(),
@@ -1862,7 +1735,7 @@ export const updateApplicationStageDirect = mutation({
   },
 });
 
-export const backfillCandidateTimestamps = mutation({
+export const backfillCandidateTimestamps = internalMutation({
   args: { forceResetAll: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const candidates = await ctx.db.query("candidates").collect();
@@ -1884,7 +1757,7 @@ export const backfillCandidateTimestamps = mutation({
   },
 });
 
-export const unpinTopCandidates = mutation({
+export const unpinTopCandidates = internalMutation({
   args: {},
   handler: async (ctx) => {
     const candidates = await ctx.db.query("candidates").collect();

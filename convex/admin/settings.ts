@@ -1,9 +1,9 @@
-import { query, mutation, internalQuery, internalMutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireRole } from "../lib/permissions";
 import { internal } from "../_generated/api";
 
-export const getSystemSettings = query({
+export const getSystemSettings = internalQuery({
   args: {},
   handler: async (ctx) => {
     await requireRole(ctx, ["admin", "ta_manager"]);
@@ -26,7 +26,7 @@ export const getInternalSystemSettings = internalQuery({
   }
 });
 
-export const updateChannelToggles = mutation({
+export const updateChannelToggles = internalMutation({
   args: {
     toggles: v.object({
       whatsappIngestion: v.boolean(),

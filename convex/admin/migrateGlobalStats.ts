@@ -1,7 +1,7 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 
-export const migrate = mutation({
+export const migrate = internalMutation({
   args: {},
   handler: async (ctx) => {
     // 1. Calculate global stats

@@ -1,7 +1,7 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 
-export const cleanupHeavyFields = mutation({
+export const cleanupHeavyFields = internalMutation({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const limit = args.limit || 100;
@@ -35,7 +35,7 @@ export const cleanupHeavyFields = mutation({
 });
 
 // A paginated version to run over all candidates
-export const cleanupAllHeavyFields = mutation({
+export const cleanupAllHeavyFields = internalMutation({
   args: { cursor: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const q = ctx.db.query("candidates");
@@ -88,7 +88,7 @@ export const cleanupAllHeavyFields = mutation({
   }
 });
 
-export const muteTechLeadJob = mutation({
+export const muteTechLeadJob = internalMutation({
   args: {},
   handler: async (ctx) => {
     const job = await ctx.db.query("jobs").withIndex("by_keyword", (q) => q.eq("keyword", "TECHLEAD")).first();

@@ -17,7 +17,7 @@
 
 import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { routeShared } from "../lib/postRouting";
 
 export function postRoutingOn(): boolean {
@@ -83,7 +83,7 @@ export async function filePosts(
   }
   for (const extra of upload.alsoAssignTo ?? []) {
     if (extra.jobId === args.jobId) continue;
-    await ctx.runMutation(api.applications.applications.createApplication, {
+    await ctx.runMutation(internal.applications.applications.createApplication, {
       candidateId: args.candidateId,
       jobId: extra.jobId as Id<"jobs">,
       cvFileId: args.cvUploadId,
@@ -96,7 +96,7 @@ export async function filePosts(
       jobPostId: extra.jobPostId as Id<"jobPosts">,
     });
     if (args.score) {
-      await ctx.scheduler.runAfter(0, api.cvs.cvScoringActions.processCvScoring, {
+      await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
         candidateId: args.candidateId,
         jobId: extra.jobId as Id<"jobs">,
       });

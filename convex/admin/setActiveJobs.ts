@@ -1,6 +1,6 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 
-export default mutation({
+export default internalMutation({
   handler: async (ctx) => {
     const ACTIVE_JOBS = [
       "m17dhspq4653q094kwet2nng4d8a31e7", // Tech Lead – Frontend (React.js / Vue.js)

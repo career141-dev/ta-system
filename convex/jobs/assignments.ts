@@ -1,4 +1,4 @@
-import { mutation, query } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireRole, requireUser, requireJobAssignment } from "../lib/permissions";
 
@@ -13,7 +13,7 @@ async function isPrimaryRecruiter(ctx: any, jobId: string, userId: string) {
   return !!assignment;
 }
 
-export const changePrimaryRecruiter = mutation({
+export const changePrimaryRecruiter = internalMutation({
   args: { jobId: v.id("jobs"), newUserId: v.id("users") },
   handler: async (ctx, { jobId, newUserId }) => {
     const user = await requireRole(ctx, ["admin", "ta_manager"]);
@@ -54,7 +54,7 @@ export const changePrimaryRecruiter = mutation({
   },
 });
 
-export const addSupportingRecruiter = mutation({
+export const addSupportingRecruiter = internalMutation({
   args: { jobId: v.id("jobs"), newUserId: v.id("users") },
   handler: async (ctx, { jobId, newUserId }) => {
     const user = await requireUser(ctx);
@@ -89,7 +89,7 @@ export const addSupportingRecruiter = mutation({
   },
 });
 
-export const removeSupportingRecruiter = mutation({
+export const removeSupportingRecruiter = internalMutation({
   args: { jobId: v.id("jobs"), removeUserId: v.id("users") },
   handler: async (ctx, { jobId, removeUserId }) => {
     const user = await requireUser(ctx);
@@ -128,7 +128,7 @@ export const removeSupportingRecruiter = mutation({
   },
 });
 
-export const changeDirector = mutation({
+export const changeDirector = internalMutation({
   args: { jobId: v.id("jobs"), newDirectorId: v.optional(v.id("users")) },
   handler: async (ctx, { jobId, newDirectorId }) => {
     const user = await requireRole(ctx, ["admin", "ta_manager"]);
@@ -169,7 +169,7 @@ export const changeDirector = mutation({
   },
 });
 
-export const changeClientContact = mutation({
+export const changeClientContact = internalMutation({
   args: { jobId: v.id("jobs"), clientName: v.optional(v.string()), clientEmail: v.optional(v.string()) },
   handler: async (ctx, { jobId, clientName, clientEmail }) => {
     const user = await requireRole(ctx, ["admin", "ta_manager", "senior_ta"]);

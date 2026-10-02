@@ -1,6 +1,6 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 
-export const migrateCandidates = mutation({
+export const migrateCandidates = internalMutation({
   handler: async (ctx) => {
     // Process in batches of 100 to avoid hitting mutation limits
     const candidates = await ctx.db.query("candidates").take(100);

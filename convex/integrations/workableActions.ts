@@ -1,8 +1,8 @@
 "use node";
 
 import { v } from "convex/values";
-import { action, internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { ConvexError } from "convex/values";
 import type { Id } from "../_generated/dataModel.d.ts";
 import { runCvExtraction } from "../cvs/cvExtraction";
@@ -126,7 +126,7 @@ async function downloadResume(
 
 // ─── Test connection ──────────────────────────────────────────────────────────
 
-export const testConnection = action({
+export const testConnection = internalAction({
   args: { subdomain: v.string(), apiKey: v.string() },
   handler: async (_ctx, args): Promise<{ ok: boolean; error?: string }> => {
     try {
@@ -140,7 +140,7 @@ export const testConnection = action({
 
 // ─── Start bulk import ────────────────────────────────────────────────────────
 
-export const startBulkImport = action({
+export const startBulkImport = internalAction({
   args: {
     subdomain: v.string(),
     apiKey: v.string(),
@@ -189,7 +189,7 @@ export const startBulkImport = action({
 
 // ─── Get latest import status ─────────────────────────────────────────────────
 
-export const getLatestImportStatus = action({
+export const getLatestImportStatus = internalAction({
   args: { userId: v.optional(v.string()) },
   handler: async (ctx, args): Promise<any> => {
     let currentUserId = args.userId;
@@ -204,7 +204,7 @@ export const getLatestImportStatus = action({
   },
 });
 
-export const getImportStatus = action({
+export const getImportStatus = internalAction({
   args: { importId: v.id("workableImports") },
   handler: async (ctx, args): Promise<any> => {
     const job: any = await ctx.runQuery(internal.integrations.workable.getImportJob as any, { importId: args.importId });
@@ -215,7 +215,7 @@ export const getImportStatus = action({
 
 // ─── Retry / Resume a stopped or failed import ─────────────────────────────
 
-export const retryImport = action({
+export const retryImport = internalAction({
   args: {
     importId: v.id("workableImports"),
     subdomain: v.optional(v.string()),
@@ -259,7 +259,7 @@ export const retryImport = action({
 
 // ─── Retry skipped (no CV) candidates from the beginning ─────────────────────
 
-export const retrySkipped = action({
+export const retrySkipped = internalAction({
   args: {
     importId: v.id("workableImports"),
     subdomain: v.optional(v.string()),
@@ -304,7 +304,7 @@ export const retrySkipped = action({
 
 // ─── Pause a running import ──────────────────────────────────────────────────
 
-export const pauseImport = action({
+export const pauseImport = internalAction({
   args: { importId: v.id("workableImports") },
   handler: async (ctx, args): Promise<void> => {
     await ctx.runMutation(internal.integrations.workable.updateImportJob, {
@@ -316,7 +316,7 @@ export const pauseImport = action({
 
 // ─── Resume a paused import ──────────────────────────────────────────────────
 
-export const resumeImport = action({
+export const resumeImport = internalAction({
   args: {
     importId: v.id("workableImports"),
     subdomain: v.optional(v.string()),
@@ -357,7 +357,7 @@ export const resumeImport = action({
 
 // ─── Stop a running import ────────────────────────────────────────────────────
 
-export const stopImport = action({
+export const stopImport = internalAction({
   args: { importId: v.id("workableImports") },
   handler: async (ctx, args): Promise<void> => {
     await ctx.runMutation(internal.integrations.workable.updateImportJob, {
@@ -588,7 +588,7 @@ export const runImportBatch = internalAction({
         });
 
         // Schedule background AI CV extraction (DeepSeek V4 Flash) via Convex Scheduler
-        await ctx.scheduler.runAfter(imported * 1000, api.cvs.cvExtraction.processCvExtraction, {
+        await ctx.scheduler.runAfter(imported * 1000, internal.cvs.cvExtraction.processCvExtraction, {
           s3Key,
           storageProvider: "r2",
           fileType: downloaded.fileType,

@@ -1,6 +1,6 @@
 import { cronJobs } from "convex/server";
 import { internalMutation } from "./_generated/server";
-import { internal, api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { adjustJobStageStat } from "./jobs/stats";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
 import { v } from "convex/values";
@@ -781,7 +781,7 @@ crons.daily(
 crons.interval(
   "poll-linkedin-inbox",
   { minutes: 13 },
-  api.communications.emailAgent.pollEmailInbox,
+  internal.communications.emailAgent.pollEmailInbox,
   { inboxEmail: "linkedin@career141.com" }
 );
 
@@ -789,7 +789,7 @@ crons.interval(
 crons.interval(
   "poll-cv-inbox",
   { minutes: 11 },
-  api.communications.emailAgent.pollEmailInbox,
+  internal.communications.emailAgent.pollEmailInbox,
   { inboxEmail: "cv@career141.com" }
 );
 
@@ -798,7 +798,7 @@ crons.interval(
 crons.interval(
   "poll-jobs-sender-inbox",
   { minutes: 3 },
-  api.communications.emailAgent.pollEmailInbox,
+  internal.communications.emailAgent.pollEmailInbox,
   { inboxEmail: "job@career141.com" }
 );
 

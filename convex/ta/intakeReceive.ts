@@ -18,7 +18,7 @@
 
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { extractText } from "../cvs/cvExtraction";
 
 /**
@@ -80,7 +80,7 @@ export const receiveCv = internalAction({
     let text = args.rawText ?? null;
     if (!text && args.s3Key) {
       try {
-        const url = await ctx.runAction(api.storage.r2.generateDownloadUrl, { key: args.s3Key });
+        const url = await ctx.runAction(internal.storage.r2.generateDownloadUrl, { key: args.s3Key });
         const res = await fetch(url);
         if (!res.ok) throw new Error(`storage returned ${res.status}`);
         const extracted = await extractText(await res.arrayBuffer(), args.fileType ?? "application/pdf", false, ctx);

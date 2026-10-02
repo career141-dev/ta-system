@@ -1,11 +1,11 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { requireUser, requireJobAssignment } from "../lib/permissions";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 
 import { adjustJobStageStat } from "../jobs/stats";
 
-export const uploadHeadhuntedCandidate = mutation({
+export const uploadHeadhuntedCandidate = internalMutation({
   args: {
     jobId: v.id("jobs"),
     fullName: v.string(),

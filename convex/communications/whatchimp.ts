@@ -1,5 +1,5 @@
-import { httpAction, mutation, query, action, internalAction, internalMutation, internalQuery } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { httpAction, internalAction, internalMutation, internalQuery } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { sendMetaFreeText } from "./metaDirectSender";
@@ -192,7 +192,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
         }
 
         // 2. Check for Keyword / Title Match
-        const activeJobs = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo);
+        const activeJobs = await ctx.runQuery(internal.jobs.jobs.getActiveJobsBasicInfo);
         const { matchedJob, matchedKeyword } = matchJobFromText(activeJobs, textBody);
 
         let isKeyword = false;
@@ -201,7 +201,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
           console.log(`[WhatChimp Webhook] Received Meta keyword "${matchedKeyword}" from +${cleanSender} for job ${matchedJob.title}`);
           
           // Create/Update Session
-          await ctx.runMutation(api.communications.whatchimp.upsertSession, {
+          await ctx.runMutation(internal.communications.whatchimp.upsertSession, {
             phone: cleanSender,
             jobId: matchedJob._id,
             keyword: matchedKeyword,
@@ -215,7 +215,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
           });
           const phoneNumberId = fetchedPhoneId || process.env.META_PHONE_NUMBER_ID || "965783109962872";
 
-          const fullJob = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: matchedJob._id });
+          const fullJob = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: matchedJob._id });
 
           if (phoneNumberId && !fullJob?.muteDefaultWhatsappReply) {
             const replyMessage = `Thank you for your interest in the ${matchedJob.title} position.\n\nPlease upload your latest CV to continue your application.`;
@@ -229,7 +229,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
         }
 
         if (!isKeyword) {
-          const session = await ctx.runQuery(api.communications.whatchimp.getSessionByPhone, { phone: cleanSender });
+          const session = await ctx.runQuery(internal.communications.whatchimp.getSessionByPhone, { phone: cleanSender });
           if (session) {
             console.log(`[WhatChimp Webhook] Pre-application chat detected for +${cleanSender}. Dispatching LLM handler.`);
             await ctx.scheduler.runAfter(0, internal.communications.whatchimp.handlePreApplicationChat, {
@@ -604,7 +604,7 @@ export const processInboundTextWebhook = internalMutation({
   },
 });
 
-export const getSessionByPhone = query({
+export const getSessionByPhone = internalQuery({
   args: { phone: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
@@ -614,7 +614,7 @@ export const getSessionByPhone = query({
   },
 });
 
-export const upsertSession = mutation({
+export const upsertSession = internalMutation({
   args: {
     phone: v.string(),
     jobId: v.id("jobs"),
@@ -654,7 +654,7 @@ export const upsertSession = mutation({
   },
 });
 
-export const deleteSession = mutation({
+export const deleteSession = internalMutation({
   args: { phone: v.string() },
   handler: async (ctx, args) => {
     const existing = await ctx.db
@@ -672,7 +672,7 @@ export const deleteSession = mutation({
  * Called after a real CV is ingested, a portfolio URL is received,
  * or an employment preference is detected.
  */
-export const updateSessionState = mutation({
+export const updateSessionState = internalMutation({
   args: {
     phone: v.string(),
     cvReceived: v.optional(v.boolean()),
@@ -703,7 +703,7 @@ export const updateSessionState = mutation({
   },
 });
 
-export const getConfiguredNumbers = action({
+export const getConfiguredNumbers = internalAction({
   args: {},
   handler: async (ctx) => {
     const apiToken = process.env.WHATCHIMP_API_TOKEN;
@@ -737,7 +737,7 @@ export const getConfiguredNumbers = action({
   },
 });
 
-export const testFetchWhatChimp = action({
+export const testFetchWhatChimp = internalAction({
   args: {},
   handler: async (ctx) => {
     const apiToken = process.env.WHATCHIMP_API_TOKEN;
@@ -766,14 +766,14 @@ export const handlePreApplicationChat = internalAction({
     try {
       // ── 1. Resolve job from session if not provided directly ───────────────
       let jobId = args.jobId;
-      const session = await ctx.runQuery(api.communications.whatchimp.getSessionByPhone, { phone: args.phone });
+      const session = await ctx.runQuery(internal.communications.whatchimp.getSessionByPhone, { phone: args.phone });
       if (!jobId && session) jobId = session.jobId;
       if (!jobId) {
         console.log(`[PreApp Chat] No job resolved for +${args.phone}. Skipping.`);
         return;
       }
 
-      const job = await ctx.runQuery(api.jobs.jobs.getJob, { jobId });
+      const job = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId });
       if (!job) return;
 
       // ── 2. Dedup guard — prevent double replies within 8 seconds ──────────
@@ -808,7 +808,7 @@ export const handlePreApplicationChat = internalAction({
 
       if (resolvedDetectedUrl && (resolvedUrlType === "youtube_url" || resolvedUrlType === "portfolio_url" || resolvedUrlType === "drive_url")) {
         // Store portfolio URL in session
-        await ctx.runMutation(api.communications.whatchimp.updateSessionState, {
+        await ctx.runMutation(internal.communications.whatchimp.updateSessionState, {
           phone: args.phone,
           portfolioUrl: resolvedDetectedUrl,
         });
@@ -828,7 +828,7 @@ export const handlePreApplicationChat = internalAction({
             : `Thank you for sharing your portfolio! 🎨 We've noted it. To complete your application, please also send your CV as a PDF.`;
         }
 
-        await ctx.runMutation(api.communications.whatchimp.updateSessionState, { phone: args.phone, lastBotReplyAt: Date.now() });
+        await ctx.runMutation(internal.communications.whatchimp.updateSessionState, { phone: args.phone, lastBotReplyAt: Date.now() });
         await sendReply(ctx, args.phone, jobId, portfolioReply);
         return;
       }
@@ -909,14 +909,14 @@ RULES — follow these strictly:
 
       // ── 7. Store employment preference if detected ────────────────────────
       if (args.textBody.match(/\bfreelance\b|\bproject[- ]based\b|\bcontract[- ]only\b/i)) {
-        await ctx.runMutation(api.communications.whatchimp.updateSessionState, {
+        await ctx.runMutation(internal.communications.whatchimp.updateSessionState, {
           phone: args.phone,
           employmentPreference: "freelance",
         });
       }
 
       // ── 8. Mark last bot reply time (dedup guard) ─────────────────────────
-      await ctx.runMutation(api.communications.whatchimp.updateSessionState, {
+      await ctx.runMutation(internal.communications.whatchimp.updateSessionState, {
         phone: args.phone,
         lastBotReplyAt: Date.now(),
       });

@@ -1,7 +1,7 @@
 "use node";
 
 import { internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 
 /**
  * Background Action Worker for Post-Sept 5th CV Re-Extraction.
@@ -35,7 +35,7 @@ export const runSept5ReextractionTick = internalAction({
       const item = claimed[i];
       const delayMs = i * 3000;
 
-      await ctx.scheduler.runAfter(delayMs, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
         cvUploadId: item.cvUploadId,
         storageId: item.storageId,
         s3Key: item.s3Key,

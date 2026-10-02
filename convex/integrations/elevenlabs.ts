@@ -1,7 +1,7 @@
 "use node";
 
 import { internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/outboundGuard";
 
@@ -13,8 +13,8 @@ export const triggerIntakeCall = internalAction({
   },
   handler: async (ctx, args): Promise<{ success: boolean; conversationId: string }> => {
     // 1. Fetch data for dynamic variables
-    const candidate: any = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
-    const job: any = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: args.jobId });
+    const candidate: any = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
+    const job: any = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: args.jobId });
     
     if (!candidate || !candidate.phone) {
       throw new Error("Candidate has no phone number");
@@ -117,9 +117,9 @@ export const triggerFollowUpCall = internalAction({
     aiCallId: v.id("aiCalls"),
   },
   handler: async (ctx, args): Promise<{ success: boolean; conversationId?: string; skipped?: boolean }> => {
-    const candidate: any = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
-    const job: any = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: args.jobId });
-    const application: any = await ctx.runQuery(api.applications.applications.getApplication, { id: args.applicationId });
+    const candidate: any = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
+    const job: any = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: args.jobId });
+    const application: any = await ctx.runQuery(internal.applications.applications.getApplication, { id: args.applicationId });
     
     if (!candidate || !candidate.phone) {
       throw new Error("Candidate has no phone number");
@@ -224,11 +224,11 @@ export const triggerFollowUpCall = internalAction({
       console.error("[ElevenLabs] Failed to trigger follow-up call:", errorText);
       
       // ROLLBACK: Call failed to place (e.g. ElevenLabs down)
-      await ctx.runMutation(api.applications.applications.updateAiCallStatus, { 
+      await ctx.runMutation(internal.applications.applications.updateAiCallStatus, { 
         aiCallId: args.aiCallId, 
         callStatus: "failed" 
       });
-      await ctx.runMutation(api.applications.applications.rollbackFollowUpState, { 
+      await ctx.runMutation(internal.applications.applications.rollbackFollowUpState, { 
         applicationId: args.applicationId 
       });
 
@@ -238,7 +238,7 @@ export const triggerFollowUpCall = internalAction({
     const data: any = await response.json();
     
     // SUCCESS: Save the conversation ID so webhooks can find it!
-    await ctx.runMutation(api.applications.applications.updateAiCallStatus, {
+    await ctx.runMutation(internal.applications.applications.updateAiCallStatus, {
       aiCallId: args.aiCallId,
       callStatus: "scheduled",
       elevenLabsConversationId: data.conversation_id

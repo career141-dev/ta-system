@@ -1,4 +1,4 @@
-import { query } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
 import { requireFullAccess } from "./lib/permissions";
 
 /**
@@ -6,7 +6,7 @@ import { requireFullAccess } from "./lib/permissions";
  * 
  * UPDATED: Now calculates stats live from the DB instead of relying on cached systemStats.
  */
-export const getOverviewMetrics = query({
+export const getOverviewMetrics = internalQuery({
   args: {},
   handler: async (ctx) => {
     await requireFullAccess(ctx);

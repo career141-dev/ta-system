@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { query, mutation, action } from "../_generated/server";
-import { api } from "../_generated/api";
+import { internalQuery, internalMutation, internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { adjustJobStageStat } from "../jobs/stats";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 
@@ -14,7 +14,7 @@ function isManualDirectoryChannel(channel: string | undefined | null): boolean {
  * Preview query: Counts all applications currently in 'new_cvs' that originate
  * from manual directory / folder uploads, grouped by job.
  */
-export const previewManualDirectoryApps = query({
+export const previewManualDirectoryApps = internalQuery({
   args: {},
   handler: async (ctx) => {
     const appsInNewCvs = await ctx.db
@@ -50,7 +50,7 @@ export const previewManualDirectoryApps = query({
  * Batch mutation: Migrates up to `batchSize` stuck applications from 'new_cvs'
  * to 'matched_candidates', updating job stats and candidate statuses.
  */
-export const migrateManualDirectoryAppsBatch = mutation({
+export const migrateManualDirectoryAppsBatch = internalMutation({
   args: {
     batchSize: v.optional(v.number()),
   },
@@ -112,7 +112,7 @@ export const migrateManualDirectoryAppsBatch = mutation({
  * Action runner: Iteratively processes batches until all stuck manual directory apps
  * are moved from 'new_cvs' to 'matched_candidates'.
  */
-export const runFullManualDirectoryMigration = action({
+export const runFullManualDirectoryMigration = internalAction({
   args: {
     batchSize: v.optional(v.number()),
   },
@@ -125,7 +125,7 @@ export const runFullManualDirectoryMigration = action({
     while (iterations < maxIterations) {
       iterations++;
       const res: any = await ctx.runMutation(
-        api.admin.migrateManualDirectoryApps.migrateManualDirectoryAppsBatch,
+        internal.admin.migrateManualDirectoryApps.migrateManualDirectoryAppsBatch,
         { batchSize }
       );
 
@@ -150,7 +150,7 @@ export const runFullManualDirectoryMigration = action({
  * and into the job's reverseMatchResults (the 'Matches' tab).
  * Genuine pipeline channels (linkedin, whatsapp, headhunt, email, email_campaign, etc.) are preserved.
  */
-export const moveJobManualAppsToMatches = mutation({
+export const moveJobManualAppsToMatches = internalMutation({
   args: {
     jobId: v.id("jobs"),
     limit: v.optional(v.number()),
@@ -264,16 +264,16 @@ export const moveJobManualAppsToMatches = mutation({
  * Action runner to iterate across all active jobs and move all manual directory/database
  * applications from the pipeline to each job's reverseMatchResults (the 'Matches' tab).
  */
-export const moveAllJobsManualAppsToMatchesAction = action({
+export const moveAllJobsManualAppsToMatchesAction = internalAction({
   args: {},
   handler: async (ctx) => {
-    const activeJobs: any = await ctx.runQuery(api.jobs.jobs.getActiveJobsBasicInfo, {});
+    const activeJobs: any = await ctx.runQuery(internal.jobs.jobs.getActiveJobsBasicInfo, {});
     const results = [];
 
     for (const job of (activeJobs || [])) {
       try {
         const res: any = await ctx.runMutation(
-          api.admin.migrateManualDirectoryApps.moveJobManualAppsToMatches,
+          internal.admin.migrateManualDirectoryApps.moveJobManualAppsToMatches,
           { jobId: job._id }
         );
         if (res.movedCount > 0) {

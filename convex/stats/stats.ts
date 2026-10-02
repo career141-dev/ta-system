@@ -1,9 +1,9 @@
-import { query, mutation, action, internalMutation } from "../_generated/server";
+import { internalMutation, internalQuery, internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { requireRole } from "../lib/permissions";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 
-export const getSystemStats = query({
+export const getSystemStats = internalQuery({
   args: {},
   handler: async () => {
     return {
@@ -13,7 +13,7 @@ export const getSystemStats = query({
   },
 });
 
-export const getIngestionStats = query({
+export const getIngestionStats = internalQuery({
   args: {},
   handler: async () => {
     return {
@@ -30,7 +30,7 @@ export const getIngestionStats = query({
   },
 });
 
-export const getRecentChannelLogs = query({
+export const getRecentChannelLogs = internalQuery({
   args: { channelType: v.string() },
   handler: async () => {
     return [];
@@ -47,7 +47,7 @@ export const backfillSystemStatsInternal = internalMutation({
   },
 });
 
-export const backfillSystemStats = mutation({
+export const backfillSystemStats = internalMutation({
   args: {},
   handler: async (): Promise<{
     totalCandidates: number;
@@ -59,7 +59,7 @@ export const backfillSystemStats = mutation({
   },
 });
 
-export const getDashboardStats = query({
+export const getDashboardStats = internalQuery({
   args: {
     dateRange: v.optional(v.string()),
     jobFilter: v.optional(v.string()),
@@ -122,7 +122,7 @@ export const updateDashboardStatsCache = internalMutation({
   }
 });
 
-export const getTeamActivity = query({
+export const getTeamActivity = internalQuery({
   args: {},
   handler: async (ctx) => {
     const logs = await ctx.db.query("activityLog")
@@ -258,7 +258,7 @@ export const logNvidiaCallMutation = internalMutation({
   },
 });
 
-export const syncWorkableTokenLogs = mutation({
+export const syncWorkableTokenLogs = internalMutation({
   args: {},
   handler: async (ctx) => {
     // Limit to 300 recent logs to prevent Convex read operation timeout
@@ -285,7 +285,7 @@ export const syncWorkableTokenLogs = mutation({
   },
 });
 
-export const getDeepSeekExtractionStats = query({
+export const getDeepSeekExtractionStats = internalQuery({
   args: {},
   handler: async (ctx) => {
     // 1. Read systemStats singleton for candidate & upload totals without scanning 115K rows
@@ -368,7 +368,7 @@ export const getDeepSeekExtractionStats = query({
   },
 });
 
-export const getCanonicalDeepSeekCandidatesCount = query({
+export const getCanonicalDeepSeekCandidatesCount = internalQuery({
   args: {},
   handler: async (ctx) => {
     const candidates = await ctx.db
@@ -384,7 +384,7 @@ export const getCanonicalDeepSeekCandidatesCount = query({
   },
 });
 
-export const getCanonicalDeepSeekTokenLogsCount = query({
+export const getCanonicalDeepSeekTokenLogsCount = internalQuery({
   args: {},
   handler: async (ctx) => {
     const logs = await ctx.db
@@ -426,7 +426,7 @@ export const getCanonicalDeepSeekTokenLogsCount = query({
   },
 });
 
-export const getExtractionCountByModel = query({
+export const getExtractionCountByModel = internalQuery({
   args: { model: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const targetModel = args.model ?? "deepseek/deepseek-v4-flash";
@@ -446,7 +446,7 @@ export const getExtractionCountByModel = query({
  * Query to fetch aggregated metrics for the dashboard cards and charts.
  * Reads from the pre-computed cache — O(8 docs) instead of O(14,000+ logs).
  */
-export const getTokenMetrics = query({
+export const getTokenMetrics = internalQuery({
   args: {},
   handler: async (ctx) => {
     await requireRole(ctx, ["admin", "ta_manager", "senior_ta"]);
@@ -646,7 +646,7 @@ export const getTokenMetrics = query({
  * Query to fetch recent logs with linked CV filename details.
  * fileName is denormalized at write-time — zero N+1 joins at read-time.
  */
-export const getRecentTokenLogs = query({
+export const getRecentTokenLogs = internalQuery({
   args: {
     limit: v.optional(v.number()),
   },
@@ -672,7 +672,7 @@ export const getRecentTokenLogs = query({
 /**
  * Mutation to clear all token logs (restricted to admins & TA managers).
  */
-export const clearAllTokenLogs = mutation({
+export const clearAllTokenLogs = internalMutation({
   args: {},
   handler: async (ctx) => {
     await requireRole(ctx, ["admin", "ta_manager"]);
@@ -734,7 +734,7 @@ export const logNvidiaCallsBatchMutation = internalMutation({
   },
 });
 
-export const logNvidiaCallMutationPublic = mutation({
+export const logNvidiaCallMutationPublic = internalMutation({
   args: {
     taskType: v.string(),
     model: v.string(),
@@ -751,17 +751,17 @@ export const logNvidiaCallMutationPublic = mutation({
   },
 });
 
-export const getTokenMetricsAction = action({
+export const getTokenMetricsAction = internalAction({
   args: {},
   handler: async (ctx): Promise<any> => {
-    return await ctx.runQuery(api.stats.stats.getTokenMetrics);
+    return await ctx.runQuery(internal.stats.stats.getTokenMetrics);
   },
 });
 
-export const getRecentTokenLogsAction = action({
+export const getRecentTokenLogsAction = internalAction({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<any> => {
-    return await ctx.runQuery(api.stats.stats.getRecentTokenLogs, { limit: args.limit });
+    return await ctx.runQuery(internal.stats.stats.getRecentTokenLogs, { limit: args.limit });
   },
 });
 
@@ -905,7 +905,7 @@ export const backfillTokenStats = internalMutation({
 });
 
 
-export const getTodayInboxActivity = query({
+export const getTodayInboxActivity = internalQuery({
   args: {},
   handler: async (ctx) => {
     const now = new Date();
@@ -971,7 +971,7 @@ export const saveSystemStats = internalMutation({
 });
 
 // The safe, action-based backfill runner
-export const runSafeBackfill = action({
+export const runSafeBackfill = internalAction({
   args: {},
   handler: async (ctx): Promise<{
     totalCandidates: number;
@@ -1057,7 +1057,7 @@ export const runSafeBackfill = action({
 });
 
 // Direct fast mutation backfill option
-export const runDirectBackfill = mutation({
+export const runDirectBackfill = internalMutation({
   args: {},
   handler: async (ctx) => {
     const candidates = await ctx.db.query("candidates").collect();
@@ -1090,7 +1090,7 @@ export const runDirectBackfill = mutation({
  * Live, real-time status query for Direct Upload / Manual Extraction Queue Card.
  * Returns exact live counts of queued, extracting, extracted, and failed CVs.
  */
-export const getDirectUploadLiveStatus = query({
+export const getDirectUploadLiveStatus = internalQuery({
   args: {},
   handler: async (ctx) => {
     // 1. Queued CVs waiting in R2 (status: "uploaded") — bounded to 1,000 per query tick
@@ -1148,7 +1148,7 @@ export const getDirectUploadLiveStatus = query({
   },
 });
 
-export const getNeedsAttention = query({
+export const getNeedsAttention = internalQuery({
   args: {
     jobFilter: v.optional(v.string()),
   },

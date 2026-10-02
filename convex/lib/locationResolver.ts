@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { action, internalMutation, internalQuery } from "../_generated/server";
+import { internalMutation, internalQuery, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { resolveLocationViaGazetteer, type StructuredLocation } from "./gazetteer";
 import { executeLLMWithNvidiaFallback } from "./llm";
@@ -56,7 +56,7 @@ export const saveCachedLocation = internalMutation({
  * 2. Static Gazetteer lookup (resolveLocationViaGazetteer)
  * 3. DeepSeek LLM fallback via OpenRouter (cv_location_resolution)
  */
-export const resolveCandidateLocationAction = action({
+export const resolveCandidateLocationAction = internalAction({
   args: {
     rawText: v.string(),
   },

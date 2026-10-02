@@ -1,7 +1,7 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { Id } from "../_generated/dataModel";
 
-export default mutation({
+export default internalMutation({
   handler: async (ctx) => {
     // Only activate this job
     // Only activate this job

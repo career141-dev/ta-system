@@ -1,4 +1,4 @@
-import { internalMutation, mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 import { calculateNvidiaCredits } from "../stats/stats";
 
 /**
@@ -6,7 +6,7 @@ import { calculateNvidiaCredits } from "../stats/stats";
  * 1. Populates missing `sourceChannel` on existing `nvidiaTokenLogs` by looking up linked `cvUploads`.
  * 2. Rebuilds `tokenStatsCache` singleton and `dailyTokenStats` rows from raw logs.
  */
-export const backfillCandidateExtractionModelPublic = mutation({
+export const backfillCandidateExtractionModelPublic = internalMutation({
   args: {},
   handler: async (ctx) => {
     const logs = await ctx.db.query("nvidiaTokenLogs").order("desc").take(500);
@@ -44,7 +44,7 @@ export const backfillCandidateExtractionModelPublic = mutation({
   },
 });
 
-export const backfillTokenCachePublic = mutation({
+export const backfillTokenCachePublic = internalMutation({
   args: {},
   handler: async (ctx) => {
     const logs = await ctx.db.query("nvidiaTokenLogs").collect();

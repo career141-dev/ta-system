@@ -1,13 +1,13 @@
 import { v } from "convex/values";
-import { action, query } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalQuery, internalMutation, internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { logLLMUsage, OPENROUTER_PRIMARY_MODEL } from "../lib/llm";
 import { extractSearchRequirements, buildSearchTerms, type SearchRequirements } from "../lib/jdParser";
 import { cvFileMissing } from "../../src/lib/cvMissing";
 import { scoreCandidateAgainstRequirements, selectLlmPool, scoreWithLLM, scoreBatchWithLLM, buildDeterministicTaReason, distinct, type ScoredCandidate } from "../cvs/cvScoring";
 
-export const searchCandidates = query({
+export const searchCandidates = internalQuery({
   args: {
     query: v.string(),
     industry: v.optional(v.string()),
@@ -127,7 +127,7 @@ type SearchInterpretation = {
   keywords: string[];
 };
 
-export const aiSearch = action({
+export const aiSearch = internalAction({
   args: {
     query: v.string(),
     industry: v.optional(v.string()),
@@ -341,7 +341,7 @@ export const aiSearch = action({
       const batchQueries: Promise<KeywordSearchResult[]>[] = [];
       for (const qStr of targetedQueries) {
         batchQueries.push(
-          ctx.runQuery(api.matching.search.searchCandidates, {
+          ctx.runQuery(internal.matching.search.searchCandidates, {
             query: qStr,
             industry: interp.industry,
             seniority: interp.seniority,
@@ -362,7 +362,7 @@ export const aiSearch = action({
       try {
         searchBatches = await Promise.all(
           filterTerms.slice(0, 3).map((term) =>
-            ctx.runQuery(api.matching.search.searchCandidates, { query: term, limit: 50 })
+            ctx.runQuery(internal.matching.search.searchCandidates, { query: term, limit: 50 })
           )
         );
       } catch (kwErr: any) {
@@ -406,7 +406,7 @@ export const aiSearch = action({
 
     // Fallback: If no results found and query is empty, query recently active candidates
     if (candidates.length === 0 && isQueryEmpty) {
-      candidates = await ctx.runQuery(api.matching.queries.getRecentCandidates, { limit: 100 });
+      candidates = await ctx.runQuery(internal.matching.queries.getRecentCandidates, { limit: 100 });
     }
 
     if (candidates.length === 0) {
@@ -731,7 +731,7 @@ export const aiSearch = action({
   },
 });
 
-export const parseNLQuery = action({
+export const parseNLQuery = internalAction({
   args: { query: v.string() },
   handler: async (ctx, args) => {
     const { executeLLMWithNvidiaFallback } = await import("../lib/llm");
@@ -764,7 +764,7 @@ export const parseNLQuery = action({
   },
 });
 
-export const semanticSearch = action({
+export const semanticSearch = internalAction({
   args: { 
     query: v.string(),
     limit: v.optional(v.number()),
@@ -831,8 +831,7 @@ export const semanticSearch = action({
   }
 });
 
-import { mutation } from "../_generated/server";
-export const bulkAddToPipeline = mutation({
+export const bulkAddToPipeline = internalMutation({
   args: {
     candidateIds: v.array(v.id("candidates")),
     jobId: v.id("jobs"),

@@ -1,7 +1,7 @@
 import { v } from "convex/values";
-import { query, mutation, internalQuery } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 
-export const list = query({
+export const list = internalQuery({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("whatsappNumbers").collect();
@@ -20,7 +20,7 @@ export const isTaNumber = internalQuery({
   }
 });
 
-export const add = mutation({
+export const add = internalMutation({
   args: {
     name: v.string(),
     phone: v.string(),
@@ -51,7 +51,7 @@ export const add = mutation({
   },
 });
 
-export const remove = mutation({
+export const remove = internalMutation({
   args: {
     id: v.id("whatsappNumbers"),
   },
@@ -60,7 +60,7 @@ export const remove = mutation({
   },
 });
 
-export const removeNumberByPattern = mutation({
+export const removeNumberByPattern = internalMutation({
   args: { pattern: v.string() },
   handler: async (ctx, args) => {
     const all = await ctx.db.query("whatsappNumbers").collect();

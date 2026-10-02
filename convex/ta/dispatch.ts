@@ -19,7 +19,7 @@
 
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 
 /**
  * Send one follow-up message a TA has approved.
@@ -43,7 +43,7 @@ export const sendFollowUp = internalAction({
     });
     if (!may.ok) return { sent: false, via: args.channel, reason: may.reason };
 
-    const app = await ctx.runQuery(api.applications.applications.getApplication, {
+    const app = await ctx.runQuery(internal.applications.applications.getApplication, {
       id: args.applicationId,
     });
     if (!app) return { sent: false, via: args.channel, reason: "That application no longer exists." };
@@ -139,7 +139,7 @@ export const startVoiceCall = internalAction({
     });
     if (!may.ok) return { started: false, reason: may.reason };
 
-    const app = await ctx.runQuery(api.applications.applications.getApplication, {
+    const app = await ctx.runQuery(internal.applications.applications.getApplication, {
       id: args.applicationId,
     });
     if (!app) return { started: false, reason: "That application no longer exists." };
@@ -149,7 +149,7 @@ export const startVoiceCall = internalAction({
       // call against this application, and its own guard refuses a second
       // call while one is already scheduled or in progress — which is what
       // stops a double click dialling somebody twice.
-      await ctx.runMutation(api.applications.applications.triggerManualAiCall, {
+      await ctx.runMutation(internal.applications.applications.triggerManualAiCall, {
         applicationId: args.applicationId,
         candidateId: app.candidateId,
         jobId: app.jobId,

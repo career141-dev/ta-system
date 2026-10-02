@@ -1,8 +1,8 @@
 import { v } from "convex/values";
-import { query, mutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { isPlausibleReferee } from "../lib/refereeCheck";
 
-export const getRefereesByCandidate = query({
+export const getRefereesByCandidate = internalQuery({
   args: { candidateId: v.string() },
   handler: async (ctx, args) => {
     let validId = ctx.db.normalizeId("candidates", args.candidateId);
@@ -21,7 +21,7 @@ export const getRefereesByCandidate = query({
   },
 });
 
-export const saveExtractedReferees = mutation({
+export const saveExtractedReferees = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     referees: v.array(
@@ -79,7 +79,7 @@ export const saveExtractedReferees = mutation({
   },
 });
 
-export const addReferee = mutation({
+export const addReferee = internalMutation({
   args: {
     candidateId: v.id("candidates"),
     name: v.string(),
@@ -105,14 +105,14 @@ export const addReferee = mutation({
   },
 });
 
-export const deleteReferee = mutation({
+export const deleteReferee = internalMutation({
   args: { id: v.id("referees") },
   handler: async (ctx, args) => {
     await ctx.db.delete(args.id);
   },
 });
 
-export const getCandidatesWithRawText = query({
+export const getCandidatesWithRawText = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const limit = args.limit || 10;

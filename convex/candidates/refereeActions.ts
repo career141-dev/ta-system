@@ -1,14 +1,14 @@
 "use node";
 import { v } from "convex/values";
-import { action } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { callOpenRouterLLM } from "../cvs/cvExtraction";
 
-export const extractRefereesForCandidateBatch = action({
+export const extractRefereesForCandidateBatch = internalAction({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<any> => {
     const limit = args.limit || 10;
-    const candidatesBatch: any[] = await ctx.runQuery(api.candidates.referees.getCandidatesWithRawText, { limit });
+    const candidatesBatch: any[] = await ctx.runQuery(internal.candidates.referees.getCandidatesWithRawText, { limit });
 
     const results = [];
 
@@ -27,7 +27,7 @@ export const extractRefereesForCandidateBatch = action({
         // No referees in the CV means none are saved. Sample referees used to be
         // inserted here, over real data, and read as contactable (21 Sep).
 
-        const savedIds: any = await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
+        const savedIds: any = await ctx.runMutation(internal.candidates.referees.saveExtractedReferees, {
           candidateId: cand.candidateId as any,
           referees: extractedReferees.map((r: any) => ({
             name: String(r.name),
@@ -69,13 +69,13 @@ export const extractRefereesForCandidateBatch = action({
   },
 });
 
-export const reparseSingleCandidateReferees = action({
+export const reparseSingleCandidateReferees = internalAction({
   args: {
     candidateId: v.id("candidates"),
   },
   handler: async (ctx, args): Promise<any> => {
     // 1. Get Candidate & Resume text
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidateForParsing, {
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidateForParsing, {
       candidateId: args.candidateId,
     });
     if (!candidate) throw new Error("Candidate not found");
@@ -101,7 +101,7 @@ export const reparseSingleCandidateReferees = action({
     // inserted here, over real data, and read as contactable (21 Sep).
 
     // 4. Persist to DB
-    const savedIds: any = await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
+    const savedIds: any = await ctx.runMutation(internal.candidates.referees.saveExtractedReferees, {
       candidateId: args.candidateId,
       referees: extractedReferees.map((r: any) => ({
         name: String(r.name),
@@ -122,11 +122,11 @@ export const reparseSingleCandidateReferees = action({
   },
 });
 
-export const reparseAllHostedReferees = action({
+export const reparseAllHostedReferees = internalAction({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args): Promise<any> => {
     const limit = args.limit || 50;
-    const candidatesBatch: any[] = await ctx.runQuery(api.candidates.referees.getCandidatesWithRawText, { limit });
+    const candidatesBatch: any[] = await ctx.runQuery(internal.candidates.referees.getCandidatesWithRawText, { limit });
 
     const results = [];
 
@@ -145,7 +145,7 @@ export const reparseAllHostedReferees = action({
         // No referees in the CV means none are saved. Sample referees used to be
         // inserted here, over real data, and read as contactable (21 Sep).
 
-        const savedIds: any = await ctx.runMutation(api.candidates.referees.saveExtractedReferees, {
+        const savedIds: any = await ctx.runMutation(internal.candidates.referees.saveExtractedReferees, {
           candidateId: cand.candidateId as any,
           referees: extractedReferees.map((r: any) => ({
             name: String(r.name),

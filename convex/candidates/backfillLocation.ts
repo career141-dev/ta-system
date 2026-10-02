@@ -1,9 +1,9 @@
 import { v } from "convex/values";
-import { action, internalMutation, query } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalMutation, internalQuery, internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { resolveCandidateLocation } from "../lib/locationResolver";
 
-export const getUnbackedCandidates = query({
+export const getUnbackedCandidates = internalQuery({
   args: {
     limit: v.number(),
   },
@@ -47,7 +47,7 @@ export const updateCandidateLocationStructuredBatch = internalMutation({
   },
 });
 
-export const getBackfillStats = query({
+export const getBackfillStats = internalQuery({
   args: {
     limit: v.optional(v.number()),
   },
@@ -72,7 +72,7 @@ export const getBackfillStats = query({
  * Args:
  * - batchSize: Number of candidates to process in this run (default: 100, max: 1000)
  */
-export const runCandidateLocationBackfillBatch = action({
+export const runCandidateLocationBackfillBatch = internalAction({
   args: {
     batchSize: v.optional(v.number()),
   },
@@ -80,7 +80,7 @@ export const runCandidateLocationBackfillBatch = action({
     const startTime = Date.now();
     const limit = Math.min(args.batchSize || 100, 1000);
 
-    const candidatesToProcess = await ctx.runQuery(api.candidates.backfillLocation.getUnbackedCandidates, {
+    const candidatesToProcess = await ctx.runQuery(internal.candidates.backfillLocation.getUnbackedCandidates, {
       limit,
     });
 

@@ -1,4 +1,4 @@
-import { query, mutation, internalMutation } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 
@@ -42,7 +42,7 @@ export function isCandidateExtracted(candidate: any): boolean {
 /**
  * Query: Gets the persistent re-extraction runner state and progress metrics.
  */
-export const getSept5ReextractionStatus = query({
+export const getSept5ReextractionStatus = internalQuery({
   args: {},
   handler: async (ctx) => {
     const record = await ctx.db
@@ -75,7 +75,7 @@ export const getSept5ReextractionStatus = query({
  * Fast Audit Query: Scans a sample of recent uploads from September 5th onwards
  * and reports the breakdown between complete candidates vs unextracted stubs.
  */
-export const getSept5AuditSample = query({
+export const getSept5AuditSample = internalQuery({
   args: {
     limit: v.optional(v.number()),
   },
@@ -289,7 +289,7 @@ export const claimNextSept5UnextractedBatch = internalMutation({
 /**
  * Public Mutation: Starts or resumes the background re-extraction runner.
  */
-export const startSept5Reextractor = mutation({
+export const startSept5Reextractor = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
@@ -330,7 +330,7 @@ export const startSept5Reextractor = mutation({
 /**
  * Public Mutation: Pauses the background re-extraction runner cleanly.
  */
-export const pauseSept5Reextractor = mutation({
+export const pauseSept5Reextractor = internalMutation({
   args: {},
   handler: async (ctx) => {
     const state = await ctx.db
@@ -352,7 +352,7 @@ export const pauseSept5Reextractor = mutation({
 /**
  * Public Mutation: Resets the cursor to September 5th 00:00:00 to allow a full re-scan.
  */
-export const resetSept5Reextractor = mutation({
+export const resetSept5Reextractor = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();

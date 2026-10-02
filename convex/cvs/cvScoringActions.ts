@@ -1,7 +1,7 @@
-import { action, internalQuery, internalMutation } from "../_generated/server";
+import { internalQuery, internalMutation, internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { adjustJobStageStat } from "../jobs/stats";
 import { initiateFollowUpOutreach } from "../pipeline/followUpHelper";
@@ -98,7 +98,7 @@ export const saveMatchScore = internalMutation({
 //
 //  Result: EVERY candidate ALWAYS gets a real score + proper reason.
 //
-export const processCvScoring = action({
+export const processCvScoring = internalAction({
   args: { candidateId: v.id("candidates"), jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     // ── Step 1: Load candidate + job data ──────────────────────────────
@@ -126,7 +126,7 @@ export const processCvScoring = action({
     // read it from there; scoring without it judged every CV on its headline fields.
     const textKey = (candidate as any).rawTextKey as string | undefined;
     if (!(candidate as any).rawText && textKey) {
-      (candidate as any).rawText = (await ctx.runAction(api.storage.r2.getResumeRawText, { rawTextKey: textKey })) ?? undefined;
+      (candidate as any).rawText = (await ctx.runAction(internal.storage.r2.getResumeRawText, { rawTextKey: textKey })) ?? undefined;
     }
 
     // ── Step 2: Build job requirements object ──────────────────────────

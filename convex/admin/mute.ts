@@ -1,6 +1,6 @@
-import { mutation } from "../_generated/server";
+import { internalMutation } from "../_generated/server";
 
-export const muteTechLead = mutation({
+export const muteTechLead = internalMutation({
   args: {},
   handler: async (ctx) => {
     const job = await ctx.db.query("jobs").withIndex("by_keyword", (q) => q.eq("keyword", "TECHLEAD")).first();

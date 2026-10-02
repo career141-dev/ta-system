@@ -16,7 +16,7 @@
 
 import { v } from "convex/values";
 import { internalAction, type ActionCtx } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
 import { isAutoReply, isCvAttachment, isNotAnApplication, parseApplicationEmail, type MailAttachmentMeta } from "../lib/mailParse";
@@ -95,7 +95,7 @@ async function placeCandidate(
       candidateId, jobId: d.jobId, jobPostId: d.postId,
     });
     if (already) continue;
-    await ctx.runMutation(api.applications.applications.createApplication, {
+    await ctx.runMutation(internal.applications.applications.createApplication, {
       candidateId,
       jobId: d.jobId,
       sourceChannel,
@@ -221,7 +221,7 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
       candidateId = await ctx.runQuery(internal.mailIntake.model.candidateByLinkedin, { url: parsed.profileUrl });
     }
     if (!candidateId) {
-      candidateId = await ctx.runMutation(api.candidates.candidates.createCandidate, {
+      candidateId = await ctx.runMutation(internal.candidates.candidates.createCandidate, {
         fullName: parsed.applicantName ?? undefined,
         linkedinUrl: parsed.profileUrl ?? undefined,
         email: parsed.email ?? undefined,
@@ -381,7 +381,7 @@ async function fileShortlist(
   const apps = await ctx.runQuery(internal.mailIntake.shortlist.applicationsFor, { candidateIds });
   for (const c of candidateIds) {
     if (!apps.some((a: { candidateId: string; openingId: string }) => a.candidateId === (c as string) && a.openingId === opening!.id)) {
-      await ctx.runMutation(api.applications.applications.createApplication, {
+      await ctx.runMutation(internal.applications.applications.createApplication, {
         candidateId: c, jobId, sourceChannel: "email", metaHeadline: m.subject.slice(0, 200),
       });
     }
@@ -448,7 +448,7 @@ async function ingestCvs(
       contentType: fileType,
       base64Data: file.body.contentBytes,
     });
-    const result = (await ctx.runMutation(api.pipeline.ingestion.processCvIngestion, {
+    const result = (await ctx.runMutation(internal.pipeline.ingestion.processCvIngestion, {
       jobId: opts.jobId,
       sourceChannel: opts.sourceChannel,
       rawSender: opts.fromAddress,

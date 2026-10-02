@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { sendMetaFreeText } from "./metaDirectSender";
 import { followUpCancelledReason } from "../lib/graphMail";
 
@@ -278,7 +278,7 @@ export const sendWhatsApp = internalAction({
     }
 
     // 1. Fetch candidate contact details
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidate, {
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, {
       id: args.candidateId,
     });
 

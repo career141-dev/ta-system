@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { getGraphToken } from "../lib/graphClient";
 import { outboundLocked } from "../lib/outboundGuard";
 import { getQdrantClient, deleteCandidateVector, candidateIdToPointId, QDRANT_CANDIDATE_COLLECTION } from "../lib/qdrant";
@@ -54,7 +54,7 @@ export const listCvMessages = internalAction({
       for (const a of atts) {
         if (a["@odata.type"] !== "#microsoft.graph.fileAttachment" || !a.name || !CV_TYPES.test(a.name) || !a.contentBytes) continue;
         const fileHash = createHash("sha256").update(Buffer.from(a.contentBytes, "base64")).digest("hex");
-        const known: boolean = await ctx.runQuery(api.communications.emailAgent.checkFileHashExists, { fileHash });
+        const known: boolean = await ctx.runQuery(internal.communications.emailAgent.checkFileHashExists, { fileHash });
         cvs.push({ id: a.id, name: a.name, contentType: a.contentType ?? "application/pdf", size: a.size ?? 0, fileHash, known: !!known });
       }
       if (cvs.length === 0) continue;

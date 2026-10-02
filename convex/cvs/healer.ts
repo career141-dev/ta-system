@@ -1,4 +1,4 @@
-import { query, internalMutation } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
 
@@ -263,7 +263,7 @@ export const releaseFailedClaim = internalMutation({
 /**
  * Healer status — real counts (bounded) and the last recorded run.
  */
-export const getHealerStatus = query({
+export const getHealerStatus = internalQuery({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();

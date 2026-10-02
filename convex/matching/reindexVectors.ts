@@ -5,7 +5,7 @@
 
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { internalAction, internalQuery, action } from "../_generated/server";
+import { internalAction, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { batchUpsertCandidateVectors, candidateVectorPayload, ensureCandidateCollection, getQdrantClient, QDRANT_CANDIDATE_COLLECTION } from "../lib/qdrant";
 import type { CandidateVectorPoint } from "../lib/qdrant";
@@ -190,7 +190,7 @@ export const reindexWorker = internalAction({
 /**
  * Public action: kick off the full re-index
  */
-export const startReindex = action({
+export const startReindex = internalAction({
   args: {},
   handler: async (ctx, _args): Promise<{ message: string }> => {
     await ctx.scheduler.runAfter(0, internal.matching.reindexVectors.reindexWorker, {
@@ -209,7 +209,7 @@ export const startReindex = action({
 /**
  * Public action: check how many candidates are currently indexed in Qdrant
  */
-export const checkProgress = action({
+export const checkProgress = internalAction({
   args: {},
   handler: async (_ctx, _args): Promise<{ indexed: number; message: string }> => {
     try {
@@ -231,7 +231,7 @@ export const checkProgress = action({
 });
 
 
-export const testLiveEmbedAndUpsert = action({
+export const testLiveEmbedAndUpsert = internalAction({
   args: {},
   handler: async (ctx) => {
     const pageResult: any = await ctx.runQuery(
@@ -254,7 +254,7 @@ export const testLiveEmbedAndUpsert = action({
 });
 
 
-export const getCandidateCounts = action({
+export const getCandidateCounts = internalAction({
   args: {},
   handler: async (ctx) => {
     // Test count with pagination without index vs with index
@@ -278,7 +278,7 @@ export const queryWithIndexCount = internalQuery({
 });
 
 
-export const getEstimatedUsageCost = action({
+export const getEstimatedUsageCost = internalAction({
   args: {},
   handler: async (_ctx) => {
     // 21,628 candidates indexed at ~500 tokens each = 10,814,000 tokens

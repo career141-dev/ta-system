@@ -1,12 +1,12 @@
 import { v } from "convex/values";
-import { mutation, query, internalMutation } from "../_generated/server";
+import { internalMutation, internalQuery } from "../_generated/server";
 import { Id } from "../_generated/dataModel";
 import { requireUser } from "../lib/permissions";
 import { adjustGlobalStat } from "../stats/statsHelper";
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-export const createScan = mutation({
+export const createScan = internalMutation({
   args: {
     title: v.string(),
     criteria: v.array(
@@ -141,7 +141,7 @@ export const updateResult = internalMutation({
   },
 });
 
-export const updateScanStatus = mutation({
+export const updateScanStatus = internalMutation({
   args: {
     scanId: v.id("cvScans"),
     status: v.union(v.literal("pending"), v.literal("processing"), v.literal("completed"), v.literal("failed")),
@@ -151,7 +151,7 @@ export const updateScanStatus = mutation({
   },
 });
 
-export const promoteCandidateToDb = mutation({
+export const promoteCandidateToDb = internalMutation({
   args: {
     resultId: v.id("cvScanResults"),
     jobId: v.optional(v.id("jobs")),
@@ -229,14 +229,14 @@ export const promoteCandidateToDb = mutation({
   },
 });
 
-export const getScanSession = query({
+export const getScanSession = internalQuery({
   args: { scanId: v.id("cvScans") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.scanId);
   },
 });
 
-export const getScanResults = query({
+export const getScanResults = internalQuery({
   args: { scanId: v.id("cvScans") },
   handler: async (ctx, args) => {
     const results = await ctx.db
@@ -248,14 +248,14 @@ export const getScanResults = query({
   },
 });
 
-export const getScanResultById = query({
+export const getScanResultById = internalQuery({
   args: { resultId: v.id("cvScanResults") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.resultId);
   },
 });
 
-export const getScanResultDirectUrl = query({
+export const getScanResultDirectUrl = internalQuery({
   args: { resultId: v.id("cvScanResults") },
   handler: async (ctx, args) => {
     const result = await ctx.db.get(args.resultId);
@@ -275,7 +275,7 @@ export const getScanResultDirectUrl = query({
   },
 });
 
-export const getUserScans = query({
+export const getUserScans = internalQuery({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const user = await requireUser(ctx);
@@ -291,7 +291,7 @@ export const getUserScans = query({
   },
 });
 
-export const cleanupExpiredCvScans = mutation({
+export const cleanupExpiredCvScans = internalMutation({
   handler: async (ctx) => {
     const now = Date.now();
     const expiredScans = await ctx.db

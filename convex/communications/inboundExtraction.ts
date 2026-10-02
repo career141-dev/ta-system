@@ -1,6 +1,6 @@
 import { internalAction, internalQuery } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
 import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod } from "../lib/answered";
@@ -42,7 +42,7 @@ export const extractDetailsFromText = internalAction({
           applicationId: args.applicationId,
           candidateId: args.candidateId,
         })
-      : await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, {
+      : await ctx.runQuery(internal.candidates.candidates.getActiveFollowUpApplication, {
           candidateId: args.candidateId,
         });
 
@@ -51,13 +51,13 @@ export const extractDetailsFromText = internalAction({
       return;
     }
 
-    const job = await ctx.runQuery(api.jobs.jobs.getJob, { jobId: activeApp.jobId });
+    const job = await ctx.runQuery(internal.jobs.jobs.getJob, { jobId: activeApp.jobId });
     if (!job) {
       console.error(`[Inbound Extraction] Job ${activeApp.jobId} not found.`);
       return;
     }
 
-    const candidate = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
+    const candidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
 
     const missingFields: string[] = [];
     const hasCV = activeApp.followUpCvReceived === true || !!candidate?.cvUploadId;
@@ -408,7 +408,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       if (hasUpdates || isQuestion || isEta || args.textBody.trim().length > 0) {
         if (hasUpdates) {
           console.log(`[Inbound Extraction] Extracted updates for candidate ${args.candidateId}:`, updates);
-          await ctx.runMutation(api.candidates.candidates.updateCandidateDetails, {
+          await ctx.runMutation(internal.candidates.candidates.updateCandidateDetails, {
             candidateId: args.candidateId,
             applicationId: activeApp._id,
             ...updates,
@@ -425,8 +425,8 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         }
 
         // Re-fetch updated application and candidate data post-update
-        const updatedCandidate = await ctx.runQuery(api.candidates.candidates.getCandidate, { id: args.candidateId });
-        const updatedApp = await ctx.runQuery(api.candidates.candidates.getActiveFollowUpApplication, { candidateId: args.candidateId });
+        const updatedCandidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
+        const updatedApp = await ctx.runQuery(internal.candidates.candidates.getActiveFollowUpApplication, { candidateId: args.candidateId });
 
         // Fields still missing after this reply (plain names, used in prompt and reply messages)
         const appRecord = updatedApp || activeApp;

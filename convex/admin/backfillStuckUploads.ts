@@ -1,8 +1,8 @@
-import { mutation, query } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { v } from "convex/values";
 import { matchJobFromText } from "../communications/whatchimp";
 
-export const auditUnassignedWhatsappUploads = query({
+export const auditUnassignedWhatsappUploads = internalQuery({
   args: {},
   handler: async (ctx) => {
     const logs = await ctx.db
@@ -35,7 +35,7 @@ export const auditUnassignedWhatsappUploads = query({
   },
 });
 
-export const backfillStuckWhatsappUploads = mutation({
+export const backfillStuckWhatsappUploads = internalMutation({
   args: {},
   handler: async (ctx) => {
     const activeJobs = await ctx.db

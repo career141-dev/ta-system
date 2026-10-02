@@ -14,7 +14,7 @@
 
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
-import { api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK } from "./guard";
 import { claimForTa } from "./applications";
@@ -63,7 +63,7 @@ export const queue = internalMutation({
       candidateName: args.fileName,
       rawSender: user._id as string,
     } as never);
-    await ctx.scheduler.runAfter(0, api.cvs.cvExtraction.processCvExtraction, {
+    await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {
       storageId: args.storageId,
       storageProvider: "convex",
       fileType: args.fileType,

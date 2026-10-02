@@ -1,18 +1,18 @@
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
-import { query, mutation, internalQuery, internalMutation } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { internalQuery, internalMutation } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { requireUser, requireFullAccess } from "../lib/permissions";
 
-export const generateUploadUrl = mutation({
+export const generateUploadUrl = internalMutation({
   handler: async (ctx) => {
     await requireUser(ctx);
     return await ctx.storage.generateUploadUrl();
   },
 });
 
-export const saveUpload = mutation({
+export const saveUpload = internalMutation({
   args: {
     storageId: v.optional(v.id("_storage")),
     s3Key: v.optional(v.string()),
@@ -48,7 +48,7 @@ export const saveUpload = mutation({
   },
 });
 
-export const queueManualExtraction = mutation({
+export const queueManualExtraction = internalMutation({
   args: {
     cvUploadId: v.id("cvUploads"),
     storageId: v.optional(v.id("_storage")),
@@ -74,7 +74,7 @@ export const queueManualExtraction = mutation({
       rawSender: args.uploadedBy,
     } as any);
 
-    await ctx.scheduler.runAfter(args.delayMs ?? 0, api.cvs.cvExtraction.processCvExtraction, {
+    await ctx.scheduler.runAfter(args.delayMs ?? 0, internal.cvs.cvExtraction.processCvExtraction, {
       storageId: args.storageId,
       s3Key: args.s3Key,
       storageProvider: args.storageProvider,
@@ -91,7 +91,7 @@ export const queueManualExtraction = mutation({
   },
 });
 
-export const clearAll = mutation({
+export const clearAll = internalMutation({
   handler: async (ctx) => {
     await requireFullAccess(ctx);
     const all = await ctx.db.query("cvUploads").collect();
@@ -102,7 +102,7 @@ export const clearAll = mutation({
   },
 });
 
-export const deleteStorageFiles = mutation({
+export const deleteStorageFiles = internalMutation({
   args: { storageIds: v.array(v.id("_storage")) },
   handler: async (ctx, args) => {
     await requireFullAccess(ctx);
@@ -141,7 +141,7 @@ export const checkUploadsStatus = internalQuery({
   },
 });
 
-export const checkAndTriggerNextBatch = mutation({
+export const checkAndTriggerNextBatch = internalMutation({
   args: {
     batchId: v.id("ingestionBatches"),
   },
@@ -205,7 +205,7 @@ export const checkAndTriggerNextBatch = mutation({
 
       const staggerDelayMs = index * 100;
 
-      await ctx.scheduler.runAfter(staggerDelayMs, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(staggerDelayMs, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId as Id<"_storage"> | undefined,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider,
@@ -222,7 +222,7 @@ export const checkAndTriggerNextBatch = mutation({
   },
 });
 
-export const cancelAllRunningExtractions = mutation({
+export const cancelAllRunningExtractions = internalMutation({
   args: {},
   handler: async (ctx) => {
     // 1. Immediately pause & fail active ingestion batches first (stops next batch triggers in < 5ms)
@@ -293,7 +293,7 @@ export const recoverStuckUploads = internalMutation({
         // Also check if this upload is part of a batch
         if (upload.batchId) {
           // Trigger next batch evaluation
-          await ctx.scheduler.runAfter(0, api.cvs.cvUploads.checkAndTriggerNextBatch, {
+          await ctx.scheduler.runAfter(0, internal.cvs.cvUploads.checkAndTriggerNextBatch, {
             batchId: upload.batchId as any,
           });
         }
@@ -304,7 +304,7 @@ export const recoverStuckUploads = internalMutation({
   },
 });
 
-export const recoverStuckUploadsPublic = mutation({
+export const recoverStuckUploadsPublic = internalMutation({
   args: {},
   handler: async (ctx) => {
     const stuck = await ctx.db
@@ -323,7 +323,7 @@ export const recoverStuckUploadsPublic = mutation({
         });
         
         if (upload.batchId) {
-          await ctx.scheduler.runAfter(0, api.cvs.cvUploads.checkAndTriggerNextBatch, {
+          await ctx.scheduler.runAfter(0, internal.cvs.cvUploads.checkAndTriggerNextBatch, {
             batchId: upload.batchId as any,
           });
         }
@@ -339,7 +339,7 @@ export const recoverStuckUploadsPublic = mutation({
  * If a candidate profile was deleted from the candidates table,
  * this mutation re-enqueues extraction to restore the candidate profile!
  */
-export const restoreAllCandidatesFromUploads = mutation({
+export const restoreAllCandidatesFromUploads = internalMutation({
   args: {},
   handler: async (ctx) => {
     // Process up to 100 uploads per iteration to stay within 1s mutation limits
@@ -362,7 +362,7 @@ export const restoreAllCandidatesFromUploads = mutation({
         });
 
         // Trigger parallel extraction (100ms spread)
-        await ctx.scheduler.runAfter(requeued * 100, api.cvs.cvExtraction.processCvExtraction, {
+        await ctx.scheduler.runAfter(requeued * 100, internal.cvs.cvExtraction.processCvExtraction, {
           storageId: upload.storageId as any,
           s3Key: upload.s3Key,
           storageProvider: upload.storageProvider,
@@ -384,7 +384,7 @@ export const restoreAllCandidatesFromUploads = mutation({
  * Sweeps all unparsed, empty ("Unknown"), or interrupted candidate profiles
  * and schedules AI extraction for each with a 2-second stagger.
  */
-export const reparseAllUnextractedCandidates = mutation({
+export const reparseAllUnextractedCandidates = internalMutation({
   args: {},
   handler: async (ctx) => {
     // 1. Find all candidates that are unparsed or have empty/stub names
@@ -419,7 +419,7 @@ export const reparseAllUnextractedCandidates = mutation({
       });
 
       // Schedule extraction with 2-second stagger to prevent rate limits
-      await ctx.scheduler.runAfter(requeued * 2000, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(requeued * 2000, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId as any,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider || "r2",
@@ -453,7 +453,7 @@ export const reparseAllUnextractedCandidates = mutation({
         errorMessage: undefined,
       });
 
-      await ctx.scheduler.runAfter(requeued * 2000, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(requeued * 2000, internal.cvs.cvExtraction.processCvExtraction, {
         storageId: upload.storageId as any,
         s3Key: upload.s3Key,
         storageProvider: upload.storageProvider || "r2",
@@ -473,7 +473,7 @@ export const reparseAllUnextractedCandidates = mutation({
 /**
  * Returns the count of candidates with isParsed: false or Unknown name
  */
-export const getUnextractedCandidatesCount = query({
+export const getUnextractedCandidatesCount = internalQuery({
   args: {},
   handler: async (ctx) => {
     const unparsed = await ctx.db
@@ -495,7 +495,7 @@ export const getUnextractedCandidatesCount = query({
 /**
  * Returns list of successfully uploaded/processing filenames for Manual Directory Import
  */
-export const getUploadedDirectoryFiles = query({
+export const getUploadedDirectoryFiles = internalQuery({
   args: {
     sourceChannel: v.optional(v.string()),
   },
@@ -509,7 +509,7 @@ export const getUploadedDirectoryFiles = query({
 /**
  * Checks if a specific file name has already been successfully uploaded for a source channel
  */
-export const checkUploadedFile = query({
+export const checkUploadedFile = internalQuery({
   args: {
     fileName: v.string(),
     sourceChannel: v.optional(v.string()),
@@ -547,7 +547,7 @@ export const checkUploadedFile = query({
 /**
  * Clears failed cvUploads records for directory import so they can be clean-retried
  */
-export const clearFailedDirectoryUploads = mutation({
+export const clearFailedDirectoryUploads = internalMutation({
   args: {
     sourceChannel: v.optional(v.string()),
   },
@@ -603,7 +603,7 @@ export const claimUploadedBatch = internalMutation({
   },
 });
 
-export const claimUploadedBatchPublic = mutation({
+export const claimUploadedBatchPublic = internalMutation({
   args: {
     limit: v.optional(v.number()),
   },
@@ -717,7 +717,7 @@ export const requeueAllStuckUploads = internalMutation({
  * or failed due to insufficient API credits, resets their status, and re-triggers
  * parallel LLM extraction using refilled credits.
  */
-export const recoverCreditDepletedCVs = mutation({
+export const recoverCreditDepletedCVs = internalMutation({
   args: {
     limit: v.optional(v.number()),
     staggerMs: v.optional(v.number()),
@@ -816,7 +816,7 @@ export const recoverCreditDepletedCVs = mutation({
         rawSender: upload.uploadedBy,
       } as any);
 
-      await ctx.scheduler.runAfter(delayMs, api.cvs.cvExtraction.processCvExtraction, {
+      await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
         cvUploadId: upload._id,
         storageId: upload.storageId,
         s3Key: upload.s3Key,

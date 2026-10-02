@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { query, mutation } from "../_generated/server";
+import { internalQuery, internalMutation } from "../_generated/server";
 import { ConvexError } from "convex/values";
 import type { QueryCtx } from "../_generated/server";
 import type { Id, Doc } from "../_generated/dataModel.d.ts";
@@ -19,7 +19,7 @@ async function getAuthUser(ctx: QueryCtx) {
 
 // ─── Full candidate profile with quick stats ─────────────────────────────────
 
-export const getFullProfile = query({
+export const getFullProfile = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -74,7 +74,7 @@ export const getFullProfile = query({
 
 // ─── Tab: CVs ────────────────────────────────────────────────────────────────
 
-export const getCandidateCvs = query({
+export const getCandidateCvs = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -100,7 +100,7 @@ export const getCandidateCvs = query({
 
 // ─── Tab: Applications (Cross-Job View) ──────────────────────────────────────
 
-export const getCandidateApplications = query({
+export const getCandidateApplications = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -148,7 +148,7 @@ export const getCandidateApplications = query({
 
 // ─── Tab: Notes (event log + legacy pipeline notes for backward compat) ──────
 
-export const getCandidateNotes = query({
+export const getCandidateNotes = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -232,7 +232,7 @@ export const getCandidateNotes = query({
 
 // ─── Tab: Timeline (event log + legacy pipeline entries + CV uploads) ────────
 
-export const getCandidateTimeline = query({
+export const getCandidateTimeline = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();
@@ -349,7 +349,7 @@ export const getCandidateTimeline = query({
 
 // ─── Add note (delegates to the logged pipeline note mutation) ───────────────
 
-export const addNote = mutation({
+export const addNote = internalMutation({
   args: {
     jobId: v.id("jobs"),
     cvId: v.id("cvs"),
@@ -404,7 +404,7 @@ export const addNote = mutation({
 
 // ─── Get active jobs for this candidate (for the note dropdown) ─────────────
 
-export const getCandidateActiveJobs = query({
+export const getCandidateActiveJobs = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
     const identity = await ctx.auth.getUserIdentity();

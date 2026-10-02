@@ -1,6 +1,6 @@
-import { query } from "../_generated/server";
+import { internalQuery } from "../_generated/server";
 
-export const getAllWhatsappComms = query({
+export const getAllWhatsappComms = internalQuery({
   args: {},
   handler: async (ctx) => {
     const all = await ctx.db.query("communications").collect();
