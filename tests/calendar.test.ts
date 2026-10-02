@@ -1,4 +1,4 @@
-import { HOLIDAYS, hasWorkingHours, isWorkingDay, workingHoursBetween } from "@/lib/calendar";
+import { HOLIDAYS, colomboGreeting, hasWorkingHours, isWorkingDay, workingHoursBetween } from "@/lib/calendar";
 
 let passed = 0;
 let failed = 0;

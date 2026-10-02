@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { colomboGreeting } from "@/lib/calendar";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { SearchBox } from "@/components/db/SearchBox";
@@ -60,8 +61,7 @@ export default async function DatabaseHome({
   const others = saved.filter((s) => s.mine === false || (s.ownerId !== user.id && s.mine !== true));
   const users = repo.users();
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const greeting = colomboGreeting();
 
   const counts = candidates.reduce<Record<string, number>>((acc, c) => {
     if (c.currentTitle) acc[c.currentTitle] = (acc[c.currentTitle] ?? 0) + 1;

@@ -190,6 +190,16 @@ export function colomboHour(at: number): number {
 }
 
 /**
+ * "Good morning" by the desk's clock. The pages read `new Date().getHours()`,
+ * which is the server's hour — UTC on the VPS — so Colombo was greeted with
+ * "Good morning" until 5:30 in the afternoon (3 Oct).
+ */
+export function colomboGreeting(at = Date.now()): string {
+  const hour = colomboHour(at);
+  return hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+}
+
+/**
  * A "YYYY-MM-DDTHH:mm" typed into a form, read as Colombo time.
  * `new Date("2026-09-14T10:00")` reads it in the server's zone instead.
  */

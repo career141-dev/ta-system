@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { colomboGreeting } from "@/lib/calendar";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { PRIORITY_TARGET } from "@/data/types";
@@ -35,8 +36,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
     .sort((a, b) => a.scheduledAt - b.scheduledAt)
     .slice(0, 5);
 
-  const hour = new Date().getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const greeting = colomboGreeting();
 
   // Spec §13 — four different jobs, four different screens.
   if (user.role === "ta_lead" || user.role === "admin") {
