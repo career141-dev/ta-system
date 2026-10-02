@@ -108,6 +108,8 @@ import type * as lib_experience from "../lib/experience.js";
 import type * as lib_firstPost from "../lib/firstPost.js";
 import type * as lib_followUpScope from "../lib/followUpScope.js";
 import type * as lib_templateBudget from "../lib/templateBudget.js";
+import type * as lib_templateForecast from "../lib/templateForecast.js";
+import type * as admin_outreachVolume from "../admin/outreachVolume.js";
 import type * as lib_followUpWindow from "../lib/followUpWindow.js";
 import type * as lib_gazetteer from "../lib/gazetteer.js";
 import type * as lib_graphClient from "../lib/graphClient.js";
@@ -308,6 +310,8 @@ declare const fullApi: ApiFromModules<{
   "lib/firstPost": typeof lib_firstPost;
   "lib/followUpScope": typeof lib_followUpScope;
   "lib/templateBudget": typeof lib_templateBudget;
+  "lib/templateForecast": typeof lib_templateForecast;
+  "admin/outreachVolume": typeof admin_outreachVolume;
   "lib/followUpWindow": typeof lib_followUpWindow;
   "lib/gazetteer": typeof lib_gazetteer;
   "lib/graphClient": typeof lib_graphClient;
