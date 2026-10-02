@@ -3,6 +3,7 @@ import { Id } from "../_generated/dataModel";
 import { query, mutation, internalQuery, internalMutation } from "../_generated/server";
 import { api, internal } from "../_generated/api";
 import { adjustGlobalStat } from "../stats/statsHelper";
+import { readCursor, writeCursor, nextCreationCursor } from "../lib/cronCursor";
 import { requireUser, requireFullAccess } from "../lib/permissions";
 
 export const generateUploadUrl = mutation({
@@ -645,41 +646,32 @@ export const requeueAllStuckUploads = internalMutation({
   handler: async (ctx, args) => {
     const limit = args.limit ?? 10;
 
-    const failedList = await ctx.db
-      .query("cvUploads")
-      .withIndex("by_status", (q) => q.eq("status", "failed"))
-      .take(limit);
-
-    const cancelledList = await ctx.db
-      .query("cvUploads")
-      .withIndex("by_status", (q) => q.eq("status", "cancelled"))
-      .take(limit);
-
-    const failedRetryList = await ctx.db
-      .query("cvUploads")
-      .withIndex("by_status", (q) => q.eq("status", "failed_retry"))
-      .take(limit);
-
-    // Also check stuck processing (> 5 mins ago)
-    const processingList = await ctx.db
-      .query("cvUploads")
-      .withIndex("by_status", (q) => q.eq("status", "processing"))
-      .take(limit);
-
+    // Each status is read from where the last run stopped (lib/cronCursor.ts).
+    // Reading the oldest `limit` every time, the permanent failures skipped
+    // below — healed already, no file — held all of those places, and newer
+    // failures were never retried (2 Oct).
     const fiveMinsAgo = Date.now() - 5 * 60 * 1000;
-    const stuckProcessing = processingList.filter((u) => {
-      const startMs = (u as any).processingStartedAt ?? u._creationTime;
-      return startMs < fiveMinsAgo;
-    });
-
-    const allStuck = [...failedList, ...cancelledList, ...failedRetryList, ...stuckProcessing]
-      .filter((u) => {
-        if ((u as any).isHealAttempted) return false;
-        if (u.status === "needs_review") return false;
-        if (u.errorMessage?.includes("File URL not found")) return false;
-        return Boolean(u.s3Key || u.storageId);
-      })
-      .slice(0, limit);
+    const eligible = (u: any) => {
+      // Stuck processing only once it has been at it more than five minutes.
+      if (u.status === "processing" && (u.processingStartedAt ?? u._creationTime) >= fiveMinsAgo) return false;
+      if (u.isHealAttempted) return false;
+      if (u.status === "needs_review") return false;
+      if (u.errorMessage?.includes("File URL not found")) return false;
+      return Boolean(u.s3Key || u.storageId);
+    };
+    const allStuck: any[] = [];
+    for (const status of ["failed", "cancelled", "failed_retry", "processing"]) {
+      const want = limit - allStuck.length;
+      if (want <= 0) break;
+      const name = `requeueStuckUploads.${status}`;
+      const after = Number((await readCursor(ctx, name)) ?? 0);
+      const rows = await ctx.db
+        .query("cvUploads")
+        .withIndex("by_status", (q) => q.eq("status", status).gt("_creationTime", after))
+        .take(want);
+      await writeCursor(ctx, name, nextCreationCursor(rows, want));
+      allStuck.push(...rows.filter(eligible));
+    }
 
     let requeuedCount = 0;
     for (const upload of allStuck) {
