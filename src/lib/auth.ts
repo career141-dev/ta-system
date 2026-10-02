@@ -57,7 +57,9 @@ export type Capability =
   /** Work an incoming CV that has not been filed against an opening yet. */
   | "intake.handle"
   /** Give or update feedback on an interview — the interviewer's view of the candidate. */
-  | "interview.feedback";
+  | "interview.feedback"
+  /** The Voice agent practice line: talk to the screening agent as a candidate. */
+  | "voice.practice";
 
 /** Everything a decision needs to know, resolved by the caller. */
 export interface AuthContext {
@@ -235,6 +237,12 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       // collision lock does not apply — feedback is not working the candidate.
       if (isDeskWide(user)) return ALLOW;
       return ctx.assignment ? ALLOW : deny("You are not on this opening.");
+
+    case "voice.practice":
+      // Taken off the TA seat (2 Oct). Leads, directors, admin and ops keep it.
+      return user.role === "ta"
+        ? deny("The voice agent practice line is not available on a Talent Acquisition account.")
+        : ALLOW;
   }
 }
 

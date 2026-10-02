@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-server-sdk";
 import { primeStore } from "@/data/prime";
 import { getCurrentUser } from "@/lib/session";
+import { can } from "@/lib/auth";
 
 /**
  * Voice agent → a practice screening call, as the CV platform's "Aura voice
@@ -49,6 +50,8 @@ export async function startVoiceTest(input: VoiceTestInput): Promise<VoiceTestSt
   // in this request too — a server action does not inherit the page's.
   await primeStore();
   const user = await getCurrentUser();
+  const allowed = can(user, "voice.practice");
+  if (!allowed.ok) return { ok: false, message: allowed.message };
   const companyName = input.companyName.trim().slice(0, 140);
   const jobTitle = input.jobTitle.trim().slice(0, 160);
   const jobDescription = input.jobDescription.trim().slice(0, 4000);
