@@ -5,6 +5,7 @@ import { internal } from "../_generated/api";
 import { initiateFollowUpOutreach } from "./followUpHelper";
 import { requireJobAssignment, requireUser } from "../lib/permissions";
 import { assertNoPendingVoiceCall } from "../aiCalls/voiceCallGuards";
+import { colomboDayStart } from "../../src/lib/calendar";
 
 // Get AI Calls for Outreach dashboard
 export const getAiCalls = query({
@@ -52,15 +53,14 @@ export const getAiCalls = query({
       });
     }
 
+    // Colombo days, not the server's (UTC): "Today" left out every call made
+    // before 05:30 Colombo time (2 Oct).
     if (args.dateRange === "Today") {
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(c => c.calledAt >= startOfToday.getTime());
+      const startOfToday = colomboDayStart(Date.now());
+      filtered = filtered.filter(c => c.calledAt >= startOfToday);
     } else if (args.dateRange === "Last 7 Days") {
-      const startOf7Days = new Date();
-      startOf7Days.setDate(startOf7Days.getDate() - 7);
-      startOf7Days.setHours(0, 0, 0, 0);
-      filtered = filtered.filter(c => c.calledAt >= startOf7Days.getTime());
+      const startOf7Days = colomboDayStart(Date.now()) - 7 * 86_400_000;
+      filtered = filtered.filter(c => c.calledAt >= startOf7Days);
     }
 
     return filtered;
