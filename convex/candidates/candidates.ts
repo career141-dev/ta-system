@@ -461,9 +461,17 @@ export const updateCandidateFields = mutation({
      * cleared, and the candidate is not merged with anyone — the TA chose them.
      */
     fillBlanksOnly: v.optional(v.boolean()),
+    /**
+     * The CV came back to us at shortlists@ (2 Oct): our own Prepared CV, with
+     * the CAREER141 box on it. When it is someone we already hold, it writes
+     * nothing — not their details, not their CV file (a second box would be
+     * drawn over the first on the next Prepared CV). Someone not held is
+     * created as usual.
+     */
+    shortlistCopy: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const { candidateId, rawText, rawTextKey, jobHistory, embedding, hasEmbedding, fillBlanksOnly: keepDetails, ...candidateArgs } = args;
+    const { candidateId, rawText, rawTextKey, jobHistory, embedding, hasEmbedding, fillBlanksOnly: keepDetails, shortlistCopy, ...candidateArgs } = args;
 
     let pastJobTitles: string[] | undefined = undefined;
     if (jobHistory && jobHistory.length > 0) {
@@ -521,6 +529,9 @@ export const updateCandidateFields = mutation({
       }
       await ctx.db.delete(candidateId);
       targetId = survivor._id;
+      // A shortlist copy is only a record of what was sent: the person, their
+      // details and their CV file stay exactly as they were.
+      if (shortlistCopy) return { targetCandidateId: targetId, keptAsIs: true };
     }
     // ── END DEDUP ─────────────────────────────────────────────────────────────
 
