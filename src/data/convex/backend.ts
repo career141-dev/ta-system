@@ -218,7 +218,9 @@ export async function shortlist(
 }
 
 export async function moveStage(actor: Actor, applicationId: Id, stage: string, reason?: string) {
-  return convexMutation<{ success: boolean; stage: string }>("ta/applications:moveStage", {
+  // `ownerTaId` comes back, with success false, when a move into TA Follow-up
+  // finds another TA has already claimed them (convex/ta/applications.ts).
+  return convexMutation<{ success: boolean; stage: string; ownerTaId?: Id }>("ta/applications:moveStage", {
     actorId: requireActorId(actor),
     applicationId,
     stage,

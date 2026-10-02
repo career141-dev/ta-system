@@ -21,7 +21,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
-import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK, optionalActor} from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, isTaOnOwnDesk, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
 import { nextSetFor } from "../lib/sets";
@@ -135,7 +135,12 @@ export const shortlist = internalMutation({
  * The claim itself, shared with the headhunted-CV upload (ta/hhUpload.ts), so
  * a CV uploaded from TA Follow-up is claimed by exactly the same rule.
  */
-export async function claimForTa(ctx: MutationCtx, user: Doc<"users">, app: Doc<"applications">) {
+export async function claimForTa(
+  ctx: MutationCtx,
+  user: Doc<"users">,
+  app: Doc<"applications">,
+  reason = "Shortlisted by a TA",
+) {
   const appId = app._id;
   // Read and write inside one mutation: Convex runs it as a transaction, so
   // a second claimer arriving mid-flight is serialised behind this one and
@@ -173,7 +178,7 @@ export async function claimForTa(ctx: MutationCtx, user: Doc<"users">, app: Doc<
       applicationId: appId,
       targetStage: "follow_up" as PipelineStage,
       actorId: user._id,
-      reason: "Shortlisted by a TA",
+      reason,
       bypassRoleCheck: true,
       // Unless the opening's follow-up switch is off: a switch that says off
       // has to mean off. Every message still passes the outreach gate
@@ -260,6 +265,22 @@ export const moveStage = internalMutation({
         ? ["director", "primary_recruiter"]
         : WORKS_THE_DESK;
     await assertJobAccess(ctx, user, app.jobId, roles);
+
+    // Into TA Follow-up with nobody's name on them is a shortlist: whoever
+    // moves them claims them. That used to be a second call from the web app
+    // after the move, and it swallowed a refused claim — two TAs moving the
+    // same person both read "Moved" (2 Oct). Claimed here, in the move's own
+    // transaction, the second one is told who has them instead.
+    if (target === "follow_up") {
+      if (!app.ownerTaId) {
+        const claimed = await claimForTa(ctx, user, app, args.reason || undefined);
+        if (!claimed.ok) return { success: false, ownerTaId: claimed.ownerTaId, stage: toTaStage(app.currentStage) };
+        return { success: true, claimed: true, stage: toTaStage("follow_up") };
+      }
+      if ((app.ownerTaId as string) !== (user._id as string) && isTaOnOwnDesk(user)) {
+        return { success: false, ownerTaId: app.ownerTaId as string, stage: toTaStage(app.currentStage) };
+      }
+    }
     assertNotAnotherTasCandidate(user, app);
 
     const result = await executeStageTransition(ctx, {
