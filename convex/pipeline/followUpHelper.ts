@@ -5,6 +5,7 @@ import { internal } from "../_generated/api";
 import { adjustJobStageStat } from "../jobs/stats";
 import { buildStructuredEmailHtml, initialReachOutEmail } from "../communications/emailHtml";
 import { resolveRecipient } from "../lib/outreachSafety";
+import { emailFirstDelayMs } from "../lib/templateBudget";
 
 /**
  * Checks per-application follow-up completion flags.
@@ -500,8 +501,33 @@ export async function initiateFollowUpOutreach(
 
   } else {
     // === INITIAL OUTREACH FLOW (Day 0) ===
+    /*
+     * Email first, where the opening asks for it.
+     *
+     * Day 0 sent the WhatsApp template AND the email together, so every
+     * candidate cost a billable template even when the email alone would have
+     * done. With `whatsappAfterEmailDays` set, Day 0 is email only and the
+     * first WhatsApp waits for the nudge that many days later — and a
+     * candidate who answers the email never costs a template at all, because
+     * their reply opens the free window and the conversation carries on there
+     * (the reply channel is honoured since the fix on 23 September).
+     *
+     * Only when there IS an email to send. A candidate with a phone and no
+     * email still gets WhatsApp now, or they would hear nothing.
+     */
+    const emailFirstMs = emailFirstDelayMs(
+      (job as any).whatsappAfterEmailDays,
+      isEmailEnabled && !!candidate.email && resolveRecipient("email", candidate.email).ok,
+    );
+    if (emailFirstMs !== null) {
+      console.log(
+        `[Follow-up Outreach] Email first for "${job.title}": holding WhatsApp back ` +
+          `${Math.round(emailFirstMs / 3_600_000)}h for ${candidate.fullName ?? candidate._id}.`,
+      );
+    }
+
     // 1. WhatsApp Outreach
-    if (isWhatsAppEnabled) {
+    if (isWhatsAppEnabled && emailFirstMs === null) {
       // Guard: only send WhatsApp if the candidate has a phone number.
       // sendMetaTemplate will throw if phone is empty — guard here prevents a crash in the scheduler.
       const candidatePhone = (candidate.phone || "").replace(/\D/g, "");
@@ -580,11 +606,17 @@ export async function initiateFollowUpOutreach(
     const followUpState = app.followUpState;
     await ctx.db.patch(app._id, {
       followUpEnteredAt: app.followUpEnteredAt ?? now,
-      nextFollowUpScheduledAt: now + NUDGE_RESCHEDULE_MS, // Schedule next sweep
+      // With email first, the next sweep is when WhatsApp becomes due — that
+      // sweep is what sends the first template — rather than in 24 hours.
+      nextFollowUpScheduledAt: now + (emailFirstMs ?? NUDGE_RESCHEDULE_MS),
       followUpAttemptCount: 1, // Set attempt count to 1 (Day 0 outreach complete)
       followUpState: {
         lastContactDay: 0,
-        firstChannelUsed: followUpState?.firstChannelUsed ?? (isWhatsAppEnabled ? "whatsapp" : "email"),
+        // Email really was first when we held WhatsApp back, and the panel
+        // reads this to say which channel opened the conversation.
+        firstChannelUsed:
+          followUpState?.firstChannelUsed ??
+          (isWhatsAppEnabled && emailFirstMs === null ? "whatsapp" : "email"),
       },
     });
 
