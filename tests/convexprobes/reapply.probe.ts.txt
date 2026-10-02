@@ -1,0 +1,109 @@
+// Convex-level check for re-apply (B1) + one-CV-per-person. NOT run by `npm test`. To run: copy to convex/b1Probe.ts, deploy to the LOCAL backend only (node scripts/convex-local-only.mjs dev --once), `run b1Probe:run`, then delete the copy.
+import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { api, internal } from "./_generated/api";
+import { v } from "convex/values";
+
+const jobDoc = (uid: any, kw: string) => ({ title: "probe", clientName: "x", clientIndustry: "x", recruitmentType: "headhunting", isConfidential: false, jobDescription: "x", requiredSkills: [], seniorityLevel: "other", experienceMinYears: 0, location: "c", keyword: kw + Date.now(), status: "active", primaryRecruiterId: uid }) as any;
+
+export const seed = internalMutation({
+  args: { s1: v.id("_storage"), s2: v.id("_storage"), s3: v.id("_storage") },
+  handler: async (ctx, a): Promise<any> => {
+    const uid = await ctx.db.insert("users", { tokenIdentifier: "b1p" + Date.now(), email: "b1@probe.local", fullName: "P", role: "ta" } as any);
+    const jobId = await ctx.db.insert("jobs", jobDoc(uid, "P"));
+    const job2 = await ctx.db.insert("jobs", jobDoc(uid, "Q"));
+    const up = (storageId: any, name: string, hash: string) => ctx.db.insert("cvUploads", { storageId, storageProvider: "convex", fileName: name, fileSize: 1, fileType: "application/pdf", fileHash: hash, uploadedBy: "x", status: "processed" } as any);
+    const old = await up(a.s1, "old.pdf", "h-old");
+    const cid = await ctx.db.insert("candidates", { fullName: "Asha Perera", email: "asha@probe.local", phone: "0771234567", phoneClean: "771234567", cvUploadId: old, fileHash: "h-old" } as any);
+    const mkApp = (candidateId: any, jid: any, stage: string, cv?: any) => ctx.db.insert("applications", { candidateId, jobId: jid, sourceChannel: "linkedin", currentStage: stage, loopIteration: 0, isActive: stage !== "rejected", createdAt: Date.now(), ownerTaId: uid, cvFileId: cv } as any);
+    const appInterview = await mkApp(cid, jobId, "interview", old);
+    const app2 = await mkApp(cid, job2, "offer", old);
+    const rej = await ctx.db.insert("candidates", { fullName: "Rej One", email: "rej@probe.local" } as any);
+    const appRej = await mkApp(rej, jobId, "rejected");
+    const same = await ctx.db.insert("candidates", { fullName: "Asha Perera", email: "other.asha@probe.local", phone: "0719999999", phoneClean: "719999999" } as any);
+    const shared = await ctx.db.insert("candidates", { fullName: "Nimal Fernando", email: "shared@probe.local" } as any);
+    const ghost = await ctx.db.insert("candidates", { fullName: "Asha Perera" } as any);
+    const newUp = await up(a.s2, "new.pdf", "h-new");
+    const ghost2 = await ctx.db.insert("candidates", { fullName: "Sunil Silva" } as any);
+    const up2 = await up(a.s3, "shared.pdf", "h-shared");
+    return { jobId, job2, cid, old, newUp, appInterview, app2, rej, appRej, ghost, ghost2, up2, same, shared };
+  },
+});
+
+export const check = internalMutation({
+  args: { ids: v.any() },
+  handler: async (ctx, { ids: i }: any): Promise<any> => {
+    const out: any = {};
+    await ctx.runMutation(api.candidates.candidates.updateCandidateFields, { candidateId: i.ghost, fullName: "Asha Perera", email: "asha@probe.local", phone: "0771234567", cvUploadId: i.newUp, fileHash: "h-new" } as any);
+    const cand = await ctx.db.get(i.cid);
+    const a1: any = await ctx.db.get(i.appInterview);
+    const a2: any = await ctx.db.get(i.app2);
+    const oldRow: any = await ctx.db.get(i.old);
+    out.merge = { ghostDeleted: (await ctx.db.get(i.ghost)) === null, candidateCvIsNew: (cand as any)?.cvUploadId === i.newUp, app1CvIsNew: a1?.cvFileId === i.newUp, app2CvIsNew: a2?.cvFileId === i.newUp, oldRowStatus: oldRow?.status, oldRowFileCleared: !oldRow?.storageId, replacedBy: oldRow?.replacedByUploadId === i.newUp };
+    await ctx.runMutation(api.candidates.candidates.updateCandidateFields, { candidateId: i.ghost2, fullName: "Sunil Silva", email: "shared@probe.local", cvUploadId: i.up2, fileHash: "h-shared" } as any);
+    out.sharedEmailDifferentName = { ghostKept: (await ctx.db.get(i.ghost2)) !== null, otherPersonUntouched: ((await ctx.db.get(i.shared)) as any)?.fullName === "Nimal Fernando" };
+    const g3 = await ctx.db.insert("candidates", { fullName: "Asha Perera" } as any);
+    const u3 = await ctx.db.insert("cvUploads", { fileName: "x.pdf", fileSize: 1, fileType: "application/pdf", fileHash: "h3", uploadedBy: "x", status: "processed" } as any);
+    await ctx.runMutation(api.candidates.candidates.updateCandidateFields, { candidateId: g3, fullName: "Asha Perera", email: "third.asha@probe.local", phone: "0755555555", cvUploadId: u3, fileHash: "h3" } as any);
+    out.sameNameOnly = { ghostKept: (await ctx.db.get(g3)) !== null, otherAshaUntouched: ((await ctx.db.get(i.same)) as any)?.email === "other.asha@probe.local" };
+    const rows: any[] = [["interview", i.cid, i.jobId, i.appInterview], ["offer(job2)", i.cid, i.job2, i.app2], ["rejected", i.rej, i.jobId, i.appRej]];
+    for (const [label, cid, jobId, app] of rows) {
+      for (const ch of ["manual_upload", "folder_import", "database"]) {
+        await ctx.runMutation(api.applications.applications.createApplication, { candidateId: cid, jobId, sourceChannel: ch });
+      }
+      const x: any = await ctx.db.get(app);
+      out["reapply_" + label] = { stage: x.currentStage, active: x.isActive, reappliedMark: !!x.reappliedAt, ownerKept: !!x.ownerTaId };
+    }
+    out.applicationsForPersonOnJob1 = (await ctx.db.query("applications").withIndex("by_candidate_job", (q) => q.eq("candidateId", i.cid).eq("jobId", i.jobId)).collect()).length;
+    return out;
+  },
+});
+
+export const dup = internalMutation({
+  args: { held: v.id("cvUploads"), s4: v.id("_storage") },
+  handler: async (ctx, a): Promise<any> => {
+    const u = await ctx.db.insert("cvUploads", { storageId: a.s4, storageProvider: "convex", fileName: "new-again.pdf", fileSize: 1, fileType: "application/pdf", fileHash: "h-new", uploadedBy: "x", status: "processed" } as any);
+    const r: any = await ctx.runMutation(internal.cvs.cvReplace.reuseFile, { newUploadId: u, heldUploadId: a.held });
+    const row: any = await ctx.db.get(u);
+    const held: any = await ctx.db.get(a.held);
+    return { reused: r, rowPointsAtHeldFile: row?.storageId === held?.storageId };
+  },
+});
+
+export const storageExists = internalQuery({
+  args: { ids: v.array(v.id("_storage")) },
+  handler: async (ctx, a) => Promise.all(a.ids.map(async (id) => ((await ctx.db.system.get(id)) !== null))),
+});
+
+export const run = internalAction({
+  args: {},
+  handler: async (ctx): Promise<any> => {
+    await ctx.runMutation(internal.b1Probe.cleanup, {});
+    const s1 = await ctx.storage.store(new Blob(["old cv " + Date.now()]));
+    const s2 = await ctx.storage.store(new Blob(["new cv " + Date.now() + Math.random()]));
+    const s3 = await ctx.storage.store(new Blob(["shared cv " + Date.now()]));
+    const ids: any = await ctx.runMutation(internal.b1Probe.seed, { s1, s2, s3 });
+    const out: any = await ctx.runMutation(internal.b1Probe.check, { ids });
+    const s4 = await ctx.storage.store(new Blob(["new cv " + Date.now() + Math.random()]));
+    out.dup = await ctx.runMutation(internal.b1Probe.dup, { held: ids.newUp, s4 });
+    await new Promise((r) => setTimeout(r, 20000));
+    const ex = await ctx.runQuery(internal.b1Probe.storageExists, { ids: [s1, s2, s3, s4] });
+    out.filesStillStored = { oldCv_shouldBeFalse: ex[0], newCv_shouldBeTrue: ex[1], otherPersonsCv_shouldBeTrue: ex[2], duplicateCopy_shouldBeFalse: ex[3] };
+    return out;
+  },
+});
+
+export const cleanup = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    let n = 0;
+    for (const c of await ctx.db.query("candidates").collect()) {
+      const nm = (c.fullName ?? "");
+      if ((c.email ?? "").endsWith("@probe.local") || ["Asha Perera", "Sunil Silva", "Rej One", "Nimal Fernando"].includes(nm)) {
+        for (const a of await ctx.db.query("applications").withIndex("by_candidateId", (q) => q.eq("candidateId", c._id)).collect()) await ctx.db.delete(a._id);
+        await ctx.db.delete(c._id); n++;
+      }
+    }
+    for (const u of await ctx.db.query("cvUploads").withIndex("by_uploadedBy", (q) => q.eq("uploadedBy", "x")).collect()) await ctx.db.delete(u._id);
+    return n;
+  },
+});

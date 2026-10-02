@@ -25,7 +25,7 @@ import { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK } from "./guard";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "../pipeline/followUpHelper";
 import { toTaStage } from "./stages";
-import { autoFollowUpPatch, questionLabels, sameRoundAs } from "../lib/followUpScope";
+import { autoFollowUpPatch, justSent, questionLabels, sameRoundAs } from "../lib/followUpScope";
 
 /**
  * Send the next follow-up for one candidate: the Day 0 outreach if nothing has
@@ -75,6 +75,16 @@ export const send = internalMutation({
       channel,
       now,
     });
+    // Two presses on one candidate (two TAs, or a double click) are read one after
+    // the other here, so the second sees what the first recorded: nothing is sent
+    // twice, and no attempt is used up for it (2 Oct).
+    if (justSent({ attempts: before, lastManualSendAt: app.followUpLastManualSendAt, lastManualChannels: app.followUpLastManualChannels, channel, now })) {
+      return {
+        sent: false as const,
+        duplicate: true as const,
+        reason: `A follow-up was sent to this candidate a moment ago (follow-up ${before} of ${max}). Nothing was sent again.`,
+      };
+    }
     if (!sameRound && before >= max) {
       throw new Error(`All ${max} follow-ups have been sent. Call them, or mark them as dropped out.`);
     }

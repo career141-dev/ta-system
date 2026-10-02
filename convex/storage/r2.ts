@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { action, internalAction } from "../_generated/server";
 import { v } from "convex/values";
@@ -89,6 +89,30 @@ export const generateDownloadUrl = action({
  * Internal action used by backend (like WhatsApp webhook) to upload a buffer to R2
  * since we can't do this inside a mutation.
  */
+/**
+ * Remove a CV file that a newer CV of the same person replaced (2 Oct).
+ * Callers (cvs/cvReplace.ts) have already moved every record off the file, so
+ * this is the last step. A deployment with the outbound lock on never writes
+ * to the production bucket — it deletes only its own "convex:" files.
+ */
+export const deleteCvFile = internalAction({
+  args: { s3Key: v.optional(v.string()), storageId: v.optional(v.id("_storage")) },
+  handler: async (ctx, args) => {
+    const local = args.s3Key ? localId(args.s3Key) : null;
+    if (args.storageId || local) {
+      await ctx.storage.delete((args.storageId ?? local) as any).catch(() => undefined);
+      return "deleted-local";
+    }
+    if (!args.s3Key) return "nothing";
+    if (outboundLocked()) {
+      console.log(`[R2] outbound lock on — not deleting ${args.s3Key} from the bucket`);
+      return "skipped-locked";
+    }
+    await getS3Client().send(new DeleteObjectCommand({ Bucket: process.env.R2_BUCKET_NAME!, Key: args.s3Key }));
+    return "deleted-r2";
+  },
+});
+
 export const uploadBufferToR2 = internalAction({
   args: {
     fileName: v.string(),

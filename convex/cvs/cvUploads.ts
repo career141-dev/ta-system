@@ -839,3 +839,23 @@ export const recoverCreditDepletedCVs = mutation({
     };
   },
 });
+
+/** Take the right to read this upload. False when another run holds it and has not timed out. */
+export const lockExtraction = internalMutation({
+  args: { cvUploadId: v.id("cvUploads"), ttlMs: v.number() },
+  handler: async (ctx, args) => {
+    const upload = await ctx.db.get(args.cvUploadId);
+    if (!upload) return true; // nothing to guard; the run reports the missing upload itself
+    const now = Date.now();
+    if (upload.extractionLockedAt && now - upload.extractionLockedAt < args.ttlMs) return false;
+    await ctx.db.patch(args.cvUploadId, { extractionLockedAt: now });
+    return true;
+  },
+});
+
+export const unlockExtraction = internalMutation({
+  args: { cvUploadId: v.id("cvUploads") },
+  handler: async (ctx, args) => {
+    if (await ctx.db.get(args.cvUploadId)) await ctx.db.patch(args.cvUploadId, { extractionLockedAt: undefined });
+  },
+});

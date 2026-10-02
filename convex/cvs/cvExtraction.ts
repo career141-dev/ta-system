@@ -988,7 +988,30 @@ function nullToUndefined<T extends Record<string, unknown>>(
 // Core extraction pipeline — one CV at a time
 // ──────────────────────────────────────────────────
 
+/**
+ * One extraction per upload at a time (2 Oct). The upload flow schedules a run
+ * and the two-minute queue claims every row still marked "uploaded" — a row waiting
+ * for its scheduled run — so the same file was read twice at once: double model spend,
+ * two candidate stubs, and referees deleted and re-inserted under a TA. The second run
+ * now stands aside; the lock lapses on its own after the safety deadline.
+ */
 export async function runCvExtraction(
+  ctx: ActionCtx,
+  args: ExtractionArgs,
+): Promise<string | null> {
+  const got = await ctx.runMutation(internal.cvs.cvUploads.lockExtraction, { cvUploadId: args.cvUploadId, ttlMs: 240_000 });
+  if (!got) {
+    console.log(`[CvExtraction] Upload ${args.cvUploadId} is already being read by another run — standing aside.`);
+    return null;
+  }
+  try {
+    return await runCvExtractionLocked(ctx, args);
+  } finally {
+    await ctx.runMutation(internal.cvs.cvUploads.unlockExtraction, { cvUploadId: args.cvUploadId }).catch(() => undefined);
+  }
+}
+
+async function runCvExtractionLocked(
   ctx: ActionCtx,
   args: ExtractionArgs,
 ): Promise<string | null> {
@@ -1077,6 +1100,8 @@ export async function runCvExtraction(
         fileHash,
         candidateId: existingCandidate._id,
       }) as string | undefined | null;
+      // The same file again: keep the one already held, drop this copy (2 Oct).
+      await ctx.runMutation(internal.cvs.cvReplace.reuseFile, { newUploadId: cvUploadId, heldUploadId: existingCandidate.cvUploadId });
 
       if (jobId) {
         await ctx.runMutation(api.applications.applications.createApplication, {
