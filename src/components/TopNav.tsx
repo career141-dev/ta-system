@@ -13,6 +13,7 @@ import { SearchIcon } from "./icons";
 import { searchScopeFor } from "@/lib/searchScope";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
+import { allows } from "@/lib/auth";
 
 const NAV = [
   { href: "/clients", label: "Clients" },
@@ -96,7 +97,7 @@ export function TopNav({
       </Link>
 
       <nav className="flex items-center gap-1" style={{ marginLeft: 56 }}>
-        {NAV.map((n) => {
+        {NAV.filter((n) => n.href !== "/voice" || allows(user, "voice.practice")).map((n) => {
           const active = path.startsWith(n.href);
           return (
             <Link

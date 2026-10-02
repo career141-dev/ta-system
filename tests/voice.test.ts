@@ -3,7 +3,8 @@ import {
   acceptAnswer, applyPlan, freshTimestamp, modeState, nextStep, questionsFor,
   readEvent, verifySignature, writePolicy,
 } from "@/lib/voice";
-import type { AiCall, Candidate } from "@/data/types";
+import { can } from "@/lib/auth";
+import type { AiCall, Candidate, Role, User } from "@/data/types";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -124,6 +125,13 @@ eq("a replayed nonce does not",
 eq("no signature does not", verifySignature({ rawBody: body, timestamp: ts, nonce, signature: null, secret }), false);
 eq("a fresh timestamp passes", freshTimestamp(ts), true);
 eq("an hour-old one does not", freshTimestamp(String(Date.now() - 3_600_000)), false);
+
+console.log("\nvoice practice line");
+const seat = (role: Role): User => ({ id: "u", name: "U", initials: "U", role, isActive: true } as User);
+eq("a TA is refused", can(seat("ta"), "voice.practice").ok, false);
+for (const r of ["admin", "director", "ta_lead", "ops"] as Role[]) {
+  eq(`${r} keeps it`, can(seat(r), "voice.practice").ok, true);
+}
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

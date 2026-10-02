@@ -1,6 +1,7 @@
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
+import { can } from "@/lib/auth";
 import { VoiceTestPanel } from "@/components/voice/VoiceTestPanel";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +13,16 @@ export const dynamic = "force-dynamic";
  */
 export default async function VoicePage() {
   await primeStore();
-  await getCurrentUser();
+  const user = await getCurrentUser();
+  const d = can(user, "voice.practice");
+  if (!d.ok) {
+    return (
+      <main className="mx-auto w-full max-w-[1180px] px-8 py-8">
+        <h1 className="text-[21px] font-semibold tracking-tight">Voice agent</h1>
+        <p className="mt-1 text-[13px] text-ink-soft">{d.message}</p>
+      </main>
+    );
+  }
   const clients = new Map(repo.clients().map((c) => [c.id, c.name]));
   const openings = repo
     .openings()
