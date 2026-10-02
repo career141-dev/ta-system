@@ -4,7 +4,7 @@ import { repo } from "@/data/store";
 import { ProjectSidebar } from "@/components/ProjectSidebar";
 import { ContextBar } from "@/components/ContextBar";
 import { getCurrentUser } from "@/lib/session";
-import { seatFor, visiblePosts } from "@/lib/visibility";
+import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
 import { levelLabel } from "@/lib/linkViews";
@@ -27,7 +27,7 @@ export default async function OpeningLayout({
   if (!allows(user, "opening.read", { openingId: id, assignment })) notFound();
   // What this person is on this opening decides what the rail even offers.
   const seat = seatFor(user, assignment?.role ?? null);
-  const apps = repo.applications(id);
+  const apps = visibleToSeat(repo.applications(id), seat);
   // Two TAs on one opening each work their own posts — see lib/visibility.
   const posts = visiblePosts(repo.jobPosts(id), user).map((p) => ({
     id: p.id,

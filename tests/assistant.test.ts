@@ -34,7 +34,10 @@ eq("another TA's job is not in it", JSON.stringify(mine).includes(`/openings/${o
 console.log("\nthe counts are the records' counts");
 const o = repo.openings().find((x) => x.id === mine.openings[0].id)!;
 const snap = mine.openings[0] as any;
-eq("stage counts add up to the visible applications", Object.values(snap.byStage as Record<string, number>).reduce((a, b) => a + b, 0), repo.applications(o.id).length);
+// A TA's counts are their own desk — unclaimed plus theirs, never a colleague's (2 Oct).
+const { seatFor, visibleToSeat } = await import("@/lib/visibility");
+const deskOf = visibleToSeat(repo.applications(o.id), seatFor(ta, repo.assignmentFor(o.id, ta.id)?.role ?? null));
+eq("stage counts add up to the visible applications", Object.values(snap.byStage as Record<string, number>).reduce((a, b) => a + b, 0), deskOf.length);
 eq("follow-ups carry a name and a number", (snap.followUps ?? []).every((f: any) => typeof f.name === "string" && "phone" in f), true);
 
 console.log("\na director sees the desk");

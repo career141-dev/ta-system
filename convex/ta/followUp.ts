@@ -22,7 +22,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { outreachLive } from "../lib/outreachSafety";
 import { Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK } from "./guard";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "../pipeline/followUpHelper";
 import { toTaStage } from "./stages";
 import { autoFollowUpPatch, questionLabels, sameRoundAs } from "../lib/followUpScope";
@@ -44,6 +44,7 @@ export const send = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("That application no longer exists.");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    assertNotAnotherTasCandidate(user, app);
 
     const taStage = toTaStage(app.currentStage);
     if (taStage !== "ai_follow_up" && taStage !== "ta_follow_up") {
@@ -170,6 +171,7 @@ export const stop = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("That application no longer exists.");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    assertNotAnotherTasCandidate(user, app);
     await stopFollowUpSequenceForApp(ctx, appId);
     return { ok: true };
   },

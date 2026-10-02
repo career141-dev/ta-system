@@ -21,7 +21,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
-import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK, optionalActor} from "./guard";
 import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
 import { nextSetFor } from "../lib/sets";
@@ -260,6 +260,7 @@ export const moveStage = internalMutation({
         ? ["director", "primary_recruiter"]
         : WORKS_THE_DESK;
     await assertJobAccess(ctx, user, app.jobId, roles);
+    assertNotAnotherTasCandidate(user, app);
 
     const result = await executeStageTransition(ctx, {
       applicationId: appId,

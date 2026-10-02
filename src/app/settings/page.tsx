@@ -23,6 +23,7 @@ const OUTCOME: Record<NonNullable<MailIntakeStatus["recent"][number]["outcome"]>
   no_cv: { label: "No CV", tone: "bg-tag text-ink-soft" },
   skipped: { label: "Not an application", tone: "bg-tag text-ink-faint" },
   failed: { label: "Failed", tone: "bg-danger-soft text-danger" },
+  held: { label: "Held for a lead", tone: "bg-warn-soft text-warn" },
 };
 
 const STATUS_LABEL = { waiting: "Waiting", processing: "Reading", extracting: "Reading CV" } as const;
@@ -61,6 +62,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div className="min-w-0">
           <p className="truncate text-[14px] font-semibold">{m.taName ?? m.mailbox}</p>
           {m.taName && <p className="truncate text-[11.5px] text-ink-soft">{m.mailbox}</p>}
+          {m.kind === "shortlist" && (
+            <p className="mt-0.5 text-[11.5px] text-ink-soft">
+              Director and client shortlists — moves people on their opening, never files new applicants
+            </p>
+          )}
           <p className="mt-0.5 text-[11.5px] text-ink-faint">
             {m.enabled
               ? m.lastSyncError
@@ -171,7 +177,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
           {status && (
             <>
-              <div className="grid gap-4 lg:grid-cols-3">
+              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
                 {status.mailboxes.filter((m) => m.kind !== "ta").map(mailboxCard)}
               </div>
 

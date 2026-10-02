@@ -19,7 +19,7 @@ import { deliveryMode } from "../lib/outreachSafety";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, WORKS_THE_DESK, optionalActor} from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK, optionalActor} from "./guard";
 import { followUpOn } from "../lib/followUpScope";
 
 export const messagesFor = internalQuery({
@@ -147,6 +147,7 @@ export const recordCall = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("Application not found");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    assertNotAnotherTasCandidate(user, app);
 
     const id = await ctx.db.insert("callFeedback", {
       applicationId: appId,

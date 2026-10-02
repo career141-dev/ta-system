@@ -128,3 +128,32 @@ export async function assertJobAccess(
 
 /** The recruiter roles that may work an opening's pipeline. */
 export const WORKS_THE_DESK = ["primary_recruiter", "supporting_recruiter", "director"];
+
+/**
+ * Whether this person is a TA working their own desk, as the web app reads it
+ * (src/data/convex/map.ts): an explicit `taRole` wins, else the backend role.
+ * Leads, directors, admin and ops review the desk and are never narrowed.
+ */
+export function isTaOnOwnDesk(user: Doc<"users">): boolean {
+  const explicit = (user as { taRole?: string | null }).taRole;
+  if (explicit) return explicit === "ta";
+  return user.role === "recruiter" || user.role === "ta" || user.role === "test_ta";
+}
+
+/**
+ * The collision lock, held by the backend as well as by the web app.
+ *
+ * Two TAs on one opening work apart: a candidate one has claimed is theirs, and
+ * the other cannot move, message or call them. The web app refuses first
+ * (src/lib/auth.ts `opening.act`), from a copy of the data that can be up to
+ * thirty seconds old — this is the check made on the live row, in the same
+ * transaction as the write. A lead or director can still act (2 Oct).
+ */
+export function assertNotAnotherTasCandidate(
+  user: Doc<"users">,
+  app: { ownerTaId?: Id<"users"> | null },
+): void {
+  if (!app.ownerTaId || (app.ownerTaId as string) === (user._id as string)) return;
+  if (!isTaOnOwnDesk(user)) return;
+  throw new Error("Another recruiter has claimed this candidate.");
+}

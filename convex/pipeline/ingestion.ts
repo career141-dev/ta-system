@@ -26,6 +26,7 @@ export const processCvIngestion = mutation({
     jobPostId: v.optional(v.id("jobPosts")),
     alsoTo: v.optional(v.array(v.object({ jobId: v.id("jobs"), jobPostId: v.id("jobPosts") }))),
     routeNote: v.optional(v.string()),
+    shortlistCopy: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     const startTime = Date.now();
@@ -207,6 +208,7 @@ export const processCvIngestion = mutation({
       alsoAssignTo: args.alsoTo?.length ? args.alsoTo : undefined,
       routeNote: args.routeNote,
       uploadedBy: "system",
+      ...(args.shortlistCopy ? { shortlistCopy: true } : {}),
       status: "pending",
     });
 

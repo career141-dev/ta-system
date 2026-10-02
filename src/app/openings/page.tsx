@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { allows, isDeskWide } from "@/lib/auth";
+import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
 import { WorkingStageMenu } from "@/components/WorkingStageMenu";
 import { OpeningMenu } from "@/components/OpeningMenu";
@@ -219,7 +220,11 @@ export default async function OpeningsPage({
           )}
           {list.map((o) => {
             const client = clients.find((c) => c.id === o.clientId);
-            const c = stageCounts(o.id);
+            // Counted over this reader's own desk — a TA is not shown the other TA's numbers (2 Oct).
+            const oSeat = seatFor(user, repo.assignmentFor(o.id, user.id)?.role ?? null);
+            const c = oSeat.ownDeskOf
+              ? visibleToSeat(repo.applications(o.id), oSeat).reduce((m, a) => { m[a.stage] = (m[a.stage] ?? 0) + 1; return m; }, {} as ReturnType<typeof stageCounts>)
+              : stageCounts(o.id);
             // Each TA numbers their own sets, so the footer speaks for the TA
             // reading it, or for the whole opening on a desk-wide screen.
             const sets = setsForOpening(o.id, isDeskWide(user) ? undefined : user.id);

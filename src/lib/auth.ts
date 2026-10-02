@@ -165,6 +165,11 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       if (ctx.assignment?.role === "client_contact") {
         return deny("Sourcing is the desk's working-out, not the shortlist.");
       }
+      // A table row another TA added is theirs. Callers name an owner only for
+      // rows (repo.openingOf), so nothing else is narrowed by this (2 Oct).
+      if (ctx.assignment && ctx.ownerTaId && ctx.ownerTaId !== user.id && user.role === "ta") {
+        return deny("That row is another recruiter's. Their table is theirs to work.");
+      }
       return ctx.assignment ? ALLOW : deny("You are not on this opening.");
 
     case "opening.manage":

@@ -13,7 +13,7 @@
 
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
-import { assertJobAccess, requireActor, WORKS_THE_DESK } from "./guard";
+import { assertJobAccess, assertNotAnotherTasCandidate, requireActor, WORKS_THE_DESK } from "./guard";
 import { Id } from "../_generated/dataModel";
 
 export const createOutbound = internalMutation({
@@ -86,6 +86,11 @@ export const mayDispatch = internalQuery({
       await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
     } catch {
       return { ok: false, reason: "You are not on this opening, so you cannot contact its candidates." };
+    }
+    try {
+      assertNotAnotherTasCandidate(user, app);
+    } catch (e) {
+      return { ok: false, reason: (e as Error).message };
     }
     return { ok: true };
   },

@@ -6,7 +6,7 @@ import { SubmitButton as Submit } from "@/components/Submit";
 import { setOpeningAutoFollowUp, setOpeningQuestions } from "@/app/actions";
 import { repo, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { seatFor } from "@/lib/visibility";
+import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { ProjectHeader } from "../../ProjectHeader";
 import { CandidateList, applyFilters, type ListFilters } from "@/components/CandidateList";
 import { StatRow } from "@/components/StatRow";
@@ -47,11 +47,14 @@ export default async function StagePage({
   const seat = seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null);
   if (seat.stages !== null && !seat.stages.includes(s)) notFound();
 
-  const everyone = repo.applications(id).filter((a) => a.stage === s);
+  // A TA's stage page is their own candidates and the unclaimed ones; the
+  // other TA's are not on it. A lead's shows both (2 Oct).
+  const everyone = visibleToSeat(repo.applications(id), seat).filter((a) => a.stage === s);
   const apps = applyFilters(everyone, filters, user.id);
   const opening = repo.opening(id);
   if (!opening) notFound();
-  const sets = setsForOpening(id);
+  // Each TA numbers their own sets, so a TA sees theirs; a lead sees both.
+  const sets = setsForOpening(id, seat.ownDeskOf ?? undefined);
   const oldest = [...everyone].sort((a, b) => a.lastStageChangedAt - b.lastStageChangedAt)[0];
   const canManage = allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
   // Whoever works this opening can bring in a headhunted CV (the upload route

@@ -14,6 +14,14 @@ import type { RoutablePost } from "../lib/postRouting";
 export const DEFAULT_MAILBOXES = ["linkedin@career141.com", "cv@career141.com", "job@career141.com"];
 
 /**
+ * Where the Director's and the clients' shortlists arrive (29 Sep). Not an
+ * application inbox: a CV here is someone already in the pipeline being put
+ * forward, so it moves them to Director or Client Shortlist instead of filing
+ * them under New CVs. See convex/mailIntake/shortlist.ts.
+ */
+export const SHORTLIST_MAILBOX = "shortlists@career141.com";
+
+/**
  * A mailbox takes only mail received after it was switched on.
  *
  * The first version read 30 days back when a mailbox was turned on. On
@@ -54,6 +62,17 @@ export const ensureMailboxes = internalMutation({
           updatedAt: now,
         });
       }
+    }
+    const shortlist = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", SHORTLIST_MAILBOX)).first();
+    if (!shortlist) {
+      await ctx.db.insert("mailIntakeMailboxes", {
+        mailbox: SHORTLIST_MAILBOX,
+        kind: "shortlist",
+        enabled: false,
+        backfillFrom: now,
+        totals: { ...EMPTY_TOTALS },
+        updatedAt: now,
+      });
     }
     // A TA's own mailbox is not read any more (29 Sep): scoops are uploaded on
     // the opening's Scoops page. Any that were switched on are switched off.
@@ -162,7 +181,8 @@ export const recordMessages = internalMutation({
     // The grace lets the CV platform's poller go first on the shared
     // mailboxes; nothing else reads a TA's mailbox, so a scoop need not wait.
     const box = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", args.mailbox)).first();
-    const grace = box?.kind === "ta" ? 0 : GRACE_MS;
+    // Nor does anything else read shortlists@.
+    const grace = box?.kind === "ta" || box?.kind === "shortlist" ? 0 : GRACE_MS;
     for (const m of args.messages) {
       const seen = await ctx.db.query("mailIntakeMessages").withIndex("by_messageId", (q) => q.eq("messageId", m.messageId)).first();
       if (seen) continue;
@@ -238,6 +258,8 @@ type Outcome = NonNullable<Doc<"mailIntakeMessages">["outcome"]>;
 
 const TOTAL_KEY: Record<Outcome, keyof typeof EMPTY_TOTALS> = {
   filed: "filed", database: "database", duplicate: "duplicate", no_cv: "noCv", skipped: "skipped", failed: "failed",
+  // Held for a lead: on no opening yet, which is what the "database" count means.
+  held: "database",
 };
 
 async function finish(
@@ -256,7 +278,7 @@ async function finish(
 export const finishMessage = internalMutation({
   args: {
     id: v.id("mailIntakeMessages"),
-    outcome: v.union(v.literal("filed"), v.literal("database"), v.literal("duplicate"), v.literal("no_cv"), v.literal("skipped"), v.literal("failed")),
+    outcome: v.union(v.literal("filed"), v.literal("database"), v.literal("duplicate"), v.literal("no_cv"), v.literal("skipped"), v.literal("failed"), v.literal("held")),
     note: v.optional(v.string()),
     error: v.optional(v.string()),
     openingIds: v.optional(v.array(v.id("jobs"))),
@@ -303,6 +325,7 @@ export const markExtracting = internalMutation({
     openingIds: v.array(v.id("jobs")),
     jobPostId: v.optional(v.id("jobPosts")),
     route: v.optional(v.any()),
+    shortlist: v.optional(v.any()),
     note: v.optional(v.string()),
     scoopTaId: v.optional(v.id("users")),
     scoopFromUserId: v.optional(v.id("users")),
@@ -533,7 +556,8 @@ export const status = internalQuery({
       if (m.taUserId) taNames.set(m.taUserId as string, (await ctx.db.get(m.taUserId))?.fullName ?? m.mailbox);
     }
     // The shared mailboxes in their usual order, then the TAs'.
-    const order = (m: Doc<"mailIntakeMailboxes">) => (m.kind === "ta" ? DEFAULT_MAILBOXES.length : DEFAULT_MAILBOXES.indexOf(m.mailbox));
+    const order = (m: Doc<"mailIntakeMailboxes">) =>
+      m.kind === "shortlist" ? DEFAULT_MAILBOXES.length : m.kind === "ta" ? DEFAULT_MAILBOXES.length + 1 : DEFAULT_MAILBOXES.indexOf(m.mailbox);
     return {
       mailboxes: mailboxes
         .sort((a, b) => order(a) - order(b) || a.mailbox.localeCompare(b.mailbox))

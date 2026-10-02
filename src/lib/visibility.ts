@@ -155,6 +155,12 @@ export interface Seat {
   canAct: boolean;
   /** Which stages they may see at all. Null means every stage. */
   stages: Stage[] | null;
+  /**
+   * Set for a TA working an opening beside another: they see the unclaimed pool
+   * and their own candidates, never a colleague's. Null for everyone who
+   * reviews the desk — a lead has to see both TAs' work (2 Oct).
+   */
+  ownDeskOf?: string | null;
 }
 
 export function seatFor(user: User, assignment: AssignmentRole | null | undefined): Seat {
@@ -190,16 +196,37 @@ export function seatFor(user: User, assignment: AssignmentRole | null | undefine
       return { role: assignment, canSeeSourcing: true, canAct: true, stages: null };
     case "primary_recruiter":
     case "supporting_recruiter":
-      return { role: assignment, canSeeSourcing: true, canAct: true, stages: null };
+      return { role: assignment, canSeeSourcing: true, canAct: true, stages: null, ownDeskOf: user.role === "ta" ? user.id : null };
     default:
       // Not on this opening at all.
       return { role: null, canSeeSourcing: false, canAct: false, stages: [] };
   }
 }
 
-/** Narrows a list to the stages this seat may see. */
+/**
+ * Narrows a list to what this seat may see: its stages, and — for a TA — not a
+ * colleague's candidates. Every candidate list, the desk assistant and the
+ * candidate page pass through here, so two TAs on one job work apart without
+ * each screen having to remember it (2 Oct).
+ */
 export function visibleToSeat(apps: Application[], seat: Seat): Application[] {
-  if (seat.stages === null) return apps;
+  const mine = seat.ownDeskOf;
+  const owned = mine ? apps.filter((a) => !a.ownerTaId || a.ownerTaId === mine) : apps;
+  if (seat.stages === null) return owned;
   const allowed = new Set(seat.stages);
-  return apps.filter((a) => allowed.has(a.stage));
+  return owned.filter((a) => allowed.has(a.stage));
+}
+
+/**
+ * An Excel Tables row that is another TA's to work: added by a TA who is not
+ * the viewer. A row a lead put in is handed to the TAs, so it is nobody's.
+ * Leads, directors, admin and ops are never kept out of a row.
+ */
+export function rowIsAnotherTas(
+  row: Pick<LinkVaultEntry, "addedBy">,
+  user: User,
+  addedByDeskWide: (userId: string) => boolean,
+): boolean {
+  if (!isScoped(user)) return false;
+  return row.addedBy !== user.id && !addedByDeskWide(row.addedBy);
 }
