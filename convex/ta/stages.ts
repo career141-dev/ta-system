@@ -131,6 +131,22 @@ export function directorReviewBlockers(
   return blockers;
 }
 
+/** Stages before Director Review (second_shortlist), and the ones after it. */
+const BEFORE_REVIEW = ["new_cvs", "matched_candidates", "ta_shortlist", "ai_call", "follow_up"];
+const AFTER_REVIEW = ["director_shortlist", "client_review", "interview", "offer", "placed"];
+
+/**
+ * Whether a move must pass Director Review's details check (backend stage
+ * names). Entering Director Review always does; so, since 2 Oct, does going
+ * past it without stopping there — straight from Follow-up to the Director's
+ * or the client's shortlist skipped the check. Not when the reviewer's own
+ * shortlist is the decision (mailIntake/shortlist.ts).
+ */
+export function needsReviewDetails(from: string, to: string, decidedByReviewer = false): boolean {
+  if (to === "second_shortlist") return true;
+  return !decidedByReviewer && BEFORE_REVIEW.includes(from) && AFTER_REVIEW.includes(to);
+}
+
 const said = (v: unknown) => typeof v === "string" && v.trim().length > 0;
 
 /**
