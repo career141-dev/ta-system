@@ -19,6 +19,8 @@ import { MutationCtx, QueryCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { resolveActor } from "../lib/auth";
 import { FULL_ACCESS_ROLES } from "../lib/permissions";
+import { mapUser } from "../../src/data/convex/map";
+import { isDeskWide } from "../../src/lib/auth";
 
 /** The acting user, from a Clerk identity or an explicit actorId. */
 export async function requireActor(
@@ -138,6 +140,14 @@ export function isTaOnOwnDesk(user: Doc<"users">): boolean {
   const explicit = (user as { taRole?: string | null }).taRole;
   if (explicit) return explicit === "ta";
   return user.role === "recruiter" || user.role === "ta" || user.role === "test_ta";
+}
+
+/**
+ * A lead, director, admin or ops — read exactly as the web app reads them
+ * (src/lib/auth.ts `isDeskWide` over the role src/data/convex/map.ts maps).
+ */
+export function isDeskWideUser(user: Doc<"users">): boolean {
+  return isDeskWide(mapUser(user as never));
 }
 
 /**

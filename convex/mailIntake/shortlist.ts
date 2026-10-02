@@ -90,6 +90,8 @@ export const moveShortlisted = internalMutation({
         bypassRoleCheck: true,
         // Moving between shortlist stages never starts an outreach sequence.
         skipAutoOutreach: true,
+        // The reviewer's mail is the decision; Director Review's details are not asked for.
+        decidedByReviewer: true,
       });
       moved.push(candidateId);
     }

@@ -17,6 +17,7 @@
  */
 
 import type { Client, Id, JobPost, Opening, ReviewRound, User } from "@/data/types";
+import { colomboDayStart, colomboLocalToInstant } from "./calendar";
 
 // ──────────────────────────────────────────────────────────── normalisation ──
 
@@ -625,13 +626,15 @@ export function dateInSubject(subject: string): Date | null {
   return null;
 }
 
+/**
+ * Whether `a` was sent on the date written in the subject (`b`, a calendar
+ * date as parsed above). The date the desk writes is a Colombo date; the
+ * server's own day put a set sent before 05:30 Colombo time on the day
+ * before (2 Oct).
+ */
 function onSameDay(a: number, b: Date): boolean {
-  const x = new Date(a);
-  return (
-    x.getFullYear() === b.getFullYear() &&
-    x.getMonth() === b.getMonth() &&
-    x.getDate() === b.getDate()
-  );
+  const p = (n: number) => String(n).padStart(2, "0");
+  return colomboDayStart(a) === colomboLocalToInstant(`${b.getFullYear()}-${p(b.getMonth() + 1)}-${p(b.getDate())}`);
 }
 
 

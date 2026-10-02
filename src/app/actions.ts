@@ -222,8 +222,7 @@ export async function moveStage(formData: FormData) {
       }
       await afterBackendWrite(openingId);
       if (r && !r.ok) {
-        const owner = repo.users().find((u) => u.id === r!.ownerTaId)?.name ?? "another recruiter";
-        await fail(`${owner} has already claimed this candidate.`);
+        await fail(`Already shortlisted by ${userName(r.ownerTaId)}.`);
       }
       await done("Shortlisted — in TA Follow-up.");
     }
@@ -236,16 +235,17 @@ export async function moveStage(formData: FormData) {
     // The backend owns the pipeline: its state machine checks the move, stops
     // any running follow-up on the way out, and (by design) sends nothing on
     // the way in — follow-up is sent from the candidate's Chat tab.
-    const unowned = stage === "ta_follow_up" && !repo.application(appId)?.ownerTaId;
+    // Into TA Follow-up with nobody's name on them, the backend claims them
+    // for whoever moved them, in the same transaction (1 Oct, one call since
+    // 2 Oct): the loser of a race is told who has them, not "Moved".
+    let r: Awaited<ReturnType<typeof backend.moveStage>> | null = null;
     try {
-      await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
+      r = await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
     } catch (e) {
       await fail(backendMessage(e, "That move could not be made."));
     }
-    // In TA Follow-up with nobody's name on them, they were in no TA's sets or
-    // end-of-day and showed as not shortlisted (1 Oct): whoever moved them claims them.
-    if (unowned) await claimFor(user.id, appId);
     await afterBackendWrite(openingId);
+    if (r?.ownerTaId) await fail(`Already shortlisted by ${userName(r.ownerTaId)}.`);
     await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
   }
   const unowned = stage === "ta_follow_up" && !repo.application(appId)?.ownerTaId;
@@ -256,18 +256,9 @@ export async function moveStage(formData: FormData) {
   await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
 }
 
-/**
- * Claim someone just put in TA Follow-up with no owner (1 Oct). The same claim
- * as the Shortlist button — owner, set number — on someone already there, so
- * nothing is sent. A claim refused because someone else holds them is fine:
- * then they are already shortlisted.
- */
-async function claimFor(userId: string, appId: string): Promise<void> {
-  try {
-    await backend.shortlist({ id: userId }, appId);
-  } catch (e) {
-    console.warn(`[claim ${appId}]`, (e as Error).message);
-  }
+/** A user's name for a message, or a fair stand-in when they are not loaded. */
+function userName(id: string): string {
+  return repo.users().find((u) => u.id === id)?.name ?? "another recruiter";
 }
 
 // ─── Backend writes (Convex store) ───────────────────────────────────────────
@@ -288,15 +279,17 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
   }
   const targetStage: Stage = "ta_follow_up";
   if (isConvex()) {
+    // Brought back is taken on (1 Oct): with no owner they were in nobody's
+    // sets or end-of-day, and read as not shortlisted. The backend claims them
+    // as part of the move (2 Oct).
+    let r: Awaited<ReturnType<typeof backend.moveStage>>;
     try {
-      await backend.moveStage({ id: userId }, appId, targetStage, "Brought back");
+      r = await backend.moveStage({ id: userId }, appId, targetStage, "Brought back");
     } catch (e) {
       return { ok: false, message: backendMessage(e, "the move was refused.") };
     }
-    // Brought back is taken on (1 Oct): with no owner they were in nobody's
-    // sets or end-of-day, and read as not shortlisted.
-    if (!owner) await claimFor(userId, appId);
     await afterBackendWrite(openingId);
+    if (r?.ownerTaId) return { ok: false, message: `Already shortlisted by ${userName(r.ownerTaId)}.` };
     return { ok: true };
   }
   const r = repo.moveStage(appId, targetStage, userId, "Brought back");

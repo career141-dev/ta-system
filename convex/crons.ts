@@ -1,12 +1,39 @@
 import { cronJobs } from "convex/server";
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { adjustJobStageStat } from "./jobs/stats";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { sweepCovers } from "./lib/followUpScope";
 import { assignedTaEmail } from "./pipeline/followUpHelper";
+import { readCursor, writeCursor, readWindow, parseWindowCursor } from "./lib/cronCursor";
+import { executeStageTransition } from "./pipeline/pipelineStateMachine";
+import { directorReviewBlockers } from "./ta/stages";
+import type { MutationCtx } from "./_generated/server";
+
+/**
+ * A stage move the sweep makes, through the state machine like every other
+ * move. Patching `currentStage` here skipped what the state machine does on
+ * the way: a candidate closed as unresponsive stayed active with no reason,
+ * their pending reminders were not stopped, and no pipeline event recorded the
+ * move (2 Oct). Nothing is started on the way in — the sweep's own moves never
+ * sent anything, and still do not.
+ */
+async function sweepMove(
+  ctx: MutationCtx,
+  appId: Id<"applications">,
+  targetStage: "follow_up" | "second_shortlist" | "unresponsive",
+  reason: string,
+) {
+  await executeStageTransition(ctx, {
+    applicationId: appId,
+    targetStage,
+    actorId: "system",
+    reason,
+    bypassRoleCheck: true,
+    skipAutoOutreach: true,
+  });
+}
 
 const crons = cronJobs();
 
@@ -45,20 +72,33 @@ export const evaluateFollowUpStage = internalMutation({
     // would never be reached. Candidates with nothing sent yet are included:
     // shortlisting sends the first message, and the sweep covers the ones where
     // that did not happen.
-    const PER_JOB_STAGE = 10;
+    //
+    // Carried on from where the last run stopped (lib/cronCursor.ts), not
+    // the oldest ten per stage every time. Rows the sweep then passes over —
+    // flagged, do-not-contact, a TA opening waiting for its first Send — kept
+    // those ten places for ever: nobody from the eleventh on was reminded,
+    // advanced or closed, and once six openings filled the 60 no newer
+    // opening was reached at all (2 Oct). Flagged rows, which the sweep never
+    // touches, are left out of the read itself.
     const MAX_APPS_PER_RUN = 60;
-    const appsToEvaluate: any[] = [];
-    for (const job of followUpJobs) {
-      for (const stage of ["follow_up", "ta_shortlist"] as const) {
-        if (appsToEvaluate.length >= MAX_APPS_PER_RUN) break;
-        appsToEvaluate.push(
-          ...(await ctx.db
-            .query("applications")
-            .withIndex("by_job_stage", (i) => i.eq("jobId", job._id).eq("currentStage", stage))
-            .take(PER_JOB_STAGE)),
-        );
-      }
-    }
+    const cursorName = taOnly ? "followUpSweep.taOnly" : "followUpSweep";
+    const picked = await readWindow(
+      followUpJobs.flatMap((job) => (["follow_up", "ta_shortlist"] as const).map((stage) => `${job._id}|${stage}`)),
+      parseWindowCursor(await readCursor(ctx, cursorName)),
+      MAX_APPS_PER_RUN,
+      (key, after, n) => {
+        const [jobId, stage] = key.split("|");
+        return ctx.db
+          .query("applications")
+          .withIndex("by_job_stage", (i) =>
+            i.eq("jobId", jobId as Id<"jobs">).eq("currentStage", stage as any).gt("_creationTime", after),
+          )
+          .filter((q) => q.neq(q.field("flaggedForTaReview"), true))
+          .take(n);
+      },
+    );
+    await writeCursor(ctx, cursorName, picked.cursor ? JSON.stringify(picked.cursor) : null);
+    const appsToEvaluate: any[] = picked.rows;
 
     const now = Date.now();
     const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
@@ -93,6 +133,22 @@ export const evaluateFollowUpStage = internalMutation({
         candidateMap.set(uniqueCandidateIds[i], candidateDocs[i]);
       }
     }
+
+    /**
+     * AI Follow-up to TA Follow-up. The follow-up clock keeps running from
+     * when it started: the state machine restarts it on entering Follow-up,
+     * which would restart the CV pipeline's day-tier reminders and its 7-day
+     * close — more messages, not fewer.
+     */
+    const toTaFollowUp = async (app: any, reason: string) => {
+      await sweepMove(ctx, app._id, "follow_up", reason);
+      await ctx.db.patch(app._id, {
+        aiFollowUpNoReply: true,
+        nextFollowUpScheduledAt: undefined,
+        nextFollowUpMessage: undefined,
+        followUpEnteredAt: app.followUpEnteredAt,
+      });
+    };
 
     for (const app of appsToEvaluate) {
       // 1. Skip if application is flagged for TA review (automated nudging paused)
@@ -135,39 +191,12 @@ export const evaluateFollowUpStage = internalMutation({
 
         if (noContact || oneDayExpiredNoReply) {
           console.log(`[Follow-Up Cron] AI Follow-up ${app._id} ${noContact ? "has no contact info" : "did not reply within 1 day"}. Moving to TA Follow-up.`);
-          await ctx.db.patch(app._id, {
-            currentStage: "follow_up",
-            lastStageChangedAt: now,
-            aiFollowUpNoReply: true,
-            nextFollowUpScheduledAt: undefined,
-            nextFollowUpMessage: undefined,
-            stageHistory: [
-              ...(app.stageHistory ?? []),
-              {
-                stage: "follow_up",
-                enteredAt: new Date().toISOString(),
-                changedBy: "system" as any,
-                note: noContact
-                  ? "Moved to TA Follow-up: No phone or email available for AI follow-up."
-                  : "Moved to TA Follow-up: Candidate did not reply to AI follow-up within 1 day.",
-              },
-            ],
-          });
-          await ctx.db.insert("pipelineEvents", {
-            applicationId: app._id,
-            candidateId: app.candidateId,
-            jobId: app.jobId,
-            eventType: "ai_followup_no_reply_to_ta",
-            fromStage: "ta_shortlist",
-            toStage: "follow_up",
-            actorType: "system",
-            notes: noContact
-              ? "No phone or email available for AI follow-up. Transferred to TA Follow-up."
-              : "Candidate did not reply to AI follow-up within 1 day. Transferred to TA Follow-up.",
-            createdAt: now,
-          });
-          await adjustJobStageStat(ctx, app.jobId, "ta_shortlist", "follow_up");
-          await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+          await toTaFollowUp(
+            app,
+            noContact
+              ? "Moved to TA Follow-up: No phone or email available for AI follow-up."
+              : "Moved to TA Follow-up: Candidate did not reply to AI follow-up within 1 day.",
+          );
           continue;
         }
       }
@@ -183,84 +212,28 @@ export const evaluateFollowUpStage = internalMutation({
       if (currentAttempts >= maxAttempts && !lastReminderStillOpen) {
         if (app.currentStage === "ta_shortlist") {
           console.log(`[Follow-Up Cron] Max attempts (${maxAttempts}) reached for AI follow-up ${app._id}. Moving to TA Follow-up.`);
-          await ctx.db.patch(app._id, {
-            currentStage: "follow_up",
-            lastStageChangedAt: now,
-            aiFollowUpNoReply: true,
-            nextFollowUpScheduledAt: undefined,
-            stageHistory: [
-              ...(app.stageHistory ?? []),
-              {
-                stage: "follow_up",
-                enteredAt: new Date().toISOString(),
-                changedBy: "system" as any,
-                note: `Moved to TA Follow-up: Candidate did not reply after ${maxAttempts} AI follow-up attempts.`,
-              },
-            ],
-          });
-          await ctx.db.insert("pipelineEvents", {
-            applicationId: app._id,
-            candidateId: app.candidateId,
-            jobId: app.jobId,
-            eventType: "ai_followup_no_reply_to_ta",
-            fromStage: "ta_shortlist",
-            toStage: "follow_up",
-            actorType: "system",
-            notes: `Candidate did not reply after ${maxAttempts} AI follow-up attempts. Transferred to TA Follow-up.`,
-            createdAt: now,
-          });
-          await adjustJobStageStat(ctx, app.jobId, "ta_shortlist", "follow_up");
-          await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+          await toTaFollowUp(app, `Moved to TA Follow-up: Candidate did not reply after ${maxAttempts} AI follow-up attempts.`);
           continue;
         }
         console.log(`[Follow-Up Cron] Max attempts (${maxAttempts}) reached for application ${app._id}. Moving to unresponsive.`);
-        await ctx.db.patch(app._id, {
-          currentStage: "unresponsive",
-          lastStageChangedAt: now,
-          nextFollowUpScheduledAt: undefined,
-          stageHistory: [
-            ...(app.stageHistory ?? []),
-            {
-              stage: "unresponsive",
-              enteredAt: new Date().toISOString(),
-              changedBy: "system" as any,
-              note: `Auto-moved to Unresponsive: Reached max follow-up attempt limit (${maxAttempts} attempts).`,
-            },
-          ],
-        });
-        await ctx.db.insert("pipelineEvents", {
-          applicationId: app._id,
-          candidateId: app.candidateId,
-          jobId: app.jobId,
-          eventType: "unresponsive_max_attempts",
-          fromStage: app.currentStage,
-          toStage: "unresponsive",
-          actorType: "system",
-          notes: `Auto-moved to Unresponsive: Exceeded ${maxAttempts} max follow-up attempts.`,
-          createdAt: now,
-        });
-        await adjustJobStageStat(ctx, app.jobId, app.currentStage, "unresponsive");
-        await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+        await sweepMove(ctx, app._id, "unresponsive", `No reply after ${maxAttempts} follow-up attempts.`);
         continue;
       }
 
       // ── Per-application completion flags (not global candidate fields) ──────
       // Falls back to candidate record for legacy apps that predate the flags.
-      const hasCV =
-        app.followUpCvReceived === true ||
-        (app.followUpCvReceived === undefined && (!!candidate.cvUploadId || !!app.cvFileId));
-
+      // Complete means what Director Review accepts (ta/stages.ts): a CV,
+      // expected salary and notice, where words like "Negotiable" count, and
+      // current salary is not required. The sweep had its own stricter rule,
+      // so somebody the desk could send on was chased and closed (2 Oct).
+      const blockers = directorReviewBlockers(app, candidate);
+      const hasCV = !blockers.includes("a CV");
+      const hasExpectedSalary = !blockers.includes("expected salary");
+      const hasNoticePeriod = !blockers.includes("notice period");
+      // Still asked for in the reminders, but no longer holds anyone back.
       const hasCurrentSalary =
         app.followUpCurrentSalary === true ||
         (app.followUpCurrentSalary === undefined && candidate.currentSalary !== undefined);
-
-      const hasExpectedSalary =
-        app.followUpExpectedSalary === true ||
-        (app.followUpExpectedSalary === undefined && candidate.expectedSalary !== undefined);
-
-      const hasNoticePeriod =
-        app.followUpNoticePeriod === true ||
-        (app.followUpNoticePeriod === undefined && candidate.noticePeriodDays !== undefined);
 
       let customQuestionsComplete = true;
       const customQuestions = job.customFollowUpQuestions || [];
@@ -272,31 +245,25 @@ export const evaluateFollowUpStage = internalMutation({
         }
       }
 
-      const allFourComplete = hasCV && hasCurrentSalary && hasExpectedSalary && hasNoticePeriod && customQuestionsComplete;
+      const allComplete = blockers.length === 0 && customQuestionsComplete;
 
-      if (allFourComplete) {
-        // All data collected — auto-advance to Second Shortlist immediately
+      if (allComplete) {
+        // All data collected — auto-advance to Second Shortlist immediately.
+        // Current salary is not marked received: it is not required, and
+        // marking it said the candidate had given it (2 Oct).
         await ctx.db.patch(app._id, {
-          currentStage: "second_shortlist",
-          lastStageChangedAt: now,
           followUpCvReceived: true,
-          followUpCurrentSalary: true,
           followUpExpectedSalary: true,
           followUpNoticePeriod: true,
-          stageHistory: [
-            ...(app.stageHistory ?? []),
-            {
-              stage: "second_shortlist",
-              enteredAt: new Date().toISOString(),
-              changedBy: "system" as any,
-              note: customQuestions.length > 0 
-                ? "Auto-advanced from Follow-up: All standard data and custom questions confirmed."
-                : "Auto-advanced from Follow-up: All 4 standard data points confirmed.",
-            },
-          ],
         });
-        await adjustJobStageStat(ctx, app.jobId, app.currentStage, "second_shortlist");
-        await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
+        await sweepMove(
+          ctx,
+          app._id,
+          "second_shortlist",
+          customQuestions.length > 0
+            ? "Auto-advanced from Follow-up: CV, expected salary, notice period and custom questions confirmed."
+            : "Auto-advanced from Follow-up: CV, expected salary and notice period confirmed.",
+        );
         continue;
       }
 
@@ -308,20 +275,7 @@ export const evaluateFollowUpStage = internalMutation({
         : null;
 
       if (maxDaysMs && timeInStage >= maxDaysMs && !allFollowUpsPaused) {
-        // move to unresponsive
-        await ctx.db.patch(app._id, {
-          currentStage: "unresponsive",
-          lastStageChangedAt: now,
-          stageHistory: [
-            ...(app.stageHistory ?? []),
-            {
-              stage: "unresponsive",
-              enteredAt: new Date().toISOString(),
-              changedBy: "system" as any,
-              note: `Auto-moved to Unresponsive: Profile still incomplete after ${job.maxFollowUpDays} days.`,
-            },
-          ],
-        });
+        await sweepMove(ctx, app._id, "unresponsive", `Profile still incomplete after ${job.maxFollowUpDays} days.`);
         await ctx.db.patch(app._id, {
           followUpState: {
             lastContactDay: app.followUpState?.lastContactDay ?? 0,
@@ -329,8 +283,6 @@ export const evaluateFollowUpStage = internalMutation({
             replyChannel: "unresponsive",
           }
         });
-        await adjustJobStageStat(ctx, app.jobId, app.currentStage, "unresponsive");
-        await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
         continue;
       }
 
@@ -487,7 +439,7 @@ export const evaluateFollowUpStage = internalMutation({
 
       // A TA System opening runs on the scheduled reminders above only. The
       // day-tier flow below would send a second message on day 4 and 6 on top
-      // of them, and its email is logged as sent without being sent.
+      // of them.
       if (job.followUpStartsOnSend === true) continue;
 
       // --- LEGACY STATIC FLOW ---
@@ -497,19 +449,7 @@ export const evaluateFollowUpStage = internalMutation({
       // in the Follow-up tab. AI voice call is suspended.
       // Note: We suspend the 7-day expiration timer if ALL follow-up channels are globally paused.
       if (timeInStage >= SEVEN_DAYS_MS && !allFollowUpsPaused) {
-        await ctx.db.patch(app._id, {
-          currentStage: "unresponsive",
-          lastStageChangedAt: now,
-          stageHistory: [
-            ...(app.stageHistory ?? []),
-            {
-              stage: "unresponsive",
-              enteredAt: new Date().toISOString(),
-              changedBy: "system" as any,
-              note: "Auto-moved to Unresponsive: Profile still incomplete after 7 days in Follow-up.",
-            },
-          ],
-        });
+        await sweepMove(ctx, app._id, "unresponsive", "Profile still incomplete after 7 days in Follow-up.");
         await ctx.db.patch(app._id, {
           followUpState: {
             lastContactDay: app.followUpState?.lastContactDay ?? 0,
@@ -517,8 +457,6 @@ export const evaluateFollowUpStage = internalMutation({
             replyChannel: "unresponsive",
           }
         });
-        await adjustJobStageStat(ctx, app.jobId, app.currentStage, "unresponsive");
-        await ctx.scheduler.runAfter(0, internal.candidates.candidates.syncCandidateOverallStatusInternal, { candidateId: app.candidateId });
         continue;
       }
 
@@ -602,12 +540,14 @@ export const evaluateFollowUpStage = internalMutation({
       if (followUpState !== undefined && followUpState.lastContactDay >= targetDay) continue;
 
       let triggerWhatsApp = false;
-      let triggerEmail = false;
       let triggerAiCall = false;
 
+      // WhatsApp only. This flow also "sent" an email: it wrote a
+      // communications row marked sent and nothing ever delivered it, so the
+      // candidate's history showed emails they never got (2 Oct). The row is
+      // gone; no email is sent in its place.
       if (targetDay === 0 || targetDay === 4 || targetDay === 6) {
         triggerWhatsApp = !whatsappFollowUpPaused;
-        triggerEmail = !emailFollowUpPaused;
       } else if (targetDay === 2) {
         // AI voice call suspended (Sri Lankan phone number not yet available).
         // Backend code in elevenlabs.ts remains intact for future reactivation.
@@ -616,7 +556,7 @@ export const evaluateFollowUpStage = internalMutation({
       }
 
       // If all scheduled actions for this day are paused, skip the rest to avoid empty states
-      if (!triggerWhatsApp && !triggerEmail && !triggerAiCall) continue;
+      if (!triggerWhatsApp && !triggerAiCall) continue;
 
       // 3 & 4. Rate Limiting and Calling Hours for AI Calls
       if (triggerAiCall) {
@@ -652,43 +592,6 @@ export const evaluateFollowUpStage = internalMutation({
         missingFields.map(f => `• ${f}`).join("\n"),
         `Please share these at your earliest convenience. Thank you!`,
       ].join("\n\n");
-
-      if (triggerEmail) {
-        const formattedMissingFields = missingFields.map(f => `• ${f}`).join("\n");
-        const companyName = (configRow as any)?.brandName || "our company";
-
-        let emailSubject = `Action Required: Missing info for your ${job.title} application`;
-        if (job.followUpEmailSubjectTemplate) {
-          emailSubject = job.followUpEmailSubjectTemplate
-            .replace(/{candidate_name}/g, candidate.fullName || "there")
-            .replace(/{job_title}/g, job.title || "the role")
-            .replace(/{company_name}/g, companyName);
-        }
-
-        let emailBody = body;
-        if (job.enableEmailFollowUpTemplate && job.followUpEmailBodyTemplate) {
-          emailBody = job.followUpEmailBodyTemplate
-            .replace(/{candidate_name}/g, candidate.fullName || "there")
-            .replace(/{job_title}/g, job.title || "the role")
-            .replace(/{missing_fields}/g, formattedMissingFields)
-            .replace(/{company_name}/g, companyName);
-        }
-
-        await ctx.db.insert("communications", {
-          candidateId: app.candidateId,
-          jobId: app.jobId,
-          applicationId: app._id,
-          direction: "outbound",
-          channel: "email",
-          subject: emailSubject,
-          body: emailBody,
-          deliveryStatus: "sent",
-          sentAt: now,
-          stoppedSequence: false,
-          sequenceDay: targetDay,
-        });
-        console.log(`[Follow-up Day ${targetDay}] Sent email to ${candidate.fullName ?? "unknown"}`);
-      }
 
       if (triggerWhatsApp) {
         if (targetDay === 0) {
@@ -818,20 +721,35 @@ export const checkSlaBreaches = internalMutation({
     const configRow = await ctx.db.query("appSettings").withIndex("by_key", q => q.eq("key", "system")).first();
     if (configRow && configRow.autopilotEnabled === false) return;
 
-    const apps = await ctx.db.query("applications")
-      .withIndex("by_active", q => q.eq("isActive", true))
-      .take(500); // Safety cap: process max 500 per daily run
+    // Only the stages it has a limit for, on active openings, carried on from
+    // where the last run stopped (lib/cronCursor.ts). It read the 500 oldest
+    // active applications every day — whatever their stage or opening — so
+    // anything newer was never checked (2 Oct). Safety cap: 500 per run.
+    const SLA_STAGES = ["ta_shortlist", "director_shortlist", "client_review", "interview", "offer", "second_shortlist", "ai_call"];
+    const activeJobs = await ctx.db.query("jobs").withIndex("by_status", (q) => q.eq("status", "active")).collect();
+    const picked = await readWindow(
+      activeJobs.flatMap((job) => SLA_STAGES.map((stage) => `${job._id}|${stage}`)),
+      parseWindowCursor(await readCursor(ctx, "slaBreaches")),
+      500,
+      (key, after, n) => {
+        const [jobId, stage] = key.split("|");
+        return ctx.db
+          .query("applications")
+          .withIndex("by_job_stage", (i) =>
+            i.eq("jobId", jobId as Id<"jobs">).eq("currentStage", stage as any).gt("_creationTime", after),
+          )
+          .filter((q) => q.eq(q.field("isActive"), true))
+          .take(n);
+      },
+    );
+    await writeCursor(ctx, "slaBreaches", picked.cursor ? JSON.stringify(picked.cursor) : null);
 
-    const jobCache = new Map<string, any>();
+    const jobCache = new Map<string, any>(activeJobs.map((j) => [j._id as string, j]));
 
-    for (const app of apps) {
+    for (const app of picked.rows) {
       if (!app.lastStageChangedAt) continue;
 
-      let job = jobCache.get(app.jobId);
-      if (job === undefined) {
-        job = await ctx.db.get(app.jobId);
-        jobCache.set(app.jobId, job);
-      }
+      const job = jobCache.get(app.jobId);
       if (!job || job.status !== "active") continue;
 
       let slaLimit = 0;

@@ -14,10 +14,16 @@ export const HOLIDAYS: string[] = [];
 
 const WEEK_MS = 7 * 24 * 3_600_000;
 
+/**
+ * Whether the Colombo day containing `d` is a working day. Read on the
+ * Colombo clock, not the server's: the server runs on UTC, where Monday's
+ * first five and a half Colombo hours are still Sunday (2 Oct).
+ */
 export function isWorkingDay(d: Date): boolean {
-  const day = d.getDay();
+  const colombo = new Date(d.getTime() + COLOMBO_OFFSET_MS);
+  const day = colombo.getUTCDay();
   if (day === 0 || day === 6) return false;
-  return HOLIDAYS.length === 0 || !HOLIDAYS.includes(d.toISOString().slice(0, 10));
+  return HOLIDAYS.length === 0 || !HOLIDAYS.includes(colombo.toISOString().slice(0, 10));
 }
 
 /**
@@ -50,22 +56,17 @@ function countWorkingHours(from: number, to: number, stopAt: number): number {
   /*
    * Whole weeks, counted once.
    *
-   * Hour steps from `at` fall at the same local times on the same weekdays a
-   * week later, so a week's working hours repeat exactly — provided the
-   * server's clock offset did not change inside it (a daylight-saving switch
-   * moves every step against midnight) and no holiday falls in it. Holidays
-   * are checked by walking, so this only applies when there are none; the
-   * offset is checked at both ends of each reused week, and a change sends
-   * that week back to being walked.
+   * Hour steps from `at` fall at the same Colombo times on the same weekdays
+   * a week later — Colombo has no daylight saving — so a week's working hours
+   * repeat exactly, provided no holiday falls in it. Holidays are checked by
+   * walking, so this only applies when there are none.
    */
   if (HOLIDAYS.length === 0) {
-    const offsetAt = (t: number) => new Date(t).getTimezoneOffset();
     while (to - at >= 2 * WEEK && hours < stopAt) {
-      const base = offsetAt(at);
       const week = walk(at, at + WEEK, Infinity);
       hours += week;
       at += WEEK;
-      while (to - at >= 2 * WEEK && hours < stopAt && offsetAt(at) === base && offsetAt(at + WEEK) === base) {
+      while (to - at >= 2 * WEEK && hours < stopAt) {
         hours += week;
         at += WEEK;
       }
@@ -82,9 +83,9 @@ function walk(from: number, to: number, stopAt: number): number {
    * steps starting on the same day are counted together instead of one by one.
    *
    * Every step that starts before the next day boundary is judged by the same
-   * day, so they can be added in one go. Two boundaries matter, because the
-   * rule reads two clocks: the day of the week is the server's local day, and
-   * the holiday list is matched on the UTC date.
+   * day, so they can be added in one go. The boundary is Colombo midnight:
+   * both the weekday and the holiday list are read on the Colombo date (2 Oct;
+   * until then the server's local day and the UTC date).
    *
    * The hour-by-hour loop ran once per hour per application. The shortlist
    * alert asks it about every unscreened CV on the desk — about 7,000, many
@@ -96,15 +97,11 @@ function walk(from: number, to: number, stopAt: number): number {
   const HOUR = 3_600_000;
   let hours = 0;
   let at = from;
-  // Two Date objects reused for the whole walk rather than two per day.
+  // One Date object reused for the whole walk rather than one per day.
   const probe = new Date(from);
-  const midnight = new Date(from);
   while (at < to && hours < stopAt) {
     probe.setTime(at);
-    midnight.setTime(at);
-    midnight.setHours(24, 0, 0, 0);
-    const utcMidnight = Math.floor(at / 86_400_000) * 86_400_000 + 86_400_000;
-    const boundary = Math.min(midnight.getTime(), utcMidnight, to);
+    const boundary = Math.min(colomboDayStart(at) + 86_400_000, to);
     const steps = Math.max(1, Math.ceil((boundary - at) / HOUR));
     const end = Math.min(at + steps * HOUR, to);
     if (isWorkingDay(probe)) hours += (end - at) / HOUR;
@@ -124,7 +121,7 @@ export function nextWorkingDay(from = new Date()): Date {
 }
 
 /** Colombo is UTC+05:30 all year — no daylight saving to account for. */
-const COLOMBO_OFFSET_MS = 5.5 * 3_600_000;
+export const COLOMBO_OFFSET_MS = 5.5 * 3_600_000;
 
 /**
  * Midnight in Colombo for the day containing `at`, as an instant.
