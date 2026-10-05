@@ -165,7 +165,7 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
     return;
   }
 
-  const live = await ctx.runQuery(internal.mailIntake.model.livePosts, {});
+  const live = await ctx.runQuery(internal.mailIntake.model.livePosts, { withLinkOnly: true });
   const route = routeShared({ subject, body: parsed.text, linkedinOnly: sourceChannel === "linkedin" }, live);
   const openingIds = destinations(route).map((d) => d.jobId);
   const jobPostId = route ? (route.postId as Id<"jobPosts">) : undefined;
