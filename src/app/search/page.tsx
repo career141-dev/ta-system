@@ -29,14 +29,14 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const clients = repo.clients();
 
   return (
-    <main className="mx-auto max-w-[980px] px-8 py-9">
+    <main className="mx-auto max-w-[980px] px-4 sm:px-8 py-6 sm:py-9">
       <h1 className="text-[24px] font-semibold tracking-tight">
         {q ? <>Results for <span className="text-ink-soft">&ldquo;{q}&rdquo;</span></> : "Search"}
       </h1>
       {!q && <p className="mt-1.5 text-[13px] text-ink-soft">Type a name, a title or a company in the box above.</p>}
 
       {q && (
-        <div className="mt-7 grid gap-8 lg:grid-cols-2">
+        <div className="mt-7 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
           <section>
             <h2 className="mb-3 text-[13px] font-semibold">Openings <span className="ml-1 font-normal text-ink-faint">{found.openings.length}</span></h2>
             <div className="overflow-hidden rounded-2xl border border-rule bg-surface">

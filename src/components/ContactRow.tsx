@@ -63,7 +63,7 @@ export function ContactRow({
           autoFocus
           type={kind === "email" ? "email" : "tel"}
           placeholder={kind === "email" ? "name@company.com" : "+94 77 000 0000"}
-          className="w-[230px] rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-brand"
+          className="w-full sm:w-[230px] rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-brand"
         />
         <SubmitButton
           busy={save.pending}
@@ -89,14 +89,14 @@ export function ContactRow({
   const missing = !value;
 
   return (
-    <span className="group inline-flex items-center gap-2">
+    <span className="group inline-flex max-w-full flex-wrap items-center gap-2">
       <span className="w-4 shrink-0 text-ink-faint">{icon}</span>
       {missing ? (
         <span className="text-[13px] text-ink-faint">{kind === "email" ? "No email on file" : "No number on file"}</span>
       ) : (
         <a
           href={kind === "email" ? `mailto:${value}` : `tel:${value.replace(/[^\d+]/g, "")}`}
-          className="font-medium hover:text-accent hover:underline"
+          className="min-w-0 break-all font-medium hover:text-accent hover:underline"
         >
           {value}
         </a>
@@ -104,7 +104,7 @@ export function ContactRow({
       {save.result?.ok && <span className="text-[11.5px] text-brand">✓ Saved</span>}
 
       {!locked && (
-        <span className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+        <span className="flex items-center gap-1 opacity-0 [@media(hover:none)]:opacity-100 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
           <button
             type="button"
             onClick={() => setEditing(true)}
@@ -189,7 +189,7 @@ export function NameEditor({
         autoFocus
         maxLength={120}
         placeholder="Full name, as on the CV"
-        className="w-[260px] rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-brand"
+        className="w-full sm:w-[260px] rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[13px] outline-none focus:border-brand"
       />
       <SubmitButton
         busy={save.pending}

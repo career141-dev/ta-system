@@ -58,7 +58,7 @@ export default async function HeadhuntingOverview({ params }: { params: Promise<
 
       <section className="mb-9">
         <h2 className="mb-3 text-[13px] font-medium text-ink-soft">Next</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {next.map((s) => (
             <div key={s.title} className="flex flex-col justify-between rounded-xl border border-rule bg-surface p-5">
               <div>

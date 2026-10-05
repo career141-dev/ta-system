@@ -82,6 +82,17 @@
   padding: 2px 6px;
 }
 
+/* The top bar's height (lib/chrome.ts): the compact bar on phones and
+   tablets, the full one with the menu laid out from 1280px. */
+:root {
+  --header-h: 64px;
+}
+@media (min-width: 1280px) {
+  :root {
+    --header-h: 78px;
+  }
+}
+
 html,
 body {
   background: var(--color-paper);

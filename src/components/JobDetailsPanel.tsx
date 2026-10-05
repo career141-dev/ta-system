@@ -109,7 +109,7 @@ export function JobDetailsPanel({
 
           <div>
             <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Client &amp; recruitment</h3>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Client Industry" hint={mark("clientIndustry")}>
                 <Select
                   name="clientIndustry"
@@ -132,7 +132,7 @@ export function JobDetailsPanel({
 
           <div>
             <h3 className="mb-3 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-faint">Requirements</h3>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="sm:col-span-2">
                 <Field label="Location" hint={mark("location")}>
                   <input name="location" defaultValue={r.location ?? ""} required className={inputClass} placeholder="e.g. Colombo, Sri Lanka" />

@@ -146,7 +146,7 @@ export function DbCandidateDrawer({
             </header>
 
             {/* Main Content Grid: On file (left) & Openings/Add (right) */}
-            <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[1fr_320px]">
               {/* On File Card */}
               <section className="rounded-2xl border border-rule bg-surface px-6 py-5">
                 <h3 className="mb-3 text-[13px] font-semibold">On file</h3>

@@ -91,7 +91,7 @@ export function ClientMenu({
       {open && (
         <div
           role="menu"
-          className="absolute right-0 top-full z-50 mt-1 w-[218px] overflow-hidden rounded-xl border border-rule bg-surface py-1 shadow-lg"
+          className="absolute right-0 top-full z-50 mt-1 w-[218px] max-w-[calc(100vw-32px)] overflow-hidden rounded-xl border border-rule bg-surface py-1 shadow-lg"
         >
           <button className={item} onClick={() => { onPane("record"); setOpen(false); }}>
             Edit the client
@@ -214,7 +214,7 @@ export function ClientEditor({
     return (
       <form onSubmit={handleUpdateRecord} className="flex flex-col gap-3.5 border-t border-rule bg-paper/40 px-7 py-5">
         <input type="hidden" name="clientId" value={clientId} />
-        <fieldset disabled={isPending} className="grid gap-3.5 sm:grid-cols-2 disabled:opacity-60">
+        <fieldset disabled={isPending} className="grid grid-cols-[minmax(0,1fr)] gap-3.5 sm:grid-cols-2 disabled:opacity-60">
           <label>
             <span className="mb-1.5 block text-[11.5px] text-ink-soft">Company name</span>
             <input name="name" defaultValue={name} required autoFocus className={inputClass} />
@@ -272,7 +272,7 @@ export function ClientEditor({
 
       <fieldset disabled={isPending} className="flex flex-col gap-3 disabled:opacity-60">
         {rows.map((c, i) => (
-          <div key={i} className="grid items-end gap-2.5 sm:grid-cols-[1fr_1fr_1.2fr_auto_auto]">
+          <div key={i} className="grid grid-cols-[minmax(0,1fr)] items-end gap-2.5 sm:grid-cols-[1fr_1fr_1.2fr_auto_auto]">
             <input name="contactName" defaultValue={c.name} placeholder="Name" className={inputClass} />
             <input name="contactTitle" defaultValue={c.title} placeholder="Title" className={inputClass} />
             <input name="contactEmail" defaultValue={c.email} type="email" placeholder="Email" className={inputClass} />

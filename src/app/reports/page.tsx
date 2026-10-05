@@ -118,7 +118,7 @@ export default async function ReportsPage({
     : null;
 
   return (
-    <main className="mx-auto max-w-[1320px] px-8 pb-16 pt-9">
+    <main className="mx-auto max-w-[1320px] px-4 sm:px-8 pb-16 pt-6 sm:pt-9">
       <header className="mb-7">
         <h1 className="text-[26px] font-semibold tracking-tight">Reports</h1>
         <p className="mt-2 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">

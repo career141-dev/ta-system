@@ -160,7 +160,7 @@ export default async function OpeningsPage({
   const hasActiveFilters = Boolean(location || industry || clientId || (showTaFilter && taId) || q);
 
   return (
-    <main className="mx-auto max-w-[1180px] px-8 py-9">
+    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
       <div className="mb-7 flex items-end justify-between gap-6">
         <div>
           <h1 className="text-[24px] font-semibold tracking-tight">Openings</h1>

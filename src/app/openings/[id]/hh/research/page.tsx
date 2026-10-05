@@ -119,7 +119,7 @@ export default async function Page({
       )}
 
       <section className="rounded-xl border border-rule bg-surface px-6 py-6">
-        <div className="grid gap-5 sm:grid-cols-2">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           <ResearchField openingId={id} name="similarDesignation" label="Similar Designation" value={f.similarDesignation} edited={edited.has("similarDesignation")} />
           <ResearchField openingId={id} name="websiteLink" label="Website Link" value={f.websiteLink} edited={edited.has("websiteLink")} />
         </div>
@@ -128,7 +128,7 @@ export default async function Page({
           <ResearchField openingId={id} name="servicesProvider" label="Services Provider" value={f.servicesProvider} list edited={edited.has("servicesProvider")} />
         </div>
 
-        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+        <div className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           <ResearchField openingId={id} name="country" label="Country" value={f.country} edited={edited.has("country")} />
           <ResearchField openingId={id} name="location" label="Location" value={f.location} edited={edited.has("location")} />
         </div>
@@ -137,7 +137,7 @@ export default async function Page({
           <ResearchField openingId={id} name="competitors" label="Competitors" value={f.competitors} list edited={edited.has("competitors")} />
         </div>
 
-        <div className="mt-5 grid gap-5 sm:grid-cols-2">
+        <div className="mt-5 grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
           <ResearchField openingId={id} name="socialMedia" label="Social Media" value={f.socialMedia} edited={edited.has("socialMedia")} />
         </div>
 

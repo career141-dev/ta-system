@@ -109,7 +109,7 @@ export async function LiveFollowUp({
           </span>
         </div>
 
-        <ul className="mt-3 grid gap-1 sm:grid-cols-2">
+        <ul className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-1 sm:grid-cols-2">
           {checklist.map(([label, ok]) => (
             <li key={label} className="flex items-center gap-2 text-[12.5px]">
               <span className={ok ? "text-brand" : "text-ink-faint"}>{ok ? "✓" : "○"}</span>

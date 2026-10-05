@@ -86,7 +86,7 @@ export default async function EodPage({
   const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
 
   return (
-    <main className="mx-auto max-w-[1100px] px-8 py-9">
+    <div className="mx-auto max-w-[1100px] py-1 sm:px-8 sm:py-9">
       <div className="flex items-center justify-between">
         <Link
           href={`/openings/${id}`}
@@ -181,7 +181,7 @@ export default async function EodPage({
               shortlist box. It was reading a field the form never sent, so the
               check could never fire. */}
           <input type="hidden" name="to" value={repo.shortlistInbox()} />
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
             <label className="block">
               <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
                 From
@@ -318,6 +318,6 @@ export default async function EodPage({
           <Pager page={historyPage} pageSize={PAGE_SIZE} total={matchingHistory.length} href={pageLink(`/openings/${id}/eod`, sp)} />
         </section>
       )}
-    </main>
+    </div>
   );
 }

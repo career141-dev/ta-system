@@ -89,7 +89,7 @@ export function PeopleAdmin({
           action={inviteUser}
           className="mb-6 rounded-2xl border border-rule bg-surface px-6 py-5"
         >
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <label>
               <span className="mb-1.5 block text-[12px] text-ink-soft">Email</span>
               <input name="email" type="email" required autoFocus placeholder="nuha@career141.com" className={inputClass} />
@@ -152,7 +152,7 @@ export function PeopleAdmin({
 
       {adding && (
         <form action={addUser} className="mb-6 rounded-2xl border border-rule bg-surface px-6 py-5">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <label>
               <span className="mb-1.5 block text-[12px] text-ink-soft">Name</span>
               <input name="name" required autoFocus placeholder="Nuha Rizwan" className={inputClass} />
@@ -239,7 +239,7 @@ export function PeopleAdmin({
               {editing === u.id ? (
                 <form action={updateUser} className="flex flex-col gap-3">
                   <input type="hidden" name="userId" value={u.id} />
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-4">
                     <input name="name" defaultValue={u.name} required className={inputClass} />
                     <input name="email" defaultValue={u.email} type="email" className={inputClass} />
                     <input name="phone" defaultValue={u.phone ?? ""} className={inputClass} />

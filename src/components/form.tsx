@@ -519,7 +519,7 @@ export function ClientPicker({
       {/* Scrollable client grid (constrained height: exactly 4 cards / 2 rows visible) */}
       {filtered.length > 0 ? (
         <div className="max-h-[124px] overflow-y-auto pr-1">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
             {filtered.map((c) => {
               const on = c.id === value;
               return (

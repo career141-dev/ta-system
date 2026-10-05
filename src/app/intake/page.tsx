@@ -214,7 +214,7 @@ export default async function IntakePage({
   };
 
   return (
-    <main className="mx-auto max-w-[1120px] px-8 py-7">
+    <main className="mx-auto max-w-[1120px] px-4 sm:px-8 py-7">
       <PageHead
         title="CV intake"
         sub={`${waiting.length} waiting · ${counts.needs_review} need a second look`}
@@ -320,7 +320,7 @@ export default async function IntakePage({
         <h2 className="mb-3 text-[13.5px] font-semibold">Add one by hand</h2>
         <Card className="p-5">
           <form action={dropIntake} className="grid gap-3">
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
                   File name

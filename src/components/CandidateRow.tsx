@@ -53,12 +53,12 @@ export function CandidateRow({
   const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <>
       <dt className="text-[12.5px] text-ink-soft">{label}</dt>
-      <dd className="text-[12.5px] leading-[1.7]">{children}</dd>
+      <dd className="min-w-0 break-words text-[12.5px] leading-[1.7]">{children}</dd>
     </>
   );
 
   return (
-    <article className="flex gap-6 px-8 py-7">
+    <article className="flex flex-wrap gap-x-6 gap-y-4 px-4 py-5 sm:flex-nowrap sm:px-8 sm:py-7">
       {selectForm && (
         <span className="pt-1">
           <RowCheck form={selectForm} name="appId" value={app.id} label={candidate.fullName} />
@@ -68,7 +68,7 @@ export function CandidateRow({
           rather than as a column of cards bolted to the right. */}
       {score && <FitMark score={score} rank={rank} />}
 
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-[220px]">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
           <Link
             href={`/openings/${openingId}/candidate/${app.id}`}
@@ -116,7 +116,7 @@ export function CandidateRow({
 
         {score && <FitReason score={score} />}
 
-        <dl className="mt-4 grid grid-cols-[96px_1fr] gap-x-6 gap-y-3">
+        <dl className="mt-4 grid grid-cols-[84px_minmax(0,1fr)] gap-x-4 gap-y-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:gap-x-6">
           {candidate.age != null && (
             <Field label="Age">
               {ageText(candidate)}
@@ -146,7 +146,7 @@ export function CandidateRow({
         </dl>
       </div>
 
-      <div className="flex w-[196px] shrink-0 flex-col items-end gap-3.5 text-right">
+      <div className="flex w-full shrink-0 flex-col items-start gap-3.5 text-left sm:w-[196px] sm:items-end sm:text-right">
         {locked ? (
           <div className="rounded-lg border border-rule bg-paper px-3.5 py-3 text-[12px] leading-[1.7] text-ink-soft">
             {owner ? (

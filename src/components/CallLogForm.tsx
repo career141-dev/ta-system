@@ -44,7 +44,7 @@ export function CallLogForm({
       <input type="hidden" name="appId" value={applicationId} />
       <input type="hidden" name="openingId" value={openingId} />
       <p className="mb-3.5 text-[13px] font-semibold">Log a call</p>
-      <div className="grid gap-3.5 sm:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-3.5 sm:grid-cols-2">
         <label>
           <span className="mb-1.5 block text-[11.5px] text-ink-soft">Which call</span>
           <div className="relative">

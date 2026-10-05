@@ -95,7 +95,7 @@ export function WorkingStageMenu({
       {open && (
         <div
           role="menu"
-          className="absolute left-0 top-full z-50 mt-1.5 w-[200px] rounded-xl border border-rule bg-surface py-1 shadow-lg"
+          className="absolute left-0 top-full z-50 mt-1.5 w-[200px] max-w-[calc(100vw-32px)] rounded-xl border border-rule bg-surface py-1 shadow-lg"
         >
           <div className="border-b border-rule/60 px-3 py-1.5 text-[10.5px] font-medium text-ink-faint">
             Working Stage

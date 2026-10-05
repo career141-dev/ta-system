@@ -176,7 +176,7 @@ export function LinkVaultTable({
             {scoped.map(({ row: r, takenBy }) => (
               <div key={r.id}>
                 {takenBy && (
-                  <p className="flex items-center gap-2 border-b border-rule bg-paper px-8 py-2 text-[12px] text-ink-soft">
+                  <p className="flex items-center gap-2 border-b border-rule bg-paper px-4 py-2 text-[12px] text-ink-soft sm:px-8">
                     <span className="h-1.5 w-1.5 rounded-full bg-warn" />
                     Shortlisted by <span className="font-medium text-ink">{userNames[takenBy] ?? "another TA"}</span>
                     <span className="text-ink-faint">— leave this one alone</span>

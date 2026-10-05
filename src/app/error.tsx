@@ -12,7 +12,7 @@ import Link from "next/link";
  */
 export default function Error({ error, retry }: { error: Error & { digest?: string }; retry: () => void }) {
   return (
-    <main className="mx-auto max-w-[1100px] px-8 py-9">
+    <main className="mx-auto max-w-[1100px] px-4 sm:px-8 py-6 sm:py-9">
       <h1 className="text-[18px] font-semibold text-ink">This page could not load</h1>
       <p className="mt-2 max-w-[60ch] text-[13px] leading-relaxed text-ink-faint">
         Nothing you saved before this is lost. Try again — if it keeps happening, send the reference below to the

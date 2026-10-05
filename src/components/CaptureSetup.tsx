@@ -27,7 +27,7 @@ export function CaptureSetup() {
         </span>
       </summary>
 
-      <div className="mt-4 grid gap-5 border-t border-rule pt-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+      <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-5 border-t border-rule pt-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <ol className="flex list-decimal flex-col gap-1.5 pl-4 text-[12.5px] leading-relaxed text-ink-soft">
           <li>
             In Chrome, open <code className="rounded bg-paper px-1.5 py-0.5 text-[11.5px]">chrome://extensions</code>{" "}

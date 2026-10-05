@@ -313,7 +313,7 @@ export default async function CandidateDrawer({
       />
 
       <div className="fixed inset-y-0 left-0 right-0 z-50 flex flex-col bg-paper shadow-[-8px_0_40px_rgba(11,26,18,.18)] lg:left-[238px]">
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-rule bg-surface px-7 py-4">
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-rule bg-surface px-4 py-3 sm:px-7 sm:py-4">
           <h1 className="min-w-0 truncate text-[15px] font-semibold tracking-tight">
             From {client.name.toUpperCase()} - {opening.title} - {(owner?.name ?? "unclaimed").toUpperCase()}
           </h1>
@@ -329,15 +329,15 @@ export default async function CandidateDrawer({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-7 py-6">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-7 sm:py-6">
           <div className="mx-auto flex max-w-[1000px] flex-col">
 
-      <section className="grid gap-5 rounded-2xl border border-rule bg-surface p-6 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
-        <div className="flex gap-5">
-          <span className="grid h-[84px] w-[84px] shrink-0 place-items-center rounded-full bg-[#c9a227] text-[24px] font-semibold text-white">{initials}</span>
+      <section className="grid grid-cols-[minmax(0,1fr)] gap-5 rounded-2xl border border-rule bg-surface p-4 shadow-[0_1px_2px_rgba(23,28,24,0.04)] sm:p-6">
+        <div className="flex gap-3 sm:gap-5">
+          <span className="grid h-[52px] w-[52px] shrink-0 place-items-center rounded-full bg-[#c9a227] text-[17px] font-semibold text-white sm:h-[84px] sm:w-[84px] sm:text-[24px]">{initials}</span>
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-[22px] font-semibold tracking-tight">{c.fullName}</h2>
+              <h2 className="break-words text-[19px] font-semibold tracking-tight sm:text-[22px]">{c.fullName}</h2>
               <NameEditor name={c.fullName} candidateId={c.id} openingId={id} locked={locked} />
               <span className="rounded bg-tag px-1.5 py-[3px] text-[11px] font-medium text-ink-soft">{channelTag(app.sourcingChannel, cvSource(app, headhuntedCandidates(repo.linkVault(app.openingId))))}</span>
               {app.isAddOn && <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[11px] font-medium text-brand">Add-on</span>}
@@ -487,7 +487,7 @@ export default async function CandidateDrawer({
         />
       )}
 
-      <nav className="mt-4 flex gap-6 border-b border-rule px-1">
+      <nav className="mt-4 flex gap-5 overflow-x-auto whitespace-nowrap border-b border-rule px-1 sm:gap-6">
         {TABS.filter((t) => t !== "reference" || referees.length > 0 || Boolean(c.cvFileName || cvFile?.ok)).map((t) => {
           // A count on every tab that can have one, so a TA knows whether a tab
           // is worth opening before they open it.
@@ -728,7 +728,7 @@ export default async function CandidateDrawer({
                 No other candidates from <span className="font-medium text-ink-soft">{targetCompany}</span> found in the database.
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 {companyColleagues.map((colleague) => {
                   const apps = repo.applicationsForCandidate(colleague.id);
                   const latestApp = apps[0];

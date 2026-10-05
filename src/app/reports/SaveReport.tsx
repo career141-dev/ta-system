@@ -31,7 +31,7 @@ export function SaveReport({ spec, suggested }: { spec: string; suggested: strin
         autoFocus
         defaultValue={suggested}
         placeholder="Name it"
-        className={`${inputClass} w-[220px] py-1.5`}
+        className={`${inputClass} w-full sm:w-[220px] py-1.5`}
       />
       <label className="flex items-center gap-1.5 text-[12px] text-ink-soft">
         <input type="checkbox" name="shared" value="1" />

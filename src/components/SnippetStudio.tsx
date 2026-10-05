@@ -222,9 +222,9 @@ export function SnippetStudio({
     "rounded-lg border border-rule bg-surface px-2 py-1.5 text-[12px] outline-none cursor-pointer";
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[232px_minmax(0,1fr)] lg:items-start">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[232px_minmax(0,1fr)] lg:items-start">
       {/* ─── rail ──────────────────────────────────────────────────────── */}
-      <aside className="flex flex-col gap-5 lg:sticky" style={{ top: RAIL_TOP + 16 }}>
+      <aside className="flex flex-col gap-5 lg:sticky" style={{ top: `calc(${RAIL_TOP} + 16px)` }}>
         <section className="rounded-xl border border-rule bg-surface p-4">
           <h2 className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">
             Job level
@@ -463,7 +463,7 @@ export function SnippetStudio({
           )}
         </div>
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_180px] xl:items-start">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-5 xl:grid-cols-[minmax(0,1fr)_180px] xl:items-start">
           <SnippetStage
             fields={fields}
             layout={layout}

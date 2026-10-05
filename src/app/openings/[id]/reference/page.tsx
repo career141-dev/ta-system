@@ -49,7 +49,7 @@ export default async function ReferencePage({
         ]}
       />
 
-      <div className="grid gap-8 xl:grid-cols-[1fr_330px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 xl:grid-cols-[1fr_330px]">
         <section className="rounded-2xl border border-rule bg-surface">
           <header className="border-b border-rule px-7 py-5">
             <h2 className="text-[14px] font-semibold">References — for the candidates in Follow-up and after</h2>

@@ -200,7 +200,7 @@ export default async function OverviewPage({
         </section>
       )}
 
-      <div className="grid gap-12 lg:grid-cols-[1fr_270px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-12 lg:grid-cols-[1fr_270px]">
         <section>
           <h2 className="mb-3 text-[13px] font-medium text-ink-soft">Pipeline</h2>
           <div className="rounded-xl border border-rule bg-surface px-5">

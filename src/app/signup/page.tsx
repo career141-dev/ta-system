@@ -21,7 +21,7 @@ export default async function SignUpPage() {
   if (await currentUser()) return <ReloadWhenSignedIn />;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[440px] flex-col justify-center px-6 py-16">
+    <main className="mx-auto flex min-h-screen w-full max-w-[440px] flex-col justify-center px-4 sm:px-6 py-16">
       <div className="mb-7">
         <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-faint">Career141</div>
         <h1 className="mt-1 text-[22px] font-semibold tracking-tight">Accept your invite</h1>

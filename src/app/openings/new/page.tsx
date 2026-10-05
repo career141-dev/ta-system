@@ -19,7 +19,7 @@ export default async function NewOpeningPage({
   const initialClientId = client || clientId || null;
 
   return (
-    <main className="mx-auto max-w-[720px] px-8 py-10">
+    <main className="mx-auto max-w-[720px] px-4 sm:px-8 py-6 sm:py-10">
       <Link href="/openings" className="text-[12.5px] text-ink-soft transition-colors hover:text-ink">
         ← Openings
       </Link>

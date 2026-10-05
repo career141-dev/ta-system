@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ROLE_LABEL } from "@/data/types";
 import type { User } from "@/data/types";
 import { SignOut } from "./SignOut";
@@ -52,15 +52,43 @@ export function TopNav({
   const path = usePathname();
   const params = useSearchParams();
   const [open, setOpen] = useState(false);
+  // Below 1280px the links and the search fold into one menu button (5 Oct,
+  // mobile): seven links and a 300px box do not fit a phone or a tablet.
+  const [menu, setMenu] = useState(false);
+  useEffect(() => setMenu(false), [path]);
   // The box searches the list on this page — clients on Clients, the stage's
   // candidates on a stage — keeping the page's own filters and tab.
   const scope = searchScopeFor(path);
   const onThisPage = scope.action !== "/search" || path === "/search";
   const current = onThisPage ? params.get("q") ?? "" : "";
 
+  const links = NAV.filter((n) => n.href !== "/voice" || allows(user, "voice.practice"));
+  const badge = alertCount > 0 && (
+    <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
+      {alertCount}
+    </span>
+  );
+  const searchBox = (where: string, width: string) => (
+    <form action={scope.action} method="GET" className={`relative ${where}`}>
+      {scope.keep.map((k) => {
+        const v = params.get(k);
+        return v ? <input key={k} type="hidden" name={k} value={v} /> : null;
+      })}
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"><SearchIcon /></span>
+      <input
+        key={`${scope.action}|${current}`}
+        name="q"
+        defaultValue={current}
+        aria-label={scope.placeholder}
+        placeholder={scope.placeholder}
+        className={`${width} rounded-full border border-rule bg-paper py-2 pl-9 pr-4 text-[13px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand-line focus:bg-surface`}
+      />
+    </form>
+  );
+
   return (
     <header
-      className="sticky top-0 z-40 flex items-center border-b border-rule bg-surface px-8"
+      className="sticky top-0 z-40 flex items-center border-b border-rule bg-surface px-4 sm:px-6 xl:px-8"
       style={{ height: HEADER_H }}
     >
       {/*
@@ -91,49 +119,27 @@ export function TopNav({
           height={152}
           priority
           unoptimized
-          className="w-auto"
-          style={{ height: 54 }}
+          className="h-[40px] w-auto xl:h-[54px]"
         />
       </Link>
 
-      <nav className="flex items-center gap-1" style={{ marginLeft: 56 }}>
-        {NAV.filter((n) => n.href !== "/voice" || allows(user, "voice.practice")).map((n) => {
-          const active = path.startsWith(n.href);
-          return (
-            <Link
-              key={n.href}
-              href={n.href}
-              className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-[14px] transition-colors ${
-                active ? "bg-paper font-semibold text-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
-              }`}
-            >
-              {n.label}
-              {n.href === "/alerts" && alertCount > 0 && (
-                <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
-                  {alertCount}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+      <nav className="ml-[56px] hidden items-center gap-1 xl:flex">
+        {links.map((n) => (
+          <Link
+            key={n.href}
+            href={n.href}
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-[14px] transition-colors ${
+              path.startsWith(n.href) ? "bg-paper font-semibold text-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
+            }`}
+          >
+            {n.label}
+            {n.href === "/alerts" && badge}
+          </Link>
+        ))}
       </nav>
 
-      <div className="ml-auto flex items-center gap-4">
-        <form action={scope.action} method="GET" className="relative hidden md:block">
-          {scope.keep.map((k) => {
-            const v = params.get(k);
-            return v ? <input key={k} type="hidden" name={k} value={v} /> : null;
-          })}
-          <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint"><SearchIcon /></span>
-          <input
-            key={`${scope.action}|${current}`}
-            name="q"
-            defaultValue={current}
-            aria-label={scope.placeholder}
-            placeholder={scope.placeholder}
-            className="w-[300px] rounded-full border border-rule bg-paper py-2 pl-9 pr-4 text-[13px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand-line focus:bg-surface"
-          />
-        </form>
+      <div className="ml-auto flex items-center gap-1 sm:gap-3 xl:gap-4">
+        {searchBox("hidden xl:block", "w-[300px]")}
 
         <NotificationBell />
 
@@ -176,7 +182,40 @@ export function TopNav({
             </div>
           )}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setMenu((v) => !v)}
+          aria-expanded={menu}
+          aria-label={menu ? "Close menu" : "Open menu"}
+          className="relative grid h-[40px] w-[40px] place-items-center rounded-lg text-ink hover:bg-paper xl:hidden"
+        >
+          <svg width={20} height={20} viewBox="0 0 20 20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+            {menu ? <path d="M5 5l10 10M15 5L5 15" /> : <path d="M3 5.5h14M3 10h14M3 14.5h14" />}
+          </svg>
+          {!menu && alertCount > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-danger" />}
+        </button>
       </div>
+
+      {menu && (
+        <div className="absolute inset-x-0 top-full max-h-[calc(100dvh-var(--header-h))] overflow-y-auto border-b border-rule bg-surface px-4 pb-4 pt-3 shadow-lg sm:px-6 xl:hidden">
+          {searchBox("mb-3", "w-full")}
+          <nav className="grid gap-0.5">
+            {links.map((n) => (
+              <Link
+                key={n.href}
+                href={n.href}
+                className={`flex items-center justify-between rounded-lg px-3 py-2.5 text-[14px] ${
+                  path.startsWith(n.href) ? "bg-paper font-semibold text-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
+                }`}
+              >
+                {n.label}
+                {n.href === "/alerts" && badge}
+              </Link>
+            ))}
+          </nav>
+        </div>
+      )}
     </header>
   );
 }
