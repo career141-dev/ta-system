@@ -44,6 +44,13 @@ const RULES_FLOOR = FIT_BANDS.worth;
 const CLOSE_IN_MEANING = 0.75;
 const MEANING_FLOOR = 50;
 const SIX_MONTHS = 182 * 86_400_000;
+/**
+ * How many people the model scores beyond the room on the list, and the most
+ * it is ever sent at once — every person costs output on the Claude
+ * subscription (5 Oct).
+ */
+const CLAUDE_EXTRA = 10;
+const CLAUDE_POOL_MAX = 40;
 
 export interface MatchResult {
   ok: boolean;
@@ -153,27 +160,35 @@ async function matchViaEngine(
   const waiting = repo.applications(o.id).filter((a) => a.stage === "matched" && !a.ownerTaId).length;
   const room = Math.max(0, LIMITS.shown - waiting);
   const by = o.assignedTaIds?.[0] ?? repo.users().find((u) => u.role === "director")?.id ?? "system";
-  const toAdd = kept.slice(0, room);
-
-  // The one line a TA reads on Database CVs (5 Oct). Claude writes it for the
-  // people being added, and only them (DeepSeek when Claude cannot); it
-  // changes nobody's place in the list.
-  const { claudeMatchOn, claudeMatchReasons } = await import("./claudeMatch");
-  const claudeOn = claudeMatchOn() && toAdd.length > 0;
-  const written = claudeOn
-    ? await claudeMatchReasons(
+  /*
+   * Claude scores, and its score decides who is added and in what order
+   * (5 Oct, the owner's request; DeepSeek when Claude cannot). It is shown the
+   * engine's best after the desk's rules — a few more than there is room for,
+   * so it can change who makes the list without a large prompt — and answers
+   * with each person's number, a score and a reason, nothing else. When
+   * neither model answers, the engine's order and scores stand as before.
+   */
+  const { claudeMatchOn, claudeMatchScores, pickByScore } = await import("./claudeMatch");
+  const pool = room > 0 ? kept.slice(0, Math.min(room + CLAUDE_EXTRA, CLAUDE_POOL_MAX)) : [];
+  const claudeOn = claudeMatchOn() && pool.length > 0;
+  const judged = claudeOn
+    ? await claudeMatchScores(
         { title: o.title, industry: repo.client(o.clientId)?.industry ?? null, jdText: o.jdMarkdown, req },
-        toAdd.map((k) => k.candidate),
+        pool.map((k) => k.candidate),
       ).catch(() => null)
     : null;
+  const picked = judged ? pickByScore(pool, judged.results, room, RULES_FLOOR) : null;
+  const toAdd = picked ? picked.chosen : kept.slice(0, room);
 
   let added = 0;
   repo.batch(() => {
     for (const k of toAdd) {
+      const verdict = judged?.results.get(k.candidate.id);
       const res = repo.addCandidateToOpening(k.candidate.id, o.id, by, null, {
         kind: "auto_match",
-        note: `Matched from the database — fit ${k.row.overallScore}. ${k.row.reason ?? ""}`.trim(),
-        reason: written?.reasons.get(k.candidate.id) ?? k.row.reason ?? "",
+        note: `Matched from the database — fit ${verdict?.score ?? k.row.overallScore}. ${verdict?.reason ?? k.row.reason ?? ""}`.trim(),
+        reason: verdict?.reason ?? k.row.reason ?? "",
+        score: verdict?.score,
       });
       if (res.ok) added++;
     }
@@ -193,9 +208,10 @@ async function matchViaEngine(
       failedNote ? `Ruled out by the desk's rules: ${failedNote}.` : null,
       room === 0 ? `${waiting} matches already waiting, so none added.` : null,
       claudeOn
-        ? written
-          ? `Reasons written by ${written.by === "claude" ? "Claude" : "DeepSeek (Claude unavailable)"} for ${toAdd.filter((k) => written.reasons.has(k.candidate.id)).length} of ${toAdd.length}.`
-          : "Claude and DeepSeek unavailable — engine reasons shown."
+        ? judged && picked
+          ? `Scored by ${judged.by === "claude" ? "Claude" : "DeepSeek (Claude unavailable)"}: ${pool.length} looked at, ${picked.chosen.length} added` +
+            `${picked.under ? `, ${picked.under} under ${RULES_FLOOR}` : ""}${picked.unscored ? `, ${picked.unscored} not answered for` : ""}.`
+          : "Claude and DeepSeek unavailable — engine scores and reasons used."
         : null,
     ].filter(Boolean).join(" ") || null,
   };
