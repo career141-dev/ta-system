@@ -26,6 +26,12 @@ import { readClaudeUsage, shadowCostUsd, totalTokens } from "./claudeUsage";
  *    so a candidate's details never reach a personal account.
  *  - searching: Claude's own web search, as the first engine behind every
  *    search the desk makes, when C141_CLAUDE_SEARCH=on (claudeWebSearch).
+ *
+ * And one more, by the owner's decision on 5 Oct: the one-line reason on each
+ * database match (lib/claudeMatch, its own switch C141_CLAUDE_MATCH). That
+ * prompt does carry candidates, so it sends a numbered summary of each — work,
+ * years, skills, place — and never a name, phone, email, LinkedIn or CV text.
+ * The gate below is unchanged: no other candidate task comes here.
  */
 const SAFE: ReadonlySet<Task> = new Set<Task>(["plan", "research", "jd"]);
 const TIMEOUT_MS = 120_000;
@@ -39,8 +45,21 @@ export function viaSubscription(task: Task): boolean {
   return wanted.includes(task);
 }
 
-function hasToken(): boolean {
+export function hasToken(): boolean {
   return (process.env.CLAUDE_CODE_OAUTH_TOKEN ?? "").trim().length > 0;
+}
+
+/** One log line per run: how much of the subscription it drew, and what it would cost on the API. */
+export function logSubscriptionUsage(task: string, stream: string): ReturnType<typeof readClaudeUsage> {
+  const usage = readClaudeUsage(stream);
+  if (usage) {
+    console.log(
+      `[claude-subscription usage] task=${task} tokens=${totalTokens(usage)} ` +
+        `(in ${usage.inputTokens}, out ${usage.outputTokens}, cached ${usage.cacheReadTokens}) ` +
+        `model=${usage.model ?? "unreported"} would-cost-on-api=$${shadowCostUsd(usage).toFixed(6)}`,
+    );
+  }
+  return usage;
 }
 
 /** Run the CLI once: the prompt on stdin, whatever it printed back. */
@@ -110,14 +129,7 @@ export async function askSubscription(task: Task, prompt: string): Promise<AiRes
 
   // Counted whether it succeeded or not: a run that hit the usage limit still
   // consumed the attempt, and a month of those is worth seeing.
-  const usage = readClaudeUsage(r.out);
-  if (usage) {
-    console.log(
-      `[claude-subscription usage] task=${task} tokens=${totalTokens(usage)} ` +
-        `(in ${usage.inputTokens}, out ${usage.outputTokens}, cached ${usage.cacheReadTokens}) ` +
-        `model=${usage.model ?? "unreported"} would-cost-on-api=$${shadowCostUsd(usage).toFixed(6)}`,
-    );
-  }
+  const usage = logSubscriptionUsage(task, r.out);
 
   if (r.timedOut) return { ok: false, reason: "network", detail: `Claude subscription: no answer in ${TIMEOUT_MS / 1000}s` };
   if (r.code === 0 && text) {

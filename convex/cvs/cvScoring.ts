@@ -1,6 +1,8 @@
 // @ts-nocheck
 import { getOpenAI, getModelForTask, executeLLMWithNvidiaFallback } from "../lib/llm";
+import { askClaudeFirst, jsonIn } from "../lib/claudeFirst";
 import type { SearchRequirements } from "../lib/jdParser";
+import { jobLevelRank } from "../lib/roleLevel";
 
 function normalizeText(value: string): string {
   if (!value) return "";
@@ -163,20 +165,9 @@ export function stripSeniorityWords(text: string): string {
   return result.replace(/\s+/g, " ").trim();
 }
 
+/** The job's level on the candidate classifier's ladder — see lib/roleLevel (fixed 5 Oct). */
 export function mapJobSeniorityTo10LevelRank(seniorityLevel?: string | null): number | null {
-  if (!seniorityLevel) return null;
-  const s = seniorityLevel.toLowerCase().trim().replace(/[\s-]/g, "_");
-  if (s.includes("entry") || s.includes("intern")) return 0;
-  if (s === "mid_level" || s === "mid") return 1;
-  if (s === "executive") return 2;
-  if (s === "senior_executive") return 3;
-  if (s === "manager") return 4;
-  if (s === "senior_manager") return 5;
-  if (s === "agm" || s.includes("assistant_general")) return 6;
-  if (s === "gm" || s.includes("general_manager")) return 7;
-  if (s === "director") return 8;
-  if (s === "c_suite" || s.includes("vp") || s.includes("chief")) return 9;
-  return null; // "other", custom, or unmapped -> skip gate
+  return jobLevelRank(seniorityLevel);
 }
 
 export function checkSeniorityConflict(
@@ -1260,7 +1251,7 @@ export async function scoreWithLLM(
     const prefSkills = Array.isArray(req.preferredSkills) ? req.preferredSkills.join(", ") : "None";
     const jdSnippet = req.summary ? String(req.summary).slice(0, 500) : "";
 
-    const userPrompt = [
+    const buildPrompt = (withName: boolean) => [
       `JOB REQUIREMENTS:`,
       `Title: ${req.title || "Not specified"}`,
       `Required Skills: ${reqSkills}`,
@@ -1271,13 +1262,31 @@ export async function scoreWithLLM(
       jdSnippet ? `Summary: ${jdSnippet}` : "",
       ``,
       `CANDIDATE PROFILE:`,
-      `Name: ${candName}`,
+      withName ? `Name: ${candName}` : "",
       `Current Title: ${candTitle}`,
       `Current Employer: ${candEmployer}`,
       `Total Experience: ${candYears} years`,
       `Skills: ${candSkills}`,
       recentJobs ? `Recent Roles:\n${recentJobs}` : "",
     ].filter(Boolean).join("\n");
+    const userPrompt = buildPrompt(true);
+    const systemPrompt = `You are a Senior Talent Acquisition (TA) Recruiter. Evaluate how well the candidate's CV aligns with the job requirements. Write all evaluations strictly in English. Do NOT output Chinese or any other language. Return ONLY a JSON object: {"score": number, "reason": "A 2-3 sentence professional TA evaluation in English explaining why this candidate is a match, highlighting key matching skills, relevant experience, and overall role fit."}`;
+
+    // Claude first (5 Oct), without the name: it is not needed to judge fit
+    // and the subscription is a personal account. No usable answer, DeepSeek.
+    const claude = await askClaudeFirst("match_score", systemPrompt, buildPrompt(false), 60_000);
+    const claudeJson = claude ? jsonIn(claude) : null;
+    if (claudeJson && typeof claudeJson.score === "number") {
+      return {
+        result: {
+          score: Math.min(100, Math.max(0, claudeJson.score)),
+          reason: typeof claudeJson.reason === "string" && claudeJson.reason.trim()
+            ? claudeJson.reason
+            : "The candidate's profile was evaluated against the job requirements.",
+        },
+        usage: { promptTokens: 0, completionTokens: 0, model: "claude-subscription" },
+      };
+    }
 
     const response = await openai.chat.completions.create({
       model,
@@ -1286,7 +1295,7 @@ export async function scoreWithLLM(
       messages: [
         {
           role: "system",
-          content: `You are a Senior Talent Acquisition (TA) Recruiter. Evaluate how well the candidate's CV aligns with the job requirements. Write all evaluations strictly in English. Do NOT output Chinese or any other language. Return ONLY a JSON object: {"score": number, "reason": "A 2-3 sentence professional TA evaluation in English explaining why this candidate is a match, highlighting key matching skills, relevant experience, and overall role fit."}`
+          content: systemPrompt,
         },
         {
           role: "user",
@@ -1402,9 +1411,9 @@ export async function scoreBatchWithLLM(
   const prefSkills = Array.isArray(req.preferredSkills) ? req.preferredSkills.join(", ") : "None";
   const jdSnippet = req.summary ? String(req.summary).slice(0, 350) : "";
 
-  const candidateSerializedList = candidates.map((c) => {
+  const serialize = (withName: boolean) => candidates.map((c) => {
     const cvObj = c.cv || {};
-    const name = cvObj.fullName || `Candidate #${c.index}`;
+    const name = (withName && cvObj.fullName) || `Candidate #${c.index}`;
     const title = cvObj.currentTitle || (cvObj as any).currentJobTitle || "Not specified";
     const employer = cvObj.currentEmployer ? `@ ${cvObj.currentEmployer}` : "";
     const exp = cvObj.yearsOfExperience ?? (cvObj as any).totalExperienceYears ?? "N/A";
@@ -1415,7 +1424,7 @@ export async function scoreBatchWithLLM(
     return `[ID: ${c.index}] ${name} | ${title} ${employer} | ${exp} yrs exp | Skills: ${skills}`;
   });
 
-  const promptText = [
+  const buildPrompt = (withName: boolean) => [
     `JOB REQUIREMENTS:`,
     `Title: ${req.title || "Not specified"}`,
     `Required Skills: ${reqSkills}`,
@@ -1426,8 +1435,9 @@ export async function scoreBatchWithLLM(
     jdSnippet ? `Summary: ${jdSnippet}` : "",
     ``,
     `CANDIDATE POOL TO EVALUATE:`,
-    ...candidateSerializedList,
+    ...serialize(withName),
   ].filter(Boolean).join("\n");
+  const promptText = buildPrompt(true);
 
   const systemPrompt = `You are a Senior Talent Acquisition (TA) Recruiter. Evaluate how well EACH candidate in the candidate pool aligns with the job requirements. Write all evaluations strictly in English. Do NOT output Chinese or any other language. Return ONLY a JSON object mapping candidate IDs to evaluation result objects:
 {
@@ -1444,7 +1454,15 @@ export async function scoreBatchWithLLM(
     let content = "{}";
     let usedModel = model;
 
-    try {
+    // Claude first (5 Oct), with "Candidate #n" in place of names. An answer
+    // with no evaluations in it counts as none: DeepSeek is asked as before.
+    // A TA is waiting on a search, so Claude gets 45s, not the full minute and a half.
+    const claude = await askClaudeFirst("match_rank", systemPrompt, buildPrompt(false), 45_000);
+    const claudeJson = claude ? jsonIn(claude) : null;
+    if (Array.isArray(claudeJson?.evaluations) && claudeJson.evaluations.some((e: any) => typeof e?.id === "number")) {
+      content = JSON.stringify(claudeJson);
+      usedModel = "claude-subscription";
+    } else try {
       const response = await openai.chat.completions.create({
         model,
         temperature: 0.1,

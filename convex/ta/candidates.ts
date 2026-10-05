@@ -77,6 +77,8 @@ const LIST_FIELDS = [
   "yearsOfExperience", "educationDegree", "educationInstitution", "certifications", "languages",
   "skills", "industries", "sector", "noticePeriodDays", "noticePeriod", "availability", "currentSalary", "currentSalaryCurrency",
   "expectedSalary", "expectedSalaryCurrency", "taCurrentSalaryText", "taExpectedSalaryText", "currentSalaryNote", "expectedSalaryNote", "cvFileName",
+  // The level sections on Database CVs and database search (src/lib/levels, 5 Oct).
+  "currentRoleRank",
 ] as const;
 
 export const getBatch = internalQuery({

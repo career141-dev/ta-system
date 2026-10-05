@@ -4,6 +4,7 @@ import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel.d.ts";
 import { mapJobSeniorityTo10LevelRank, checkSeniorityConflict, scoreCandidateAgainstRequirements, getSkillDomain } from "../cvs/cvScoring";
+import { currentRoleGate as currentRoleGateFor } from "../lib/roleLevel";
 import { classifyJobRoleFamily, classifyCurrentRolesBatch } from "../lib/currentRoleClassifier";
 import { synthesizeJobRequirements } from "../lib/jobSynthesizer";
 import { candidateVectorPayload, upsertCandidateVector, queryCandidateVectors } from "../lib/qdrant";
@@ -701,26 +702,11 @@ Return ONLY valid JSON matching this schema:
           };
 
           const candRank = classRes.rank;
-          let currentRoleGate: "pass" | "pass_with_penalty" | "excluded_overqualified" | "skipped_other" = "pass";
-          let currentRolePenalty = 0;
-          let exclusionReason: string | null = null;
-
-          if (jobRank === null) {
-            currentRoleGate = "skipped_other";
-          } else if (candRank === null) {
-            currentRoleGate = "pass";
-          } else {
-            const delta = jobRank - candRank;
-            if (delta < 0) {
-              currentRoleGate = "excluded_overqualified";
-              exclusionReason = classRes.exclusionReason || `Candidate's current role level (${classRes.rankLabel}) exceeds target job level.`;
-            } else if (delta === 0 || delta === 1) {
-              currentRoleGate = "pass";
-            } else {
-              currentRoleGate = "pass_with_penalty";
-              currentRolePenalty = Math.max(-40, -12 * (delta - 1));
-            }
-          }
+          // Job and candidate on the same ladder (lib/roleLevel, fixed 5 Oct).
+          const { gate: currentRoleGate, penalty: currentRolePenalty } = currentRoleGateFor(jobRank, candRank);
+          const exclusionReason: string | null = currentRoleGate === "excluded_overqualified"
+            ? classRes.exclusionReason || `Candidate's current role level (${classRes.rankLabel}) exceeds target job level.`
+            : null;
 
           const seniorityConflict = checkSeniorityConflict(candRank, cv.seniorityLevel);
 

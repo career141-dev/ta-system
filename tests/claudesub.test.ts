@@ -1,7 +1,9 @@
 /**
  * Which tasks may go to the owner's Claude subscription (src/lib/claudeSub).
  * The point of the gate: a candidate's CV or messages never reach a personal
- * account, whatever C141_CLAUDE_SUB_TASKS says.
+ * account, whatever C141_CLAUDE_SUB_TASKS says. The one exception, by the
+ * owner's decision on 5 Oct, is the database-match reason, which has its own
+ * switch and sends no name or contacts (tests/claudematch.test.ts).
  */
 import { viaSubscription } from "@/lib/claudeSub";
 
