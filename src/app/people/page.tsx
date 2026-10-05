@@ -34,7 +34,7 @@ export default async function PeoplePage({
   const page = pageFrom(sp, matching.length, PAGE_SIZE);
 
   return (
-    <main className="mx-auto max-w-[1100px] px-8 py-9">
+    <main className="mx-auto max-w-[1100px] px-4 sm:px-8 py-6 sm:py-9">
       <h1 className="text-[24px] font-semibold tracking-tight">People</h1>
       <p className="mb-7 mt-1.5 max-w-[70ch] text-[13px] leading-relaxed text-ink-soft">
         Who is on the desk, and what each of them can do.

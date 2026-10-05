@@ -67,7 +67,7 @@ export function ClosingPanel({
         </p>
         {offer.terms && <p className="mt-1 text-[12px] text-ink-soft">{offer.terms}</p>}
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-2">
           <form action={recordPlacement} className="flex flex-wrap items-end gap-2">
             <input type="hidden" name="offerId" value={offer.id} />
             <input type="hidden" name="applicationId" value={app.id} />
@@ -131,7 +131,7 @@ export function ClosingPanel({
       <form action={makeOffer} className="mt-2.5 grid gap-2.5">
         <input type="hidden" name="applicationId" value={app.id} />
         <input type="hidden" name="openingId" value={openingId} />
-        <div className="grid gap-2.5 sm:grid-cols-4">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5 sm:grid-cols-4">
           <label className="block">
             <span className={label}>Salary</span>
             <input

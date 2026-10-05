@@ -42,14 +42,14 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
 
   return (
     <>
-      <section className="mb-8 grid gap-4 sm:grid-cols-3">
+      <section className="mb-8 grid grid-cols-3 gap-2 sm:gap-4">
         {[
           { n: withClient.length, label: "Sitting with clients" },
           { n: mine.length, label: "To chase", warn: mine.length > 0 },
           { n: interviews.length, label: "Interviews scheduled" },
         ].map((s) => (
-          <div key={s.label} className="rounded-2xl border border-rule bg-surface px-6 py-5">
-            <div className={`tabular text-[26px] font-semibold leading-none ${s.warn ? "text-warn" : ""}`}>
+          <div key={s.label} className="min-w-0 rounded-2xl border border-rule bg-surface px-3 py-4 sm:px-6 sm:py-5">
+            <div className={`tabular truncate text-[21px] font-semibold leading-none sm:text-[26px] ${s.warn ? "text-warn" : ""}`}>
               {s.n}
             </div>
             <div className="mt-2 text-[12.5px] text-ink-soft">{s.label}</div>
@@ -57,12 +57,12 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
         ))}
       </section>
 
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Waiting on client feedback</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             {clientList.pager.total === 0 ? (
-              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
+              <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">
                 {q ? "Nothing here matches that search." : "Nothing with a client."}
               </p>
             ) : (
@@ -74,7 +74,7 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
                     <Link
                       key={a.id}
                       href={`/openings/${o.id}/pipeline/client_shortlist`}
-                      className="flex flex-wrap items-center gap-x-5 gap-y-1 px-7 py-3.5 hover:bg-paper/60"
+                      className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5 hover:bg-paper/60"
                     >
                       <div className="min-w-[200px] flex-1">
                         <p className="text-[13.5px] font-medium">{c?.fullName}</p>
@@ -100,7 +100,7 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
           <h2 className="mb-3.5 text-[13px] font-semibold">Interviews to coordinate</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             {interviewList.pager.total === 0 ? (
-              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
+              <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">
                 {q ? "Nothing here matches that search." : "Nothing scheduled."}
               </p>
             ) : (
@@ -115,7 +115,7 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
                         .some((f) => f.kind === "pre_interview" && f.outcome === "reached")
                     : false;
                   return (
-                    <div key={iv.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-7 py-3.5">
+                    <div key={iv.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5">
                       <div className="min-w-[200px] flex-1">
                         <p className="text-[13.5px] font-medium">{c?.fullName}</p>
                         <p className="text-[11.5px] text-ink-faint">
@@ -146,7 +146,7 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
               {chaseList.rows.map((a) => (
-                <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4">
+                <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 sm:px-7 py-4">
                   <p className="min-w-[260px] flex-1 text-[13.5px]">{a.detail}</p>
                   <Link
                     href={a.href}

@@ -5,6 +5,7 @@ import { emailAllowed, phoneAllowed, outboundLocked, suppressed } from "../lib/o
 import { resolveRecipient } from "../lib/outreachSafety";
 import { refuseIfDoNotContact } from "../lib/doNotContact";
 import { followUpCancelledReason } from "../lib/graphMail";
+import { dailyTemplateCap, startOfUtcDay, withinTemplateBudget } from "../lib/templateBudget";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -138,6 +139,50 @@ export const sendMetaTemplate = internalAction({
     }
     const cleanRecipientPhone = decision.to;
     if (decision.note) console.log(`[Meta Template Sender] Template${decision.note}`);
+
+    /*
+     * The day's budget. Every WhatsApp we pay Meta for passes through here —
+     * initial outreach, re-engagement, and the fallback when free text is
+     * refused — so this is the one place a cap belongs.
+     *
+     * Free text inside the candidate's 24-hour window costs nothing, so the
+     * bill is concentrated in cold templates. A bulk send can spend a month's
+     * budget in an afternoon, and the invoice arrives long afterwards. The cap
+     * refuses rather than reports.
+     *
+     * `C141_WHATSAPP_TEMPLATE_DAILY_CAP` unset means no cap, so a deployment
+     * that has not opted in sends exactly as it did before.
+     */
+    const cap = dailyTemplateCap(process.env.C141_WHATSAPP_TEMPLATE_DAILY_CAP);
+    if (cap !== null) {
+      const sentToday = await ctx.runQuery(
+        internal.communications.metaTemplateSender.countBillableTemplatesToday,
+        { since: startOfUtcDay(Date.now()) },
+      );
+      if (!withinTemplateBudget(sentToday, cap)) {
+        const reason =
+          `Not sent — the daily WhatsApp template limit of ${cap} has been reached ` +
+          `(${sentToday} sent today). It will be tried again tomorrow.`;
+        console.warn(`[Meta Template Sender] ${reason}`);
+        await ctx.runMutation(internal.communications.metaTemplateSender.logTemplateCommunication, {
+          communicationId: args.communicationId,
+          applicationId: app?._id,
+          candidateId: resolvedCandidateId,
+          jobId: resolvedJobId || job?._id,
+          body: `[${args.templateType} template held back] ${reason}`,
+          status: "failed",
+          error: reason,
+        });
+        // Tomorrow, not never: the sweep clears its own schedule before
+        // sending, so without this the candidate would simply be dropped.
+        if (app?._id) {
+          await ctx.runMutation(internal.communications.metaTemplateSender.retryTemplateTomorrow, {
+            applicationId: app._id,
+          });
+        }
+        return;
+      }
+    }
 
     // 3. Construct parameters and text representations based on template type
     let templateName = "";
@@ -295,6 +340,8 @@ export const sendMetaTemplate = internalAction({
       body: loggedBody,
       status: sentSuccess ? "sent" : "failed",
       error: errorMessage || undefined,
+      // Counts against tomorrow's cap only if Meta actually took it.
+      billableTemplate: sentSuccess,
     });
 
     if (!sentSuccess) {
@@ -314,6 +361,8 @@ export const logTemplateCommunication = internalMutation({
     body: v.string(),
     status: v.union(v.literal("sent"), v.literal("failed")),
     error: v.optional(v.string()),
+    /** True only when Meta accepted it, so the cap counts real spend. */
+    billableTemplate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     if (args.communicationId) {
@@ -324,6 +373,7 @@ export const logTemplateCommunication = internalMutation({
         sentAt: Date.now(),
         ...(args.applicationId ? { applicationId: args.applicationId } : {}),
         ...(args.jobId ? { jobId: args.jobId } : {}),
+        ...(args.billableTemplate === true ? { billableTemplate: true } : {}),
       });
     } else {
       await ctx.db.insert("communications", {
@@ -338,6 +388,7 @@ export const logTemplateCommunication = internalMutation({
         errorMessage: args.error,
         sentAt: Date.now(),
         stoppedSequence: false,
+        ...(args.billableTemplate === true ? { billableTemplate: true } : {}),
       });
     }
   },
@@ -382,5 +433,43 @@ export const getApplicationForCandidate = internalQuery({
         q.eq("candidateId", args.candidateId).eq("jobId", args.jobId!)
       )
       .first();
+  },
+});
+
+/**
+ * Billable templates sent since `since`, for the daily cap.
+ *
+ * Counted off `by_channel_time`, so the scan is one day of WhatsApp rows
+ * rather than the whole table.
+ */
+export const countBillableTemplatesToday = internalQuery({
+  args: { since: v.number() },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db
+      .query("communications")
+      .withIndex("by_channel_time", (q) => q.eq("channel", "whatsapp").gte("sentAt", args.since))
+      .collect();
+    return rows.filter((r) => r.billableTemplate === true && r.direction === "outbound").length;
+  },
+});
+
+/**
+ * Put a candidate held back by the cap at the front of tomorrow's queue.
+ *
+ * The sweep clears `nextFollowUpScheduledAt` before it sends, as its guard
+ * against sending twice. Without putting a time back, a candidate the cap
+ * refused would never be chased again — the cap would quietly drop people
+ * instead of delaying them.
+ */
+export const retryTemplateTomorrow = internalMutation({
+  args: { applicationId: v.id("applications") },
+  handler: async (ctx, args) => {
+    const app = await ctx.db.get(args.applicationId);
+    if (!app) return;
+    const tomorrow = startOfUtcDay(Date.now()) + 24 * 60 * 60 * 1000;
+    await ctx.db.patch(args.applicationId, { nextFollowUpScheduledAt: tomorrow });
+    console.log(
+      `[Meta Template Sender] Application ${args.applicationId} held back by the daily cap; rescheduled for ${new Date(tomorrow).toISOString()}.`,
+    );
   },
 });

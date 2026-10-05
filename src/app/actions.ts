@@ -1350,7 +1350,26 @@ export async function addJobPost(formData: FormData) {
   const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel, externalUrl);
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back(`Job post "${title}" added.`);
+  const reread = externalUrl ? await rereadMailboxFor(externalUrl) : false;
+  await back(`Job post "${title}" added.${reread ? REREAD_NOTE : ""}`);
+}
+
+const REREAD_NOTE = " Checking linkedin@ for the last 30 days for this job's applicants — they appear in New CVs within a few minutes.";
+
+/**
+ * A LinkedIn link was saved: re-read the mailbox for the people who applied
+ * before it was (convex/communications/emailAgent.ts rescanMailboxForLink,
+ * 5 October). Only queued here; a failure to queue does not undo the save.
+ */
+async function rereadMailboxFor(url: string): Promise<boolean> {
+  if (!isConvex()) return false;
+  try {
+    const r = await convexMutation<{ queued: boolean }>("communications/emailAgent:queueRescanForLink", { url });
+    return !!r?.queued;
+  } catch (e) {
+    console.error("[posts] could not queue the mailbox re-read:", e);
+    return false;
+  }
 }
 
 export async function updatePost(formData: FormData) {
@@ -1378,6 +1397,7 @@ export async function updatePost(formData: FormData) {
   // email — the surest way to the right post. Either the job's own link, or
   // the Recruiter project's: `talent/hire/…`, or the "View applicant" link
   // copied from any application email for this job (22 September).
+  const linkBefore = repo.jobPosts().find((p) => p.id === postId)?.externalUrl ?? null;
   if (formData.has("externalUrl")) {
     const url = String(formData.get("externalUrl") ?? "").trim();
     const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
@@ -1392,7 +1412,9 @@ export async function updatePost(formData: FormData) {
   // A refusal is shown, not swallowed.
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Job post saved.");
+  // A new or changed link: fetch the people who applied before it was saved.
+  const reread = patch.externalUrl && patch.externalUrl !== linkBefore ? await rereadMailboxFor(patch.externalUrl) : false;
+  await back(`Job post saved.${reread ? REREAD_NOTE : ""}`);
 }
 
 export async function updatePostInline(_: ActionResult | null, formData: FormData) {
@@ -1656,7 +1678,13 @@ async function pipelineFromLink(
       claimed = await backend.shortlist({ id: user.id }, made.applicationId);
     } catch (e) {
       await afterBackendWrite(openingId);
-      return { tone: "error", message: `They could not be shortlisted: ${backendMessage(e, "the claim was refused.")}` };
+      // A note, not an error (2 Oct): the application already exists in TA Follow-up, so the
+      // row reads Interested whatever this says — "Failed" over an Interested row told the TA
+      // one thing and showed another, and a second press added nothing.
+      return {
+        tone: "note",
+        message: `Added to TA Follow-up, but they were not claimed: ${backendMessage(e, "the claim was refused.")} Press Shortlist on their card to take them on.`,
+      };
     }
     if (!claimed.ok) {
       const owner = repo.users().find((u) => u.id === claimed!.ownerTaId)?.name ?? "Another recruiter";
@@ -1876,6 +1904,10 @@ export async function moveBackToTables(formData: FormData) {
   if (repo.offers(appId).length > 0 || repo.placements({ openingId }).some((p) => p.applicationId === appId)) {
     return fail("They have an offer or a placement on this opening, so they stay on the pipeline.");
   }
+  // A TA may pull a candidate back from Interview too (the desk, 2 Oct). An interview still to
+  // come would keep reminding a candidate who is no longer on the pipeline, so those are
+  // cancelled once the move has gone through (below).
+  const upcomingInterviews = repo.interviews(appId).filter((i) => i.outcome !== "cancelled" && i.scheduledAt > Date.now());
 
   if (isConvex()) {
     try {
@@ -1888,6 +1920,7 @@ export async function moveBackToTables(formData: FormData) {
     const r = repo.moveStage(appId, "dropped_out", user.id, BACK_TO_TABLES_REASON);
     if (!r.ok) return fail(r.message);
   }
+  for (const i of upcomingInterviews) repo.setInterviewOutcome(i.id, "cancelled", user.id, BACK_TO_TABLES_REASON);
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
   revalidatePath(`/openings/${openingId}/hh/links`);
@@ -2891,10 +2924,18 @@ export async function setUserActive(formData: FormData) {
 export async function runDatabaseSearch(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
-  const q = String(formData.get("q") ?? "").trim();
+  const said = String(formData.get("q") ?? "").trim();
   const mode = String(formData.get("mode") ?? "natural");
   const openingId = String(formData.get("openingId") ?? "");
-  if (!q) redirect("/database");
+  // A reply under the results carries on the conversation (5 Oct): the new
+  // message is added to the search so far, one message per line (lib/query
+  // turnsOf). Boolean is a literal string and always stands alone.
+  const prior = mode === "boolean" ? "" : String(formData.get("prior") ?? "").trim();
+  if (!said) redirect(prior ? `/database/results?${new URLSearchParams({ q: prior })}` : "/database");
+  const turns = prior ? [...prior.split(/\n+/).filter((t) => t.trim()), said.replace(/\s*\n+\s*/g, " ")] : [said];
+  // Over 4,000 characters, the oldest refinements go — never the first request.
+  while (turns.length > 2 && turns.join("\n").length > 4000) turns.splice(1, 1);
+  const q = turns.join("\n").slice(0, 4000);
   const params = new URLSearchParams({ q });
   if (mode === "boolean" || mode === "meaning") params.set("mode", mode);
   if (openingId) params.set("for", openingId);
@@ -4432,6 +4473,16 @@ export async function finishCall(formData: FormData) {
 // and no second screen — the round is opened by pressing Send and closed by the
 // reply landing.
 
+/**
+ * People an end-of-day send has taken and not yet recorded (2 Oct). The "already
+ * sent" check read the recorded rounds, and the round is recorded only after the
+ * email has gone — so two TAs, or a double click, passed the check together and both
+ * emailed the Director the same candidates. A person is reserved here, in the same
+ * synchronous step as the check, and released when the send ends. The site runs as
+ * one process, so this is enough; a second server would need the claim in the database.
+ */
+const eodInFlight = new Set<string>();
+
 export async function sendEod(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
@@ -4442,11 +4493,21 @@ export async function sendEod(formData: FormData) {
   // Anybody already sent to this reviewer is dropped, and so is anybody who is
   // not on this opening — the list came from the browser.
   const sent = new Set(repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds));
-  const fresh = ids.filter((id) => !sent.has(id) && repo.application(id)?.openingId === openingId);
+  const holdKey = (id: string) => `${openingId}:${kind}:${id}`;
+  // A TA sends only the people they shortlisted on this opening (the desk, 2 Oct): the list
+  // came from the browser, so it is checked here, not only when the page is drawn. A lead or
+  // director sends for the desk.
+  const mine = (id: string) => user.role !== "ta" || repo.application(id)?.ownerTaId === user.id;
+  const notMine = ids.filter((id) => !mine(id));
+  const fresh = ids.filter((id) => mine(id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && repo.application(id)?.openingId === openingId);
+  if (notMine.length > 0 && fresh.length === 0)
+    redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent("Nothing sent — you can send only the candidates you shortlisted.")}`);
   if (fresh.length === 0)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
-      ids.length ? "Everyone on that list has already been sent." : "Nothing to send.",
+      ids.length ? "Everyone on that list has already been sent, or is being sent right now." : "Nothing to send.",
     )}`);
+  for (const id of fresh) eodInFlight.add(holdKey(id));
+  try {
   const sets = fresh.map((id) => repo.application(id)?.setNumber).filter((n): n is number => n != null);
 
   // The desk's To and Cc start on it; the TA can add more (29 Sep) and take any
@@ -4590,6 +4651,9 @@ export async function sendEod(formData: FormData) {
         : `Recorded as sent to the client. ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on a reply. Nothing was emailed from here.`,
     )}`,
   );
+  } finally {
+    for (const id of fresh) eodInFlight.delete(holdKey(id));
+  }
 }
 
 /**

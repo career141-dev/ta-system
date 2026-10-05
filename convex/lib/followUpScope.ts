@@ -102,3 +102,26 @@ export function sameRoundAs(input: {
   if (input.now - input.lastManualSendAt > ROUND_WINDOW_MS) return false;
   return !(input.lastManualChannels ?? []).includes(input.channel);
 }
+
+/** The same send pressed again within this long is a double press, not a new follow-up. */
+export const DOUBLE_PRESS_MS = 60_000;
+
+/**
+ * Was this very send made a moment ago — by this TA's second click or by a
+ * colleague on the same candidate (2 Oct)? Everything it would send has just
+ * gone, so sending again would be a "reminder" right behind the first message
+ * and would use up an attempt of three.
+ */
+export function justSent(input: {
+  attempts: number;
+  lastManualSendAt?: number | null;
+  lastManualChannels?: string[] | null;
+  channel: SendChannel | "both";
+  now: number;
+}): boolean {
+  if (input.attempts <= 0 || !input.lastManualSendAt) return false;
+  if (input.now - input.lastManualSendAt > DOUBLE_PRESS_MS) return false;
+  const sent = input.lastManualChannels ?? [];
+  const wanted: string[] = input.channel === "both" ? ["whatsapp", "email"] : [input.channel];
+  return wanted.every((c) => sent.includes(c));
+}

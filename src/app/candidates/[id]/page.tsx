@@ -117,7 +117,7 @@ export default async function CandidatePage({
   const cvHref = `/api/cv/${encodeURIComponent(c.id)}`;
 
   return (
-    <main className="mx-auto max-w-[1040px] px-8 py-9">
+    <main className="mx-auto max-w-[1040px] px-4 sm:px-8 py-6 sm:py-9">
       <Link href={safeBack} className="text-[12.5px] text-ink-soft hover:text-ink">
         {backHref ? "← Back to results" : "← Database"}
       </Link>
@@ -173,7 +173,7 @@ export default async function CandidatePage({
         <p className="mt-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">{profileProblem}</p>
       )}
 
-      <div className="mt-7 grid gap-8 lg:grid-cols-[1fr_320px]">
+      <div className="mt-7 grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[1fr_320px]">
         <div className="flex min-w-0 flex-col gap-6">
           {profile?.summary && (
             <section className="rounded-2xl border border-rule bg-surface px-6 py-5">
@@ -337,7 +337,7 @@ export default async function CandidatePage({
             {referees.length === 0 ? (
               <p className="text-[12.5px] text-ink-faint">No referees named on this CV.</p>
             ) : (
-              <ul className="grid gap-3 sm:grid-cols-2">
+              <ul className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
                 {referees.map((r, i) => (
                   <li key={i} className="rounded-lg bg-paper px-4 py-3 text-[12.5px]">
                     <div className="font-medium text-ink">{r.name}</div>

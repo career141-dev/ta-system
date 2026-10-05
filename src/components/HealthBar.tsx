@@ -25,7 +25,7 @@ export function HealthBar({ health }: { health: Health }) {
         <span className="text-[13px] text-ink-soft">{health.headline}</span>
       </div>
 
-      <dl className="mt-3 grid gap-2 sm:grid-cols-4">
+      <dl className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-2 sm:grid-cols-4">
         {health.parts.map((p) => (
           <div key={p.label}>
             <div className="flex items-baseline justify-between gap-2">

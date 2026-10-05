@@ -33,7 +33,7 @@ export default async function ScanPage({ searchParams }: { searchParams: Promise
   const scans = slicePage(matching, page, PAGE_SIZE);
 
   return (
-    <main className="mx-auto max-w-[880px] px-8 py-9">
+    <main className="mx-auto max-w-[880px] px-4 sm:px-8 py-6 sm:py-9">
       <Link href="/database" className="text-[12.5px] text-ink-soft hover:text-ink">
         ← Database
       </Link>

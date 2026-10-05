@@ -377,6 +377,13 @@ export default defineSchema({
 
     // Agent 3 — Outbound TA Identity
     outreachWhatsAppNumber: v.optional(v.string()),
+    /*
+     * Hold the first WhatsApp back this many days and let email go alone.
+     *
+     * Day 0 sent both, so every candidate cost a template even when the email
+     * would have done. Unset keeps the old behaviour.
+     */
+    whatsappAfterEmailDays: v.optional(v.number()),
 
     // SLA Thresholds (days)
     slaNoNewCvsDays: v.optional(v.number()),
@@ -636,6 +643,10 @@ export default defineSchema({
      *  matches someone we hold it is only a record of what was sent: it writes
      *  nothing onto them and does not replace their CV file. */
     shortlistCopy: v.optional(v.boolean()),
+    /** A newer CV of the same person took this file's place (cvs/cvReplace.ts, 2 Oct). The file is kept (5 Oct). */
+    replacedByUploadId: v.optional(v.id("cvUploads")),
+    /** An extraction is reading this upload right now (cvs/cvUploads.ts lockExtraction, 2 Oct). */
+    extractionLockedAt: v.optional(v.number()),
     /** Set when a TA uploads a scoop CV from the opening's Scoops page
      *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
      *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`
@@ -1040,6 +1051,8 @@ export default defineSchema({
     rejectedBy: v.optional(v.union(v.id("users"), v.literal("system"))),
     rejectedAt: v.optional(v.number()),
     rejectReason: v.optional(v.string()),
+    /** The person applied to this opening again (applications.createApplication, 2 Oct). Their stage is not changed. */
+    reappliedAt: v.optional(v.number()),
     placedAt: v.optional(v.number()),
     placedBy: v.optional(v.id("users")),
     aiFollowUpNoReply: v.optional(v.boolean()),
@@ -1330,6 +1343,14 @@ export default defineSchema({
     jobId: v.optional(v.id("jobs")),
     direction: v.union(v.literal("outbound"), v.literal("inbound")),
     channel: v.union(v.literal("email"), v.literal("whatsapp"), v.literal("sms")),
+    /*
+     * This row cost money: an approved WhatsApp template, billed by Meta.
+     *
+     * Free text inside the candidate's 24-hour window is free, so only these
+     * count against the daily cap (convex/lib/templateBudget.ts). Set when the
+     * send actually succeeds, never on the attempt.
+     */
+    billableTemplate: v.optional(v.boolean()),
     subject: v.optional(v.string()),
     body: v.string(),
     senderId: v.optional(v.id("users")),
@@ -1951,6 +1972,27 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_singletonKey", ["singletonKey"]),
 
+  /**
+   * Every email the shared application mailboxes (linkedin@, cv@) brought in,
+   * once each, and what became of it (5 October). Read instead of the read
+   * flag — an email someone opened in Outlook first was never picked up — and
+   * the one count of what arrived against what was filed.
+   */
+  mailboxLog: defineTable({
+    mailbox: v.string(),
+    messageId: v.string(),
+    receivedAt: v.string(),
+    subject: v.string(),
+    fromAddress: v.optional(v.string()),
+    /** cv — handed to CV processing; held — a LinkedIn applicant with no CV, held
+     *  from the notification; no_cv — nothing to file; reply — a candidate's reply. */
+    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply")),
+    note: v.optional(v.string()),
+    loggedAt: v.number(),
+  })
+    .index("by_mailbox_message", ["mailbox", "messageId"])
+    .index("by_mailbox_received", ["mailbox", "receivedAt"]),
+
   appSettings: defineTable({
     key: v.string(),
     commonWhatsappNumber: v.optional(v.string()),
@@ -1962,6 +2004,8 @@ export default defineSchema({
     updatedBy: v.optional(v.id("users")),
     updatedAt: v.optional(v.string()),
     lastEmailFetchTimestamp: v.optional(v.string()), // Added for email polling memory
+    /** When this mailbox began to be read by the mailboxLog instead of the read flag (5 Oct). */
+    mailLogSince: v.optional(v.string()),
     channel_toggles: v.optional(v.object({
       whatsappIngestion: v.boolean(),
       emailIngestion: v.boolean(),

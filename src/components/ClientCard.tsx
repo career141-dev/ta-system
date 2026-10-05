@@ -131,7 +131,7 @@ export function ClientCard({
           button is invalid, and the editing controls were a permanent strip
           across the card before this. */}
       <div
-        className={`relative flex items-center gap-5 rounded-t-xl px-7 py-5 transition-colors hover:bg-paper/50 ${open ? "" : "rounded-b-xl"}`}
+        className={`relative flex flex-wrap items-center gap-x-5 gap-y-3 rounded-t-xl px-4 py-4 transition-colors sm:flex-nowrap sm:px-7 sm:py-5 hover:bg-paper/50 ${open ? "" : "rounded-b-xl"}`}
       >
         <button
           onClick={toggle}
@@ -167,7 +167,7 @@ export function ClientCard({
           "OPENALL TIME IN PROGRESS". The label is the wider of the two things
           in the column, so the label has to set the width.
         */}
-        <div className="pointer-events-none relative shrink-0 items-baseline text-right" style={STAT_COLS}>
+        <div className="pointer-events-none relative order-last w-full shrink-0 items-baseline text-left sm:order-none sm:w-auto sm:text-right" style={STAT_COLS}>
           {([
             [String(openCount), "Open"],
             [String(allTime), "All time"],
@@ -238,7 +238,7 @@ export function ClientCard({
 
       {open &&
         (openings.length === 0 ? (
-          <p className="border-t border-rule px-7 py-8 text-[13px] text-ink-faint">
+          <p className="border-t border-rule px-4 py-8 text-[13px] text-ink-faint sm:px-7">
             No openings yet.
           </p>
         ) : (
@@ -247,7 +247,7 @@ export function ClientCard({
               <Link
                 key={o.id}
                 href={`/openings/${o.id}`}
-                className="flex items-center gap-5 px-7 py-4 hover:bg-paper/60"
+                className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 py-4 hover:bg-paper/60 sm:flex-nowrap sm:px-7"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2.5">
@@ -265,7 +265,7 @@ export function ClientCard({
                 </div>
                 {/* The same three columns as the client row above, so the
                     numbers line up down the card. */}
-                <div className="shrink-0 items-baseline text-right" style={STAT_COLS}>
+                <div className="w-full shrink-0 items-baseline text-left sm:w-auto sm:text-right" style={STAT_COLS}>
                   <span className="px-2">
                     <span className="tabular block whitespace-nowrap text-[14px]">{o.followUp}</span>
                     <span className="mt-1 block whitespace-nowrap text-[11px] text-ink-faint">Follow-up</span>
@@ -283,7 +283,7 @@ export function ClientCard({
                     <span className="mt-1 block whitespace-nowrap text-[11px] text-ink-faint">Days</span>
                   </span>
                 </div>
-                <span className="shrink-0" style={TRAILING} aria-hidden="true" />
+                <span className="hidden shrink-0 sm:block" style={TRAILING} aria-hidden="true" />
               </Link>
             ))}
           </div>

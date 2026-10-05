@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
 import { addJobPost, addLinkLevel, deleteJobPost } from "@/app/actions";
 import { SignOut } from "./SignOut";
@@ -71,6 +71,10 @@ export function ProjectSidebar({
   const [pipeOpen, setPipeOpen] = useState(inPipeline);
   const [jobOpen, setJobOpen] = useState(inJob);
   const [addingJob, setAddingJob] = useState(false);
+  // On a phone the rail is a menu above the page, closed until asked for and
+  // closed again once a page is picked (5 Oct, mobile).
+  const [railOpen, setRailOpen] = useState(false);
+  useEffect(() => setRailOpen(false), [path, search]);
 
   const row = (active: boolean) =>
     `rounded-lg px-3.5 py-2.5 text-[13.5px] transition-colors ${
@@ -111,9 +115,19 @@ export function ProjectSidebar({
   ];
 
   return (
+    <>
+    <button
+      type="button"
+      onClick={() => setRailOpen((v) => !v)}
+      aria-expanded={railOpen}
+      className="flex items-center justify-between border-b border-rule bg-surface px-4 py-3 text-[13.5px] font-medium text-ink sm:px-6 lg:hidden"
+    >
+      <span>{railOpen ? "Close menu" : "Pipeline, posts and tools"}</span>
+      <Chevron open={railOpen} />
+    </button>
     <aside
-      className="sticky flex w-[238px] shrink-0 flex-col justify-between overflow-y-auto border-r border-rule px-5 py-6"
-      style={{ top: RAIL_TOP, height: `calc(100dvh - ${RAIL_TOP}px)` }}
+      className={`${railOpen ? "flex" : "hidden"} w-full shrink-0 flex-col justify-between overflow-y-auto border-b border-rule bg-surface px-4 py-5 sm:px-6 lg:sticky lg:flex lg:w-[238px] lg:border-b-0 lg:border-r lg:bg-transparent lg:px-5 lg:py-6 lg:[height:calc(100dvh-var(--rail-top))] lg:[top:var(--rail-top)]`}
+      style={{ ["--rail-top" as string]: RAIL_TOP }}
     >
       <div className="flex flex-col gap-1">
         {/* Headhunting is the desk's working-out. A client contact never sees it. */}
@@ -374,7 +388,7 @@ export function ProjectSidebar({
                             e.preventDefault();
                           }
                         }}
-                        className="hidden group-hover:block"
+                        className="hidden group-hover:block [@media(hover:none)]:block"
                       >
                         <input type="hidden" name="openingId" value={openingId} />
                         <input type="hidden" name="postId" value={p.id} />
@@ -421,5 +435,6 @@ export function ProjectSidebar({
         <SignOut className="w-full rounded-lg px-3.5 py-2 text-left text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink" />
       </div>
     </aside>
+    </>
   );
 }

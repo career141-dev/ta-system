@@ -81,7 +81,7 @@ export default async function StagePage({
           switch controls go out (PR #32), so it cannot live only on AI
           Follow-up (review of PR #31, 24 Sep). */}
       {(s === "ai_follow_up" || s === "ta_follow_up") && (
-        <div className="mb-6 grid items-start gap-4 lg:grid-cols-2">
+        <div className="mb-6 grid grid-cols-[minmax(0,1fr)] items-start gap-4 lg:grid-cols-2">
           {/* Automatic follow-up: reminders after the TA's first Send. */}
           <div className="rounded-xl border border-rule bg-surface p-4">
             <div className="flex items-center justify-between gap-3">

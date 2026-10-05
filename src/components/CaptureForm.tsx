@@ -214,7 +214,7 @@ export function CaptureForm({
           {/* Where the job is and whose passport the client wants are two
               different questions — a Dhaka post can be a search for Sri Lankans.
               Sourcing cannot work this out later, so it is asked here. */}
-          <div className="mt-6 grid gap-5 sm:grid-cols-2">
+          <div className="mt-6 grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
             <label>
               <span className="mb-1.5 block text-[12px] text-ink-soft">Country the job is in</span>
               <div className="relative">

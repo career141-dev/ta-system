@@ -98,7 +98,7 @@ export default async function DatabaseHome({
   const onNoOpening = shelf ? null : candidates.filter((c) => repo.applicationsForCandidate(c.id).length === 0).length;
 
   return (
-    <main className="mx-auto max-w-[720px] px-6 pb-24 pt-8">
+    <main className="mx-auto max-w-[720px] px-4 sm:px-6 pb-24 pt-8">
       <Illustration />
 
       <h1 className="mt-5 text-center text-[28px] font-semibold tracking-tight">

@@ -35,13 +35,15 @@ export async function ContextBar({
   const workingStage = user ? repo.workingStage(openingId, user.id) : "100%";
 
   return (
+    // One line and sticky from 1024px; on a phone it wraps and scrolls away,
+    // so it does not take a third of the screen (5 Oct, mobile).
     <div
-      className="sticky z-30 flex items-center gap-3 border-b border-rule bg-paper px-8"
-      style={{ height: CONTEXT_H, top: HEADER_H }}
+      className="z-30 flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-rule bg-paper px-4 py-2 sm:px-6 lg:sticky lg:h-[var(--context-h)] lg:flex-nowrap lg:px-8 lg:py-0"
+      style={{ top: HEADER_H, ["--context-h" as string]: `${CONTEXT_H}px` }}
     >
       <Link
         href={`/openings/${openingId}`}
-        className="flex min-w-0 items-baseline gap-2.5 hover:underline"
+        className="flex min-w-0 basis-full items-baseline gap-2.5 hover:underline lg:basis-auto"
       >
         <span className="truncate text-[14px] font-semibold tracking-tight">{o.title}</span>
         <span className="shrink-0 text-[12.5px] text-ink-soft">{client.name}</span>
@@ -71,7 +73,7 @@ export async function ContextBar({
             </span>
           ))}
         </div>
-        <span className="text-[12px] text-ink-soft">
+        <span className="hidden text-[12px] text-ink-soft sm:inline">
           {tas.map((t) => t!.name.split(" ")[0]).join(", ")}
         </span>
         {/* A lead or above, or a recruiter on this opening — Delete only moves it to the Bin (28 Sep). */}

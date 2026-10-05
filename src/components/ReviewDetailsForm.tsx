@@ -271,7 +271,7 @@ export function ReviewDetailsForm({
           {missing.length ? `Still needed: ${missing.join(", ")}` : "All details in — ready for Director review"}
         </span>
       </div>
-      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
         {money("currentSalary", curCurrency, setCurCurrency, curVal, setCurVal, "e.g. 250,000 / 250k / Not disclosed", "Current salary (optional)")}
         {money("expectedSalary", expCurrency, setExpCurrency, expVal, setExpVal, "e.g. 300,000 / 300k / Negotiable / Open to discuss", "Expected salary")}
         <label>

@@ -86,7 +86,18 @@ async function placeCandidate(
   sourceChannel: string,
   subject: string,
 ) {
-  for (const d of destinations(route)) {
+  await placeOnPosts(ctx, candidateId, destinations(route), sourceChannel, subject);
+}
+
+/** The same, for a caller that already has the posts — the CV platform's poller (5 Oct). */
+export async function placeOnPosts(
+  ctx: ActionCtx,
+  candidateId: Id<"candidates">,
+  posts: { jobId: Id<"jobs">; postId: Id<"jobPosts"> }[],
+  sourceChannel: string,
+  subject: string,
+) {
+  for (const d of posts) {
     // Already on this opening — the CV pipeline filed them, or LinkedIn's
     // second email about the same applicant. createApplication on an existing
     // application moves it from New CVs to Matched candidates, which moved 196
@@ -154,7 +165,7 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
     return;
   }
 
-  const live = await ctx.runQuery(internal.mailIntake.model.livePosts, {});
+  const live = await ctx.runQuery(internal.mailIntake.model.livePosts, { withLinkOnly: true });
   const route = routeShared({ subject, body: parsed.text, linkedinOnly: sourceChannel === "linkedin" }, live);
   const openingIds = destinations(route).map((d) => d.jobId);
   const jobPostId = route ? (route.postId as Id<"jobPosts">) : undefined;

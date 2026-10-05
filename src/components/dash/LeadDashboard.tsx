@@ -101,10 +101,10 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
         <div className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <div className="divide-y divide-rule">
             {load.length === 0 && (
-              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">Nobody matches that search.</p>
+              <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">Nobody matches that search.</p>
             )}
             {team.rows.map((l) => (
-              <div key={l.ta.id} className="flex flex-wrap items-center gap-x-6 gap-y-3 px-7 py-4">
+              <div key={l.ta.id} className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 sm:px-7 py-4">
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-tag text-[11px] font-bold text-ink-soft">
                   {l.ta.initials}
                 </span>
@@ -173,23 +173,23 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
         <Pager {...team.pager} scroll={false} className="mt-4" />
       </section>
 
-      <div className="grid gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Needs a decision</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             {stale.length + unassigned.length + awaitingJd.length === 0 ? (
-              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
+              <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">
                 {q ? "Nothing here matches that search." : "Nothing waiting on you."}
               </p>
             ) : (
               <div className="divide-y divide-rule">
                 {decisions.rows.map(({ kind, o }) => kind === "unassigned" ? (
-                  <Link key={`u-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
+                  <Link key={`u-${o.id}`} href={`/openings/${o.id}`} className="block px-4 sm:px-7 py-4 hover:bg-paper/60">
                     <p className="text-[13.5px]">{o.title}</p>
                     <p className="mt-0.5 text-[11.5px] text-danger">Nobody assigned</p>
                   </Link>
                 ) : kind === "jd" ? (
-                  <Link key={`j-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
+                  <Link key={`j-${o.id}`} href={`/openings/${o.id}`} className="block px-4 sm:px-7 py-4 hover:bg-paper/60">
                     <p className="text-[13.5px]">{o.title}</p>
                     <p className="mt-0.5 text-[11.5px] text-warn">
                       JD not approved by{" "}
@@ -199,7 +199,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                 ) : (() => {
                   const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
                   return (
-                    <Link key={`s-${o.id}`} href={`/openings/${o.id}`} className="block px-7 py-4 hover:bg-paper/60">
+                    <Link key={`s-${o.id}`} href={`/openings/${o.id}`} className="block px-4 sm:px-7 py-4 hover:bg-paper/60">
                       <p className="text-[13.5px]">{o.title}</p>
                       <p className="mt-0.5 text-[11.5px] text-ink-soft">
                         Day {days} against a {o.priorityTier} target of{" "}
@@ -232,7 +232,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
           </div>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             {roles.pager.total === 0 && (
-              <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">
+              <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">
                 {offOnly ? "Every open role is on LinkedIn." : q ? "No open role matches that search." : "No open roles."}
               </p>
             )}
@@ -243,7 +243,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                   <Link
                     key={o.id}
                     href={`/openings/${o.id}`}
-                    className="flex items-center gap-4 px-7 py-3.5 hover:bg-paper/60"
+                    className="flex items-center gap-4 px-4 sm:px-7 py-3.5 hover:bg-paper/60"
                   >
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[13px]">{o.title}</p>

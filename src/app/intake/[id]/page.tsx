@@ -64,7 +64,7 @@ export default async function IntakeItemPage({
   };
 
   return (
-    <main className="mx-auto max-w-[1000px] px-8 py-7">
+    <main className="mx-auto max-w-[1000px] px-4 sm:px-8 py-7">
       <Link href="/intake" className="text-[12px] text-ink-soft hover:text-ink">
         ← CV intake
       </Link>
@@ -232,7 +232,7 @@ export default async function IntakeItemPage({
         <Card className="p-5">
           <form action={editIntakeParsed} className="grid gap-3">
             <input type="hidden" name="itemId" value={item.id} />
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
               {FIELDS.map((f) => (
                 <label key={f.key} className={`block ${f.wide ? "sm:col-span-2" : ""}`}>
                   <span className="mb-1 flex items-baseline gap-1.5 text-[11px] uppercase tracking-[0.08em] text-ink-faint">
@@ -305,7 +305,7 @@ export default async function IntakeItemPage({
       {!settled && (
         <section className="mb-7">
           <h2 className="mb-3 text-[13.5px] font-semibold">Decide</h2>
-          <div className="grid gap-3 md:grid-cols-3">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-3">
             <Card className="flex flex-col p-4">
               <h3 className="text-[13px] font-medium">Admit as new</h3>
               <p className="mt-1 flex-1 text-[12px] leading-relaxed text-ink-soft">

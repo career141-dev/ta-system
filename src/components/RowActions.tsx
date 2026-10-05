@@ -80,8 +80,8 @@ export function RowActions({
   };
 
   return (
-    <div className="flex flex-col items-end gap-2">
-    <div className="relative flex items-center gap-2">
+    <div className="flex flex-col items-start gap-2 sm:items-end">
+    <div className="relative flex flex-wrap items-center gap-2 sm:flex-nowrap">
       <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
         <input type="hidden" name="appId" value={appId} />
         <input type="hidden" name="openingId" value={openingId} />
@@ -148,7 +148,7 @@ export function RowActions({
       )}
 
       {open === "stage" && (
-        <div className="absolute right-0 top-full z-30 mt-2 w-[210px] rounded-xl border border-rule bg-surface py-1.5 text-left shadow-lg">
+        <div className="absolute left-0 top-full z-30 mt-2 w-[210px] max-w-[calc(100vw-32px)] sm:left-auto sm:right-0 rounded-xl border border-rule bg-surface py-1.5 text-left shadow-lg">
           <p className="px-3.5 py-1.5 text-[11px] uppercase tracking-wider text-ink-faint">
             Move to
           </p>
@@ -264,7 +264,7 @@ export function RowActions({
             setOpen(false);
             book.run(formData);
           }}
-          className="absolute right-0 top-full z-30 mt-2 w-[330px] rounded-xl border border-rule bg-surface p-4 text-left shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-[330px] max-w-[calc(100vw-32px)] sm:left-auto sm:right-0 rounded-xl border border-rule bg-surface p-4 text-left shadow-lg"
         >
           <input type="hidden" name="appId" value={appId} />
           <input type="hidden" name="openingId" value={openingId} />
@@ -340,7 +340,7 @@ export function RowActions({
       {open === "decline" && (
         <form
           action={declineOffer}
-          className="absolute right-0 top-full z-30 mt-2 w-[280px] rounded-xl border border-rule bg-surface p-4 text-left shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-[280px] max-w-[calc(100vw-32px)] sm:left-auto sm:right-0 rounded-xl border border-rule bg-surface p-4 text-left shadow-lg"
         >
           <input type="hidden" name="appId" value={appId} />
           <input type="hidden" name="openingId" value={openingId} />
@@ -381,7 +381,7 @@ export function RowActions({
       {(open === "reject" || open === "dropout") && (
         <form
           onSubmit={moveTo}
-          className="absolute right-0 top-full z-30 mt-2 w-[260px] rounded-xl border border-rule bg-surface p-3.5 text-left shadow-lg"
+          className="absolute left-0 top-full z-30 mt-2 w-[260px] max-w-[calc(100vw-32px)] sm:left-auto sm:right-0 rounded-xl border border-rule bg-surface p-3.5 text-left shadow-lg"
         >
           <input type="hidden" name="appId" value={appId} />
           <input type="hidden" name="openingId" value={openingId} />

@@ -152,7 +152,7 @@ export function NewClientDialog({
               }}
               className="rounded-2xl border border-rule bg-surface p-6"
             >
-              <div className="grid gap-5 sm:grid-cols-2">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-5 sm:grid-cols-2">
                 <label className="sm:col-span-2">
                   <span className="mb-1.5 block text-[12px] text-ink-soft">Company name</span>
                   <input name="name" required autoFocus placeholder="Delmo Holdings" className={`${inputClass} text-[15px]`} />

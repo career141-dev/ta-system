@@ -146,7 +146,7 @@ export function LinkRow({
   if (removed || del.result?.tone === "ok") return null;
 
   return (
-    <article className="px-6 py-5">
+    <article className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="flex gap-3.5">
         <form
           onSubmit={(e) => {
@@ -171,7 +171,7 @@ export function LinkRow({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0 flex-1 basis-[200px]">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <a
                   href={externalUrl(r.linkedinUrl) ?? undefined}
@@ -238,7 +238,7 @@ export function LinkRow({
                         autoFocus
                         maxLength={300}
                         placeholder="Why not interested? e.g. happy where they are"
-                        className="w-[260px] rounded-full border border-rule-strong bg-surface px-3 py-1 text-[12px]"
+                        className="w-full sm:w-[260px] rounded-full border border-rule-strong bg-surface px-3 py-1 text-[12px]"
                       />
                       <SubmitButton
                         busy={setInterest.pending}
@@ -288,8 +288,8 @@ export function LinkRow({
               </div>
             </div>
 
-            <div className="flex shrink-0 flex-col items-end gap-2">
-              <div className="flex items-center gap-2">
+            <div className="flex w-full shrink-0 flex-col items-start gap-2 sm:w-auto sm:items-end">
+              <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
                 {onPipeline ? (
                   <Link
                     href={`/openings/${openingId}/candidate/${onPipeline.id}`}
@@ -438,7 +438,7 @@ export function LinkRow({
             </form>
           )}
 
-          <dl className="mt-3 grid grid-cols-[96px_1fr] gap-x-4 gap-y-1.5 text-[12.5px] leading-relaxed">
+          <dl className="mt-3 grid grid-cols-[80px_minmax(0,1fr)] gap-x-3 gap-y-1.5 break-words text-[12.5px] leading-relaxed sm:grid-cols-[96px_minmax(0,1fr)] sm:gap-x-4">
             {notes.length > 0 && (
               <>
                 <dt className="font-medium text-ink-soft">Notes</dt>
@@ -526,7 +526,7 @@ export function LinkRow({
           {!edit && <ActionNote result={answer} className="mt-3" />}
 
           {edit && (
-            <div className="mt-4 grid gap-6 border-t border-rule pt-4 lg:grid-cols-2">
+            <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-6 border-t border-rule pt-4 lg:grid-cols-2">
               <form
                 onSubmit={(e) => {
                   const { formData, pressed } = submitted(e);

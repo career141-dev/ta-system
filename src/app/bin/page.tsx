@@ -29,7 +29,7 @@ export default async function BinPage() {
   const mayPurge = isDeskWide(user);
 
   return (
-    <main className="mx-auto max-w-[1180px] px-8 py-9">
+    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
       <div className="mb-8">
         <h1 className="text-[24px] font-semibold tracking-tight">Bin</h1>
         <p className="mt-1.5 text-[13px] text-ink-soft">

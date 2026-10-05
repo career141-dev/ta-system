@@ -31,10 +31,14 @@ export const processCvIngestion = internalMutation({
   handler: async (ctx, args) => {
     const startTime = Date.now();
 
-    // 1. Get job — must be active (only if jobId is provided)
+    // 1. Get job — must be active (only if jobId is provided). On hold is
+    // accepted for a CV filed to a post: post routing reaches an opening on
+    // hold only through that post's own LinkedIn link, so the person applied
+    // for this job (5 October).
     if (args.jobId) {
       const job = await ctx.db.get(args.jobId);
-      if (!job || job.status !== "active") {
+      const open = job?.status === "active" || (job?.status === "on_hold" && !!args.jobPostId);
+      if (!job || !open) {
         await ctx.db.insert("ingestionLog", {
           jobId: args.jobId,
           channelType: args.sourceChannel as any,

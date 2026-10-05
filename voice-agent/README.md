@@ -19,10 +19,13 @@ Optional: `AURA_REALTIME_MODEL` (default `gpt-realtime-2.1-mini`) and
 `AURA_REALTIME_VOICE` (default `marin`; also `cedar`, `alloy`, `coral`, `sage`,
 `verse`…).
 
-Turn-taking runs on OpenAI's server VAD, and nothing cuts Aura off mid-sentence.
-`AURA_SILENCE_MS` (default 400) is how long after the candidate stops that Aura
-answers; raise it if she talks over people who pause. `AURA_VAD_THRESHOLD`
-(default 0.5) — raise it if room noise starts turns. Each reply logs
+Turn-taking runs on OpenAI's server VAD. The candidate can talk over Aura (2 Oct):
+she stops, takes in what they said and answers that first. `AURA_INTERRUPTIONS=off`
+puts back the old behaviour where nothing cuts her off. `AURA_SILENCE_MS` (default
+600) is how long after the candidate stops that Aura answers; raise it if she talks
+over people who pause. `AURA_VAD_THRESHOLD` (default 0.6, or 0.5 with interruptions
+off) — raise it if room noise or an echo cuts her off. `AURA_SPEED` (default 0.92)
+is her speaking pace, 0.5–1.5. Each reply logs
 `[Aura] reply first audio in … ms`.
 
 ```bash

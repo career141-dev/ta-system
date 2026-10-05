@@ -3,6 +3,59 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
+import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../lib/mailCursor";
+import { isNotAnApplication, parseApplicationEmail } from "../lib/mailParse";
+import { linkedinJobId, linkedinProjectId } from "../lib/postRouting";
+import { placeOnPosts } from "../mailIntake/process";
+import type { ActionCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
+
+/**
+ * A LinkedIn applicant whose notification carries no résumé (5 October). They
+ * named themselves, the job and usually their profile, which is enough to hold
+ * them and put them on the post: found by their LinkedIn profile, or created.
+ * Until now the email was marked read and dropped, and the applicant was lost.
+ * The newer mail reader (mailIntake/process.ts) does the same, and places them
+ * through the same placeOnPosts.
+ *
+ * Returns the note for the mailbox log, or null when the email is not an
+ * applicant notification (a LinkedIn notice, a digest, anything else).
+ */
+async function holdLinkedInApplicant(
+  ctx: ActionCtx,
+  input: { inboxEmail: string; subject: string; fromAddress: string; body: string; bodyIsHtml: boolean },
+): Promise<string | null> {
+  if (isNotAnApplication(input.fromAddress, input.subject)) return null;
+  const parsed = parseApplicationEmail({
+    subject: input.subject,
+    fromAddress: input.fromAddress,
+    bodyHtml: input.bodyIsHtml ? input.body : "",
+    bodyText: input.bodyIsHtml ? "" : input.body,
+  });
+  if (!parsed.isLinkedIn || !parsed.applicantName) return null;
+
+  const channel = inboxChannel(input.inboxEmail);
+  const route = await routeByPosts(ctx, { subject: input.subject, body: input.body, channel });
+  let candidateId: Id<"candidates"> | null = parsed.profileUrl
+    ? await ctx.runQuery(internal.mailIntake.model.candidateByLinkedin, { url: parsed.profileUrl })
+    : null;
+  if (!candidateId) {
+    candidateId = await ctx.runMutation(internal.candidates.candidates.createCandidate, {
+      fullName: parsed.applicantName,
+      linkedinUrl: parsed.profileUrl ?? undefined,
+      email: parsed.email ?? undefined,
+      phone: parsed.phone ?? undefined,
+      sourceChannel: channel,
+    });
+  }
+  if (!candidateId) return `CV not attached, and ${parsed.applicantName} could not be held.`;
+  const posts = [
+    ...(route.jobId && route.jobPostId ? [{ jobId: route.jobId, postId: route.jobPostId }] : []),
+    ...route.alsoTo.map((a) => ({ jobId: a.jobId, postId: a.jobPostId })),
+  ];
+  await placeOnPosts(ctx, candidateId, posts, channel, input.subject);
+  return `CV not attached — ${parsed.applicantName} held from the LinkedIn notification. ${route.note}`;
+}
 
 /** Which channel a shared mailbox's CVs are recorded under. */
 function inboxChannel(inbox: string): string {
@@ -131,9 +184,10 @@ async function fetchAttachmentContent(inboxEmail: string, messageId: string, att
   }
 }
 
-async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ignoreReadStatus: boolean = false) {
+/** The messages, and whether every page was read — a partial read must not move the cursor. */
+async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ignoreReadStatus: boolean = false): Promise<{ messages: any[]; fetchedAll: boolean }> {
   const token = await getGraphToken();
-  if (!token) return [];
+  if (!token) return { messages: [], fetchedAll: false };
 
   const bypassReadCheck = ignoreReadStatus;
 
@@ -153,6 +207,7 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
     let url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/mailFolders/inbox/messages?$filter=${filterClause}&$select=id,subject,body,from,hasAttachments,isRead,receivedDateTime&$top=100`;
     
     const allMessages: any[] = [];
+    let fetchedAll = true;
 
     while (url) {
       const response = await safeFetchWithRetry(url, {
@@ -161,6 +216,7 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
 
       if (!response || !response.ok) {
         console.error("[EmailAgent] Failed to fetch emails:", response ? await response.text() : "Network error");
+        fetchedAll = false;
         break;
       }
 
@@ -172,10 +228,10 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
       url = data["@odata.nextLink"];
     }
 
-    return allMessages;
+    return { messages: allMessages, fetchedAll };
   } catch (error) {
     console.error("[EmailAgent] Error fetching emails:", error);
-    return [];
+    return { messages: [], fetchedAll: false };
   }
 }
 
@@ -239,17 +295,43 @@ export const pollEmailInbox = internalAction({
     const currentFetchTime = new Date().toISOString();
 
     // 1. Fetch inbox emails (including read emails for Sanjeev or when ignoreReadStatus is true)
-    const messages = await fetchInboxEmails(targetInboxEmail, lastFetch, ignoreReadStatus ?? false);
-    if ((messages as any[]).length > 0) {
-      console.log(`[EmailAgent] Found ${(messages as any[]).length} target messages in ${targetInboxEmail}.`);
+    // linkedin@ and cv@ are read by the log, not the read flag (lib/mailCursor.ts).
+    const byLog = readsByLog(targetInboxEmail, process.env.LINKEDIN_SHARED_INBOX);
+    const fetched = await fetchInboxEmails(targetInboxEmail, lastFetch, byLog || (ignoreReadStatus ?? false));
+    const fetchedAll = fetched.fetchedAll;
+    let messages = fetched.messages;
+    if (byLog && messages.length > 0) {
+      const logSince: string = await ctx.runMutation(internal.communications.emailAgent.startMailLog, { inboxEmail: targetInboxEmail });
+      const logged: string[] = await ctx.runQuery(internal.communications.emailAgent.loggedMessageIds, {
+        inboxEmail: targetInboxEmail,
+        messageIds: messages.map((m: any) => m.id),
+      });
+      messages = notYetHandled(messages, new Set(logged), logSince);
+    }
+    // Record each email once it has been handled, and mark it read for whoever opens the mailbox.
+    const finish = async (message: any, outcome: "cv" | "held" | "no_cv" | "reply", note?: string) => {
+      await markEmailAsRead(targetInboxEmail, message.id);
+      if (!byLog) return;
+      await ctx.runMutation(internal.communications.emailAgent.logMailboxMessage, {
+        inboxEmail: targetInboxEmail,
+        messageId: message.id,
+        receivedAt: message.receivedDateTime ?? new Date().toISOString(),
+        subject: message.subject ?? "",
+        fromAddress: message.from?.emailAddress?.address,
+        outcome,
+        note,
+      });
+    };
+    if (messages.length > 0) {
+      console.log(`[EmailAgent] Found ${messages.length} target messages in ${targetInboxEmail}.`);
     } else {
       console.log(`[EmailAgent] No matching messages found in ${targetInboxEmail}.`);
     }
     
-    const allMessages = messages as any[];
-    const batch = allMessages.slice(0, 15);
-    if (allMessages.length > 15) {
-      console.log(`[EmailAgent] ${allMessages.length} unread emails found. Processing top 15 in this run to prevent execution timeout (remaining ${allMessages.length - 15} will run in next 5-min cycle).`);
+    const allMessages = oldestFirst(messages);
+    const batch = allMessages.slice(0, POLL_BATCH);
+    if (allMessages.length > POLL_BATCH) {
+      console.log(`[EmailAgent] ${allMessages.length} unread emails found. Processing the oldest ${POLL_BATCH}; the cursor stays, so the remaining ${allMessages.length - POLL_BATCH} are fetched again next run.`);
     }
 
     let currentExtractionDelayMs = 0; // Stagger AI extractions by 10s
@@ -313,11 +395,27 @@ export const pollEmailInbox = internalAction({
 
       if (cvAttachments.length === 0) {
         if (isReplyProcessed || isCandidateMatched) {
-          await markEmailAsRead(targetInboxEmail, message.id);
+          await finish(message, "reply");
           continue;
         }
+        // A LinkedIn applicant with no résumé: held and put on the post, on the
+        // shared mailboxes, where post routing decides the job (5 October).
+        if (postRoutingOn() && !jobId && senderEmail) {
+          const held = await holdLinkedInApplicant(ctx, {
+            inboxEmail: targetInboxEmail,
+            subject,
+            fromAddress: senderEmail,
+            body: emailBody,
+            bodyIsHtml: message.body?.contentType === "html",
+          });
+          if (held) {
+            console.log(`[EmailAgent] ${held}`);
+            await finish(message, "held", held);
+            continue;
+          }
+        }
         console.log(`[EmailAgent] No CV attachments found in email: "${subject}"`);
-        await markEmailAsRead(targetInboxEmail, message.id);
+        await finish(message, "no_cv");
         continue; // No CV attachment and not a follow-up reply — skip
       }
       
@@ -457,7 +555,11 @@ Respond ONLY with a valid JSON object in this exact format:
         });
       }
 
-      await markEmailAsRead(targetInboxEmail, message.id);
+      await finish(
+        message,
+        "cv",
+        `${cvAttachments.length} CV${cvAttachments.length > 1 ? "s" : ""}. ${postRoute?.note ?? (resolvedJobId ? "Filed to its job." : "No job matched, so the candidate went to the database.")}`,
+      );
       /*
       if (!isReplyProcessed && !isLinkedInNoReply) {
         if (resolvedJobId) {
@@ -470,8 +572,15 @@ Respond ONLY with a valid JSON object in this exact format:
     }
 
     // Commit the fetch timestamp AFTER all messages are processed so a mid-batch crash
-    // does not skip unprocessed messages on the next poll cycle.
-    await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: currentFetchTime, inboxEmail: targetInboxEmail });
+    // does not skip unprocessed messages on the next poll cycle — and only when
+    // nothing was left behind (lib/mailCursor.ts, 5 October).
+    // Read by the log, a held cursor cannot refetch the same mail forever, so the
+    // outbound lock (mail left unread) does not matter there.
+    if (advanceCursor({ fetchedAll, found: allMessages.length, markReadDisabled: outboundLocked() && !byLog })) {
+      await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: currentFetchTime, inboxEmail: targetInboxEmail });
+    } else {
+      console.log(`[EmailAgent] ${targetInboxEmail}: cursor kept at ${lastFetch ?? "(none)"} — ${fetchedAll ? `${allMessages.length - POLL_BATCH} message(s) still waiting` : "the mailbox could not be read in full"}.`);
+    }
   },
 });
 
@@ -883,6 +992,198 @@ export const updateLastEmailFetchTimestamp = internalMutation({
       await ctx.db.insert("appSettings", { key, lastEmailFetchTimestamp: timestamp });
     }
   }
+});
+
+/** When this mailbox began to be read by the log; set on the first such run. */
+export const startMailLog = internalMutation({
+  args: { inboxEmail: v.string() },
+  handler: async (ctx, { inboxEmail }): Promise<string> => {
+    const key = `email_fetch_${inboxEmail}`;
+    const row = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", key)).first();
+    if (row?.mailLogSince) return row.mailLogSince;
+    const now = new Date().toISOString();
+    if (row) await ctx.db.patch(row._id, { mailLogSince: now });
+    else await ctx.db.insert("appSettings", { key, mailLogSince: now });
+    return now;
+  },
+});
+
+/** Which of these messages the log already holds. */
+export const loggedMessageIds = internalQuery({
+  args: { inboxEmail: v.string(), messageIds: v.array(v.string()) },
+  handler: async (ctx, { inboxEmail, messageIds }): Promise<string[]> => {
+    const out: string[] = [];
+    for (const messageId of messageIds) {
+      const hit = await ctx.db
+        .query("mailboxLog")
+        .withIndex("by_mailbox_message", (q) => q.eq("mailbox", inboxEmail).eq("messageId", messageId))
+        .first();
+      if (hit) out.push(messageId);
+    }
+    return out;
+  },
+});
+
+export const logMailboxMessage = internalMutation({
+  args: {
+    inboxEmail: v.string(),
+    messageId: v.string(),
+    receivedAt: v.string(),
+    subject: v.string(),
+    fromAddress: v.optional(v.string()),
+    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply")),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, a) => {
+    const hit = await ctx.db
+      .query("mailboxLog")
+      .withIndex("by_mailbox_message", (q) => q.eq("mailbox", a.inboxEmail).eq("messageId", a.messageId))
+      .first();
+    if (hit) return;
+    await ctx.db.insert("mailboxLog", {
+      mailbox: a.inboxEmail,
+      messageId: a.messageId,
+      receivedAt: a.receivedAt,
+      subject: a.subject.slice(0, 300),
+      fromAddress: a.fromAddress,
+      outcome: a.outcome,
+      note: a.note?.slice(0, 500),
+      loggedAt: Date.now(),
+    });
+  },
+});
+
+// ── Re-reading the mailbox when a LinkedIn link is saved (5 October) ─────────
+//
+// A TA often creates the job on LinkedIn first and the post here later.
+// Everyone who applied in between was filed by title, or to the database, and
+// saving the link did nothing for them. Saving it now re-reads linkedin@ for
+// the last 30 days: every email that, read again, routes to a post with this
+// link is filed there — a CV as any CV (an already-held person is linked, not
+// created twice), a no-CV applicant held from the notification. Nobody is
+// moved off another opening, and nothing is sent to anyone.
+
+/** The most emails one re-read files; past it the rest wait for the next save. */
+const RESCAN_MAX = 300;
+const RESCAN_PAGES = 10;
+
+/** Messages in the inbox whose text matches a search term, newest first (Graph $search). */
+async function searchInbox(inboxEmail: string, term: string): Promise<any[]> {
+  const token = await getGraphToken();
+  if (!token) return [];
+  const q = encodeURIComponent(`"${term.replace(/"/g, "")}"`);
+  let url: string | undefined =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/mailFolders/inbox/messages?$search=${q}&$select=id,subject,body,from,hasAttachments,receivedDateTime&$top=50`;
+  const out: any[] = [];
+  for (let page = 0; url && page < RESCAN_PAGES; page++) {
+    const res = await safeFetchWithRetry(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res || !res.ok) {
+      console.error(`[Rescan] Search for "${term}" failed:`, res ? await res.text() : "network error");
+      break;
+    }
+    const data = await res.json();
+    out.push(...(data.value ?? []));
+    url = data["@odata.nextLink"];
+  }
+  return out;
+}
+
+/** The titles of the posts that carry this link — the subjects LinkedIn's emails use. */
+export const postsWithLink = internalQuery({
+  args: { project: v.optional(v.string()), job: v.optional(v.string()) },
+  handler: async (ctx, { project, job }) => {
+    const titles: string[] = [];
+    const ids: string[] = [];
+    for (const p of await ctx.db.query("jobPosts").collect()) {
+      if (!p.externalUrl) continue;
+      const hit = (project && linkedinProjectId(p.externalUrl) === project) || (job && linkedinJobId(p.externalUrl) === job);
+      if (!hit) continue;
+      ids.push(p._id);
+      titles.push(p.title, ...(p.previousTitles ?? []));
+    }
+    return { ids, titles };
+  },
+});
+
+/** Called by the app when a post's LinkedIn link is saved. */
+export const queueRescanForLink = internalMutation({
+  args: { url: v.string(), days: v.optional(v.number()) },
+  handler: async (ctx, { url, days }) => {
+    if (!linkedinProjectId(url) && !linkedinJobId(url)) return { queued: false };
+    await ctx.scheduler.runAfter(5_000, internal.communications.emailAgent.rescanMailboxForLink, { url, days });
+    return { queued: true };
+  },
+});
+
+export const rescanMailboxForLink = internalAction({
+  args: { url: v.string(), days: v.optional(v.number()) },
+  handler: async (ctx, { url, days }) => {
+    if (!postRoutingOn()) return { searched: 0, filed: 0 };
+    const project = linkedinProjectId(url) ?? undefined;
+    const job = linkedinJobId(url) ?? undefined;
+    const posts = await ctx.runQuery(internal.communications.emailAgent.postsWithLink, { project, job });
+    if (posts.ids.length === 0) return { searched: 0, filed: 0 };
+    const ours = new Set<string>(posts.ids);
+    const inbox = process.env.LINKEDIN_SHARED_INBOX || "linkedin@career141.com";
+    const since = new Date(Date.now() - (days ?? 30) * 24 * 60 * 60_000).toISOString();
+
+    // The number finds the emails that carry it; the titles find any whose
+    // link the search index did not keep. Each one is routed again below, so a
+    // title search that also finds other jobs' emails files none of them.
+    const found = new Map<string, any>();
+    for (const term of [project, job, ...new Set(posts.titles)].filter(Boolean) as string[]) {
+      for (const m of await searchInbox(inbox, term)) {
+        if ((m.receivedDateTime ?? "") >= since) found.set(m.id, m);
+      }
+    }
+
+    let filed = 0;
+    let delayMs = 0;
+    for (const m of oldestFirst([...found.values()]).slice(0, RESCAN_MAX)) {
+      const subject = m.subject ?? "";
+      const body = m.body?.content ?? "";
+      const route = await routeByPosts(ctx, { subject, body, channel: inboxChannel(inbox) });
+      const toUs = (route.jobPostId && ours.has(route.jobPostId)) || route.alsoTo.some((a) => ours.has(a.jobPostId));
+      if (!toUs || !route.jobId) continue;
+
+      const attachments = m.hasAttachments ? await fetchMessageAttachments(inbox, m.id) : [];
+      const cvs = attachments.filter(
+        (a: any) =>
+          a.contentType?.includes("pdf") ||
+          a.contentType?.includes("msword") ||
+          a.contentType?.includes("officedocument.wordprocessingml") ||
+          /\.(pdf|docx?)$/i.test(a.name ?? ""),
+      );
+      if (cvs.length === 0) {
+        const from = m.from?.emailAddress?.address;
+        const held = from
+          ? await holdLinkedInApplicant(ctx, { inboxEmail: inbox, subject, fromAddress: from, body, bodyIsHtml: m.body?.contentType === "html" })
+          : null;
+        if (held) filed++;
+        continue;
+      }
+      for (const a of cvs) {
+        await ctx.scheduler.runAfter(delayMs, internal.communications.emailAgent.processSingleEmailAttachment, {
+          targetInboxEmail: inbox,
+          messageId: m.id,
+          attachmentId: a.id,
+          attachmentName: a.name ?? "cv.pdf",
+          contentType: a.contentType || "application/pdf",
+          resolvedJobId: route.jobId,
+          jobPostId: route.jobPostId,
+          alsoTo: route.alsoTo.length ? route.alsoTo : undefined,
+          routeNote: `Re-read when the LinkedIn link was saved. ${route.note}`,
+          rawSender: m.from?.emailAddress?.address,
+          subject,
+          currentExtractionDelayMs: delayMs * 5,
+        });
+        delayMs += 2_000;
+      }
+      filed++;
+    }
+    console.log(`[Rescan] ${url}: ${found.size} email(s) found in ${inbox} since ${since.slice(0, 10)}, ${filed} filed to the post.`);
+    return { searched: found.size, filed };
+  },
 });
 
 export const checkFileHashExists = internalQuery({

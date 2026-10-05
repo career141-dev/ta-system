@@ -24,7 +24,8 @@ export async function GET(req: Request) {
   await primeStore();
   if (!authorised(req)) return reply({ error: "bad_token" }, 401);
 
-  const user = extensionUser(new URL(req.url).searchParams.get("userId"));
+  const params = new URL(req.url).searchParams;
+  const user = extensionUser(params.get("userId"));
   let openings = user
     ? repo
         .openingsForUser(user)
@@ -37,6 +38,7 @@ export async function GET(req: Request) {
           locations: o.locations,
         }))
     : [];
+
 
   if (openings.length === 0) {
     openings = repo

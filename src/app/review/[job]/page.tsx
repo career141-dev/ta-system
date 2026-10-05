@@ -56,7 +56,7 @@ export default async function ReviewJob({
   const page = pageFrom(sp, matching.length, PAGE_SIZE);
 
   return (
-    <main className="mx-auto w-full max-w-[920px] px-6 py-8">
+    <main className="mx-auto w-full max-w-[920px] px-4 sm:px-6 py-8">
       <Link href="/review" className="text-[12px] text-ink-faint hover:underline">← All review lists</Link>
       <div className="sticky top-0 z-10 -mx-6 mt-2 border-b border-rule bg-paper/95 px-6 py-3 backdrop-blur">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -73,7 +73,7 @@ export default async function ReviewJob({
             <span className="text-[11px] text-ink-faint">Requirements {reqs.version}</span>
           </div>
           <p className="mt-1 text-ink-soft">{reqs.summary}</p>
-          <div className="mt-3 grid gap-4 md:grid-cols-2">
+          <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-4 md:grid-cols-2">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">Essential</div>
               <ul className="mt-1 list-disc space-y-1 pl-4">{reqs.essential.map((e) => <li key={e}>{e}</li>)}</ul>

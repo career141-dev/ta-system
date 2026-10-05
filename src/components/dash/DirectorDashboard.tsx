@@ -48,15 +48,15 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
 
   return (
     <>
-      <section className="mb-8 grid gap-4 sm:grid-cols-4">
+      <section className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
         {[
           { n: open.length, label: "Open roles" },
           { n: waiting.length, label: "Waiting on you", warn: waiting.length > 0 },
           { n: `$${Math.round(value / 1000)}k`, label: "In progress" },
           { n: placed ? `$${Math.round(placed / 1000)}k` : "—", label: "Placed" },
         ].map((s) => (
-          <div key={s.label} className="rounded-2xl border border-rule bg-surface px-6 py-5">
-            <div className={`tabular text-[26px] font-semibold leading-none ${s.warn ? "text-warn" : ""}`}>
+          <div key={s.label} className="min-w-0 rounded-2xl border border-rule bg-surface px-3 py-4 sm:px-6 sm:py-5">
+            <div className={`tabular truncate text-[21px] font-semibold leading-none sm:text-[26px] ${s.warn ? "text-warn" : ""}`}>
               {s.n}
             </div>
             <div className="mt-2 text-[12.5px] text-ink-soft">{s.label}</div>
@@ -70,7 +70,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
               {review.pager.total === 0 && (
-                <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">Nothing here matches that search.</p>
+                <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">Nothing here matches that search.</p>
               )}
               {review.rows.map(({ o, a }) => {
                 const c = repo.candidate(a.candidateId);
@@ -78,7 +78,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
                   <Link
                     key={a.id}
                     href={`/openings/${o.id}/pipeline/director_review`}
-                    className="flex flex-wrap items-center gap-x-5 gap-y-1 px-7 py-3.5 hover:bg-paper/60"
+                    className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5 hover:bg-paper/60"
                   >
                     <div className="min-w-[220px] flex-1">
                       <p className="text-[13.5px] font-medium">{c?.fullName}</p>
@@ -99,10 +99,10 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
         </section>
       )}
 
-      <div className="grid gap-8 lg:grid-cols-[1fr_1fr]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[1fr_1fr]">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Where everyone is</h2>
-          <div className="rounded-2xl border border-rule bg-surface px-7 py-5">
+          <div className="rounded-2xl border border-rule bg-surface px-4 sm:px-7 py-5">
             {totals.map((t) => (
               <div key={t.stage} className="flex items-center gap-4 border-b border-rule py-3 last:border-b-0">
                 <span className="w-[130px] shrink-0 text-[13px]">{STAGE_LABEL[t.stage]}</span>
@@ -120,7 +120,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
               {byClient.pager.total === 0 && (
-                <p className="px-7 py-10 text-center text-[12.5px] text-ink-faint">No client matches that search.</p>
+                <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">No client matches that search.</p>
               )}
               {byClient.rows.map((cl) => {
                 const mine = open.filter((o) => o.clientId === cl.id);
@@ -130,7 +130,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
                 );
                 const v = mine.reduce((n, o) => n + (o.valueOnProgressing ?? 0), 0);
                 return (
-                  <div key={cl.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-7 py-3.5">
+                  <div key={cl.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5">
                     <div className="min-w-[140px] flex-1">
                       <p className="text-[13.5px] font-medium">{cl.name}</p>
                       <p className="text-[11.5px] text-ink-faint">

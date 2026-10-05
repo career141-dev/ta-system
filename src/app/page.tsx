@@ -41,7 +41,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   // Spec §13 — four different jobs, four different screens.
   if (user.role === "ta_lead" || user.role === "admin") {
     return (
-      <main className="mx-auto max-w-[1180px] px-8 py-9">
+      <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
         <header className="mb-8">
           <h1 className="text-[24px] font-semibold tracking-tight">
             {greeting}, {user.name}
@@ -58,7 +58,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   if (user.role === "director") {
     return (
-      <main className="mx-auto max-w-[1180px] px-8 py-9">
+      <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
         <header className="mb-8">
           <h1 className="text-[24px] font-semibold tracking-tight">
             {greeting}, {user.name}
@@ -72,7 +72,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   if (user.role === "ops") {
     return (
-      <main className="mx-auto max-w-[1180px] px-8 py-9">
+      <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
         <header className="mb-8">
           <h1 className="text-[24px] font-semibold tracking-tight">
             {greeting}, {user.name}
@@ -95,7 +95,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   );
 
   return (
-    <main className="mx-auto max-w-[1180px] px-8 py-9">
+    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
       <header className="mb-8">
         <h1 className="text-[24px] font-semibold tracking-tight">
           {greeting}, {user.name}
@@ -135,7 +135,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </section>
       )}
 
-      <div className="grid gap-8 lg:grid-cols-[1fr_300px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[1fr_300px]">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">My openings</h2>
           <div className="flex flex-col gap-4">
