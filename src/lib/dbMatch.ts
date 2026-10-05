@@ -121,7 +121,7 @@ export function failsHardRules(
  * working" are different answers, and only one of them is about candidates.
  */
 async function matchViaEngine(
-  o: { id: string; clientId: string; locations: string[]; targetNationalities: string[]; assignedTaIds: string[] },
+  o: { id: string; clientId: string; title: string; jdMarkdown: string; locations: string[]; targetNationalities: string[]; assignedTaIds: string[] },
   req: Requirements,
   trigger: MatchRun["trigger"],
   now: number,
@@ -153,13 +153,26 @@ async function matchViaEngine(
   const waiting = repo.applications(o.id).filter((a) => a.stage === "matched" && !a.ownerTaId).length;
   const room = Math.max(0, LIMITS.shown - waiting);
   const by = o.assignedTaIds?.[0] ?? repo.users().find((u) => u.role === "director")?.id ?? "system";
+  const toAdd = kept.slice(0, room);
+
+  // The one line a TA reads on Database CVs (5 Oct). Claude writes it for the
+  // people being added, and only them; it changes nobody's place in the list.
+  const { claudeMatchOn, claudeMatchReasons } = await import("./claudeMatch");
+  const claudeOn = claudeMatchOn() && toAdd.length > 0;
+  const written = claudeOn
+    ? await claudeMatchReasons(
+        { title: o.title, industry: repo.client(o.clientId)?.industry ?? null, jdText: o.jdMarkdown, req },
+        toAdd.map((k) => k.candidate),
+      ).catch(() => null)
+    : null;
 
   let added = 0;
   repo.batch(() => {
-    for (const k of kept.slice(0, room)) {
+    for (const k of toAdd) {
       const res = repo.addCandidateToOpening(k.candidate.id, o.id, by, null, {
         kind: "auto_match",
         note: `Matched from the database — fit ${k.row.overallScore}. ${k.row.reason ?? ""}`.trim(),
+        reason: written?.get(k.candidate.id) ?? k.row.reason ?? "",
       });
       if (res.ok) added++;
     }
@@ -178,6 +191,11 @@ async function matchViaEngine(
     note: [
       failedNote ? `Ruled out by the desk's rules: ${failedNote}.` : null,
       room === 0 ? `${waiting} matches already waiting, so none added.` : null,
+      claudeOn
+        ? written
+          ? `Reasons written by Claude for ${toAdd.filter((k) => written.has(k.candidate.id)).length} of ${toAdd.length}.`
+          : "Claude unavailable — engine reasons shown."
+        : null,
     ].filter(Boolean).join(" ") || null,
   };
   repo.saveMatchRun(record);

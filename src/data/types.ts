@@ -374,6 +374,10 @@ export interface Application {
   /** Where the TA put the CAREER141 box on the Prepared CV, in PDF points from
    *  page 1's top-left. Null or missing: placed automatically (29 Sep). */
   preparedCvBox?: { x: number; y: number } | null;
+  /** Why a database match was picked, in one line — what Database CVs shows
+   *  instead of the full row (5 Oct). Claude's when it wrote one, else the
+   *  engine's. Not in `notes`, which the prepared CV prints. */
+  matchReason?: string | null;
   sourcingChannel: SourcingChannel;
 
   /** Spec §9 / Q3 — set in the same write as the shortlist. First to shortlist owns. */

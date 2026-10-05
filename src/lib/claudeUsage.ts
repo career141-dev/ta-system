@@ -29,6 +29,8 @@
  */
 export const CLAUDE_API_RATES_USD_PER_MTOK: Record<string, { input: number; output: number }> = {
   "claude-sonnet-4-5": { input: 3, output: 15 },
+  // The model database-match reasons ask for (lib/claudeMatch, 5 Oct).
+  "claude-sonnet-5-5": { input: 2, output: 10 },
   "claude-opus-4-1": { input: 15, output: 75 },
   "claude-haiku-4-5": { input: 1, output: 5 },
 };

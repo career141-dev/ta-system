@@ -4328,7 +4328,7 @@ const rawRepo = {
      * stages under different channel codes, and the 13 September audit found
      * both were being filed as database matches.
      */
-    origin: { kind: "database" } | { kind: "auto_match"; note: string } | { kind: "intake"; source: IntakeSource } = { kind: "database" },
+    origin: { kind: "database" } | { kind: "auto_match"; note: string; reason?: string } | { kind: "intake"; source: IntakeSource } = { kind: "database" },
   ): { ok: boolean; reason?: string } {
     const db = load();
     if (!db.candidates.some((c) => c.id === candidateId)) return { ok: false, reason: "No such candidate" };
@@ -4356,6 +4356,7 @@ const rawRepo = {
               ? origin.note
               : `Found in the database by ${d.users.find((u) => u.id === byUserId)?.name ?? "a TA"}`,
         ],
+        matchReason: origin.kind === "auto_match" ? origin.reason?.trim() || null : null,
         statusA: null,
         statusB: null,
         rankTier: null,

@@ -80,7 +80,7 @@ export function projectOpening(job: Doc<"jobs">) {
 }
 
 export function projectApplication(a: Doc<"applications">) {
-  const x = a as Doc<"applications"> & { rating?: number | null; taNotes?: string[]; taPreparedCvBox?: { x: number; y: number } };
+  const x = a as Doc<"applications"> & { rating?: number | null; taNotes?: string[]; taPreparedCvBox?: { x: number; y: number }; taMatchReason?: string };
   return {
     id: a._id as string,
     openingId: a.jobId as string,
@@ -103,6 +103,7 @@ export function projectApplication(a: Doc<"applications">) {
     rating: x.rating ?? null,
     notes: x.taNotes ?? [],
     preparedCvBox: x.taPreparedCvBox ?? null,
+    matchReason: x.taMatchReason ?? null,
     reviewNotes: a.reviewNotes ?? [],
     statusA: a.statusA ?? null,
     statusB: a.statusB ?? null,
