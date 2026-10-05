@@ -795,8 +795,12 @@ const rawRepo = {
 
   /** One Excel Tables row, by its id. */
   linkEntry: (entryId: Id): LinkVaultEntry | null => load().linkVault.find((l) => l.id === entryId) ?? null,
+  /** Newest first, so a row just added is at the top of Excel Tables
+   *  (Gajani, #124, 5 Oct). */
   linkVault: (openingId: Id): LinkVaultEntry[] =>
-    load().linkVault.filter((l) => l.openingId === openingId),
+    load()
+      .linkVault.filter((l) => l.openingId === openingId)
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
 
   callFeedback: (applicationId: Id) =>
     load()
