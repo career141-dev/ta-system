@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
+import { advanceCursor, oldestFirst, POLL_BATCH } from "../lib/mailCursor";
 
 /** Which channel a shared mailbox's CVs are recorded under. */
 function inboxChannel(inbox: string): string {
@@ -131,9 +132,10 @@ async function fetchAttachmentContent(inboxEmail: string, messageId: string, att
   }
 }
 
-async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ignoreReadStatus: boolean = false) {
+/** The messages, and whether every page was read — a partial read must not move the cursor. */
+async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ignoreReadStatus: boolean = false): Promise<{ messages: any[]; fetchedAll: boolean }> {
   const token = await getGraphToken();
-  if (!token) return [];
+  if (!token) return { messages: [], fetchedAll: false };
 
   const bypassReadCheck = ignoreReadStatus;
 
@@ -153,6 +155,7 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
     let url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/mailFolders/inbox/messages?$filter=${filterClause}&$select=id,subject,body,from,hasAttachments,isRead,receivedDateTime&$top=100`;
     
     const allMessages: any[] = [];
+    let fetchedAll = true;
 
     while (url) {
       const response = await safeFetchWithRetry(url, {
@@ -161,6 +164,7 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
 
       if (!response || !response.ok) {
         console.error("[EmailAgent] Failed to fetch emails:", response ? await response.text() : "Network error");
+        fetchedAll = false;
         break;
       }
 
@@ -172,10 +176,10 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
       url = data["@odata.nextLink"];
     }
 
-    return allMessages;
+    return { messages: allMessages, fetchedAll };
   } catch (error) {
     console.error("[EmailAgent] Error fetching emails:", error);
-    return [];
+    return { messages: [], fetchedAll: false };
   }
 }
 
@@ -239,17 +243,17 @@ export const pollEmailInbox = internalAction({
     const currentFetchTime = new Date().toISOString();
 
     // 1. Fetch inbox emails (including read emails for Sanjeev or when ignoreReadStatus is true)
-    const messages = await fetchInboxEmails(targetInboxEmail, lastFetch, ignoreReadStatus ?? false);
-    if ((messages as any[]).length > 0) {
-      console.log(`[EmailAgent] Found ${(messages as any[]).length} target messages in ${targetInboxEmail}.`);
+    const { messages, fetchedAll } = await fetchInboxEmails(targetInboxEmail, lastFetch, ignoreReadStatus ?? false);
+    if (messages.length > 0) {
+      console.log(`[EmailAgent] Found ${messages.length} target messages in ${targetInboxEmail}.`);
     } else {
       console.log(`[EmailAgent] No matching messages found in ${targetInboxEmail}.`);
     }
     
-    const allMessages = messages as any[];
-    const batch = allMessages.slice(0, 15);
-    if (allMessages.length > 15) {
-      console.log(`[EmailAgent] ${allMessages.length} unread emails found. Processing top 15 in this run to prevent execution timeout (remaining ${allMessages.length - 15} will run in next 5-min cycle).`);
+    const allMessages = oldestFirst(messages);
+    const batch = allMessages.slice(0, POLL_BATCH);
+    if (allMessages.length > POLL_BATCH) {
+      console.log(`[EmailAgent] ${allMessages.length} unread emails found. Processing the oldest ${POLL_BATCH}; the cursor stays, so the remaining ${allMessages.length - POLL_BATCH} are fetched again next run.`);
     }
 
     let currentExtractionDelayMs = 0; // Stagger AI extractions by 10s
@@ -470,8 +474,13 @@ Respond ONLY with a valid JSON object in this exact format:
     }
 
     // Commit the fetch timestamp AFTER all messages are processed so a mid-batch crash
-    // does not skip unprocessed messages on the next poll cycle.
-    await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: currentFetchTime, inboxEmail: targetInboxEmail });
+    // does not skip unprocessed messages on the next poll cycle — and only when
+    // nothing was left behind (lib/mailCursor.ts, 5 October).
+    if (advanceCursor({ fetchedAll, found: allMessages.length, markReadDisabled: outboundLocked() })) {
+      await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: currentFetchTime, inboxEmail: targetInboxEmail });
+    } else {
+      console.log(`[EmailAgent] ${targetInboxEmail}: cursor kept at ${lastFetch ?? "(none)"} — ${fetchedAll ? `${allMessages.length - POLL_BATCH} message(s) still waiting` : "the mailbox could not be read in full"}.`);
+    }
   },
 });
 
