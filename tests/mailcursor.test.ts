@@ -3,7 +3,7 @@
  * burst of more than 15 applications lost all but 15: the cursor moved past
  * the rest and no later run fetched them. Pure — no Graph, no database.
  */
-import { advanceCursor, oldestFirst, POLL_BATCH } from "../convex/lib/mailCursor";
+import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../convex/lib/mailCursor";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -27,6 +27,26 @@ const msgs = [
 ];
 eq("sorted by arrival", oldestFirst(msgs).map((m) => m.id), ["a", "b", "c"]);
 eq("the input is left as it was", msgs.map((m) => m.id), ["c", "a", "b"]);
+
+console.log("\nthe application mailboxes are read by the log, not the read flag");
+eq("linkedin@ by the log", readsByLog("LinkedIn@Career141.com"), true);
+eq("cv@ by the log", readsByLog("cv@career141.com"), true);
+eq("job@ keeps the read flag — its mail is replies", readsByLog("job@career141.com"), false);
+eq("the configured LinkedIn inbox too", readsByLog("apply@career141.com", "apply@career141.com"), true);
+
+const since = "2026-10-06T00:00:00Z";
+const box = [
+  { id: "opened-today", isRead: true, receivedDateTime: "2026-10-06T08:00:00Z" },
+  { id: "unread-today", isRead: false, receivedDateTime: "2026-10-06T08:05:00Z" },
+  { id: "handled-before", isRead: true, receivedDateTime: "2026-10-05T23:50:00Z" },
+  { id: "left-unread-before", isRead: false, receivedDateTime: "2026-10-05T23:55:00Z" },
+  { id: "logged", isRead: true, receivedDateTime: "2026-10-06T07:00:00Z" },
+];
+eq(
+  "an email opened in Outlook is still handled; logged and old handled mail is not",
+  notYetHandled(box, new Set(["logged"]), since).map((m) => m.id),
+  ["opened-today", "unread-today", "left-unread-before"],
+);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;

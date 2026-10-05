@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
-import { advanceCursor, oldestFirst, POLL_BATCH } from "../lib/mailCursor";
+import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../lib/mailCursor";
 
 /** Which channel a shared mailbox's CVs are recorded under. */
 function inboxChannel(inbox: string): string {
@@ -243,7 +243,33 @@ export const pollEmailInbox = internalAction({
     const currentFetchTime = new Date().toISOString();
 
     // 1. Fetch inbox emails (including read emails for Sanjeev or when ignoreReadStatus is true)
-    const { messages, fetchedAll } = await fetchInboxEmails(targetInboxEmail, lastFetch, ignoreReadStatus ?? false);
+    // linkedin@ and cv@ are read by the log, not the read flag (lib/mailCursor.ts).
+    const byLog = readsByLog(targetInboxEmail, process.env.LINKEDIN_SHARED_INBOX);
+    const fetched = await fetchInboxEmails(targetInboxEmail, lastFetch, byLog || (ignoreReadStatus ?? false));
+    const fetchedAll = fetched.fetchedAll;
+    let messages = fetched.messages;
+    if (byLog && messages.length > 0) {
+      const logSince: string = await ctx.runMutation(internal.communications.emailAgent.startMailLog, { inboxEmail: targetInboxEmail });
+      const logged: string[] = await ctx.runQuery(internal.communications.emailAgent.loggedMessageIds, {
+        inboxEmail: targetInboxEmail,
+        messageIds: messages.map((m: any) => m.id),
+      });
+      messages = notYetHandled(messages, new Set(logged), logSince);
+    }
+    // Record each email once it has been handled, and mark it read for whoever opens the mailbox.
+    const finish = async (message: any, outcome: "cv" | "no_cv" | "reply", note?: string) => {
+      await markEmailAsRead(targetInboxEmail, message.id);
+      if (!byLog) return;
+      await ctx.runMutation(internal.communications.emailAgent.logMailboxMessage, {
+        inboxEmail: targetInboxEmail,
+        messageId: message.id,
+        receivedAt: message.receivedDateTime ?? new Date().toISOString(),
+        subject: message.subject ?? "",
+        fromAddress: message.from?.emailAddress?.address,
+        outcome,
+        note,
+      });
+    };
     if (messages.length > 0) {
       console.log(`[EmailAgent] Found ${messages.length} target messages in ${targetInboxEmail}.`);
     } else {
@@ -317,11 +343,11 @@ export const pollEmailInbox = internalAction({
 
       if (cvAttachments.length === 0) {
         if (isReplyProcessed || isCandidateMatched) {
-          await markEmailAsRead(targetInboxEmail, message.id);
+          await finish(message, "reply");
           continue;
         }
         console.log(`[EmailAgent] No CV attachments found in email: "${subject}"`);
-        await markEmailAsRead(targetInboxEmail, message.id);
+        await finish(message, "no_cv");
         continue; // No CV attachment and not a follow-up reply — skip
       }
       
@@ -461,7 +487,11 @@ Respond ONLY with a valid JSON object in this exact format:
         });
       }
 
-      await markEmailAsRead(targetInboxEmail, message.id);
+      await finish(
+        message,
+        "cv",
+        `${cvAttachments.length} CV${cvAttachments.length > 1 ? "s" : ""}. ${postRoute?.note ?? (resolvedJobId ? "Filed to its job." : "No job matched, so the candidate went to the database.")}`,
+      );
       /*
       if (!isReplyProcessed && !isLinkedInNoReply) {
         if (resolvedJobId) {
@@ -476,7 +506,9 @@ Respond ONLY with a valid JSON object in this exact format:
     // Commit the fetch timestamp AFTER all messages are processed so a mid-batch crash
     // does not skip unprocessed messages on the next poll cycle — and only when
     // nothing was left behind (lib/mailCursor.ts, 5 October).
-    if (advanceCursor({ fetchedAll, found: allMessages.length, markReadDisabled: outboundLocked() })) {
+    // Read by the log, a held cursor cannot refetch the same mail forever, so the
+    // outbound lock (mail left unread) does not matter there.
+    if (advanceCursor({ fetchedAll, found: allMessages.length, markReadDisabled: outboundLocked() && !byLog })) {
       await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: currentFetchTime, inboxEmail: targetInboxEmail });
     } else {
       console.log(`[EmailAgent] ${targetInboxEmail}: cursor kept at ${lastFetch ?? "(none)"} — ${fetchedAll ? `${allMessages.length - POLL_BATCH} message(s) still waiting` : "the mailbox could not be read in full"}.`);
@@ -892,6 +924,65 @@ export const updateLastEmailFetchTimestamp = internalMutation({
       await ctx.db.insert("appSettings", { key, lastEmailFetchTimestamp: timestamp });
     }
   }
+});
+
+/** When this mailbox began to be read by the log; set on the first such run. */
+export const startMailLog = internalMutation({
+  args: { inboxEmail: v.string() },
+  handler: async (ctx, { inboxEmail }): Promise<string> => {
+    const key = `email_fetch_${inboxEmail}`;
+    const row = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", key)).first();
+    if (row?.mailLogSince) return row.mailLogSince;
+    const now = new Date().toISOString();
+    if (row) await ctx.db.patch(row._id, { mailLogSince: now });
+    else await ctx.db.insert("appSettings", { key, mailLogSince: now });
+    return now;
+  },
+});
+
+/** Which of these messages the log already holds. */
+export const loggedMessageIds = internalQuery({
+  args: { inboxEmail: v.string(), messageIds: v.array(v.string()) },
+  handler: async (ctx, { inboxEmail, messageIds }): Promise<string[]> => {
+    const out: string[] = [];
+    for (const messageId of messageIds) {
+      const hit = await ctx.db
+        .query("mailboxLog")
+        .withIndex("by_mailbox_message", (q) => q.eq("mailbox", inboxEmail).eq("messageId", messageId))
+        .first();
+      if (hit) out.push(messageId);
+    }
+    return out;
+  },
+});
+
+export const logMailboxMessage = internalMutation({
+  args: {
+    inboxEmail: v.string(),
+    messageId: v.string(),
+    receivedAt: v.string(),
+    subject: v.string(),
+    fromAddress: v.optional(v.string()),
+    outcome: v.union(v.literal("cv"), v.literal("no_cv"), v.literal("reply")),
+    note: v.optional(v.string()),
+  },
+  handler: async (ctx, a) => {
+    const hit = await ctx.db
+      .query("mailboxLog")
+      .withIndex("by_mailbox_message", (q) => q.eq("mailbox", a.inboxEmail).eq("messageId", a.messageId))
+      .first();
+    if (hit) return;
+    await ctx.db.insert("mailboxLog", {
+      mailbox: a.inboxEmail,
+      messageId: a.messageId,
+      receivedAt: a.receivedAt,
+      subject: a.subject.slice(0, 300),
+      fromAddress: a.fromAddress,
+      outcome: a.outcome,
+      note: a.note?.slice(0, 500),
+      loggedAt: Date.now(),
+    });
+  },
 });
 
 export const checkFileHashExists = internalQuery({

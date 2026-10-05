@@ -31,3 +31,26 @@ export function advanceCursor(run: { fetchedAll: boolean; found: number; markRea
 export function oldestFirst<T extends { receivedDateTime?: string }>(messages: T[]): T[] {
   return [...messages].sort((a, b) => (a.receivedDateTime ?? "").localeCompare(b.receivedDateTime ?? ""));
 }
+
+/**
+ * The shared application mailboxes are read by a log of what was handled, not
+ * by the read flag (5 October): an email someone opened in Outlook first was
+ * never picked up. job@ keeps the read flag — its mail is candidates' replies,
+ * and handling an old reply again would answer it twice.
+ */
+export function readsByLog(mailbox: string, linkedinShared?: string): boolean {
+  const m = mailbox.trim().toLowerCase();
+  return m === "linkedin@career141.com" || m === "cv@career141.com" || (!!linkedinShared && m === linkedinShared.trim().toLowerCase());
+}
+
+/**
+ * What still needs handling: not in the log, and not mail the old read-flag
+ * poller had already handled (read, and received before the log began).
+ */
+export function notYetHandled<T extends { id: string; isRead?: boolean; receivedDateTime?: string }>(
+  messages: T[],
+  logged: Set<string>,
+  logSince: string,
+): T[] {
+  return messages.filter((m) => !logged.has(m.id) && !(m.isRead && (m.receivedDateTime ?? "") < logSince));
+}
