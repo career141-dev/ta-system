@@ -9,6 +9,14 @@ import { isConvex } from "@/data/mode";
 import { primeStore } from "@/data/prime";
 import { convexMutation } from "./convexServer";
 
+/**
+ * Replies are applied only from here on (owner, 5 Oct). Until then the app had
+ * no Microsoft settings and never read a reply, so the TAs handled them by
+ * hand; replies already sitting in the mailboxes for sets still open are not
+ * applied when reading starts, or it could reject people a TA already dealt with.
+ */
+export const REPLIES_FROM = Date.parse("2026-10-05T12:15:00Z");
+
 let lastSyncTime = 0;
 const SYNC_COOLDOWN_MS = 15_000; // Throttle to max once per 15s
 const processedMsgIds = new Set<string>();
@@ -52,7 +60,8 @@ export async function syncMailboxRepliesSilently(): Promise<number> {
     return 0;
   }
 
-  if (!messages || messages.length === 0) return 0;
+  messages = (messages ?? []).filter((m) => Date.parse(m.receivedDateTime) >= REPLIES_FROM);
+  if (messages.length === 0) return 0;
 
   let appliedCount = 0;
 
