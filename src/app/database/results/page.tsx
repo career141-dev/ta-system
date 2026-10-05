@@ -6,7 +6,7 @@ import { assess } from "@/lib/assessment";
 import type { Score } from "@/lib/scoring";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
-import { criteriaFromParams, criteriaToParams, describe, parseBoolean, parseQuery, withoutChip, withValue } from "@/lib/query";
+import { conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, turnsOf, withoutChip, withValue } from "@/lib/query";
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
@@ -97,7 +97,7 @@ function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "bool
         <div className="rounded-xl border border-rule bg-surface p-4">
           <SearchBox
             vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
-            initialQuery={q}
+            prior={q}
             initialMode={mode}
             openingId={forOpening}
             compact
@@ -108,7 +108,7 @@ function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "bool
         {q ? (
           <LoadingProgress
             steps={DATABASE_STEPS}
-            heading={`Searching for “${q.length > 80 ? `${q.slice(0, 80)}…` : q}”`}
+            heading={`Searching for “${(turnsOf(q).at(-1) ?? q).slice(0, 80)}${(turnsOf(q).at(-1) ?? q).length > 80 ? "…" : ""}”`}
             note="a new search can take up to half a minute; the same search again is instant"
           />
         ) : (
@@ -140,7 +140,10 @@ async function Results({ sp }: { sp: Params }) {
     criteriaToParams(criteriaFromParams(sp)).toString().length > 0;
   // By meaning still reads the sentence for the strict parts — place, years,
   // notice, salary — and lets the similarity rank everything else.
-  const parsed = mode !== "boolean" ? parseQuery(q, vocab) : null;
+  // Every message of the conversation, a later one winning where they disagree (5 Oct).
+  const parsed = mode !== "boolean" ? parseConversation(q, vocab) : null;
+  // What the engine, the words and the vectors are searched on: the whole conversation.
+  const text = mode === "boolean" ? q : conversationText(q);
   const criteria = edited ? criteriaFromParams(sp) : (parsed?.criteria ?? criteriaFromParams(sp));
   const ignored = edited ? [] : (parsed?.ignored ?? []);
   const booleanError = mode === "boolean" ? parseBoolean(q).error : null;
@@ -161,15 +164,15 @@ async function Results({ sp }: { sp: Params }) {
    * behind it and replaces it.
    */
   if (isConvex() && q && mode === "natural") {
-    const held = cachedEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+    const held = cachedEngineSearch(text, criteria, ENGINE_LIMIT, edited);
     if (held) return <ResultsView {...view} engine={held} />;
-    const full = engineSearch(q, criteria, ENGINE_LIMIT, edited);
+    const full = engineSearch(text, criteria, ENGINE_LIMIT, edited);
     // Started above, so an unawaited failure here is not an unhandled one; the
     // streamed half reports it.
     full.catch(() => undefined);
     let quick: EngineSearch | null = null;
     try {
-      quick = await quickEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+      quick = await quickEngineSearch(text, criteria, ENGINE_LIMIT, edited);
     } catch {
       // No quick answer: wait for the full one, as before.
     }
@@ -285,7 +288,7 @@ async function ResultsView({
     // degrades to a worse search rather than to an empty one.
     retrievalProblem = `Ranked on words only — the matching engine could not run (${engineError}).`;
     try {
-      const terms = [q, ...criteria.titles, ...criteria.skills.slice(0, 3), ...criteria.employers.slice(0, 2)];
+      const terms = [conversationText(q), ...criteria.titles, ...criteria.skills.slice(0, 3), ...criteria.employers.slice(0, 2)];
       const hits = await keywordRetrieve(terms, 150);
       await primeStore({ candidateIds: hits });
     } catch (inner) {
@@ -318,7 +321,7 @@ async function ResultsView({
     // same reason findDatabaseMatches skips this. Refreshing the local file
     // here re-embedded every primed candidate: ~17 s and a paid API call.
     const vectors = isConvex() ? { ok: true as const } : await refreshCandidateVectors();
-    const query = vectors.ok ? await embedQuery(q) : vectors;
+    const query = vectors.ok ? await embedQuery(conversationText(q)) : vectors;
     if (query.ok) {
       const hits = await nearestCandidates(query.vectors[0], 1000);
       similarity = new Map(hits.map((n) => [n.id, n.similarity]));
@@ -331,7 +334,7 @@ async function ResultsView({
       // nobody yet.
       if (isConvex()) {
         try {
-          const hits = await keywordRetrieve([q, ...criteria.titles], 150);
+          const hits = await keywordRetrieve([conversationText(q), ...criteria.titles], 150);
           await primeStore({ candidateIds: hits });
         } catch (e) {
           retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
@@ -611,7 +614,7 @@ async function ResultsView({
           <div className="rounded-xl border border-rule bg-surface p-4">
             <SearchBox
               vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
-              initialQuery={q}
+              prior={q}
               initialMode={mode}
               openingId={forOpening}
               compact

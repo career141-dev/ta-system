@@ -218,6 +218,56 @@ export function parseQuery(raw: string, vocab: Vocabulary): ParseResult {
   return { criteria: c, understood: describe(c), ignored };
 }
 
+// ─── A search held as a conversation ─────────────────────────────────────────
+//
+// The Database search is a chat (owner, 5 Oct): the box under the results adds
+// to the search instead of starting a new one, so "Senior Software Engineer in
+// Dhaka", then "with 5 years", then "not from Dialog" is one search. The
+// messages travel in `q`, one per line, so a saved search or a shared link
+// carries the whole conversation.
+
+/** The messages of a search, oldest first. */
+export function turnsOf(q: string): string[] {
+  return q.split(/\n+/).map((t) => t.trim()).filter(Boolean);
+}
+
+/** The conversation as one request — for the engine's model and the word and vector searches. */
+export function conversationText(q: string): string {
+  return turnsOf(q)
+    .map((t) => t.replace(/[.\s]+$/, ""))
+    .join(". ");
+}
+
+/** Who and where the role is: a later message that names one means a change, not an addition. */
+const REPLACED_BY_LATER: (keyof SearchCriteria)[] = ["titles", "locations", "nationalities"];
+
+/**
+ * Each message read in turn. A number, a place or a title in a later message
+ * replaces the earlier one ("actually 8 years", "in Colombo instead"); skills,
+ * employers, exclusions and the rest add up.
+ */
+export function parseConversation(q: string, vocab: Vocabulary): ParseResult {
+  const turns = turnsOf(q);
+  if (turns.length <= 1) return parseQuery(q, vocab);
+  const c: SearchCriteria = structuredClone(EMPTY_CRITERIA);
+  const ignored: string[] = [];
+  for (const turn of turns) {
+    const r = parseQuery(turn, vocab);
+    for (const key of Object.keys(c) as (keyof SearchCriteria)[]) {
+      const later = r.criteria[key];
+      if (Array.isArray(later)) {
+        if (later.length === 0) continue;
+        const earlier = c[key] as string[];
+        (c as unknown as Record<string, string[]>)[key] = REPLACED_BY_LATER.includes(key) ? [...later] : [...new Set([...earlier, ...later])];
+      } else if (later !== null && later !== "any") {
+        (c as unknown as Record<string, unknown>)[key] = later;
+      }
+    }
+    ignored.push(...r.ignored);
+  }
+  return { criteria: c, understood: describe(c), ignored: [...new Set(ignored)] };
+}
+
 // ─── Describing criteria back to the person who typed them ───────────────────
 
 export function describe(c: SearchCriteria): Chip[] {
