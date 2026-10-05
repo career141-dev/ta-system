@@ -1,7 +1,7 @@
 /**
  * The desk's 1 October report: the end-of-day SETS cell doubling its CV count,
- * the app's own "Headhunted —" note showing as a TA's note, and a headhunted
- * CV's claim being invisible to the other TAs on the opening.
+ * and the app's own "Headhunted —" note showing as a TA's note. (Its
+ * third fix, a headhunted CV shown to the other TAs, was undone on 5 Oct.)
  */
 import { setsCell } from "@/lib/eod-format";
 import { isSystemNote } from "@/lib/pdf";
@@ -30,7 +30,7 @@ console.log("\na headhunted CV is a claim the others see");
 const ta = { id: "u_hifa", role: "ta", isActive: true } as User;
 const row = (outcome: LinkVaultEntry["outcome"]) => ({ id: `r_${outcome}`, addedBy: "u_sanduni", outcome }) as LinkVaultEntry;
 const seen = scopeLinks([row("shortlisted"), row("cv_received"), row("contacted")], ta, () => false).map((s) => [s.row.id, s.takenBy]);
-eq("a CV received shows as Sanduni's; a saved link or a contact stays hers alone", seen, [["r_cv_received", "u_sanduni"]]);
+eq("a CV received, a saved link and a contact all stay Sanduni's alone", seen, []);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

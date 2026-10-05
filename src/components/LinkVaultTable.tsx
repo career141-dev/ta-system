@@ -47,15 +47,10 @@ export function LinkVaultTable({
 }) {
   const users = repo.users();
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
-  // A TA's table is their own, plus whatever a lead put in for them. The
-  // exception is somebody the other TA is really working — on the pipeline
-  // from their row — which appears marked so it is not worked twice (1 Oct).
+  // A TA's table is their own, plus whatever a lead put in for them. Another
+  // TA's rows are not shown, even ones they have taken on (5 Oct).
   const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
-  const notTakenOn = new Set(["rejected", "dropped_out", "matched", "new_cv", "ai_follow_up"]);
-  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id), (r) =>
-    !!r.candidateId &&
-    repo.applicationsForCandidate(r.candidateId).some((a) => a.openingId === openingId && !notTakenOn.has(a.stage)),
-  );
+  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
   // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
   const canNote = can(user, "link.note").ok;
   // Each row's application here and its interest, worked out once: the tabs,
@@ -107,8 +102,7 @@ export function LinkVaultTable({
   if (level && !sheets.some((l) => l.n === level)) sheets.push({ n: level, at: 0 });
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
-  const scoped = slicePage(matching, current, PAGE_SIZE);
-  const rows = scoped.map((x) => x.row);
+  const rows = slicePage(matching, current, PAGE_SIZE).map((x) => x.row);
   // Sheet tabs, as in a workbook: the open one joins the table below it.
   const tab = (on: boolean) =>
     `-mb-px whitespace-nowrap rounded-t-lg border px-4 py-2 text-[12.5px] transition-colors ${
@@ -173,28 +167,18 @@ export function LinkVaultTable({
           </p>
         ) : (
           <div className="divide-y divide-rule">
-            {scoped.map(({ row: r, takenBy }) => (
-              <div key={r.id}>
-                {takenBy && (
-                  <p className="flex items-center gap-2 border-b border-rule bg-paper px-4 py-2 text-[12px] text-ink-soft sm:px-8">
-                    <span className="h-1.5 w-1.5 rounded-full bg-warn" />
-                    Shortlisted by <span className="font-medium text-ink">{userNames[takenBy] ?? "another TA"}</span>
-                    <span className="text-ink-faint">— leave this one alone</span>
-                  </p>
-                )}
-                <div className={takenBy ? "pointer-events-none opacity-55" : undefined}>
-                  <LinkRow
-                    entry={r}
-                    openingId={openingId}
-                    addedByName={userNames[r.addedBy] ?? "—"}
-                    onPipeline={facts.get(r.id)!.app}
-                    interest={facts.get(r.id)!.interest}
-                    userNames={userNames}
-                    canNote={canNote}
-                    viewerId={user.id}
-                  />
-                </div>
-              </div>
+            {rows.map((r) => (
+              <LinkRow
+                key={r.id}
+                entry={r}
+                openingId={openingId}
+                addedByName={userNames[r.addedBy] ?? "—"}
+                onPipeline={facts.get(r.id)!.app}
+                interest={facts.get(r.id)!.interest}
+                userNames={userNames}
+                canNote={canNote}
+                viewerId={user.id}
+              />
             ))}
           </div>
         )}

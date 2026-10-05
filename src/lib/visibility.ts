@@ -74,35 +74,29 @@ export function scopeApplications(
 }
 
 /**
- * Table rows: mine, anything a lead put in, and anyone another TA is working.
+ * Table rows: mine, and anything a lead put in. Nobody else's.
  *
  * A row added by a lead, director, admin or ops is handed to the TAs, not
  * claimed — it usually arrives with a note saying what to do with it. Until
  * 25 Sep it showed as "Shortlisted by <lead> — leave this one alone", which
  * is the opposite of what the lead meant.
  *
- * "Working" is a real claim (1 Oct): the person is on the pipeline from that
- * TA's row, or their headhunted CV was uploaded. It was the row's outcome
- * "Shortlisted" — but every row arrives Shortlisted, so all of another TA's
- * saved links showed in your table, and two TAs on one opening (Jesmeen and
- * Hassan) saw each other's profiles mixed in with their own.
+ * Another TA's rows are not shown at all (5 Oct). Until then a row the other
+ * TA had taken on — on the pipeline from it, or its CV uploaded — appeared
+ * greyed out as "Shortlisted by Hassan — leave this one alone", so two TAs on
+ * one opening still read each other's work. The collision it guarded against
+ * is caught where it happens: pasting a link already in the table is refused
+ * with whose it is (addLink, app/actions.ts).
  */
 export function scopeLinks(
   rows: LinkVaultEntry[],
   user: User,
   addedByDeskWide: (userId: string) => boolean,
-  /** The row's person is on this opening's pipeline, taken on by a TA. */
-  onPipeline: (row: LinkVaultEntry) => boolean = () => false,
 ): Scoped<LinkVaultEntry>[] {
   if (!isScoped(user)) return rows.map((row) => ({ row, takenBy: null }));
-  const out: Scoped<LinkVaultEntry>[] = [];
-  for (const r of rows) {
-    if (r.addedBy === user.id || addedByDeskWide(r.addedBy)) out.push({ row: r, takenBy: null });
-    // A headhunted CV uploaded for the row is a claim too: it was hidden from
-    // everyone else, so a colleague started on the same person (1 Oct).
-    else if (r.outcome === "cv_received" || onPipeline(r)) out.push({ row: r, takenBy: r.addedBy });
-  }
-  return out;
+  return rows
+    .filter((r) => r.addedBy === user.id || addedByDeskWide(r.addedBy))
+    .map((row) => ({ row, takenBy: null }));
 }
 
 /**
