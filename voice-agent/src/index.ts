@@ -77,15 +77,30 @@ const num = (name: string, fallback: number) => {
  * If she starts talking over pauses, raise AURA_SILENCE_MS; if room noise
  * starts turns, raise AURA_VAD_THRESHOLD.
  */
-const SILENCE_MS = num("AURA_SILENCE_MS", 400);
+/**
+ * 2 Oct: the candidate can talk over Aura again. With interruptions off she read
+ * out a long answer to the end while the candidate spoke, and only then took in
+ * what they had said — callers could not stop her or correct her, and she moved
+ * on as if they had said nothing. AURA_INTERRUPTIONS=off puts the old behaviour back.
+ *
+ * To keep the 24 Sep problem (a cough, an "mm-hmm", her own echo cutting her off)
+ * from returning: the server VAD threshold is higher while interruptions are on
+ * (0.6), and LiveKit resumes her sentence if no words follow the sound. She also
+ * speaks a little slower (AURA_SPEED, default 0.92) and waits a little longer
+ * before answering (AURA_SILENCE_MS, default 600), because she was too quick for
+ * callers to follow.
+ */
+const INTERRUPTIONS = (process.env.AURA_INTERRUPTIONS ?? "on").trim().toLowerCase() !== "off";
+const SILENCE_MS = num("AURA_SILENCE_MS", INTERRUPTIONS ? 600 : 400);
+const SPEED = Math.min(1.5, Math.max(0.5, num("AURA_SPEED", 0.92)));
 const TURN_DETECTION = {
   type: "server_vad",
-  threshold: num("AURA_VAD_THRESHOLD", 0.5),
+  threshold: num("AURA_VAD_THRESHOLD", INTERRUPTIONS ? 0.6 : 0.5),
   // Keeps the first syllable of an answer.
   prefix_padding_ms: 300,
   silence_duration_ms: SILENCE_MS,
   create_response: true,
-  interrupt_response: false,
+  interrupt_response: INTERRUPTIONS,
 } as const;
 
 /**
@@ -111,7 +126,7 @@ export default defineAgent({
 
     const brief = readBrief(ctx.room.metadata);
     console.info(
-      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}] [silence=${SILENCE_MS}ms]`,
+      `[Aura] Call starting [room=${ctx.room.name}] [role=${brief.jobTitle}] [items=${brief.detailsToCollect.length}] [model=${REALTIME_MODEL}] [voice=${REALTIME_VOICE}] [silence=${SILENCE_MS}ms] [interruptions=${INTERRUPTIONS ? "on" : "off"}] [speed=${SPEED}]`,
     );
 
     // OpenAI decides when the candidate has finished (TURN_DETECTION above);
@@ -123,6 +138,7 @@ export default defineAgent({
       model: REALTIME_MODEL,
       voice: REALTIME_VOICE,
       reasoning: { effort: "minimal" },
+      speed: SPEED,
       turnDetection: TURN_DETECTION,
       inputAudioNoiseReduction: { type: "near_field" },
     });
@@ -134,7 +150,12 @@ export default defineAgent({
       aecWarmupDuration: 0,
       // LiveKit logs a startup warning that interruptions "cannot be false"
       // with server-side turn detection; here that is the point (see above).
-      turnHandling: { turnDetection: "realtime_llm", interruption: { enabled: false } },
+      turnHandling: {
+        turnDetection: "realtime_llm",
+        interruption: INTERRUPTIONS
+          ? { enabled: true, falseInterruptionTimeout: 1500, resumeFalseInterruption: true }
+          : { enabled: false },
+      },
     });
 
     // Each finished line goes to the call window, which keeps the transcript.

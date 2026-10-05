@@ -392,12 +392,25 @@ export const createApplication = internalMutation({
       if (args.stage) {
         updates.currentStage = args.stage as any;
         updates.lastStageChangedAt = Date.now();
-      } else if (isDatabaseOrManual || existing.currentStage === "new_cvs" || existing.currentStage === "rejected") {
+      } else if (existing.currentStage === "new_cvs") {
         updates.currentStage = "matched_candidates" as any;
         updates.lastStageChangedAt = Date.now();
       }
+      // A person who applies again keeps the stage they are at (2 Oct). A manual,
+      // folder or database upload used to send anyone — Interview, Director
+      // Shortlist, Rejected — back to Matched with no record, and reopened the
+      // rejected, while the owner stayed on the card. Now only the CV and details
+      // are refreshed; a rejected person stays rejected and carries a re-applied
+      // mark for the TA to act on.
+      if (!args.stage && !updates.currentStage) {
+        updates.reappliedAt = Date.now();
+        updates.stageHistory = [
+          ...(existing.stageHistory ?? []),
+          { stage: existing.currentStage, enteredAt: new Date().toISOString(), changedBy: "system" as const, note: `Applied again (${args.sourceChannel}); stage unchanged` },
+        ];
+      }
 
-      if (existing.isActive === false) {
+      if (existing.isActive === false && existing.currentStage !== "rejected" && existing.currentStage !== "unresponsive") {
         updates.isActive = true;
       }
       

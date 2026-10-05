@@ -103,6 +103,21 @@ export const apply = internalMutation({
       const { id: _own, ...fields } = ready.after as Row;
       const row = { ...(rename(fields) as Row), id: ready.key };
       const doc = await model.toDoc(row, cx, true);
+      // One application per person per opening (2 Oct). The app checks against the rows it
+      // loaded, which can be 30 seconds old; two TAs adding the same candidate, or an add
+      // racing a CV intake, both arrived here as inserts and made two applications: two
+      // owners, two follow-up streams. Here the check sees the live table inside the
+      // transaction, so the second insert becomes the first one's row instead.
+      if (model.backend === "applications" && doc.candidateId && doc.jobId) {
+        const held = await ctx.db
+          .query("applications")
+          .withIndex("by_candidate_job", (q) => q.eq("candidateId", doc.candidateId as never).eq("jobId", doc.jobId as never))
+          .first();
+        if (held) {
+          if (temp.has(ready.key)) ids[ready.key] = held._id;
+          continue;
+        }
+      }
       const inserted = await ctx.db.insert(model.backend as never, clean(doc) as never);
       if (temp.has(ready.key)) ids[ready.key] = inserted;
     }

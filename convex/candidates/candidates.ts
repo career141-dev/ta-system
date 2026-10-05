@@ -8,6 +8,7 @@ import { requireFullAccess } from "../lib/permissions";
 import { answersById } from "../lib/followUpScope";
 import { CV_FILE_KEYS, fillBlanksOnly } from "../lib/fillBlanks";
 import { findSameCandidate } from "../lib/sameCandidate";
+import { replaceHeldCv } from "../cvs/cvReplace";
 
 export const listCandidates = internalQuery({
   args: {
@@ -565,6 +566,9 @@ export const updateCandidateFields = internalMutation({
     }
 
     await ctx.db.patch(targetId, definedPatches);
+    // One CV file per person (2 Oct): a different file of someone we already hold
+    // takes the old one's place on every opening, and the old file is removed.
+    if (survivor && args.cvUploadId) await replaceHeldCv(ctx, survivor._id, survivor.cvUploadId, args.cvUploadId);
 
     // Sync to candidateResumes table
     if (rawText !== undefined || rawTextKey !== undefined || jobHistory || embedding || hasEmbedding !== undefined) {

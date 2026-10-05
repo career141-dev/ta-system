@@ -636,6 +636,10 @@ export default defineSchema({
      *  matches someone we hold it is only a record of what was sent: it writes
      *  nothing onto them and does not replace their CV file. */
     shortlistCopy: v.optional(v.boolean()),
+    /** A newer CV of the same person took this file's place (cvs/cvReplace.ts, 2 Oct). The file is kept (5 Oct). */
+    replacedByUploadId: v.optional(v.id("cvUploads")),
+    /** An extraction is reading this upload right now (cvs/cvUploads.ts lockExtraction, 2 Oct). */
+    extractionLockedAt: v.optional(v.number()),
     /** Set when a TA uploads a scoop CV from the opening's Scoops page
      *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
      *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`
@@ -1040,6 +1044,8 @@ export default defineSchema({
     rejectedBy: v.optional(v.union(v.id("users"), v.literal("system"))),
     rejectedAt: v.optional(v.number()),
     rejectReason: v.optional(v.string()),
+    /** The person applied to this opening again (applications.createApplication, 2 Oct). Their stage is not changed. */
+    reappliedAt: v.optional(v.number()),
     placedAt: v.optional(v.number()),
     placedBy: v.optional(v.id("users")),
     aiFollowUpNoReply: v.optional(v.boolean()),

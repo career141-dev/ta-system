@@ -127,9 +127,18 @@ export const shortlist = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("Application not found");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    // The Shortlist button is for people still to be taken on. A closed card on a stale page
+    // is brought back deliberately (Brought back / Add to pipeline), not by a claim (2 Oct).
+    const stage = toTaStage(app.currentStage);
+    if (stage === "rejected" || stage === "dropped_out") {
+      throw new Error("This candidate is closed on this opening. Bring them back first, then shortlist.");
+    }
     return claimForTa(ctx, user, app);
   },
 });
+
+/** Stages a claim moves into TA Follow-up; every other stage stays where it is. */
+const PULLED_INTO_FOLLOW_UP = new Set<string>(["new_cv", "matched", "ai_follow_up", "rejected", "dropped_out"]);
 
 /**
  * The claim itself, shared with the headhunted-CV upload (ta/hhUpload.ts), so
@@ -173,7 +182,11 @@ export async function claimForTa(
   // a CV scored at or above the pass mark (cvs/cvScoringActions.ts). For
   // two days on 23–24 September a TA's shortlist went to AI Follow-up by
   // mistake; the owner asked for it back (24 September).
-  if (toTaStage(app.currentStage) !== "ta_follow_up") {
+  // Only people still at the front of the pipeline are pulled into Follow-up (2 Oct).
+  // Someone already at Director review, interview, offer or placed is claimed
+  // where they are — shortlisting must never send a candidate backwards, as it did
+  // for anyone left unowned by admin/unshortlist.ts or an HH upload.
+  if (PULLED_INTO_FOLLOW_UP.has(toTaStage(app.currentStage))) {
     await executeStageTransition(ctx, {
       applicationId: appId,
       targetStage: "follow_up" as PipelineStage,

@@ -1,0 +1,94 @@
+// Convex-level check for A1 (no duplicate application), C2 (colleague's candidate refused) and B2 (extraction lock). NOT run by npm test: copy to convex/a1c2Probe.ts, deploy to the LOCAL backend only, run a1c2Probe:run and a1c2Probe:b2, delete the copy.
+import { internalAction, internalMutation, internalQuery } from "./_generated/server";
+import { internal } from "./_generated/api";
+import { v } from "convex/values";
+
+export const cleanup = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    let n = 0;
+    for (const c of await ctx.db.query("candidates").collect()) {
+      if ((c.email ?? "").endsWith("@a1c2.local")) {
+        for (const a of await ctx.db.query("applications").withIndex("by_candidateId", (q) => q.eq("candidateId", c._id)).collect()) await ctx.db.delete(a._id);
+        await ctx.db.delete(c._id);
+        n++;
+      }
+    }
+    return n;
+  },
+});
+
+export const seed = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<any> => {
+    const mkUser = (name: string, role: string) => ctx.db.insert("users", { tokenIdentifier: "a1c2" + name + Date.now(), email: `${name}@a1c2.local`, fullName: name, role, isActive: true, isOnboarded: true } as any);
+    const owner = await mkUser("owner", "ta");
+    const other = await mkUser("other", "ta");
+    const lead = await mkUser("lead", "ta_manager");
+    const jobId = await ctx.db.insert("jobs", { title: "probe", clientName: "x", clientIndustry: "x", recruitmentType: "headhunting", isConfidential: false, jobDescription: "x", requiredSkills: [], seniorityLevel: "other", experienceMinYears: 0, location: "c", keyword: "A" + Date.now(), status: "active", primaryRecruiterId: owner, assignedTaIds: [owner, other], taLeadId: lead } as any);
+    const candA = await ctx.db.insert("candidates", { fullName: "Dup Candidate", email: "dup@a1c2.local" } as any);
+    const candB = await ctx.db.insert("candidates", { fullName: "Owned Candidate", email: "owned@a1c2.local", phone: "0770001111" } as any);
+    const app = await ctx.db.insert("applications", { candidateId: candB, jobId, sourceChannel: "linkedin", currentStage: "follow_up", loopIteration: 0, isActive: true, createdAt: Date.now(), ownerTaId: owner } as any);
+    return { owner, other, lead, jobId, candA, app };
+  },
+});
+
+export const countApps = internalQuery({
+  args: { candidateId: v.id("candidates"), jobId: v.id("jobs") },
+  handler: async (ctx, a) => (await ctx.db.query("applications").withIndex("by_candidate_job", (q) => q.eq("candidateId", a.candidateId).eq("jobId", a.jobId)).collect()).length,
+});
+
+const insertOp = (key: string, jobId: string, candidateId: string) => ({
+  table: "applications", kind: "insert" as const, key,
+  after: { id: key, openingId: jobId, candidateId, stage: "ta_follow_up", sourcingChannel: "HH", ownerTaId: null, answers: {}, notes: [], reviewNotes: [], lastStageChangedAt: Date.now(), createdAt: Date.now() },
+});
+
+export const run = internalAction({
+  args: {},
+  handler: async (ctx): Promise<any> => {
+    await ctx.runMutation(internal.a1c2Probe.cleanup, {});
+    const s: any = await ctx.runMutation(internal.a1c2Probe.seed, {});
+    const out: any = {};
+
+    // A1: two separate commits, then two inserts in one commit, all for the same person on the same opening.
+    const r1: any = await ctx.runMutation(internal.ta.commit.apply, { ops: [insertOp("tmp_a", s.jobId, s.candA)] });
+    const r2: any = await ctx.runMutation(internal.ta.commit.apply, { ops: [insertOp("tmp_b", s.jobId, s.candA)] });
+    const r3: any = await ctx.runMutation(internal.ta.commit.apply, { ops: [insertOp("tmp_c", s.jobId, s.candA), insertOp("tmp_d", s.jobId, s.candA)] });
+    out.A1 = {
+      applicationsForThePerson_shouldBe1: await ctx.runQuery(internal.a1c2Probe.countApps, { candidateId: s.candA, jobId: s.jobId }),
+      secondCommitPointsAtTheFirst: r2.ids.tmp_b === r1.ids.tmp_a,
+      sameCommitTwiceAlsoOne: r3.ids.tmp_c === r1.ids.tmp_a && r3.ids.tmp_d === r1.ids.tmp_a,
+    };
+
+    // C2: a colleague's candidate.
+    const tryIt = async (who: string, label: string, fn: () => Promise<any>) => {
+      try { await fn(); out.C2[label + " / " + who] = "allowed"; } catch (e: any) { out.C2[label + " / " + who] = "REFUSED: " + String(e.message).replace(/\s+/g, " ").slice(0, 55); }
+    };
+    out.C2 = {};
+    for (const [who, id] of [["other TA", s.other], ["owner", s.owner], ["lead", s.lead]] as any[]) {
+      await tryIt(who, "log a call", () => ctx.runMutation(internal.ta.outreach.recordCall, { actorId: id, applicationId: s.app, kind: "ad_hoc", outcome: "reached", body: "probe" }));
+      await tryIt(who, "stop follow-up", () => ctx.runMutation(internal.ta.followUp.stop, { actorId: id, applicationId: s.app }));
+      await tryIt(who, "move stage", () => ctx.runMutation(internal.ta.applications.moveStage, { actorId: id, applicationId: s.app, stage: "ta_follow_up" }));
+    }
+    return out;
+  },
+});
+
+export const mkUpload = internalMutation({
+  args: {},
+  handler: async (ctx) => ctx.db.insert("cvUploads", { fileName: "b2.pdf", fileSize: 1, fileType: "application/pdf", uploadedBy: "a1c2", status: "uploaded" } as any),
+});
+
+export const b2 = internalAction({
+  args: {},
+  handler: async (ctx): Promise<any> => {
+    const id: any = await ctx.runMutation(internal.a1c2Probe.mkUpload, {});
+    const first: any = await ctx.runMutation(internal.cvs.cvUploads.lockExtraction, { cvUploadId: id, ttlMs: 240_000 });
+    const second: any = await ctx.runMutation(internal.cvs.cvUploads.lockExtraction, { cvUploadId: id, ttlMs: 240_000 });
+    await ctx.runMutation(internal.cvs.cvUploads.unlockExtraction, { cvUploadId: id });
+    const afterUnlock: any = await ctx.runMutation(internal.cvs.cvUploads.lockExtraction, { cvUploadId: id, ttlMs: 240_000 });
+    await new Promise((r) => setTimeout(r, 300));
+    const afterTimeout: any = await ctx.runMutation(internal.cvs.cvUploads.lockExtraction, { cvUploadId: id, ttlMs: 100 });
+    return { firstRunGetsIt: first, secondRunWhileFirstReading_shouldBeFalse: second, afterFirstFinishes: afterUnlock, crashedRunLapses: afterTimeout };
+  },
+});

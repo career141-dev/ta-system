@@ -1,0 +1,81 @@
+// Convex-level check for A4 (shortlist never moves a later stage back) and C1 (no double follow-up). NOT run by npm test: copy to convex/c1a4Probe.ts, deploy to the LOCAL backend only, run c1a4Probe:run, delete the copy.
+import { internalAction, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
+
+export const cleanup = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<number> => {
+    let n = 0;
+    for (const c of await ctx.db.query("candidates").collect()) {
+      if ((c.email ?? "").endsWith("@c1a4.local")) {
+        for (const a of await ctx.db.query("applications").withIndex("by_candidateId", (q) => q.eq("candidateId", c._id)).collect()) await ctx.db.delete(a._id);
+        await ctx.db.delete(c._id); n++;
+      }
+    }
+    return n;
+  },
+});
+
+export const seed = internalMutation({
+  args: {},
+  handler: async (ctx): Promise<any> => {
+    const uid = await ctx.db.insert("users", { tokenIdentifier: "c1a4" + Date.now(), email: "ta@c1a4.local", fullName: "TA One", role: "ta", isActive: true, isOnboarded: true } as any);
+    const jobId = await ctx.db.insert("jobs", { title: "probe", clientName: "x", clientIndustry: "x", recruitmentType: "headhunting", isConfidential: false, jobDescription: "x", requiredSkills: [], seniorityLevel: "other", experienceMinYears: 0, location: "c", keyword: "C" + Date.now(), status: "active", primaryRecruiterId: uid, assignedTaIds: [uid], taLeadId: uid } as any);
+    const apps: any = {};
+    for (const stage of ["matched_candidates", "second_shortlist", "director_shortlist", "client_review", "interview", "offer", "placed", "rejected", "unresponsive"]) {
+      const candidateId = await ctx.db.insert("candidates", { fullName: "P " + stage, email: `${stage}@c1a4.local`, phone: "0771112222" } as any);
+      apps[stage] = await ctx.db.insert("applications", { candidateId, jobId, sourceChannel: "linkedin", currentStage: stage, loopIteration: 0, isActive: true, createdAt: Date.now() } as any);
+    }
+    const mkFollowUp = async (tag: string, ageMs: number, channels: string[]) => {
+      const candidateId = await ctx.db.insert("candidates", { fullName: "F " + tag, email: `${tag}@c1a4.local`, phone: "0773334444" } as any);
+      return await ctx.db.insert("applications", { candidateId, jobId, sourceChannel: "linkedin", currentStage: "follow_up", loopIteration: 0, isActive: true, createdAt: Date.now(), ownerTaId: uid, followUpAttemptCount: 1, followUpLastManualSendAt: Date.now() - ageMs, followUpLastManualChannels: channels } as any);
+    };
+    apps.fuBothJustSent = await mkFollowUp("both", 5_000, ["whatsapp", "email"]);
+    apps.fuWaJustSent = await mkFollowUp("wa", 5_000, ["whatsapp"]);
+    apps.fuOld = await mkFollowUp("old", 120_000, ["whatsapp", "email"]);
+    return { uid, apps };
+  },
+});
+
+const stageOf = async (ctx: any, id: any) => {
+  const a = await ctx.db.get(id);
+  return { stage: a.currentStage, owner: a.ownerTaId ? "set" : "none", attempts: a.followUpAttemptCount ?? 0 };
+};
+
+export const readStages = internalMutation({
+  args: {},
+  handler: async () => null,
+});
+
+export const run = internalAction({
+  args: {},
+  handler: async (ctx): Promise<any> => {
+    await ctx.runMutation(internal.c1a4Probe.cleanup, {});
+    const { uid, apps }: any = await ctx.runMutation(internal.c1a4Probe.seed, {});
+    const out: any = { A4_shortlistUnownedAtLaterStage: {}, C1_secondSend: {} };
+    for (const stage of Object.keys(apps).filter((k) => !k.startsWith("fu"))) {
+      let result: string;
+      try {
+        const r: any = await ctx.runMutation(internal.ta.applications.shortlist, { actorId: uid, applicationId: apps[stage] });
+        result = JSON.stringify(r.ok);
+      } catch (e: any) {
+        result = "REFUSED: " + String(e.message).slice(0, 70);
+      }
+      const after: any = await ctx.runQuery(internal.c1a4Probe.peek, { id: apps[stage] });
+      out.A4_shortlistUnownedAtLaterStage[stage] = { claim: result, stageAfter: after.stage, owner: after.owner };
+    }
+    for (const [label, key, channel] of [["both just sent, press both", "fuBothJustSent", undefined], ["whatsapp just sent, press whatsapp", "fuWaJustSent", "whatsapp"], ["whatsapp just sent, press email", "fuWaJustSent", "email"], ["sent 2 min ago, press both", "fuOld", undefined]] as any[]) {
+      const r: any = await ctx.runMutation(internal.ta.followUp.send, { actorId: uid, applicationId: apps[key], channel });
+      const after: any = await ctx.runQuery(internal.c1a4Probe.peek, { id: apps[key] });
+      out.C1_secondSend[label] = { sent: r.sent, duplicate: !!r.duplicate, blockedByTestMode: !!r.blocked, note: (r.reason ?? "").slice(0, 60), attemptsAfter: after.attempts };
+    }
+    return out;
+  },
+});
+
+import { internalQuery } from "./_generated/server";
+import { v } from "convex/values";
+export const peek = internalQuery({
+  args: { id: v.id("applications") },
+  handler: async (ctx, a): Promise<any> => stageOf(ctx, a.id),
+});

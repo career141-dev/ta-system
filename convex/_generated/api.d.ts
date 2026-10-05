@@ -76,6 +76,7 @@ import type * as cvScanner_scanActions from "../cvScanner/scanActions.js";
 import type * as cvScanner_scanMutations from "../cvScanner/scanMutations.js";
 import type * as cvs_batches from "../cvs/batches.js";
 import type * as cvs_cvExtraction from "../cvs/cvExtraction.js";
+import type * as cvs_cvReplace from "../cvs/cvReplace.js";
 import type * as cvs_cvScoring from "../cvs/cvScoring.js";
 import type * as cvs_cvScoringActions from "../cvs/cvScoringActions.js";
 import type * as cvs_cvUploads from "../cvs/cvUploads.js";
@@ -275,6 +276,7 @@ declare const fullApi: ApiFromModules<{
   "cvScanner/scanMutations": typeof cvScanner_scanMutations;
   "cvs/batches": typeof cvs_batches;
   "cvs/cvExtraction": typeof cvs_cvExtraction;
+  "cvs/cvReplace": typeof cvs_cvReplace;
   "cvs/cvScoring": typeof cvs_cvScoring;
   "cvs/cvScoringActions": typeof cvs_cvScoringActions;
   "cvs/cvUploads": typeof cvs_cvUploads;
