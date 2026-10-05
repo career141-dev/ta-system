@@ -1963,8 +1963,9 @@ export default defineSchema({
     receivedAt: v.string(),
     subject: v.string(),
     fromAddress: v.optional(v.string()),
-    /** cv — handed to CV processing; no_cv — nothing to file; reply — a candidate's reply. */
-    outcome: v.union(v.literal("cv"), v.literal("no_cv"), v.literal("reply")),
+    /** cv — handed to CV processing; held — a LinkedIn applicant with no CV, held
+     *  from the notification; no_cv — nothing to file; reply — a candidate's reply. */
+    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply")),
     note: v.optional(v.string()),
     loggedAt: v.number(),
   })

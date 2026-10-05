@@ -4,6 +4,57 @@ import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
 import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../lib/mailCursor";
+import { isNotAnApplication, parseApplicationEmail } from "../lib/mailParse";
+import { placeOnPosts } from "../mailIntake/process";
+import type { ActionCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
+
+/**
+ * A LinkedIn applicant whose notification carries no résumé (5 October). They
+ * named themselves, the job and usually their profile, which is enough to hold
+ * them and put them on the post: found by their LinkedIn profile, or created.
+ * Until now the email was marked read and dropped, and the applicant was lost.
+ * The newer mail reader (mailIntake/process.ts) does the same, and places them
+ * through the same placeOnPosts.
+ *
+ * Returns the note for the mailbox log, or null when the email is not an
+ * applicant notification (a LinkedIn notice, a digest, anything else).
+ */
+async function holdLinkedInApplicant(
+  ctx: ActionCtx,
+  input: { inboxEmail: string; subject: string; fromAddress: string; body: string; bodyIsHtml: boolean },
+): Promise<string | null> {
+  if (isNotAnApplication(input.fromAddress, input.subject)) return null;
+  const parsed = parseApplicationEmail({
+    subject: input.subject,
+    fromAddress: input.fromAddress,
+    bodyHtml: input.bodyIsHtml ? input.body : "",
+    bodyText: input.bodyIsHtml ? "" : input.body,
+  });
+  if (!parsed.isLinkedIn || !parsed.applicantName) return null;
+
+  const channel = inboxChannel(input.inboxEmail);
+  const route = await routeByPosts(ctx, { subject: input.subject, body: input.body, channel });
+  let candidateId: Id<"candidates"> | null = parsed.profileUrl
+    ? await ctx.runQuery(internal.mailIntake.model.candidateByLinkedin, { url: parsed.profileUrl })
+    : null;
+  if (!candidateId) {
+    candidateId = await ctx.runMutation(internal.candidates.candidates.createCandidate, {
+      fullName: parsed.applicantName,
+      linkedinUrl: parsed.profileUrl ?? undefined,
+      email: parsed.email ?? undefined,
+      phone: parsed.phone ?? undefined,
+      sourceChannel: channel,
+    });
+  }
+  if (!candidateId) return `CV not attached, and ${parsed.applicantName} could not be held.`;
+  const posts = [
+    ...(route.jobId && route.jobPostId ? [{ jobId: route.jobId, postId: route.jobPostId }] : []),
+    ...route.alsoTo.map((a) => ({ jobId: a.jobId, postId: a.jobPostId })),
+  ];
+  await placeOnPosts(ctx, candidateId, posts, channel, input.subject);
+  return `CV not attached — ${parsed.applicantName} held from the LinkedIn notification. ${route.note}`;
+}
 
 /** Which channel a shared mailbox's CVs are recorded under. */
 function inboxChannel(inbox: string): string {
@@ -257,7 +308,7 @@ export const pollEmailInbox = internalAction({
       messages = notYetHandled(messages, new Set(logged), logSince);
     }
     // Record each email once it has been handled, and mark it read for whoever opens the mailbox.
-    const finish = async (message: any, outcome: "cv" | "no_cv" | "reply", note?: string) => {
+    const finish = async (message: any, outcome: "cv" | "held" | "no_cv" | "reply", note?: string) => {
       await markEmailAsRead(targetInboxEmail, message.id);
       if (!byLog) return;
       await ctx.runMutation(internal.communications.emailAgent.logMailboxMessage, {
@@ -345,6 +396,22 @@ export const pollEmailInbox = internalAction({
         if (isReplyProcessed || isCandidateMatched) {
           await finish(message, "reply");
           continue;
+        }
+        // A LinkedIn applicant with no résumé: held and put on the post, on the
+        // shared mailboxes, where post routing decides the job (5 October).
+        if (postRoutingOn() && !jobId && senderEmail) {
+          const held = await holdLinkedInApplicant(ctx, {
+            inboxEmail: targetInboxEmail,
+            subject,
+            fromAddress: senderEmail,
+            body: emailBody,
+            bodyIsHtml: message.body?.contentType === "html",
+          });
+          if (held) {
+            console.log(`[EmailAgent] ${held}`);
+            await finish(message, "held", held);
+            continue;
+          }
         }
         console.log(`[EmailAgent] No CV attachments found in email: "${subject}"`);
         await finish(message, "no_cv");
@@ -963,7 +1030,7 @@ export const logMailboxMessage = internalMutation({
     receivedAt: v.string(),
     subject: v.string(),
     fromAddress: v.optional(v.string()),
-    outcome: v.union(v.literal("cv"), v.literal("no_cv"), v.literal("reply")),
+    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply")),
     note: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
