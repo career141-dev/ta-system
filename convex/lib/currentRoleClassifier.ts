@@ -1,6 +1,7 @@
 "use node";
 
 import { executeLLMWithNvidiaFallback } from "./llm";
+import { askClaudeFirst, jsonIn } from "./claudeFirst";
 
 export interface CandidateForRoleClassification {
   _id: string;
@@ -154,16 +155,27 @@ Return ONLY valid JSON matching:
   }
 }`;
 
+  const system = "You are an expert talent acquisition classifier. Output valid JSON only.";
   try {
-    const { content } = await executeLLMWithNvidiaFallback(ctx, "jd_matching", {
-      messages: [
-        { role: "system", content: "You are an expert talent acquisition classifier. Output valid JSON only." },
-        { role: "user", content: prompt },
-      ],
-      temperature: 0.1,
-      max_tokens: 4096,
-      response_format: { type: "json_object" },
-    });
+    // Claude first (5 Oct). The prompt carries ids, titles, employers and
+    // years, no names. An answer that does not read as the expected map
+    // counts as no answer: DeepSeek is asked as before.
+    let content = "";
+    const claude = await askClaudeFirst("match_role", system, prompt, 90_000);
+    const claudeJson = claude ? jsonIn(claude) : null;
+    if (claudeJson && candidateInputs.some((c) => typeof claudeJson[c.candidateId]?.rank === "number")) {
+      content = JSON.stringify(claudeJson);
+    } else {
+      ({ content } = await executeLLMWithNvidiaFallback(ctx, "jd_matching", {
+        messages: [
+          { role: "system", content: system },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.1,
+        max_tokens: 4096,
+        response_format: { type: "json_object" },
+      }));
+    }
 
     let cleanJson = (content || "{}").trim();
     if (cleanJson.startsWith("```")) {

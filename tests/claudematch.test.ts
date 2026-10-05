@@ -4,7 +4,7 @@
  * answer counts only for a person who was asked about; and the switch is off
  * unless both the setting and the subscription token are there.
  */
-import { claudeMatchOn, matchLine, matchPrompt, readMatch, type MatchJob } from "@/lib/claudeMatch";
+import { claudeMatchOn, matchLine, matchPrompt, readMatch, readMatchText, type MatchJob } from "@/lib/claudeMatch";
 import type { Candidate } from "@/data/types";
 
 let pass = 0, fail = 0;
@@ -64,6 +64,9 @@ eq("no result at all: an error", readMatch("", 1).error, "claude_no_answer");
   const long = Array.from({ length: 60 }, (_, i) => `w${i}`).join(" ");
   eq("a reason that runs long is cut", readMatch(stream([{ n: 1, why: long }]), 1).reasons.get(1)?.endsWith("…"), true);
 }
+
+console.log("\nDeepSeek's plain-text answer, when Claude had none");
+eq("read the same way", [...readMatchText('Sure:\n[{"n":2,"why":"Payroll and SAP."},{"n":9,"why":"x"}]', 2).reasons], [[2, "Payroll and SAP."]]);
 
 console.log("\nthe switch");
 const set = (v: Record<string, string | undefined>) => {

@@ -156,7 +156,8 @@ async function matchViaEngine(
   const toAdd = kept.slice(0, room);
 
   // The one line a TA reads on Database CVs (5 Oct). Claude writes it for the
-  // people being added, and only them; it changes nobody's place in the list.
+  // people being added, and only them (DeepSeek when Claude cannot); it
+  // changes nobody's place in the list.
   const { claudeMatchOn, claudeMatchReasons } = await import("./claudeMatch");
   const claudeOn = claudeMatchOn() && toAdd.length > 0;
   const written = claudeOn
@@ -172,7 +173,7 @@ async function matchViaEngine(
       const res = repo.addCandidateToOpening(k.candidate.id, o.id, by, null, {
         kind: "auto_match",
         note: `Matched from the database — fit ${k.row.overallScore}. ${k.row.reason ?? ""}`.trim(),
-        reason: written?.get(k.candidate.id) ?? k.row.reason ?? "",
+        reason: written?.reasons.get(k.candidate.id) ?? k.row.reason ?? "",
       });
       if (res.ok) added++;
     }
@@ -193,8 +194,8 @@ async function matchViaEngine(
       room === 0 ? `${waiting} matches already waiting, so none added.` : null,
       claudeOn
         ? written
-          ? `Reasons written by Claude for ${toAdd.filter((k) => written.has(k.candidate.id)).length} of ${toAdd.length}.`
-          : "Claude unavailable — engine reasons shown."
+          ? `Reasons written by ${written.by === "claude" ? "Claude" : "DeepSeek (Claude unavailable)"} for ${toAdd.filter((k) => written.reasons.has(k.candidate.id)).length} of ${toAdd.length}.`
+          : "Claude and DeepSeek unavailable — engine reasons shown."
         : null,
     ].filter(Boolean).join(" ") || null,
   };

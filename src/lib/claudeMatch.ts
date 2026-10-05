@@ -20,8 +20,9 @@ import { yearsFromHistory, type Requirements } from "./scoring";
  * for somebody who was not asked about.
  *
  * Off unless C141_CLAUDE_MATCH=on. When Claude cannot answer — the usage
- * limit, a lapsed token, a slow run — the engine's own reason is shown and
- * matching carries on as before.
+ * limit, a lapsed token, a slow run — DeepSeek is asked the same question;
+ * when neither can, the engine's own reason is shown. Matching never waits on
+ * either.
  */
 const TIMEOUT_MS = 180_000;
 const DEFAULT_MODEL = "claude-sonnet-5-5";
@@ -96,9 +97,14 @@ export function readMatch(stream: string, count: number): { reasons: Map<number,
   if (final.is_error || (final.subtype && final.subtype !== "success")) {
     return { reasons: new Map(), rejected: 0, error: `claude_failed: ${(final.result ?? final.subtype ?? "").slice(0, 200)}` };
   }
+  return readMatchText(final.result ?? "", count);
+}
+
+/** The same reading for a plain-text answer — DeepSeek's, when Claude had none. */
+export function readMatchText(text: string, count: number): { reasons: Map<number, string>; rejected: number } {
   const reasons = new Map<number, string>();
   let rejected = 0;
-  for (const r of jsonArrayIn(final.result ?? "")) {
+  for (const r of jsonArrayIn(text)) {
     const n = typeof r.n === "number" ? r.n : Number(r.n);
     const why = typeof r.why === "string" ? r.why.replace(/\s+/g, " ").trim() : "";
     if (!Number.isInteger(n) || n < 1 || n > count || reasons.has(n) || !why) {
@@ -112,30 +118,52 @@ export function readMatch(stream: string, count: number): { reasons: Map<number,
 }
 
 /**
- * The reasons for these people, by candidate id. Null when Claude could not
- * answer at all; the caller then shows the engine's reasons.
+ * The reasons for these people, by candidate id, and who wrote them: Claude
+ * first, DeepSeek when Claude has no answer (5 Oct: "if something happens to
+ * the Claude subscription, straight away move to DeepSeek"). Null when neither
+ * answered; the caller then shows the engine's reasons.
  */
-export async function claudeMatchReasons(job: MatchJob, candidates: Candidate[]): Promise<Map<string, string> | null> {
-  if (candidates.length === 0) return new Map();
+export async function claudeMatchReasons(
+  job: MatchJob,
+  candidates: Candidate[],
+): Promise<{ reasons: Map<string, string>; by: "claude" | "deepseek" } | null> {
+  if (candidates.length === 0) return { reasons: new Map(), by: "claude" };
+  const prompt = matchPrompt(job, candidates.map((c, i) => matchLine(i + 1, c)));
+  const byId = (m: Map<number, string>) => new Map([...m].map(([n, why]) => [candidates[n - 1].id, why]));
+
+  const fromClaude = await askClaude(prompt, candidates.length);
+  if (fromClaude) return { reasons: byId(fromClaude), by: "claude" };
+
+  // DeepSeek, on OpenRouter — the engine matching used before. Only that
+  // route: with no OpenRouter key, `write` would reach for the metered
+  // Anthropic key, which is not a fallback anyone asked for.
+  const { viaOpenRouter, write } = await import("./ai");
+  if (!viaOpenRouter()) return null;
+  const r = await write("", prompt, 1500, "rank");
+  const fromDeepSeek = r.ok ? readMatchText(r.text, candidates.length).reasons : new Map<number, string>();
+  if (fromDeepSeek.size) return { reasons: byId(fromDeepSeek), by: "deepseek" };
+  console.warn(`[claude-match] DeepSeek had no answer either (${r.ok ? "unreadable" : r.reason}); engine reasons shown`);
+  return null;
+}
+
+async function askClaude(prompt: string, count: number): Promise<Map<number, string> | null> {
   const model = (process.env.C141_CLAUDE_MATCH_MODEL ?? "").trim() || DEFAULT_MODEL;
   const r = await runClaude(
     // No tools at all: it answers from the prompt, it does not act.
     ["--output-format", "stream-json", "--verbose", "--tools", "", "--model", model],
-    matchPrompt(job, candidates.map((c, i) => matchLine(i + 1, c))),
+    prompt,
     TIMEOUT_MS,
   );
   logSubscriptionUsage("match", r.out);
   if (r.timedOut) {
-    console.warn(`[claude-match] no answer in ${TIMEOUT_MS / 1000}s; engine reasons shown`);
+    console.warn(`[claude-match] no answer in ${TIMEOUT_MS / 1000}s; asking DeepSeek`);
     return null;
   }
-  const { reasons, rejected, error } = readMatch(r.out, candidates.length);
-  if (error || (r.code !== 0 && reasons.size === 0)) {
-    console.warn(`[claude-match] ${error ?? `exited ${r.code}: ${r.err.slice(0, 200)}`}; engine reasons shown`);
+  const { reasons, rejected, error } = readMatch(r.out, count);
+  if (error || reasons.size === 0) {
+    console.warn(`[claude-match] ${error ?? `exited ${r.code}: ${r.err.slice(0, 200)}`}; asking DeepSeek`);
     return null;
   }
   if (rejected) console.warn(`[claude-match] ${rejected} answer(s) dropped: not one of the people asked about`);
-  const out = new Map<string, string>();
-  for (const [n, why] of reasons) out.set(candidates[n - 1].id, why);
-  return out;
+  return reasons;
 }
