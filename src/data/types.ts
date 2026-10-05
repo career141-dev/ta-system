@@ -286,6 +286,12 @@ export interface Candidate {
   cvFileName: string | null;
   /** Their CV file was lost in the Convex Cloud move; kept out of search and matching (src/lib/cvMissing.ts). */
   cvFileMissing?: boolean;
+  /**
+   * Their current role's level, 0 intern … 9 director, as the matching
+   * engine's classifier read it (convex/lib/roleLevel). Absent until the
+   * engine has seen them; src/lib/levels falls back to the title.
+   */
+  currentLevel?: number | null;
   /** Spec §6D — the result row shows a career, not a single line. */
   workHistory: { title: string; employer: string; fromYear: number; toYear: number | null }[];
   createdAt: number;

@@ -40,6 +40,65 @@ export function jobLevelRank(seniorityLevel?: string | null): number | null {
   return null; // "other", custom, or unmapped -> skip gate
 }
 
+/** What each rung is called on screen. */
+export const LEVEL_LABEL: readonly string[] = [
+  "Intern / Trainee",
+  "Junior / Associate",
+  "Mid-level",
+  "Senior",
+  "Lead / Assistant Manager",
+  "Manager",
+  "Senior Manager / Head",
+  "AGM / DGM",
+  "GM / VP",
+  "Director / C-suite",
+];
+
+/**
+ * A candidate's level from their current title, for people the engine's
+ * classifier has not seen yet — database search reaches far more people than
+ * reverse matching ever classifies. Most specific wording first, so an
+ * "Assistant General Manager" is not read as a manager or an assistant.
+ */
+export function levelFromTitle(title: string | null | undefined, years?: number | null): number | null {
+  const t = ` ${String(title ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim()} `;
+  if (!t.trim()) return null;
+  const has = (re: RegExp) => re.test(t);
+  if (has(/ (agm|dgm|assistant general manager|deputy general manager) /)) return 7;
+  if (has(/ (assistant manager|asst manager|team lead|team leader|lead|principal) /)) return 4;
+  if (has(/ (senior manager|sr manager|head of|head) /)) return 6;
+  if (has(/ (general manager|gm|country manager|vice president|vp) /)) return 8;
+  if (has(/ (chief|ceo|cto|cfo|coo|cio|director|managing director|president|founder) /)) return 9;
+  if (has(/ manager /)) return 5;
+  if (has(/ (intern|internship|apprentice) /)) return 0;
+  if (has(/ (senior|sr|snr) /)) return 3;
+  if (has(/ (junior|jr|associate|graduate|trainee|entry|assistant) /)) return 1;
+  // No level word ("Software Engineer", "Accountant", "Executive"): the
+  // working level, unless they have under two years behind them.
+  return years != null && years > 0 && years < 2 ? 1 : 2;
+}
+
+/**
+ * The sections a list of candidates is shown in — 5 Oct, at the owner's
+ * request: under each level, the people at that level, highest level first.
+ *
+ * With a job: its own level, then each level below it (the levels matching
+ * looks at), then anyone above it, then anyone whose level is not known.
+ * Without a job (a plain database search): every level, highest first.
+ */
+export function levelSection(
+  jobRank: number | null,
+  candRank: number | null,
+): { order: number; label: string } {
+  if (candRank === null) return { order: 100, label: "Level not known" };
+  const name = LEVEL_LABEL[candRank] ?? `Level ${candRank}`;
+  if (jobRank === null) return { order: 9 - candRank, label: name };
+  const below = jobRank - candRank;
+  if (below < 0) return { order: 50 + candRank, label: `${name} — above this job's level` };
+  if (below === 0) return { order: 0, label: `${name} — this job's level` };
+  return { order: below, label: `${name} — ${below === 1 ? "one level" : below === 2 ? "two levels" : `${below} levels`} below` };
+}
+
 export type CurrentRoleGate = "pass" | "pass_with_penalty" | "excluded_overqualified" | "skipped_other";
 
 /**

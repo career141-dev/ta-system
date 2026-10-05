@@ -1,4 +1,5 @@
-import { currentRoleGate, jobLevelRank } from "../convex/lib/roleLevel";
+import { currentRoleGate, jobLevelRank, levelFromTitle, levelSection } from "../convex/lib/roleLevel";
+import { inLevelOrder } from "../src/lib/levels";
 import { mapSeniority } from "../convex/lib/jobRequirements";
 
 let pass = 0, fail = 0;
@@ -44,6 +45,41 @@ eq("tech lead for senior job: out", gateFor("senior_executive", CAND.lead), "exc
 eq("above the job: out", gateFor("mid_level", CAND.manager), "excluded_overqualified");
 eq("unclassified candidate: in", currentRoleGate(3, null), { gate: "pass", penalty: 0 });
 eq("penalty is capped at -40", currentRoleGate(9, 0), { gate: "pass_with_penalty", penalty: -40 });
+
+// ── A level from the title, for people the classifier has not seen (5 Oct) ──
+eq("Senior Software Engineer", levelFromTitle("Senior Software Engineer"), CAND.senior);
+eq("Software Engineer", levelFromTitle("Software Engineer"), CAND.mid);
+eq("Software Engineer, 1 yr", levelFromTitle("Software Engineer", 1), CAND.junior);
+eq("Associate Software Engineer", levelFromTitle("Associate Software Engineer"), CAND.junior);
+eq("Junior Developer", levelFromTitle("Junior Developer"), CAND.junior);
+eq("Software Engineering Intern", levelFromTitle("Software Engineering Intern"), CAND.intern);
+eq("Tech Lead", levelFromTitle("Tech Lead"), CAND.lead);
+eq("Assistant Manager - Finance", levelFromTitle("Assistant Manager - Finance"), CAND.lead);
+eq("Assistant General Manager", levelFromTitle("Assistant General Manager"), CAND.agm);
+eq("Senior Manager HR", levelFromTitle("Senior Manager HR"), CAND.seniorManager);
+eq("General Manager", levelFromTitle("General Manager"), CAND.gm);
+eq("Finance Director", levelFromTitle("Finance Director"), CAND.director);
+eq("Marketing Executive", levelFromTitle("Marketing Executive"), CAND.mid);
+eq("Senior Executive - Sales", levelFromTitle("Senior Executive - Sales"), CAND.senior);
+eq("no title", levelFromTitle(null), null);
+
+// ── Sections: the job's level, then each level below, then above, then unknown ──
+const senior = CAND.senior;
+eq("same level", levelSection(senior, CAND.senior), { order: 0, label: "Senior — this job's level" });
+eq("one below", levelSection(senior, CAND.mid), { order: 1, label: "Mid-level — one level below" });
+eq("two below", levelSection(senior, CAND.junior), { order: 2, label: "Junior / Associate — two levels below" });
+eq("three below", levelSection(senior, CAND.intern), { order: 3, label: "Intern / Trainee — 3 levels below" });
+eq("above sits after every level below", levelSection(senior, CAND.lead).order > levelSection(senior, CAND.intern).order, true);
+eq("unknown last", levelSection(senior, null).order > levelSection(senior, CAND.director).order, true);
+eq("no job: highest level first", levelSection(null, CAND.director).order < levelSection(null, CAND.intern).order, true);
+
+// ── Sections keep the fit order inside each one ──
+const people = [
+  { n: "junior 90", lvl: CAND.junior }, { n: "senior 85", lvl: CAND.senior }, { n: "mid 80", lvl: CAND.mid },
+  { n: "senior 70", lvl: CAND.senior }, { n: "intern 65", lvl: CAND.intern }, { n: "mid 60", lvl: CAND.mid },
+];
+eq("grouped, best fit first in each", inLevelOrder(people, (p) => levelSection(senior, p.lvl)).map((p) => p.n),
+  ["senior 85", "senior 70", "mid 80", "mid 60", "junior 90", "intern 65"]);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
