@@ -1,6 +1,7 @@
 // @ts-nocheck
 import { getOpenAI, getModelForTask, executeLLMWithNvidiaFallback } from "../lib/llm";
 import type { SearchRequirements } from "../lib/jdParser";
+import { jobLevelRank } from "../lib/roleLevel";
 
 function normalizeText(value: string): string {
   if (!value) return "";
@@ -163,20 +164,9 @@ export function stripSeniorityWords(text: string): string {
   return result.replace(/\s+/g, " ").trim();
 }
 
+/** The job's level on the candidate classifier's ladder — see lib/roleLevel (fixed 5 Oct). */
 export function mapJobSeniorityTo10LevelRank(seniorityLevel?: string | null): number | null {
-  if (!seniorityLevel) return null;
-  const s = seniorityLevel.toLowerCase().trim().replace(/[\s-]/g, "_");
-  if (s.includes("entry") || s.includes("intern")) return 0;
-  if (s === "mid_level" || s === "mid") return 1;
-  if (s === "executive") return 2;
-  if (s === "senior_executive") return 3;
-  if (s === "manager") return 4;
-  if (s === "senior_manager") return 5;
-  if (s === "agm" || s.includes("assistant_general")) return 6;
-  if (s === "gm" || s.includes("general_manager")) return 7;
-  if (s === "director") return 8;
-  if (s === "c_suite" || s.includes("vp") || s.includes("chief")) return 9;
-  return null; // "other", custom, or unmapped -> skip gate
+  return jobLevelRank(seniorityLevel);
 }
 
 export function checkSeniorityConflict(
