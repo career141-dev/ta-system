@@ -25,7 +25,7 @@ export async function GET(req: Request) {
   if (!authorised(req)) return reply({ error: "bad_token" }, 401);
 
   const user = extensionUser(new URL(req.url).searchParams.get("userId"));
-  const openings = user
+  let openings = user
     ? repo
         .openingsForUser(user)
         .filter((o) => o.status === "open")
@@ -38,10 +38,23 @@ export async function GET(req: Request) {
         }))
     : [];
 
+  if (openings.length === 0) {
+    openings = repo
+      .openings()
+      .filter((o) => o.status === "open")
+      .map((o) => ({
+        id: o.id,
+        title: o.title,
+        client: repo.client(o.clientId)?.name ?? "—",
+        locations: o.locations,
+      }));
+  }
+
   const users = repo
     .users()
-    .filter((u) => extensionUser(u.id))
+    .filter((u) => u.isActive && ["ta", "ta_lead", "admin", "director", "ops"].includes(u.role))
     .map((u) => ({ id: u.id, name: u.name, initials: u.initials }));
 
   return reply({ openings, users });
 }
+

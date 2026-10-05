@@ -796,7 +796,10 @@ const rawRepo = {
   /** One Excel Tables row, by its id. */
   linkEntry: (entryId: Id): LinkVaultEntry | null => load().linkVault.find((l) => l.id === entryId) ?? null,
   linkVault: (openingId: Id): LinkVaultEntry[] =>
-    load().linkVault.filter((l) => l.openingId === openingId),
+    load()
+      .linkVault.filter((l) => l.openingId === openingId)
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
+
 
   callFeedback: (applicationId: Id) =>
     load()
