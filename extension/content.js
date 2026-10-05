@@ -162,7 +162,12 @@
     // In order of trust, not page order (1 Oct): the open profile's own header
     // first. A list row or a sidebar card ("People also viewed") is someone
     // else, and reading their name put profiles on the wrong person.
-    const nameEl = [
+    // The open profile's id is in the address (…/profile/<id>). A name link
+    // pointing at that id is that person, wherever it sits on the page; the
+    // first lockup on a list is just whoever is first (5 Oct).
+    const id = (window.location.pathname.match(/\/profile\/([A-Za-z0-9_-]{10,})/) || [])[1];
+    const byId = id ? document.querySelector(`a[data-test-lockup-name-button][href*="${CSS.escape(id)}"]`) : null;
+    const nameEl = byId || [
       "[data-test-profile-header-name]",
       "[data-test-row-lockup-full-name] a[data-test-lockup-name-button]",
       "a[data-test-lockup-name-button]",

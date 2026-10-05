@@ -62,6 +62,19 @@ export async function POST(req: Request) {
   const capture = normaliseCapture(body.profile, userId);
   if (!capture) return reply({ error: "not_a_linkedin_profile" }, 400);
 
+  /*
+   * A Recruiter page that names nobody — the Applicants, Pipeline or Overview
+   * list (5 Oct). The extension read the list's first name, and with no
+   * profile id to tell people apart every press filed or refreshed that same
+   * person. Only an open profile (/talent/…/profile/<id>) is one person.
+   */
+  if (/linkedin\.com\/talent\//i.test(capture.sourceUrl) && !linkKey(capture.sourceUrl)) {
+    return reply({
+      error: "not_one_profile",
+      message: "This Recruiter page is a list, not one person. Click the candidate's name to open their profile, then capture.",
+    }, 422);
+  }
+
   const canonical = canonicalProfile(capture.sourceUrl);
   // Recruiter URLs do not carry a /in/ slug, so they are filed as they came.
   const url = canonical ? `https://www.${canonical}` : capture.sourceUrl;
