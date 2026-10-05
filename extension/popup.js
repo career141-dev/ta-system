@@ -29,7 +29,9 @@ async function load() {
     return;
   }
 
-  fill($("userId"), res.users.map((u) => [u.id, u.name]), s.userId);
+  // Nobody is picked for the TA: a remembered id no longer in the list fell to
+  // the first name, and the panel quietly showed a colleague's jobs (5 Oct).
+  fill($("userId"), [["", "Choose who you are"], ...res.users.map((u) => [u.id, u.name])], s.userId);
   // The openings are the chosen recruiter's own (2 Oct), so ask again when the
   // list settled on someone other than who was remembered.
   const chosen = $("userId").value;
@@ -45,6 +47,8 @@ async function load() {
     res.openings.map((o) => [o.id, `${o.client} — ${o.title}`]),
     s.openingId,
   );
+  if (!chosen) say("Choose who you are to see your jobs.");
+  else if (res.openings.length === 0) say("You are not on any open job yet. Ask your lead to add you to the job on the desk.", "bad");
   paintHistory();
 }
 
