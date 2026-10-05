@@ -377,6 +377,13 @@ export default defineSchema({
 
     // Agent 3 — Outbound TA Identity
     outreachWhatsAppNumber: v.optional(v.string()),
+    /*
+     * Hold the first WhatsApp back this many days and let email go alone.
+     *
+     * Day 0 sent both, so every candidate cost a template even when the email
+     * would have done. Unset keeps the old behaviour.
+     */
+    whatsappAfterEmailDays: v.optional(v.number()),
 
     // SLA Thresholds (days)
     slaNoNewCvsDays: v.optional(v.number()),
@@ -1336,6 +1343,14 @@ export default defineSchema({
     jobId: v.optional(v.id("jobs")),
     direction: v.union(v.literal("outbound"), v.literal("inbound")),
     channel: v.union(v.literal("email"), v.literal("whatsapp"), v.literal("sms")),
+    /*
+     * This row cost money: an approved WhatsApp template, billed by Meta.
+     *
+     * Free text inside the candidate's 24-hour window is free, so only these
+     * count against the daily cap (convex/lib/templateBudget.ts). Set when the
+     * send actually succeeds, never on the attempt.
+     */
+    billableTemplate: v.optional(v.boolean()),
     subject: v.optional(v.string()),
     body: v.string(),
     senderId: v.optional(v.id("users")),

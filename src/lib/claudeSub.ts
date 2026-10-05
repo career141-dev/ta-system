@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { AiResult, Task } from "./ai";
 import type { SearchHit, SearchResult } from "./serper";
 import { keepHit, parseBooleanQuery } from "./websearch";
+import { readClaudeUsage, shadowCostUsd, totalTokens } from "./claudeUsage";
 
 /**
  * The owner's Claude subscription, for the desk's research and suggestions
@@ -87,11 +88,55 @@ export async function runClaude(args: string[], prompt: string, timeoutMs: numbe
 }
 
 export async function askSubscription(task: Task, prompt: string): Promise<AiResult> {
-  // No tools at all: it answers from the prompt, it does not act.
-  const r = await runClaude(["--output-format", "text", "--tools", ""], prompt, TIMEOUT_MS);
-  const text = r.out.trim();
+  /*
+   * `stream-json`, not `text`, so the run can be counted.
+   *
+   * The plan is a flat fee, so nothing here changes the bill — but with
+   * `--output-format text` the CLI printed the answer and threw the usage
+   * away, and there was no way to tell how much of the subscription this
+   * platform actually draws, or whether the same work would cost cents on the
+   * metered key (asked 2 October). The final `result` event carries the token
+   * counts; `readStream` already reads this format for the search path.
+   *
+   * No tools at all: it answers from the prompt, it does not act.
+   */
+  const r = await runClaude(
+    ["--output-format", "stream-json", "--verbose", "--tools", ""],
+    prompt,
+    TIMEOUT_MS,
+  );
+  const { final } = readStream(r.out);
+  const text = (final?.result ?? "").trim();
+
+  // Counted whether it succeeded or not: a run that hit the usage limit still
+  // consumed the attempt, and a month of those is worth seeing.
+  const usage = readClaudeUsage(r.out);
+  if (usage) {
+    console.log(
+      `[claude-subscription usage] task=${task} tokens=${totalTokens(usage)} ` +
+        `(in ${usage.inputTokens}, out ${usage.outputTokens}, cached ${usage.cacheReadTokens}) ` +
+        `model=${usage.model ?? "unreported"} would-cost-on-api=$${shadowCostUsd(usage).toFixed(6)}`,
+    );
+  }
+
   if (r.timedOut) return { ok: false, reason: "network", detail: `Claude subscription: no answer in ${TIMEOUT_MS / 1000}s` };
-  if (r.code === 0 && text) return { ok: true, text, sources: [], searches: 0, provider: `claude-subscription · ${task}` };
+  if (r.code === 0 && text) {
+    return {
+      ok: true,
+      text,
+      sources: [],
+      searches: 0,
+      provider: `claude-subscription · ${task}`,
+      // Cached reads are folded into input, which is how Anthropic bills them.
+      usage: usage
+        ? {
+            inputTokens: usage.inputTokens + usage.cacheReadTokens,
+            outputTokens: usage.outputTokens,
+            thinkingTokens: 0,
+          }
+        : undefined,
+    };
+  }
   // Usage limit, expired token, CLI error: said in the log, and the caller falls back.
   return { ok: false, reason: "network", detail: `Claude subscription exited ${r.code}: ${(r.err || text).slice(0, 300)}` };
 }
