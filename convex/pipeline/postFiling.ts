@@ -38,7 +38,7 @@ export async function routeByPosts(
   ctx: ActionCtx,
   input: { subject: string; body?: string | null; channel: string },
 ): Promise<EmailRoute> {
-  const posts = await ctx.runQuery(internal.mailIntake.model.livePosts, { includeDraft: true });
+  const posts = await ctx.runQuery(internal.mailIntake.model.livePosts, { includeDraft: true, withLinkOnly: true });
   const pick = routeShared(
     { subject: input.subject, body: input.body, linkedinOnly: input.channel === "linkedin" },
     posts,

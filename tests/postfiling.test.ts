@@ -92,5 +92,22 @@ eq("nothing in plain text", linkedinProjectId("Your job has a new applicant"), n
   eq("another project's number does not", other, null);
 }
 
+console.log("\na job on hold, or a paused advert, is reached by its own link only (5 Oct)");
+{
+  const link = "https://www.linkedin.com/talent/hire/1528413625/overview";
+  const mk = (id: string, openingId: string, extra: Partial<RoutablePost> = {}): RoutablePost => ({
+    id, openingId, title: "Head of Finance", previousTitles: [], aliasKeywords: [], channel: "linkedin",
+    campaignCode: "", externalUrl: null, postedAt: 0, status: "live", ...extra,
+  });
+  const onHold = mk("p_hold", "op_hold", { externalUrl: link, status: "paused", linkOnly: true });
+  const email = 'New application: Head of Finance from Nimal <a href="https://www.linkedin.com/talent/redirect/batchReview?project=1528413625&amp;a=1">View applicant</a>';
+  eq("its link files the applicant there", routeShared({ subject: "New application: Head of Finance from Nimal", body: email, linkedinOnly: true }, [onHold])?.postId, "p_hold");
+  eq("its title alone does not", routeShared({ subject: "New application: Head of Finance from Nimal", linkedinOnly: true }, [onHold]), null);
+  const live = mk("p_live", "op_live");
+  eq("the title goes to the live advert, never the one on hold", routeShared({ subject: "New application: Head of Finance from Nimal", linkedinOnly: true }, [onHold, live])?.postId, "p_live");
+  const liveSameLink = mk("p_live2", "op_live", { externalUrl: link, postedAt: -1 });
+  eq("a live advert with the same link wins over the paused one", routeShared({ subject: "x", body: email, linkedinOnly: true }, [onHold, liveSameLink])?.postId, "p_live2");
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

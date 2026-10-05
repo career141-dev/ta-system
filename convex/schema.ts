@@ -1951,6 +1951,27 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_singletonKey", ["singletonKey"]),
 
+  /**
+   * Every email the shared application mailboxes (linkedin@, cv@) brought in,
+   * once each, and what became of it (5 October). Read instead of the read
+   * flag — an email someone opened in Outlook first was never picked up — and
+   * the one count of what arrived against what was filed.
+   */
+  mailboxLog: defineTable({
+    mailbox: v.string(),
+    messageId: v.string(),
+    receivedAt: v.string(),
+    subject: v.string(),
+    fromAddress: v.optional(v.string()),
+    /** cv — handed to CV processing; held — a LinkedIn applicant with no CV, held
+     *  from the notification; no_cv — nothing to file; reply — a candidate's reply. */
+    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply")),
+    note: v.optional(v.string()),
+    loggedAt: v.number(),
+  })
+    .index("by_mailbox_message", ["mailbox", "messageId"])
+    .index("by_mailbox_received", ["mailbox", "receivedAt"]),
+
   appSettings: defineTable({
     key: v.string(),
     commonWhatsappNumber: v.optional(v.string()),
@@ -1962,6 +1983,8 @@ export default defineSchema({
     updatedBy: v.optional(v.id("users")),
     updatedAt: v.optional(v.string()),
     lastEmailFetchTimestamp: v.optional(v.string()), // Added for email polling memory
+    /** When this mailbox began to be read by the mailboxLog instead of the read flag (5 Oct). */
+    mailLogSince: v.optional(v.string()),
     channel_toggles: v.optional(v.object({
       whatsappIngestion: v.boolean(),
       emailIngestion: v.boolean(),

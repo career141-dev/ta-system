@@ -352,21 +352,36 @@ export const livePosts = internalQuery({
     // advert is often already up on LinkedIn and collecting (post routing on
     // the shared mailboxes, 22 September). Paused and closed never route.
     includeDraft: v.optional(v.boolean()),
+    /**
+     * Also posts that only their own LinkedIn link may reach (5 October): paused
+     * or closed, or on an opening on hold. An application carrying that link
+     * was made for that job, so it goes there rather than to the database.
+     */
+    withLinkOnly: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<RoutablePost[]> => {
     const posts = await ctx.db.query("jobPosts").withIndex("by_status", (q) => q.eq("status", "live")).collect();
     if (args.includeDraft) {
       posts.push(...(await ctx.db.query("jobPosts").withIndex("by_status", (q) => q.eq("status", "draft")).collect()));
     }
+    if (args.withLinkOnly) {
+      for (const status of ["paused", "closed"] as const) {
+        posts.push(...(await ctx.db.query("jobPosts").withIndex("by_status", (q) => q.eq("status", status)).collect()).filter((p) => p.externalUrl));
+      }
+    }
     const out: RoutablePost[] = [];
     const openings = new Map<string, Doc<"jobs"> | null>();
     for (const p of posts) {
       const key = p.openingId as string;
       if (!openings.has(key)) openings.set(key, await ctx.db.get(p.openingId));
-      // The extraction pipeline files only to active jobs; an advert left live
-      // on a job on hold is not collecting.
-      if (openings.get(key)?.status !== "active") continue;
+      const opening = openings.get(key)?.status;
+      // Filled, cancelled and draft openings never collect. On hold, or the
+      // advert paused or closed, only by the post's own link.
+      const listed = opening === "active" && (p.status === "live" || p.status === "draft");
+      const linkOnly = !!args.withLinkOnly && !!p.externalUrl && (opening === "active" || opening === "on_hold");
+      if (!listed && !linkOnly) continue;
       out.push({
+        ...(listed ? {} : { linkOnly: true }),
         id: p._id as string,
         openingId: p.openingId as string,
         title: p.title,

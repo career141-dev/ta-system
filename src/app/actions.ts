@@ -1350,7 +1350,26 @@ export async function addJobPost(formData: FormData) {
   const r = repo.addJobPost(openingId, title, user.id, String(formData.get("liveOnLinkedIn")) === "1", channel, externalUrl);
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back(`Job post "${title}" added.`);
+  const reread = externalUrl ? await rereadMailboxFor(externalUrl) : false;
+  await back(`Job post "${title}" added.${reread ? REREAD_NOTE : ""}`);
+}
+
+const REREAD_NOTE = " Checking linkedin@ for the last 30 days for this job's applicants — they appear in New CVs within a few minutes.";
+
+/**
+ * A LinkedIn link was saved: re-read the mailbox for the people who applied
+ * before it was (convex/communications/emailAgent.ts rescanMailboxForLink,
+ * 5 October). Only queued here; a failure to queue does not undo the save.
+ */
+async function rereadMailboxFor(url: string): Promise<boolean> {
+  if (!isConvex()) return false;
+  try {
+    const r = await convexMutation<{ queued: boolean }>("communications/emailAgent:queueRescanForLink", { url });
+    return !!r?.queued;
+  } catch (e) {
+    console.error("[posts] could not queue the mailbox re-read:", e);
+    return false;
+  }
 }
 
 export async function updatePost(formData: FormData) {
@@ -1378,6 +1397,7 @@ export async function updatePost(formData: FormData) {
   // email — the surest way to the right post. Either the job's own link, or
   // the Recruiter project's: `talent/hire/…`, or the "View applicant" link
   // copied from any application email for this job (22 September).
+  const linkBefore = repo.jobPosts().find((p) => p.id === postId)?.externalUrl ?? null;
   if (formData.has("externalUrl")) {
     const url = String(formData.get("externalUrl") ?? "").trim();
     const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
@@ -1392,7 +1412,9 @@ export async function updatePost(formData: FormData) {
   // A refusal is shown, not swallowed.
   if (!r.ok) await fail(r.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Job post saved.");
+  // A new or changed link: fetch the people who applied before it was saved.
+  const reread = patch.externalUrl && patch.externalUrl !== linkBefore ? await rereadMailboxFor(patch.externalUrl) : false;
+  await back(`Job post saved.${reread ? REREAD_NOTE : ""}`);
 }
 
 export async function updatePostInline(_: ActionResult | null, formData: FormData) {

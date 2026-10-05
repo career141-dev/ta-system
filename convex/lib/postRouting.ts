@@ -32,6 +32,12 @@ export interface RoutablePost {
   externalUrl?: string | null;
   postedAt?: number | null;
   status: string;
+  /**
+   * Paused or closed, or its opening on hold: matched only by its own LinkedIn
+   * link, never by title or code (5 October). The link proves which job the
+   * person applied for; a title on a job nobody is working proves nothing.
+   */
+  linkOnly?: boolean;
 }
 
 export interface PostPick {
@@ -333,19 +339,24 @@ const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * client; a message that does not route goes to the database instead, where
  * nothing is lost.
  *
- * `live` must already be restricted to live posts on open openings.
+ * `live` must already be restricted to live posts on open openings, plus any
+ * marked `linkOnly`, which only a LinkedIn job or project number can reach.
  */
 export function routeShared<P extends RoutablePost>(
   input: { subject: string; body?: string | null; linkedinOnly?: boolean },
   live: P[],
 ): PostPick | null {
   const text = `${input.subject}\n${input.body ?? ""}`;
+  // A link-only post (paused, closed, or its opening on hold) is matched by its
+  // link alone; a live one wins when both carry the same link.
+  const newestLiveFirst = (a: P, b: P) => Number(!!a.linkOnly) - Number(!!b.linkOnly) || (b.postedAt ?? 0) - (a.postedAt ?? 0);
+  const listed = live.filter((p) => !p.linkOnly);
 
   const jobNo = linkedinJobId(input.body) ?? linkedinJobId(input.subject);
   if (jobNo) {
     const byUrl = live.filter((p) => linkedinJobId(p.externalUrl) === jobNo);
     if (byUrl.length >= 1) {
-      const [primary, ...rest] = [...byUrl].sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0));
+      const [primary, ...rest] = [...byUrl].sort(newestLiveFirst);
       const others = new Map<string, P>();
       for (const p of rest) if (p.openingId !== primary.openingId && !others.has(p.openingId)) others.set(p.openingId, p);
       return {
@@ -364,7 +375,7 @@ export function routeShared<P extends RoutablePost>(
   if (projectNo) {
     const byProject = live.filter((p) => linkedinProjectId(p.externalUrl) === projectNo);
     if (byProject.length >= 1) {
-      const [primary, ...rest] = [...byProject].sort((a, b) => (b.postedAt ?? 0) - (a.postedAt ?? 0));
+      const [primary, ...rest] = [...byProject].sort(newestLiveFirst);
       const others = new Map<string, P>();
       for (const p of rest) if (p.openingId !== primary.openingId && !others.has(p.openingId)) others.set(p.openingId, p);
       return {
@@ -378,7 +389,7 @@ export function routeShared<P extends RoutablePost>(
     }
   }
 
-  const coded = postByCampaignCode(text, live);
+  const coded = postByCampaignCode(text, listed);
   if (coded) {
     return {
       postId: coded.id,
@@ -390,7 +401,7 @@ export function routeShared<P extends RoutablePost>(
     };
   }
 
-  const pool = input.linkedinOnly ? live.filter((p) => (p.channel ?? "linkedin") === "linkedin") : live;
+  const pool = input.linkedinOnly ? listed.filter((p) => (p.channel ?? "linkedin") === "linkedin") : listed;
   const ranked = rankPosts(pool, input.subject, input.body);
   if (!ranked) return null;
   if (ranked.primary.confidence !== "exact" && ranked.primary.confidence !== "keyword") return null;
