@@ -5,10 +5,10 @@
 // files and the desk could open the wrong one. These keep a single file:
 //   - the same file again  → the new upload points at the file already held and
 //     its own copy is removed;
-//   - a different file of the same person → the new file becomes their CV, every
-//     opening they are on points at it, and the old file is removed.
-// Removal happens last, after every record has moved off the file, and only when
-// no other upload row still uses it.
+//   - a different file of the same person → the new file becomes their CV and every
+//     opening they are on points at it. The old file is KEPT, marked replaced
+//     (owner, 5 Oct): a wrong match must never delete someone's CV.
+// Only an identical copy is ever removed, and only when no other upload row uses it.
 
 import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
@@ -63,8 +63,7 @@ export async function reuseHeldFile(ctx: MutationCtx, newUploadId: Id<"cvUploads
 /**
  * A different file of the same person: the new one is their CV from now on.
  * Every application of theirs that pointed at the old file moves to the new
- * one, then the old file is removed. The old upload row stays as a record,
- * marked as replaced.
+ * one. The old upload row and its file stay, marked as replaced.
  */
 export async function replaceHeldCv(ctx: MutationCtx, candidateId: Id<"candidates">, oldUploadId: Id<"cvUploads"> | undefined | null, newUploadId: Id<"cvUploads">) {
   if (!oldUploadId || oldUploadId === newUploadId) return false;
@@ -75,8 +74,10 @@ export async function replaceHeldCv(ctx: MutationCtx, candidateId: Id<"candidate
   for (const a of await ctx.db.query("applications").withIndex("by_candidateId", (q) => q.eq("candidateId", candidateId)).take(200)) {
     if (a.cvFileId === oldUploadId) await ctx.db.patch(a._id, { cvFileId: newUploadId, cvFileName: fresh.fileName });
   }
-  await removeFile(ctx, old);
-  await ctx.db.patch(oldUploadId, { replacedByUploadId: newUploadId, s3Key: undefined, storageId: undefined, status: "replaced" });
+  // The old FILE is kept (owner, 5 Oct). Only the record moves to the new CV:
+  // if the match was wrong — two people taken for one, as on 1 Oct — deleting
+  // would lose a real person's CV for good, and 2,977 CVs are already missing.
+  await ctx.db.patch(oldUploadId, { replacedByUploadId: newUploadId, status: "replaced" });
   return true;
 }
 

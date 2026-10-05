@@ -636,7 +636,7 @@ export default defineSchema({
      *  matches someone we hold it is only a record of what was sent: it writes
      *  nothing onto them and does not replace their CV file. */
     shortlistCopy: v.optional(v.boolean()),
-    /** A newer CV of the same person took this file's place (cvs/cvReplace.ts, 2 Oct); the file itself is gone. */
+    /** A newer CV of the same person took this file's place (cvs/cvReplace.ts, 2 Oct). The file is kept (5 Oct). */
     replacedByUploadId: v.optional(v.id("cvUploads")),
     /** An extraction is reading this upload right now (cvs/cvUploads.ts lockExtraction, 2 Oct). */
     extractionLockedAt: v.optional(v.number()),
