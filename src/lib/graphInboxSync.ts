@@ -7,7 +7,7 @@ import { extractReplyText, parseReply, withUnpickedRejected } from "./reviewRepl
 import { revalidatePath } from "next/cache";
 import { isConvex } from "@/data/mode";
 import { primeStore } from "@/data/prime";
-import { convexMutation } from "./convexServer";
+import { convexAction, convexMutation } from "./convexServer";
 
 /**
  * Replies are applied only from here on (owner, 5 Oct). Until then the app had
@@ -54,7 +54,11 @@ export async function syncMailboxRepliesSilently(): Promise<number> {
 
   let messages: { id: string; from: string; subject: string; body: string; bodyPreview: string; receivedDateTime: string }[] = [];
   try {
-    messages = await fetchMailboxMessages(mailboxes, 15);
+    // On the live desk the backend reads them: it holds the Microsoft settings
+    // the end-of-day mail is sent with, and the app holds none (5 Oct).
+    messages = isConvex()
+      ? await convexAction<typeof messages>("communications/replyInbox:recent", { mailboxes, top: 15 })
+      : await fetchMailboxMessages(mailboxes, 15);
   } catch (e) {
     console.warn("[graphInboxSync] Background sync check failed:", (e as Error).message);
     return 0;
