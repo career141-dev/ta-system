@@ -241,14 +241,19 @@ export const adminSaveUser = internalMutation({
       target = null;
     }
     if (!target) throw new Error("That person no longer exists.");
-    // Only another DESK account conflicts; an older-app duplicate of the same
-    // address is not a second person on the desk.
-    if ((await allWithEmail(ctx, email)).some((u) => u.taRole && u._id !== target!._id)) {
+    // Only another DESK account at a DIFFERENT address conflicts. A second
+    // desk record at the person's own address is the same person twice — the
+    // roster import and their sign-in each made one — and refusing it left
+    // binath@career141.com impossible to re-role (5 Oct). Those twins take the
+    // same change, so the two records can never grant different access.
+    const ownEmail = (target.email ?? "").trim().toLowerCase();
+    const others = (await allWithEmail(ctx, email)).filter((u) => u.taRole && u._id !== target!._id);
+    if (others.length && email !== ownEmail) {
       throw new Error(`${email} already belongs to someone else on the desk.`);
     }
-    if (isActiveAdmin(target) && args.taRole !== "admin") await assertAnotherAdmin(ctx, target._id);
+    if (isActiveAdmin(target) && args.taRole !== "admin") await assertAnotherAdmin(ctx, ownEmail);
 
-    await ctx.db.patch(target._id, fields);
+    for (const u of [target, ...others]) await ctx.db.patch(u._id, fields);
     return { userId: target._id as string, action: "updated" as const };
   },
 });
@@ -266,8 +271,15 @@ export const adminSetUserActive = internalMutation({
       target = null;
     }
     if (!target) throw new Error("That person no longer exists.");
-    if (!args.isActive && isActiveAdmin(target)) await assertAnotherAdmin(ctx, target._id);
-    await ctx.db.patch(target._id, { isActive: args.isActive, updatedAt: new Date().toISOString() });
+    const ownEmail = (target.email ?? "").trim().toLowerCase();
+    if (!args.isActive && isActiveAdmin(target)) await assertAnotherAdmin(ctx, ownEmail);
+    // Left or back applies to every desk record of this address — one active
+    // twin would otherwise keep a "left" person signed in.
+    const twins = ownEmail ? (await allWithEmail(ctx, ownEmail)).filter((u) => u.taRole) : [];
+    const now = new Date().toISOString();
+    for (const u of twins.some((u) => u._id === target!._id) ? twins : [target, ...twins]) {
+      await ctx.db.patch(u._id, { isActive: args.isActive, updatedAt: now });
+    }
     return { ok: true };
   },
 });
@@ -336,9 +348,14 @@ export const listOffDeskAccounts = internalQuery({
   },
 });
 
-async function assertAnotherAdmin(ctx: { db: any }, excluding: Doc<"users">["_id"]) {
+/**
+ * Another PERSON is an active admin. Excludes by address, not record id: a
+ * duplicate record of the same person is not a second admin, and counting it
+ * would let the only real admin step down.
+ */
+async function assertAnotherAdmin(ctx: { db: any }, excludingEmail: string) {
   const all = (await ctx.db.query("users").collect()) as Doc<"users">[];
-  if (!all.some((u) => u._id !== excluding && isActiveAdmin(u))) {
+  if (!all.some((u) => (u.email ?? "").trim().toLowerCase() !== excludingEmail && isActiveAdmin(u))) {
     throw new Error("This is the last active admin. Make someone else an admin first.");
   }
 }
