@@ -57,75 +57,6 @@ export function CandidateRow({
     </>
   );
 
-  /*
-   * A database match not yet shortlisted: its name and why it was picked, and
-   * nothing else (5 Oct, the owner's request). Everything we extracted is on
-   * the candidate page, one click away; the list is for deciding who to open.
-   * The order is still the fit order the list was given.
-   */
-  if (app.stage === "matched") {
-    return (
-      <article className="flex flex-wrap items-start gap-x-6 gap-y-3 px-4 py-4 sm:flex-nowrap sm:px-8 sm:py-5">
-        {selectForm && (
-          <span className="pt-0.5">
-            <RowCheck form={selectForm} name="appId" value={app.id} label={candidate.fullName} />
-          </span>
-        )}
-        <div className="min-w-0 flex-1 basis-[220px]">
-          <Link
-            href={`/openings/${openingId}/candidate/${app.id}`}
-            className="text-[15px] font-semibold text-brand hover:underline"
-          >
-            {candidate.fullName}
-          </Link>
-          {app.matchReason ? (
-            <p className="mt-1 text-[13px] leading-[1.6] text-ink-soft">{app.matchReason}</p>
-          ) : (
-            // Matched before reasons were kept on the record: the list's own.
-            score && <FitReason score={score} />
-          )}
-        </div>
-        <div className="flex w-full shrink-0 flex-col items-start sm:w-[196px] sm:items-end">
-          {locked ? (
-            <div className="rounded-lg border border-rule bg-paper px-3.5 py-3 text-[12px] leading-[1.7] text-ink-soft">
-              {owner ? (
-                <>
-                  Shortlisted by <span className="text-ink">{owner.name}</span>
-                </>
-              ) : (
-                <span className="text-ink-faint">View only</span>
-              )}
-            </div>
-          ) : claimable ? (
-            <form action={claimCandidate}>
-              <input type="hidden" name="appId" value={app.id} />
-              <input type="hidden" name="openingId" value={openingId} />
-              <SubmitButton
-                pendingLabel="Shortlisting…"
-                className="rounded-full bg-brand px-4 py-[7px] text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-70"
-              >
-                Shortlist
-              </SubmitButton>
-            </form>
-          ) : (
-            <RowActions
-              appId={app.id}
-              openingId={openingId}
-              current={app.stage}
-              candidate={candidate}
-              app={app}
-              isAddOn={app.isAddOn}
-              isBackup={!!app.backupForApplicationId}
-              canDecideDirector={canDecideDirector}
-              canDecideClient={canDecideClient}
-              backToTables={cameFromTables(app, repo.linkVault(openingId))}
-            />
-          )}
-        </div>
-      </article>
-    );
-  }
-
   return (
     <article className="flex flex-wrap gap-x-6 gap-y-4 px-4 py-5 sm:flex-nowrap sm:px-8 sm:py-7">
       {selectForm && (
@@ -183,7 +114,13 @@ export function CandidateRow({
           className="mt-1.5"
         />
 
-        {score && <FitReason score={score} />}
+        {/* A database match carries the model's own line on why it was picked
+            (lib/claudeMatch, 5 Oct); everyone else, the score's reasons. */}
+        {app.matchReason ? (
+          <p className="mt-2 text-[13px] leading-[1.6] text-ink-soft">{app.matchReason}</p>
+        ) : (
+          score && <FitReason score={score} />
+        )}
 
         <dl className="mt-4 grid grid-cols-[84px_minmax(0,1fr)] gap-x-4 gap-y-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:gap-x-6">
           {candidate.age != null && (
@@ -269,7 +206,8 @@ export function CandidateRow({
           />
         )}
 
-        {/* Database matches never get here: they take the short row above. */}
+        {/* Not on Database CVs: everyone there is a database match. */}
+        {app.stage !== "matched" && (
         <div className="rounded-lg border border-rule px-3.5 py-3 text-[12px] leading-[1.8] text-ink-faint">
           <span className="text-ink-soft">In {(STAGE_LABEL[app.stage] ?? app.stage ?? "").toLowerCase()}</span>
           <br />
@@ -281,6 +219,7 @@ export function CandidateRow({
             </>
           )}
         </div>
+        )}
       </div>
     </article>
   );

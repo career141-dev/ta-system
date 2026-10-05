@@ -6,7 +6,7 @@ import type { Application, Candidate, User } from "@/data/types";
 import { CandidateRow } from "./CandidateRow";
 import { SearchIcon } from "./icons";
 import { assess } from "@/lib/assessment";
-import type { Score } from "@/lib/scoring";
+import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { Pager } from "./Pager";
@@ -158,7 +158,13 @@ export function CandidateList({
   if (assessment?.ok) {
     for (const a of apps) {
       const hit = assessment.scores.get(a.candidateId);
-      if (hit) scored.set(a.id, hit);
+      if (!hit) continue;
+      // A database match the model scored shows that score, and is ordered by
+      // it (lib/claudeMatch, 5 Oct); the rules' working stays underneath.
+      const own = a.matchScore;
+      scored.set(a.id, typeof own === "number"
+        ? { ...hit, overall: own, band: own >= FIT_BANDS.strong ? "strong" : own >= FIT_BANDS.worth ? "worth a look" : "weak" }
+        : hit);
     }
   }
 
