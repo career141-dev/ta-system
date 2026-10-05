@@ -35,7 +35,7 @@ export async function GET(req: Request) {
     return reply(
       {
         error: "extension_out_of_date",
-        message: "This copy of the Career141 extension is out of date. Get the new one (0.2.1) from the desk, then press Reload on it in chrome://extensions.",
+        message: "This copy of the Career141 extension is out of date. Ask your lead for the new extension files (0.2.1), replace your extension folder with them, then press Reload on it in chrome://extensions.",
       },
       426,
     );
