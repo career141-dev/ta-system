@@ -24,7 +24,23 @@ export async function GET(req: Request) {
   await primeStore();
   if (!authorised(req)) return reply({ error: "bad_token" }, 401);
 
-  const user = extensionUser(new URL(req.url).searchParams.get("userId"));
+  const params = new URL(req.url).searchParams;
+  /*
+   * A copy of the extension from before 2 Oct asks without naming anyone. It
+   * was answered with an empty list, which read as "my jobs are gone" (5 Oct)
+   * and nobody knew why — that copy is still labelled 0.2.0. It now hears what
+   * to do; its panel shows this message as it stands.
+   */
+  if (!params.has("userId")) {
+    return reply(
+      {
+        error: "extension_out_of_date",
+        message: "This copy of the Career141 extension is out of date. Get the new one (0.2.1) from the desk, then press Reload on it in chrome://extensions.",
+      },
+      426,
+    );
+  }
+  const user = extensionUser(params.get("userId"));
   const openings = user
     ? repo
         .openingsForUser(user)
