@@ -2924,10 +2924,18 @@ export async function setUserActive(formData: FormData) {
 export async function runDatabaseSearch(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
-  const q = String(formData.get("q") ?? "").trim();
+  const said = String(formData.get("q") ?? "").trim();
   const mode = String(formData.get("mode") ?? "natural");
   const openingId = String(formData.get("openingId") ?? "");
-  if (!q) redirect("/database");
+  // A reply under the results carries on the conversation (5 Oct): the new
+  // message is added to the search so far, one message per line (lib/query
+  // turnsOf). Boolean is a literal string and always stands alone.
+  const prior = mode === "boolean" ? "" : String(formData.get("prior") ?? "").trim();
+  if (!said) redirect(prior ? `/database/results?${new URLSearchParams({ q: prior })}` : "/database");
+  const turns = prior ? [...prior.split(/\n+/).filter((t) => t.trim()), said.replace(/\s*\n+\s*/g, " ")] : [said];
+  // Over 4,000 characters, the oldest refinements go — never the first request.
+  while (turns.length > 2 && turns.join("\n").length > 4000) turns.splice(1, 1);
+  const q = turns.join("\n").slice(0, 4000);
   const params = new URLSearchParams({ q });
   if (mode === "boolean" || mode === "meaning") params.set("mode", mode);
   if (openingId) params.set("for", openingId);

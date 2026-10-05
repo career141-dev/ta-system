@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { runDatabaseSearch } from "@/app/actions";
 
 /**
@@ -10,6 +11,11 @@ import { runDatabaseSearch } from "@/app/actions";
  * typeahead offers words the database actually contains: a TA typing
  * "Merchandis" finds out in the same keystroke whether we call it that,
  * "Merchandiser", or "Sourcing".
+ *
+ * Under the results it is the reply box of a conversation (5 Oct): what is
+ * typed is added to the search so far (`prior`), the way a chat carries on,
+ * until "New search" starts again. Boolean is a literal string, so it is never
+ * added to — switching to it starts a fresh search.
  */
 export function SearchBox({
   vocab,
@@ -18,6 +24,7 @@ export function SearchBox({
   openingId,
   autoFocus = false,
   compact = false,
+  prior = "",
 }: {
   vocab: string[];
   initialQuery?: string;
@@ -25,10 +32,14 @@ export function SearchBox({
   openingId?: string | null;
   autoFocus?: boolean;
   compact?: boolean;
+  /** The conversation so far; set under the results, where the box replies to it. */
+  prior?: string;
 }) {
   const [q, setQ] = useState(initialQuery);
   const [mode, setMode] = useState<"natural" | "boolean" | "meaning">(initialMode);
   const [focused, setFocused] = useState(false);
+  // A reply adds to the search; a Boolean string stands alone.
+  const replying = !!prior && mode !== "boolean" && initialMode !== "boolean";
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const tail = q.split(/[\s,]+/).pop() ?? "";
@@ -54,6 +65,7 @@ export function SearchBox({
     <form action={runDatabaseSearch} className="relative">
       <input type="hidden" name="mode" value={mode} />
       {openingId && <input type="hidden" name="openingId" value={openingId} />}
+      {replying && <input type="hidden" name="prior" value={prior} />}
 
       <div
         className={`relative rounded-xl border bg-surface transition-colors ${
@@ -78,7 +90,9 @@ export function SearchBox({
           placeholder={
             mode === "boolean"
               ? '("Merchandising Manager" OR "Senior Merchandiser") AND "Apparel"'
-              : "I'm looking for a…"
+              : replying
+                ? "Refine it — e.g. at least 8 years · knows React · not from Dialog · in Colombo instead"
+                : "I'm looking for a…"
           }
           className={`w-full resize-none bg-transparent py-3 ${
             compact ? "px-3.5 pr-3.5 text-[13px]" : "px-4 pr-16 text-[15px]"
@@ -110,7 +124,7 @@ export function SearchBox({
               disabled={!q.trim()}
               className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
             >
-              Search
+              {replying ? "Send" : "Search"}
             </button>
           )}
         </div>
@@ -127,6 +141,18 @@ export function SearchBox({
           </button>
         )}
       </div>
+
+      {prior && (
+        <p className="mt-2 flex items-center justify-between gap-3 text-[11.5px] text-ink-faint">
+          <span>{replying ? "Each message adds to this search." : "Boolean starts a new search."}</span>
+          <Link
+            href={`/database${openingId ? `?for=${encodeURIComponent(openingId)}` : ""}`}
+            className="shrink-0 font-medium text-accent hover:underline"
+          >
+            New search
+          </Link>
+        </p>
+      )}
 
       {focused && suggestions.length > 0 && (
         <ul className="absolute left-0 right-0 top-full z-20 mt-1.5 overflow-hidden rounded-xl border border-rule bg-surface py-1 shadow-[0_8px_24px_rgba(23,28,24,0.12)]">

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { SearchCriteria } from "@/data/types";
-import { describe, describeBoolean, parseBoolean, toBooleanString, withoutChip, type Chip } from "@/lib/query";
+import { describe, describeBoolean, parseBoolean, toBooleanString, turnsOf, withoutChip, type Chip } from "@/lib/query";
 
 /**
  * The left rail — spec §6D.2, modelled on Recruiter's AI-assisted search panel.
@@ -118,10 +118,17 @@ export function AiPanel({
           </svg>
         </div>
 
-        <div className="mt-3 flex justify-end">
-          <p className="max-w-[86%] rounded-xl rounded-br-sm bg-navactive px-3.5 py-2.5 text-[12.5px] leading-relaxed text-white">
-            {query}
-          </p>
+        {/* The conversation so far, one bubble per message (5 Oct): the box
+            under the results adds to it rather than starting again. */}
+        <div className="mt-3 flex flex-col items-end gap-2">
+          {(mode === "boolean" ? [query] : turnsOf(query)).map((t, i) => (
+            <p
+              key={i}
+              className="max-w-[86%] whitespace-pre-wrap break-words rounded-xl rounded-br-sm bg-navactive px-3.5 py-2.5 text-[12.5px] leading-relaxed text-white"
+            >
+              {t}
+            </p>
+          ))}
         </div>
 
         <div className="mt-5 flex flex-col items-start gap-2.5">
@@ -179,7 +186,13 @@ export function AiPanel({
 
         <div className="mt-4 rounded-lg bg-paper px-3.5 py-3">
           <p className="text-[12.5px] leading-relaxed text-ink-soft">
-            A search has been started from your request. Update it through the box below, or by{" "}
+            {mode === "boolean" ? (
+              <>A search has been started from your request. Change it through the box below, or by{" "}</>
+            ) : turnsOf(query).length > 1 ? (
+              <>These results answer the whole conversation above. Keep refining in the box below — say what to add, change or rule out — or{" "}</>
+            ) : (
+              <>A search has been started from your request. Keep refining it in the box below, like a chat — each message adds to this search — or by{" "}</>
+            )}
             <button onClick={() => setShowFilters(true)} className="font-medium text-accent hover:underline">
               editing the current filters
             </button>
