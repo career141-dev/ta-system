@@ -67,11 +67,9 @@ eq("another TA's unshortlisted row stays hidden", seen([mk("c", "u_other", "cont
 // 1 Oct: every row arrives Shortlisted, so "shortlisted" put all of another
 // TA's saved links in your table. Only a person they really took on shows.
 eq("another TA's saved link (Shortlisted by default) stays hidden", seen([mk("d", "u_other", "shortlisted")]), []);
-eq(
-  "another TA's row whose person is on the pipeline from it is marked",
-  scopeLinks([mk("d2", "u_other", "shortlisted")], ta, deskWide, () => true).map((s) => [s.row.id, s.takenBy]),
-  [["d2", "u_other"]],
-);
+// 5 Oct: not even a person they have taken on — the other TA's work is theirs.
+eq("another TA's row whose person is on the pipeline stays hidden", seen([mk("d2", "u_other", "shortlisted")]), []);
+eq("another TA's row with a CV received stays hidden", seen([mk("d3", "u_other", "cv_received")]), []);
 eq("their own row, as before", seen([mk("e", "u_me", "contacted")]), [["e", null]]);
 eq(
   "a lead sees every row",
