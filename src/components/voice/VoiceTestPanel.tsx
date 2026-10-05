@@ -170,7 +170,7 @@ export function VoiceTestPanel({ openings }: { openings: OpeningOption[] }) {
   const clock = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 
   return (
-    <div className="mt-6 grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
+    <div className="mt-6 grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
       <section className="rounded-xl border border-rule bg-surface p-5">
         <h2 className="text-[13.5px] font-semibold">The role</h2>
         <div className="mt-4 flex flex-col gap-3.5">
@@ -191,7 +191,7 @@ export function VoiceTestPanel({ openings }: { openings: OpeningOption[] }) {
               ))}
             </select>
           </label>
-          <div className="grid gap-3.5 sm:grid-cols-2">
+          <div className="grid grid-cols-[minmax(0,1fr)] gap-3.5 sm:grid-cols-2">
             <label>
               <span className="mb-1.5 block text-[11.5px] text-ink-soft">Company</span>
               <input id="voice-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} disabled={inCall} className={inputClass} />

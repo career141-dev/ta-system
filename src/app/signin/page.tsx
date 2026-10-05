@@ -26,7 +26,7 @@ export default async function SignInPage() {
   const emails = await clerkEmails();
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[440px] flex-col justify-center px-6 py-16">
+    <main className="mx-auto flex min-h-screen w-full max-w-[440px] flex-col justify-center px-4 sm:px-6 py-16">
       {/* Aura's lettering is white on transparent, so it sits on its own dark
           panel whatever the page theme (28 Sep). */}
       <div className="mb-7 flex justify-center rounded-2xl bg-[#0b0b12] px-10 py-8">

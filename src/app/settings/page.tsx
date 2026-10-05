@@ -139,7 +139,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   );
 
   return (
-    <main className="mx-auto max-w-[1180px] px-8 py-9">
+    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
       <h1 className="text-[24px] font-semibold tracking-tight">Settings</h1>
       <p className="mt-1.5 text-[13px] text-ink-soft">The platform&rsquo;s background work. Admins only.</p>
 
@@ -177,7 +177,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
 
           {status && (
             <>
-              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2 xl:grid-cols-4">
                 {status.mailboxes.filter((m) => m.kind !== "ta").map(mailboxCard)}
               </div>
 

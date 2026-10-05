@@ -67,7 +67,7 @@ export default async function ClientsPage({
   const hasActiveFilters = Boolean(industry || q);
 
   return (
-    <main className="mx-auto max-w-[1180px] px-8 py-9">
+    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
       <div className="mb-8 flex items-end justify-between gap-6">
         <div>
           <h1 className="text-[24px] font-semibold tracking-tight">Clients</h1>

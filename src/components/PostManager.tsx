@@ -330,7 +330,7 @@ export function PostManager({
               {isEditing && (
                 <form
                   action={updatePost}
-                  className="mt-4 grid gap-4 rounded-xl border border-rule bg-paper/60 px-5 py-4 sm:grid-cols-2"
+                  className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-4 rounded-xl border border-rule bg-paper/60 px-5 py-4 sm:grid-cols-2"
                 >
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="postId" value={p.id} />

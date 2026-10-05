@@ -71,7 +71,7 @@ export function OpeningMenu({
         <div
           role="menu"
           onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 top-full z-50 mt-1.5 w-[280px] rounded-xl border border-rule bg-surface py-1 text-left shadow-lg"
+          className="absolute right-0 top-full z-50 mt-1.5 w-[280px] max-w-[calc(100vw-32px)] rounded-xl border border-rule bg-surface py-1 text-left shadow-lg"
         >
           {!confirming ? (
             <button

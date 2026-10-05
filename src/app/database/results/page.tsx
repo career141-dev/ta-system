@@ -92,7 +92,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
 function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "boolean" | "meaning"; forOpening: string | null }) {
   const vocab = repo.vocabulary();
   return (
-    <div className="grid items-start gap-6 xl:grid-cols-[400px_1fr]">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[400px_1fr]">
       <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
         <div className="rounded-xl border border-rule bg-surface p-4">
           <SearchBox
@@ -594,7 +594,7 @@ async function ResultsView({
 
   return (
     <>
-      <div className="grid items-start gap-6 xl:grid-cols-[400px_1fr]">
+      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[400px_1fr]">
         <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
           <AiPanel
             criteria={criteria}
@@ -666,7 +666,7 @@ async function ResultsView({
           {total > 0 && (
             <section className="mb-4">
               <h2 className="mb-2.5 text-[15px] font-semibold">Spotlights</h2>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {[
                   { n: free, label: "Free to approach" },
                   { n: inPipe, label: "Already being worked" },

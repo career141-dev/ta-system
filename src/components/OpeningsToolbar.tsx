@@ -197,7 +197,7 @@ export function OpeningsToolbar({
         </div>
 
         {/* Filter Button & Search Input grouped together on the right */}
-        <div className="ml-auto flex items-center gap-2.5">
+        <div className="flex w-full items-center gap-2.5 sm:ml-auto sm:w-auto">
           {/* Filter Button & Popover */}
           <div className="relative" ref={filterRef}>
             <button
@@ -231,7 +231,7 @@ export function OpeningsToolbar({
             </button>
 
             {filterOpen && (
-              <div className="absolute right-0 top-full z-40 mt-2 w-80 rounded-2xl border border-rule bg-surface p-4 shadow-xl">
+              <div className="absolute left-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-32px)] rounded-2xl sm:left-auto sm:right-0 border border-rule bg-surface p-4 shadow-xl">
                 <div className="mb-3 flex items-center justify-between border-b border-rule pb-2.5">
                   <span className="text-[13px] font-semibold text-ink">Filter Openings</span>
                   {activeCount > 0 && (
@@ -329,7 +329,7 @@ export function OpeningsToolbar({
           </div>
 
           {/* Search Input */}
-          <div className="relative">
+          <div className="relative min-w-0 flex-1 sm:flex-none">
             <span className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint">
               <SearchIcon />
             </span>
@@ -339,7 +339,7 @@ export function OpeningsToolbar({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search openings"
               aria-label="Search openings"
-              className="w-[260px] rounded-full border border-rule bg-surface py-2 pl-9 pr-4 text-[13px] outline-none placeholder:text-ink-faint focus:border-brand-line"
+              className="w-full rounded-full border border-rule bg-surface py-2 pl-9 sm:w-[260px] pr-4 text-[13px] outline-none placeholder:text-ink-faint focus:border-brand-line"
             />
           </div>
         </div>

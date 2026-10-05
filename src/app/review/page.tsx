@@ -15,7 +15,7 @@ export default async function ReviewIndex({ searchParams }: { searchParams: Prom
   const openings = repo.openings();
 
   return (
-    <main className="mx-auto w-full max-w-[860px] px-6 py-10">
+    <main className="mx-auto w-full max-w-[860px] px-4 sm:px-6 py-6 sm:py-10">
       <h1 className="text-[22px] font-semibold tracking-tight">Recruiter review</h1>
       <p className="mt-2 max-w-[62ch] text-[13px] leading-relaxed text-ink-soft">
         For each person, decide as you would when shortlisting for that job: <b>Shortlist</b>, <b>Maybe</b> or <b>Reject</b>.

@@ -226,7 +226,7 @@ function InterviewCard({
           {iv.outcome !== "attended" && (
             <details>
               <summary className={summary}>Reschedule</summary>
-              <form action={rescheduleInterview} className="mt-2 grid gap-2.5 sm:grid-cols-2">
+              <form action={rescheduleInterview} className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-2.5 sm:grid-cols-2">
                 {ids}
                 <label><span className={small}>New date</span><input name="date" type="date" required defaultValue={when.date} className={input} /></label>
                 <label><span className={small}>New time</span><input name="time" type="time" required defaultValue={when.time} className={input} /></label>
@@ -250,7 +250,7 @@ function InterviewCard({
 
           <details>
             <summary className={summary}>Edit details</summary>
-            <form action={editInterview} className="mt-2 grid gap-2.5 sm:grid-cols-2">
+            <form action={editInterview} className="mt-2 grid grid-cols-[minmax(0,1fr)] gap-2.5 sm:grid-cols-2">
               {ids}
               <label><span className={small}>Interview name</span><input name="title" defaultValue={iv.title ?? ""} className={input} /></label>
               <label><span className={small}>Minutes</span><input name="durationMins" type="number" min={15} step={15} defaultValue={iv.durationMins ?? ""} className={input} /></label>

@@ -17,7 +17,7 @@ export default async function VoicePage() {
   const d = can(user, "voice.practice");
   if (!d.ok) {
     return (
-      <main className="mx-auto w-full max-w-[1180px] px-8 py-8">
+      <main className="mx-auto w-full max-w-[1180px] px-4 sm:px-8 py-8">
         <h1 className="text-[21px] font-semibold tracking-tight">Voice agent</h1>
         <p className="mt-1 text-[13px] text-ink-soft">{d.message}</p>
       </main>
@@ -37,7 +37,7 @@ export default async function VoicePage() {
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
-    <main className="mx-auto w-full max-w-[1180px] px-8 py-8">
+    <main className="mx-auto w-full max-w-[1180px] px-4 sm:px-8 py-8">
       <h1 className="text-[21px] font-semibold tracking-tight">Voice agent</h1>
       <p className="mt-1 max-w-[70ch] text-[13px] leading-relaxed text-ink-soft">
         Talk to the AI screening agent the way a candidate would. Choose an opening or type a role, then start the

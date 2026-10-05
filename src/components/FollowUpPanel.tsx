@@ -198,7 +198,7 @@ export function FollowUpPanel({
             <input type="hidden" name="applicationId" value={applicationId} />
             <input type="hidden" name="openingId" value={openingId} />
             {s.missing.map((q) => (
-              <label key={q.id} className="grid gap-1 sm:grid-cols-[170px_1fr] sm:items-center">
+              <label key={q.id} className="grid grid-cols-[minmax(0,1fr)] gap-1 sm:grid-cols-[170px_1fr] sm:items-center">
                 <span className="text-[12px] text-ink-soft">{q.label}</span>
                 <input name={q.field ? `std_${q.field}` : `q_${q.id}`} className={field} />
               </label>

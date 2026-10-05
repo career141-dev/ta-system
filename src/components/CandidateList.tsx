@@ -208,7 +208,7 @@ export function CandidateList({
           whole page — header, rail and matching banner included (28 Sep). */}
       <Form
         action={basePath}
-        className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-rule px-8 py-5"
+        className="flex flex-wrap items-center gap-x-4 gap-y-3 border-b border-rule px-4 sm:px-8 py-5"
       >
         {Object.entries(keepQuery).map(([k, v]) => (
           <input key={k} type="hidden" name={k} value={v} />
@@ -321,7 +321,7 @@ export function CandidateList({
 
 
       {shown.length === 0 ? (
-        <div className="px-8 py-20 text-center">
+        <div className="px-4 sm:px-8 py-20 text-center">
           <p className="text-[13.5px] text-ink-soft">Nobody here.</p>
           <p className="mt-1.5 text-[12.5px] text-ink-faint">
             {active.length > 0
@@ -331,7 +331,7 @@ export function CandidateList({
         </div>
       ) : (
         <div className="divide-y divide-rule">
-          <div className="px-8 pt-4">
+          <div className="px-4 sm:px-8 pt-4">
             <BulkBar form={BULK_FORM} noun={["candidate", "candidates"]} action={canManage ? removeApplications : undefined}>
               <input type="hidden" name="openingId" value={openingId} />
               {claimable && (
@@ -368,7 +368,7 @@ export function CandidateList({
             return (
               <Fragment key={a.id}>
               {day !== null && day !== prev && (
-                <div className="bg-paper px-8 py-2.5 text-[12px] font-medium text-ink-soft">
+                <div className="bg-paper px-4 sm:px-8 py-2.5 text-[12px] font-medium text-ink-soft">
                   {colomboDayLabel(day)}
                   <span className="font-normal text-ink-faint">
                     {" "}· {n} {n === 1 ? "candidate" : "candidates"}

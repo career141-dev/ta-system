@@ -10,11 +10,15 @@
  * read them without dragging a server component's imports along.
  */
 
-/** The top bar. Tall enough to carry the logo lockup at 54px. */
-export const HEADER_H = 78;
+/**
+ * The top bar: 78px on a wide screen, tall enough for the logo lockup at 54px;
+ * 64px below 1280px, where the menu folds into a button (5 Oct, mobile). The
+ * number lives in globals.css as --header-h so it can change with the screen.
+ */
+export const HEADER_H = "var(--header-h)";
 
-/** The client / position / team band inside an opening. */
+/** The client / position / team band inside an opening (sticky from 1024px). */
 export const CONTEXT_H = 48;
 
 /** Where the project rail starts, and therefore how tall it is. */
-export const RAIL_TOP = HEADER_H + CONTEXT_H;
+export const RAIL_TOP = `calc(var(--header-h) + ${CONTEXT_H}px)`;

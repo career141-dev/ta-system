@@ -86,7 +86,7 @@ export function ScreeningPanel({
             <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
               How
             </span>
-            <select name="mode" defaultValue="assisted" className={`${input} w-[210px]`}>
+            <select name="mode" defaultValue="assisted" className={`${input} w-full sm:w-[210px]`}>
               {MODES.map((m) => {
                 const st = modeState(m);
                 return (
@@ -274,7 +274,7 @@ export function ScreeningPanel({
         <input
           name="failureReason"
           placeholder="No answer, wrong number, call back later…"
-          className={`${input} w-[260px]`}
+          className={`${input} w-full sm:w-[260px]`}
         />
         <SubmitButton
           tone="dark"

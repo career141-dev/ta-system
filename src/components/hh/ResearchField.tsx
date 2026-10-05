@@ -100,7 +100,7 @@ export function ResearchField({
       <span className="mb-1 flex items-center gap-2 text-[11.5px] text-ink-soft">
         {label}
         {edited && <span className="rounded bg-tag px-1.5 py-px text-[10px] text-ink-faint">edited</span>}
-        <span className="ml-auto text-[11px] text-ink-faint opacity-0 transition-opacity group-hover:opacity-100">
+        <span className="ml-auto text-[11px] text-ink-faint opacity-0 [@media(hover:none)]:opacity-100 transition-opacity group-hover:opacity-100">
           edit
         </span>
       </span>
