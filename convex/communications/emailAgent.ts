@@ -5,6 +5,7 @@ import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
 import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../lib/mailCursor";
 import { isNotAnApplication, parseApplicationEmail } from "../lib/mailParse";
+import { linkedinJobId, linkedinProjectId } from "../lib/postRouting";
 import { placeOnPosts } from "../mailIntake/process";
 import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
@@ -1049,6 +1050,139 @@ export const logMailboxMessage = internalMutation({
       note: a.note?.slice(0, 500),
       loggedAt: Date.now(),
     });
+  },
+});
+
+// ── Re-reading the mailbox when a LinkedIn link is saved (5 October) ─────────
+//
+// A TA often creates the job on LinkedIn first and the post here later.
+// Everyone who applied in between was filed by title, or to the database, and
+// saving the link did nothing for them. Saving it now re-reads linkedin@ for
+// the last 30 days: every email that, read again, routes to a post with this
+// link is filed there — a CV as any CV (an already-held person is linked, not
+// created twice), a no-CV applicant held from the notification. Nobody is
+// moved off another opening, and nothing is sent to anyone.
+
+/** The most emails one re-read files; past it the rest wait for the next save. */
+const RESCAN_MAX = 300;
+const RESCAN_PAGES = 10;
+
+/** Messages in the inbox whose text matches a search term, newest first (Graph $search). */
+async function searchInbox(inboxEmail: string, term: string): Promise<any[]> {
+  const token = await getGraphToken();
+  if (!token) return [];
+  const q = encodeURIComponent(`"${term.replace(/"/g, "")}"`);
+  let url: string | undefined =
+    `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/mailFolders/inbox/messages?$search=${q}&$select=id,subject,body,from,hasAttachments,receivedDateTime&$top=50`;
+  const out: any[] = [];
+  for (let page = 0; url && page < RESCAN_PAGES; page++) {
+    const res = await safeFetchWithRetry(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res || !res.ok) {
+      console.error(`[Rescan] Search for "${term}" failed:`, res ? await res.text() : "network error");
+      break;
+    }
+    const data = await res.json();
+    out.push(...(data.value ?? []));
+    url = data["@odata.nextLink"];
+  }
+  return out;
+}
+
+/** The titles of the posts that carry this link — the subjects LinkedIn's emails use. */
+export const postsWithLink = internalQuery({
+  args: { project: v.optional(v.string()), job: v.optional(v.string()) },
+  handler: async (ctx, { project, job }) => {
+    const titles: string[] = [];
+    const ids: string[] = [];
+    for (const p of await ctx.db.query("jobPosts").collect()) {
+      if (!p.externalUrl) continue;
+      const hit = (project && linkedinProjectId(p.externalUrl) === project) || (job && linkedinJobId(p.externalUrl) === job);
+      if (!hit) continue;
+      ids.push(p._id);
+      titles.push(p.title, ...(p.previousTitles ?? []));
+    }
+    return { ids, titles };
+  },
+});
+
+/** Called by the app when a post's LinkedIn link is saved. */
+export const queueRescanForLink = internalMutation({
+  args: { url: v.string(), days: v.optional(v.number()) },
+  handler: async (ctx, { url, days }) => {
+    if (!linkedinProjectId(url) && !linkedinJobId(url)) return { queued: false };
+    await ctx.scheduler.runAfter(5_000, internal.communications.emailAgent.rescanMailboxForLink, { url, days });
+    return { queued: true };
+  },
+});
+
+export const rescanMailboxForLink = internalAction({
+  args: { url: v.string(), days: v.optional(v.number()) },
+  handler: async (ctx, { url, days }) => {
+    if (!postRoutingOn()) return { searched: 0, filed: 0 };
+    const project = linkedinProjectId(url) ?? undefined;
+    const job = linkedinJobId(url) ?? undefined;
+    const posts = await ctx.runQuery(internal.communications.emailAgent.postsWithLink, { project, job });
+    if (posts.ids.length === 0) return { searched: 0, filed: 0 };
+    const ours = new Set<string>(posts.ids);
+    const inbox = process.env.LINKEDIN_SHARED_INBOX || "linkedin@career141.com";
+    const since = new Date(Date.now() - (days ?? 30) * 24 * 60 * 60_000).toISOString();
+
+    // The number finds the emails that carry it; the titles find any whose
+    // link the search index did not keep. Each one is routed again below, so a
+    // title search that also finds other jobs' emails files none of them.
+    const found = new Map<string, any>();
+    for (const term of [project, job, ...new Set(posts.titles)].filter(Boolean) as string[]) {
+      for (const m of await searchInbox(inbox, term)) {
+        if ((m.receivedDateTime ?? "") >= since) found.set(m.id, m);
+      }
+    }
+
+    let filed = 0;
+    let delayMs = 0;
+    for (const m of oldestFirst([...found.values()]).slice(0, RESCAN_MAX)) {
+      const subject = m.subject ?? "";
+      const body = m.body?.content ?? "";
+      const route = await routeByPosts(ctx, { subject, body, channel: inboxChannel(inbox) });
+      const toUs = (route.jobPostId && ours.has(route.jobPostId)) || route.alsoTo.some((a) => ours.has(a.jobPostId));
+      if (!toUs || !route.jobId) continue;
+
+      const attachments = m.hasAttachments ? await fetchMessageAttachments(inbox, m.id) : [];
+      const cvs = attachments.filter(
+        (a: any) =>
+          a.contentType?.includes("pdf") ||
+          a.contentType?.includes("msword") ||
+          a.contentType?.includes("officedocument.wordprocessingml") ||
+          /\.(pdf|docx?)$/i.test(a.name ?? ""),
+      );
+      if (cvs.length === 0) {
+        const from = m.from?.emailAddress?.address;
+        const held = from
+          ? await holdLinkedInApplicant(ctx, { inboxEmail: inbox, subject, fromAddress: from, body, bodyIsHtml: m.body?.contentType === "html" })
+          : null;
+        if (held) filed++;
+        continue;
+      }
+      for (const a of cvs) {
+        await ctx.scheduler.runAfter(delayMs, internal.communications.emailAgent.processSingleEmailAttachment, {
+          targetInboxEmail: inbox,
+          messageId: m.id,
+          attachmentId: a.id,
+          attachmentName: a.name ?? "cv.pdf",
+          contentType: a.contentType || "application/pdf",
+          resolvedJobId: route.jobId,
+          jobPostId: route.jobPostId,
+          alsoTo: route.alsoTo.length ? route.alsoTo : undefined,
+          routeNote: `Re-read when the LinkedIn link was saved. ${route.note}`,
+          rawSender: m.from?.emailAddress?.address,
+          subject,
+          currentExtractionDelayMs: delayMs * 5,
+        });
+        delayMs += 2_000;
+      }
+      filed++;
+    }
+    console.log(`[Rescan] ${url}: ${found.size} email(s) found in ${inbox} since ${since.slice(0, 10)}, ${filed} filed to the post.`);
+    return { searched: found.size, filed };
   },
 });
 
