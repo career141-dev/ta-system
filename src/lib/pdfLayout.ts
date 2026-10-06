@@ -14,13 +14,23 @@ export interface LayoutTextItem {
  * 3. In-line word spacing
  */
 export function extractPageTextWithLayout(items: any[], pageWidth: number, pageHeight: number): string {
+  /*
+   * Only text that sits on the page (6 Oct). Some PDFs carry items at absurd or
+   * infinite positions; the column search below then stepped across a "page"
+   * billions of points wide — or for ever, once the step no longer moved the
+   * number — and every CV read froze the backend's action runner with it.
+   */
+  const pageW = Number.isFinite(pageWidth) && pageWidth > 0 ? pageWidth : 612;
+  const pageH = Number.isFinite(pageHeight) && pageHeight > 0 ? pageHeight : 792;
+  const onPage = (n: number, size: number) => Number.isFinite(n) && n >= -size && n <= size * 2;
   const validItems: LayoutTextItem[] = [];
   for (const item of items) {
     if (!item || typeof item.str !== "string" || item.str.length === 0) continue;
     const transform = item.transform || [1, 0, 0, 1, 0, 0];
     const x = transform[4];
     const y = transform[5];
-    const width = item.width || 0;
+    if (!onPage(x, pageW) || !onPage(y, pageH)) continue;
+    const width = Number.isFinite(item.width) ? Math.min(Math.max(0, item.width), pageW * 2) : 0;
     const height = item.height || Math.abs(transform[3]) || 10;
     validItems.push({
       str: item.str,
@@ -90,13 +100,22 @@ export function extractPageTextWithLayout(items: any[], pageWidth: number, pageH
   let minCrossing = Infinity;
 
   if (validItems.length > 15) {
-    const minX = Math.min(...validItems.map((i) => i.x));
-    const maxX = Math.max(...validItems.map((i) => i.x + i.width));
+    // A loop, not Math.min(...items): a page of tens of thousands of items
+    // overflowed the call stack.
+    let minX = Infinity;
+    let maxX = -Infinity;
+    for (const i of validItems) {
+      if (i.x < minX) minX = i.x;
+      if (i.x + i.width > maxX) maxX = i.x + i.width;
+    }
+    minX = Math.max(minX, 0);
+    maxX = Math.min(maxX, pageW);
     const contentWidth = maxX - minX;
 
     if (contentWidth > 250) {
-      // Test potential split gutters
-      for (let split = minX + 80; split <= maxX - 80; split += 10) {
+      // Test potential split gutters — at most ~100 of them, whatever the page.
+      const step = Math.max(10, (contentWidth - 160) / 100);
+      for (let split = minX + 80; split <= maxX - 80; split += step) {
         let leftCount = 0;
         let rightCount = 0;
         let crossingCount = 0;
@@ -134,9 +153,9 @@ export function extractPageTextWithLayout(items: any[], pageWidth: number, pageH
       const itemRight = item.x + item.width;
       const isWide = item.width > 200 && item.x < split && itemRight > split;
       if (isWide) {
-        if (item.y > (pageHeight || 800) * 0.75) {
+        if (item.y > pageH * 0.75) {
           headerItems.push(item);
-        } else if (item.y < (pageHeight || 800) * 0.2) {
+        } else if (item.y < pageH * 0.2) {
           footerItems.push(item);
         } else {
           const mid = item.x + item.width / 2;
