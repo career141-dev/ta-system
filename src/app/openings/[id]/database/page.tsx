@@ -12,6 +12,7 @@ import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { MatchingStatus } from "@/components/MatchingStatus";
 import { linkedCandidates } from "@/lib/dbMatch";
+import { levelSectionFor } from "@/lib/levels";
 
 export default async function DatabasePage({
   params,
@@ -113,6 +114,12 @@ export default async function DatabasePage({
             filters={filters}
             claimable
             basePath={`/openings/${id}/database`}
+            // Under each level the matcher looks at — this job's, then each
+            // one below — its people, best fit first (5 Oct).
+            groupBy={(a) => {
+              const c = repo.candidate(a.candidateId);
+              return c ? levelSectionFor(opening, c) : { order: 100, label: "Level not known" };
+            }}
           />
         </div>
       </div>

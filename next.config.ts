@@ -7,7 +7,14 @@ const nextConfig: NextConfig = {
   // unaffected, and so is `next dev`.
   output: "standalone",
   // The JSON store writes to .data/ at runtime; keep it out of the bundle.
-  outputFileTracingIncludes: {},
+  // pdf.js on the server needs @napi-rs/canvas for DOMMatrix, and its
+  // platform binary is loaded by a runtime require the tracer cannot follow
+  // — so the live image had none, and referee reading fell back to pdf2json
+  // ("DOMMatrix is not defined", 5 Oct).
+  outputFileTracingIncludes: { "/**/*": ["./node_modules/@napi-rs/**/*"] },
+  // Required as Node packages, not bundled, so they are traced into the
+  // standalone server with their native parts.
+  serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas"],
   // This project's own folder is the root. With a second lockfile in a parent
   // folder Next otherwise guesses the parent, and traces files from there.
   outputFileTracingRoot: path.resolve(__dirname),

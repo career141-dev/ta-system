@@ -795,11 +795,12 @@ const rawRepo = {
 
   /** One Excel Tables row, by its id. */
   linkEntry: (entryId: Id): LinkVaultEntry | null => load().linkVault.find((l) => l.id === entryId) ?? null,
+  /** Newest first, so a row just added is at the top of Excel Tables
+   *  (Gajani, #124, 5 Oct). */
   linkVault: (openingId: Id): LinkVaultEntry[] =>
     load()
       .linkVault.filter((l) => l.openingId === openingId)
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
-
 
   callFeedback: (applicationId: Id) =>
     load()
@@ -4327,7 +4328,7 @@ const rawRepo = {
      * stages under different channel codes, and the 13 September audit found
      * both were being filed as database matches.
      */
-    origin: { kind: "database" } | { kind: "auto_match"; note: string } | { kind: "intake"; source: IntakeSource } = { kind: "database" },
+    origin: { kind: "database" } | { kind: "auto_match"; note: string; reason?: string; score?: number } | { kind: "intake"; source: IntakeSource } = { kind: "database" },
   ): { ok: boolean; reason?: string } {
     const db = load();
     if (!db.candidates.some((c) => c.id === candidateId)) return { ok: false, reason: "No such candidate" };
@@ -4355,6 +4356,8 @@ const rawRepo = {
               ? origin.note
               : `Found in the database by ${d.users.find((u) => u.id === byUserId)?.name ?? "a TA"}`,
         ],
+        matchReason: origin.kind === "auto_match" ? origin.reason?.trim() || null : null,
+        matchScore: origin.kind === "auto_match" && typeof origin.score === "number" ? origin.score : null,
         statusA: null,
         statusB: null,
         rankTier: null,

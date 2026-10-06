@@ -24,6 +24,7 @@ import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import type { DrawerCv } from "@/components/db/DbCandidateDrawer";
 import { keywordRetrieve } from "@/lib/retrieve";
+import { inLevelOrder, levelSectionFor } from "@/lib/levels";
 import {
   cachedEngineSearch,
   deskCriteria,
@@ -420,6 +421,18 @@ async function ResultsView({
     return scoreB - scoreA || (b.candidate.totalExperienceYears ?? 0) - (a.candidate.totalExperienceYears ?? 0);
   });
 
+  // Then in level sections, highest level first, best fit first inside each —
+  // against the opening's level when the search is for one, the same sections
+  // Database CVs shows (5 Oct). Done across the whole list before paging, so a
+  // page never mixes the order.
+  const sectionOf = (c: (typeof results)[number]["candidate"]) => levelSectionFor(target, c);
+  results.splice(0, results.length, ...inLevelOrder(results, (r) => sectionOf(r.candidate)));
+  const sectionCount = new Map<string, number>();
+  for (const r of results) {
+    const label = sectionOf(r.candidate).label;
+    sectionCount.set(label, (sectionCount.get(label) ?? 0) + 1);
+  }
+
   const shown = results.slice((page - 1) * PAGE, page * PAGE);
 
   const openings = repo.openings().filter((o) => o.status === "open");
@@ -781,6 +794,16 @@ async function ResultsView({
             ) : (
               shown.map((r, i) => (
                 <div key={r.candidate.id}>
+                  {/* A level's heading before its first row, and again at the top of a page it carries on to. */}
+                  {(i === 0 || sectionOf(shown[i - 1].candidate).label !== sectionOf(r.candidate).label) && (
+                    <div className="border-b border-rule bg-paper px-6 py-2.5 text-[12px] font-medium text-ink-soft">
+                      {sectionOf(r.candidate).label}
+                      <span className="font-normal text-ink-faint">
+                        {" "}· {sectionCount.get(sectionOf(r.candidate).label) ?? 0}{" "}
+                        {(sectionCount.get(sectionOf(r.candidate).label) ?? 0) === 1 ? "candidate" : "candidates"}
+                      </span>
+                    </div>
+                  )}
                   <ResultRow
                     candidate={r.candidate}
                     fit={fit.get(r.candidate.id) ?? null}

@@ -7,7 +7,15 @@ import { extractReplyText, parseReply, withUnpickedRejected } from "./reviewRepl
 import { revalidatePath } from "next/cache";
 import { isConvex } from "@/data/mode";
 import { primeStore } from "@/data/prime";
-import { convexMutation } from "./convexServer";
+import { convexAction, convexMutation } from "./convexServer";
+
+/**
+ * Replies are applied only from here on (owner, 5 Oct). Until then the app had
+ * no Microsoft settings and never read a reply, so the TAs handled them by
+ * hand; replies already sitting in the mailboxes for sets still open are not
+ * applied when reading starts, or it could reject people a TA already dealt with.
+ */
+export const REPLIES_FROM = Date.parse("2026-10-05T12:15:00Z");
 
 let lastSyncTime = 0;
 const SYNC_COOLDOWN_MS = 15_000; // Throttle to max once per 15s
@@ -46,13 +54,18 @@ export async function syncMailboxRepliesSilently(): Promise<number> {
 
   let messages: { id: string; from: string; subject: string; body: string; bodyPreview: string; receivedDateTime: string }[] = [];
   try {
-    messages = await fetchMailboxMessages(mailboxes, 15);
+    // On the live desk the backend reads them: it holds the Microsoft settings
+    // the end-of-day mail is sent with, and the app holds none (5 Oct).
+    messages = isConvex()
+      ? await convexAction<typeof messages>("communications/replyInbox:recent", { mailboxes, top: 15 })
+      : await fetchMailboxMessages(mailboxes, 15);
   } catch (e) {
     console.warn("[graphInboxSync] Background sync check failed:", (e as Error).message);
     return 0;
   }
 
-  if (!messages || messages.length === 0) return 0;
+  messages = (messages ?? []).filter((m) => Date.parse(m.receivedDateTime) >= REPLIES_FROM);
+  if (messages.length === 0) return 0;
 
   let appliedCount = 0;
 

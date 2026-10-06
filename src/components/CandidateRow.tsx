@@ -114,7 +114,13 @@ export function CandidateRow({
           className="mt-1.5"
         />
 
-        {score && <FitReason score={score} />}
+        {/* A database match carries the model's own line on why it was picked
+            (lib/claudeMatch, 5 Oct); everyone else, the score's reasons. */}
+        {app.matchReason ? (
+          <p className="mt-2 text-[13px] leading-[1.6] text-ink-soft">{app.matchReason}</p>
+        ) : (
+          score && <FitReason score={score} />
+        )}
 
         <dl className="mt-4 grid grid-cols-[84px_minmax(0,1fr)] gap-x-4 gap-y-3 sm:grid-cols-[96px_minmax(0,1fr)] sm:gap-x-6">
           {candidate.age != null && (

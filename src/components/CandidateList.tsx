@@ -6,7 +6,7 @@ import type { Application, Candidate, User } from "@/data/types";
 import { CandidateRow } from "./CandidateRow";
 import { SearchIcon } from "./icons";
 import { assess } from "@/lib/assessment";
-import type { Score } from "@/lib/scoring";
+import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { Pager } from "./Pager";
@@ -15,6 +15,7 @@ import { passesFilters } from "@/lib/listFilters";
 import { BulkBar, BulkConfirm, DownloadCvsButton } from "./BulkSelect";
 import { SubmitButton } from "./Submit";
 import { confirmShortlist, removeApplications } from "@/app/actions";
+import { inLevelOrder } from "@/lib/levels";
 
 const PAGE_SIZE = 25;
 const BULK_FORM = "bulk-applications";
@@ -87,6 +88,7 @@ export function CandidateList({
   basePath,
   keepQuery = {},
   groupByDay,
+  groupBy,
 }: {
   openingId: string;
   apps: Application[];
@@ -104,6 +106,12 @@ export function CandidateList({
    * on its own (30 Sep).
    */
   groupByDay?: (a: Application) => number;
+  /**
+   * Split the list into named sections, lowest `order` first, keeping the
+   * chosen order inside each. Database CVs uses it for level sections — this
+   * job's level, then each level below (5 Oct).
+   */
+  groupBy?: (a: Application) => { order: number; label: string };
 }) {
   const users = repo.users();
 
@@ -150,7 +158,13 @@ export function CandidateList({
   if (assessment?.ok) {
     for (const a of apps) {
       const hit = assessment.scores.get(a.candidateId);
-      if (hit) scored.set(a.id, hit);
+      if (!hit) continue;
+      // A database match the model scored shows that score, and is ordered by
+      // it (lib/claudeMatch, 5 Oct); the rules' working stays underneath.
+      const own = a.matchScore;
+      scored.set(a.id, typeof own === "number"
+        ? { ...hit, overall: own, band: own >= FIT_BANDS.strong ? "strong" : own >= FIT_BANDS.worth ? "worth a look" : "weak" }
+        : hit);
     }
   }
 
@@ -180,6 +194,15 @@ export function CandidateList({
       days.set(d, [...(days.get(d) ?? []), a]);
     }
     shown = [...days].sort((x, y) => y[0] - x[0]).flatMap(([, list]) => list);
+  }
+  // Sections first, whatever the order inside them — as with days above.
+  if (groupBy) shown = inLevelOrder(shown, groupBy);
+  const sectionCount = new Map<string, number>();
+  if (groupBy) {
+    for (const a of shown) {
+      const label = groupBy(a).label;
+      sectionCount.set(label, (sectionCount.get(label) ?? 0) + 1);
+    }
   }
   // Each day's count is the whole day's, not just what is on this page.
   const dayCount = new Map<number, number>();
@@ -365,6 +388,11 @@ export function CandidateList({
             const day = groupByDay ? colomboDayStart(groupByDay(a)) : null;
             const prev = groupByDay && i > 0 ? colomboDayStart(groupByDay(onPage[i - 1])) : null;
             const n = day !== null ? (dayCount.get(day) ?? 0) : 0;
+            // The same for a section: its heading before its first row, and
+            // again at the top of a page it carries on to.
+            const section = groupBy ? groupBy(a).label : null;
+            const prevSection = groupBy && i > 0 ? groupBy(onPage[i - 1]).label : null;
+            const sn = section !== null ? (sectionCount.get(section) ?? 0) : 0;
             return (
               <Fragment key={a.id}>
               {day !== null && day !== prev && (
@@ -372,6 +400,14 @@ export function CandidateList({
                   {colomboDayLabel(day)}
                   <span className="font-normal text-ink-faint">
                     {" "}· {n} {n === 1 ? "candidate" : "candidates"}
+                  </span>
+                </div>
+              )}
+              {section !== null && section !== prevSection && (
+                <div className="bg-paper px-4 sm:px-8 py-2.5 text-[12px] font-medium text-ink-soft">
+                  {section}
+                  <span className="font-normal text-ink-faint">
+                    {" "}· {sn} {sn === 1 ? "candidate" : "candidates"}
                   </span>
                 </div>
               )}

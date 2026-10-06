@@ -81,6 +81,8 @@ export function mapCandidate(c: LiveCandidate, resume: LiveResume | null): Candi
     cvFileName: typeof c.cvFileName === "string" ? c.cvFileName : null,
     // Worked out by the backend (convex/ta/candidates.ts withCareer, src/lib/cvMissing.ts).
     ...(c.cvFileMissing === true ? { cvFileMissing: true } : {}),
+    // The engine's level for their current role, for the level sections (src/lib/levels).
+    ...(typeof c.currentRoleRank === "number" ? { currentLevel: c.currentRoleRank } : {}),
     workHistory: (history ?? [])
       .filter((h) => h && h.title)
       .map((h) => ({ title: String(h.title), employer: String(h.company ?? ""), fromYear: yearOf(h.startDate) ?? 0, toYear: yearOf(h.endDate) })),

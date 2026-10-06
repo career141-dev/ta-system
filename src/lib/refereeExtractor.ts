@@ -63,6 +63,9 @@ export async function extractRawText(buffer: Buffer, fileType?: string): Promise
     const PDFParser = (await import("pdf2json")).default;
     const parser = new (PDFParser as any)(null, 1);
     const parsedText: string = await new Promise((resolve) => {
+      // pdf2json reports neither "ready" nor "error" on some files, and the
+      // candidate page waited on it for ever (5 Oct). Ten seconds, then give up.
+      setTimeout(() => resolve(""), 10_000);
       parser.on("pdfParser_dataReady", () => {
         try {
           resolve(parser.getRawTextContent() || "");

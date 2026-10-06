@@ -60,10 +60,17 @@ const TAB_LABEL: Record<(typeof TABS)[number], string> = {
  * ponytail: per-process memory — after a restart a CV with no referees is read once more.
  */
 const refereeRuns = new Map<string, Promise<ExtractedReferee[]>>();
+/** Resolves to `fallback` after `ms`, whatever `work` is still doing. */
+const within = <T,>(work: Promise<T>, ms: number, fallback: T): Promise<T> =>
+  Promise.race([work, new Promise<T>((r) => setTimeout(() => r(fallback), ms))]);
 function refereesFromCv(candidateId: string): Promise<ExtractedReferee[]> {
   let run = refereeRuns.get(candidateId);
   if (!run) {
-    run = (async () => {
+    // A run that never ends (a CV the reader stalls on, a model that never
+    // answers) was kept here, so every later open of that candidate waited on
+    // it too, until the app restarted (5 Oct). After two minutes it is
+    // dropped and the next open tries again.
+    const work = (async () => {
       try {
         const { cvBytes } = await import("@/lib/cvAccess");
         const cv = await cvBytes(candidateId);
@@ -99,6 +106,11 @@ function refereesFromCv(candidateId: string): Promise<ExtractedReferee[]> {
         return [];
       }
     })();
+    run = within<ExtractedReferee[] | null>(work, 120_000, null).then((found) => {
+      if (found !== null) return found;
+      refereeRuns.delete(candidateId);
+      return [];
+    });
     refereeRuns.set(candidateId, run);
   }
   return run;
@@ -172,8 +184,11 @@ export default async function CandidateDrawer({
   }
 
   // If still no referees on file, read them off the CV (once per candidate).
+  // The page waits three seconds for this, no longer: the run carries on and
+  // saves what it finds, so the referees show on the next open (5 Oct — a
+  // profile sat on the loading screen while its CV was read).
   if (referees.length === 0) {
-    const valid = await refereesFromCv(c.id);
+    const valid = await within(refereesFromCv(c.id), 3_000, [] as ExtractedReferee[]);
     const now = Date.now();
     referees = valid.map((r, idx) => ({
       id: `ref_auto_${c.id}_${idx}`,

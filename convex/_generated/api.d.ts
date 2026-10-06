@@ -67,6 +67,7 @@ import type * as communications_inquiries from "../communications/inquiries.js";
 import type * as communications_messageClassifier from "../communications/messageClassifier.js";
 import type * as communications_metaDirectSender from "../communications/metaDirectSender.js";
 import type * as communications_metaTemplateSender from "../communications/metaTemplateSender.js";
+import type * as communications_replyInbox from "../communications/replyInbox.js";
 import type * as communications_whatchimp from "../communications/whatchimp.js";
 import type * as communications_whatchimpActions from "../communications/whatchimpActions.js";
 import type * as communications_whatsappOutbound from "../communications/whatsappOutbound.js";
@@ -270,6 +271,7 @@ declare const fullApi: ApiFromModules<{
   "communications/messageClassifier": typeof communications_messageClassifier;
   "communications/metaDirectSender": typeof communications_metaDirectSender;
   "communications/metaTemplateSender": typeof communications_metaTemplateSender;
+  "communications/replyInbox": typeof communications_replyInbox;
   "communications/whatchimp": typeof communications_whatchimp;
   "communications/whatchimpActions": typeof communications_whatchimpActions;
   "communications/whatsappOutbound": typeof communications_whatsappOutbound;

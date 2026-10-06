@@ -1102,6 +1102,13 @@ export default defineSchema({
     // Where the TA dragged the CAREER141 box on the Prepared CV, in PDF points
     // from page 1's top-left (29 Sep). Absent: placed automatically.
     taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number() })),
+    // Why a database match was picked, one line, shown on its Database CVs
+    // row (5 Oct). Written by Claude when it is on, else the reverse-match
+    // engine's own reason.
+    taMatchReason: v.optional(v.string()),
+    // The model's 0–100 score for that match, shown as the row's fit and used
+    // for its order (5 Oct). Absent when the engine's score was used.
+    taMatchScore: v.optional(v.number()),
     // Notes left on this person in Director review by a TA, lead, director or
     // admin (29 Sep). `byRole` is the role at the time, as on link-vault notes.
     reviewNotes: v.optional(v.array(v.object({

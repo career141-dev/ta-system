@@ -251,6 +251,8 @@ export function mapApplication(a: BackendApplication): Application {
     rating: numOrNull(a.rating),
     notes: Array.isArray(a.notes) ? (a.notes as string[]) : [],
     preparedCvBox: validBox(a.preparedCvBox),
+    matchReason: typeof a.matchReason === "string" && a.matchReason ? a.matchReason : null,
+    matchScore: typeof a.matchScore === "number" ? a.matchScore : null,
     reviewNotes: Array.isArray(a.reviewNotes) ? (a.reviewNotes as never) : [],
 
     statusA: typeof a.statusA === "string" ? a.statusA : null,

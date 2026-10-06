@@ -286,6 +286,12 @@ export interface Candidate {
   cvFileName: string | null;
   /** Their CV file was lost in the Convex Cloud move; kept out of search and matching (src/lib/cvMissing.ts). */
   cvFileMissing?: boolean;
+  /**
+   * Their current role's level, 0 intern … 9 director, as the matching
+   * engine's classifier read it (convex/lib/roleLevel). Absent until the
+   * engine has seen them; src/lib/levels falls back to the title.
+   */
+  currentLevel?: number | null;
   /** Spec §6D — the result row shows a career, not a single line. */
   workHistory: { title: string; employer: string; fromYear: number; toYear: number | null }[];
   createdAt: number;
@@ -374,6 +380,13 @@ export interface Application {
   /** Where the TA put the CAREER141 box on the Prepared CV, in PDF points from
    *  page 1's top-left. Null or missing: placed automatically (29 Sep). */
   preparedCvBox?: { x: number; y: number } | null;
+  /** Why a database match was picked, in one line, on its Database CVs row
+   *  (5 Oct). Claude's when it wrote one, else the engine's. Not in `notes`,
+   *  which the prepared CV prints. */
+  matchReason?: string | null;
+  /** Claude's (or DeepSeek's) 0–100 score for that match — the row's fit and
+   *  its place in the list (5 Oct). Null when the engine's score was used. */
+  matchScore?: number | null;
   sourcingChannel: SourcingChannel;
 
   /** Spec §9 / Q3 — set in the same write as the shortlist. First to shortlist owns. */
