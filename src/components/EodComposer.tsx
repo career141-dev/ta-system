@@ -12,6 +12,7 @@ import {
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { sendEod } from "@/app/actions";
+import { SubmitButton } from "./Submit";
 
 function noteLineToHtml(line: string): string {
   let l = line
@@ -917,13 +918,20 @@ export function EodComposer({
           name="applicationIds"
           value={initialRows.map((r) => r.applicationId).join(",")}
         />
-        <button
+        {/* Busy from the first press (6 Oct): the plain button showed nothing
+            while the CVs were stamped and the mail sent, so TAs pressed it
+            again and again — each press another send. */}
+        <SubmitButton
           disabled={initialRows.length === 0 || nobodyOnTo}
           title={nobodyOnTo ? "Add an address as To first" : undefined}
+          pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
           {kind === "director" ? "Send email" : "Record that it went to the client"}
-        </button>
+        </SubmitButton>
+        {kind === "director" && (
+          <span className="text-[11.5px] text-ink-faint">Press once — the CVs are stamped and attached before it goes.</span>
+        )}
       </form>
     </div>
   );
