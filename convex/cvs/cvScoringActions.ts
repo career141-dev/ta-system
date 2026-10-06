@@ -203,7 +203,7 @@ export const processCvScoring = internalAction({
 
     const scoringModel = OPENROUTER_CV_EXTRACTION_MODEL;
 
-    // ── TIER 1: OpenRouter DeepSeek — 3 retries ───────────────────
+    // ── TIER 1: Claude first, DeepSeek straight after (scoreWithLLM) — 3 retries ──
     let tier1Success = false;
     let tier1Usage   = { promptTokens: 0, completionTokens: 0, model: scoringModel };
 
@@ -214,7 +214,8 @@ export const processCvScoring = internalAction({
         finalReason  = result.reason;
         tier1Usage   = usage;
         tier1Success = true;
-        scoringTier  = "deepseek-primary";
+        // Which of the two answered, so the log says so (6 Oct).
+        scoringTier  = usage.model === "claude-subscription" ? "claude-primary" : "deepseek-primary";
         break;
       } catch {
         if (attempt < 3) {
@@ -231,9 +232,9 @@ export const processCvScoring = internalAction({
         promptTokens:    tier1Usage.promptTokens,
         completionTokens: tier1Usage.completionTokens,
         success: tier1Success,
-        error:   tier1Success ? undefined : "Tier 1 (DeepSeek) failed after 3 retries",
+        error:   tier1Success ? undefined : "Tier 1 (Claude, then DeepSeek) failed after 3 retries",
         cvUploadId: candidate.cvUploadId ?? undefined,
-        provider: "openrouter",
+        provider: tier1Usage.model === "claude-subscription" ? "claude-subscription" : "openrouter",
       }]
     });
 

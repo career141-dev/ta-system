@@ -1,7 +1,7 @@
 "use node";
 
 import { executeLLMWithNvidiaFallback } from "./llm";
-import { askClaudeFirst, jsonIn } from "./claudeFirst";
+import { askClaudeFirst, claudeBudgetMs, jsonIn } from "./claudeFirst";
 
 export interface CandidateForRoleClassification {
   _id: string;
@@ -161,7 +161,7 @@ Return ONLY valid JSON matching:
     // years, no names. An answer that does not read as the expected map
     // counts as no answer: DeepSeek is asked as before.
     let content = "";
-    const claude = await askClaudeFirst("match_role", system, prompt, 90_000);
+    const claude = await askClaudeFirst("match_role", system, prompt, claudeBudgetMs("match_role"));
     const claudeJson = claude ? jsonIn(claude) : null;
     if (claudeJson && candidateInputs.some((c) => typeof claudeJson[c.candidateId]?.rank === "number")) {
       content = JSON.stringify(claudeJson);

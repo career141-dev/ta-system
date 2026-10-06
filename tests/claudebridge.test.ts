@@ -5,8 +5,8 @@
  * is "no" at once, so the backend goes to DeepSeek; and the backend side never
  * throws — any failure is a null, which means DeepSeek.
  */
-import { bridgeSecretOk, bridgeUnavailable, readBridgeRequest, resetBridge } from "@/lib/claudeBridge";
-import { askClaudeFirst, jsonIn } from "../convex/lib/claudeFirst";
+import { bridgeSecretOk, bridgeUnavailable, readBridgeRequest, releaseSlot, resetBridge, takeSlot } from "@/lib/claudeBridge";
+import { answerInProcess, askClaudeFirst, CLAUDE_ANSWER_MS, claudeBudgetMs, jsonIn } from "../convex/lib/claudeFirst";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -72,6 +72,40 @@ console.log("\nthe backend side");
   }) as unknown as typeof fetch;
   await askClaudeFirst("match_role", "sys", "the prompt", 1000, spy);
   eq("asks the app's private route with the secret", sent, { url: "http://app:3000/api/internal/claude", secret: SECRET, body: { task: "match_role", system: "sys", prompt: "the prompt" } });
+}
+
+console.log("\nwaiting for a slot (6 Oct)");
+{
+  resetBridge();
+  set({ C141_CLAUDE_BRIDGE_SECRET: SECRET, C141_CLAUDE_MATCH: "on", CLAUDE_CODE_OAUTH_TOKEN: "t" });
+  for (let i = 0; i < 3; i++) await takeSlot(0);
+  eq("three running: the next is told busy", bridgeUnavailable(), "busy");
+  const queued = takeSlot(1_000);
+  releaseSlot();
+  eq("one finishes: the waiting call gets its slot", await queued, true);
+  eq("and a call that cannot wait any longer is turned away", await takeSlot(20), false);
+  resetBridge();
+}
+
+console.log("\nthe time each call allows");
+for (const t of ["match_role", "match_score", "match_rank"] as const) {
+  eq(`${t}: longer than one Claude answer`, claudeBudgetMs(t) > CLAUDE_ANSWER_MS, true);
+}
+eq("a search, where a TA is waiting, waits less than background scoring", claudeBudgetMs("match_rank") < claudeBudgetMs("match_score"), true);
+
+console.log("\ninside the app (database search)");
+{
+  set({});
+  let asked = 0;
+  const neverCalled = (async () => { asked++; return new Response("{}"); }) as unknown as typeof fetch;
+  answerInProcess(async (task, _s, prompt) => `${task}:${prompt}`);
+  eq("asks in the process, not over the network, with no address set", [await askClaudeFirst("match_rank", "", "p", 1000, neverCalled), asked], ["match_rank:p", 0]);
+  answerInProcess(async () => null);
+  eq("no answer in the process: DeepSeek", await askClaudeFirst("match_rank", "", "p", 1000, neverCalled), null);
+  answerInProcess(async () => { throw new Error("spawn failed"); });
+  eq("a throw in the process: DeepSeek, not a throw", await askClaudeFirst("match_rank", "", "p", 1000, neverCalled), null);
+  answerInProcess(null);
+  eq("cleared: back to the network rules", await askClaudeFirst("match_rank", "", "p", 1000, neverCalled), null);
 }
 
 console.log("\nreading the answer");

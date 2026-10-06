@@ -20,6 +20,41 @@
  */
 export type ClaudeFirstTask = "match_role" | "match_score" | "match_rank";
 
+/**
+ * The app's limit on one Claude answer (src/lib/claudeBridge). 6 Oct: CV-vs-job
+ * scoring gave up at 60s and search ranking at 45s, well inside this. Claude
+ * often takes longer, so those calls fell to DeepSeek while the abandoned run
+ * kept its slot, and the calls behind it were turned away as "busy". Only the
+ * role level, which waited the full 90s, was reliably Claude's.
+ */
+export const CLAUDE_ANSWER_MS = 90_000;
+/**
+ * How long a call waits for a free Claude slot before DeepSeek answers it. Scoring
+ * and role level run in the background, so they wait. For search ranking a TA is
+ * looking at the screen, so it waits less.
+ */
+export const CLAUDE_QUEUE_MS: Record<ClaudeFirstTask, number> = {
+  match_role: 60_000,
+  match_score: 60_000,
+  match_rank: 20_000,
+};
+/** The caller's whole budget: a wait for a slot, one answer, and the trip over the network. */
+export function claudeBudgetMs(task: ClaudeFirstTask): number {
+  return CLAUDE_QUEUE_MS[task] + CLAUDE_ANSWER_MS + 5_000;
+}
+
+/**
+ * When this code runs inside the web app (database search runs the engine's own
+ * scoring there, src/lib/engineSearch), the app asks Claude directly rather than
+ * over HTTP to itself. 6 Oct: C141_APP_INTERNAL_URL is set only in the Convex env,
+ * so database search never asked Claude at all.
+ */
+type InProcessAsk = (task: ClaudeFirstTask, system: string, prompt: string) => Promise<string | null>;
+const IN_PROCESS = Symbol.for("c141.claudeFirst.inProcess");
+export function answerInProcess(ask: InProcessAsk | null) {
+  (globalThis as Record<symbol, unknown>)[IN_PROCESS] = ask ?? undefined;
+}
+
 export async function askClaudeFirst(
   task: ClaudeFirstTask,
   system: string,
@@ -27,6 +62,16 @@ export async function askClaudeFirst(
   timeoutMs: number,
   fetcher: typeof fetch = fetch,
 ): Promise<string | null> {
+  const local = (globalThis as Record<symbol, unknown>)[IN_PROCESS] as InProcessAsk | undefined;
+  if (local) {
+    try {
+      const text = await local(task, system, prompt);
+      return text?.trim() ? text : null;
+    } catch (e: any) {
+      console.warn(`[claude-first] ${task} → deepseek: ${e?.message || e}`);
+      return null;
+    }
+  }
   const base = (process.env.C141_APP_INTERNAL_URL ?? "").trim().replace(/\/+$/, "");
   const secret = (process.env.C141_CLAUDE_BRIDGE_SECRET ?? "").trim();
   if (!base || secret.length < 16) return null;
