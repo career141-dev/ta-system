@@ -18,7 +18,14 @@ import { convexAction, convexMutation } from "./convexServer";
 export const REPLIES_FROM = Date.parse("2026-10-05T12:15:00Z");
 
 let lastSyncTime = 0;
-const SYNC_COOLDOWN_MS = 15_000; // Throttle to max once per 15s
+/*
+ * At most one read at a time, and two minutes apart (6 Oct). Every bell poll
+ * asked every 15 s, and while the backend's read hung each ask took one of
+ * its six action slots for five minutes — the end-of-day send was refused.
+ * A reply applied two minutes later is soon enough.
+ */
+const SYNC_COOLDOWN_MS = 120_000;
+let reading = false;
 const processedMsgIds = new Set<string>();
 
 /**
@@ -33,10 +40,19 @@ const processedMsgIds = new Set<string>();
  */
 export async function syncMailboxRepliesSilently(): Promise<number> {
   const now = Date.now();
-  if (now - lastSyncTime < SYNC_COOLDOWN_MS) {
+  if (reading || now - lastSyncTime < SYNC_COOLDOWN_MS) {
     return 0;
   }
   lastSyncTime = now;
+  reading = true;
+  try {
+    return await syncOnce();
+  } finally {
+    reading = false;
+  }
+}
+
+async function syncOnce(): Promise<number> {
 
   const openRounds = repo.reviewRounds().filter((r) => r.status !== "returned");
   if (openRounds.length === 0) {
