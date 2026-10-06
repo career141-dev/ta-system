@@ -212,6 +212,30 @@ export function visibleToSeat(apps: Application[], seat: Seat): Application[] {
 }
 
 /**
+ * What the desk assistant may tell this person about one opening (6 Oct).
+ *
+ * Exactly their seat (`visibleToSeat`) — for a TA beside another, their own
+ * candidates and the unclaimed pool, the same rows the candidate lists show.
+ * On top of that, the one hole in the 12 Sep wall: a colleague's candidate
+ * once shortlisted, as `takenBy`, so the assistant can say "shortlisted by
+ * Sanduni — leave this one" without a number, an email or a link.
+ *
+ * Until now the assistant filtered follow-ups by "any TA on the opening" and
+ * read all posts, so it listed a co-TA's follow-ups, phones included, and
+ * their posts' counts. Action proposals already read `visibleToSeat`,
+ * which is these rows less the `takenBy` ones, plus the collision lock.
+ */
+export function deskScope(apps: Application[], seat: Seat): Scoped<Application>[] {
+  const own = visibleToSeat(apps, seat).map((row) => ({ row, takenBy: null as string | null }));
+  if (!seat.ownDeskOf) return own;
+  const mine = seat.ownDeskOf;
+  const taken = apps
+    .filter((a) => a.ownerTaId && a.ownerTaId !== mine && a.shortlistedAt)
+    .map((row) => ({ row, takenBy: row.ownerTaId }));
+  return [...own, ...taken];
+}
+
+/**
  * An Excel Tables row that is another TA's to work: added by a TA who is not
  * the viewer. A row a lead put in is handed to the TAs, so it is nobody's.
  * Leads, directors, admin and ops are never kept out of a row.

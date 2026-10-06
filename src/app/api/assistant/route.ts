@@ -1,6 +1,6 @@
 import { primeStore } from "@/data/prime";
 import { currentUser } from "@/lib/session";
-import { askDesk, type AssistantTurn } from "@/lib/deskAssistant";
+import { askDesk, snapshotCandidateIds, type AssistantTurn } from "@/lib/deskAssistant";
 import { candidateIdsForIntent, looksLikeAction, propose, understand } from "@/lib/deskActions";
 import { FAILURE_MESSAGE, type AiFailure } from "@/lib/ai";
 
@@ -42,6 +42,12 @@ export async function POST(req: Request) {
       return Response.json(propose(user, intent));
     }
   }
+
+  // Numbers about now, not the 30-second cache, and the record of everyone the
+  // snapshot will name — a match or an interview came back nameless before
+  // (6 Oct). Read after the rate limit, so a loop cannot turn into reads.
+  await primeStore({ allApplications: true, followUps: true, fresh: true });
+  await primeStore({ candidateIds: snapshotCandidateIds(user, question.trim().slice(0, 600)) });
 
   const r = await askDesk(user, question, history);
   if (!r.ok) {

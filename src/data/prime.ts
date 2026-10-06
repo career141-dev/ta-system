@@ -79,7 +79,17 @@ export interface PrimeScope {
    * be known before the applications are.
    */
   followUps?: boolean;
+  /**
+   * Read the tables and applications again unless they are a few seconds old,
+   * rather than trusting the 30-second cache. Only the desk assistant asks
+   * (6 Oct): "how many CVs today" is a question about now, and the answer says
+   * "as of 10:42". Its per-person rate limit is what keeps this bounded.
+   */
+  fresh?: boolean;
 }
+
+/** How old "fresh" may be — enough that one burst of questions shares a read. */
+const FRESH_MS = 5_000;
 
 /**
  * Re-reads the roster alone. The small tables load once per process, so an
@@ -215,7 +225,8 @@ async function refresh(scope: PrimeScope): Promise<void> {
    * A refresh that fails keeps the rows already held. They are thirty seconds
    * old; an empty list of users is not an improvement on that.
    */
-  if (!state.snapshot || now - state.tablesAt > TABLES_TTL_MS) {
+  const ttl = scope.fresh ? FRESH_MS : TABLES_TTL_MS;
+  if (!state.snapshot || now - state.tablesAt > ttl) {
     const w = state.writes;
     try {
       const [users, openings, clients, whole] = await Promise.all([
@@ -257,7 +268,7 @@ async function refresh(scope: PrimeScope): Promise<void> {
   // ── Applications, and the people on them ──────────────────────────────────
   const wanted = new Set<Id>(scope.candidateIds ?? []);
 
-  if ((scope.allApplications || scope.followUps) && now - state.allAt > TABLES_TTL_MS) {
+  if ((scope.allApplications || scope.followUps) && now - state.allAt > ttl) {
     const w = state.writes;
     try {
       const { applications } = await backend.allApplications(actor);
