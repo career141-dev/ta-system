@@ -298,8 +298,23 @@ function extractRawPdfStreamTextFallback(buffer: ArrayBuffer): string {
 }
 
 import { extractPageTextWithLayout } from "../lib/pdfLayout";
+import { within } from "../lib/within";
 
+/*
+ * No PDF reader may hold an action slot for long (6 Oct). The backend runs
+ * every action in six slots; a broken PDF that left pdf2json waiting for an
+ * event that never came held one for the full 300 s, and a handful of them
+ * refused the end-of-day send. Each reader gets a bound, and what it has not
+ * read by then falls to the next (finally the raw stream text).
+ */
+const PDFJS_LIMIT_MS = 30_000;
+const PDF2JSON_LIMIT_MS = 15_000;
+const VISION_LIMIT_MS = 60_000;
 async function extractTextFromPdfWithPdfJs(buffer: ArrayBuffer): Promise<string> {
+  return within(readWithPdfJs(buffer), PDFJS_LIMIT_MS, "", "pdf.js");
+}
+
+async function readWithPdfJs(buffer: ArrayBuffer): Promise<string> {
   try {
     ensureDOMMatrixPolyfill();
     // Use the legacy build — required for Node.js environments.
@@ -312,17 +327,23 @@ async function extractTextFromPdfWithPdfJs(buffer: ArrayBuffer): Promise<string>
       disableFontFace: true,
       verbosity: 0,
     });
+    // A broken file can reject after we have stopped waiting; that is not a crash.
+    loadingTask.promise.catch(() => undefined);
     const pdfDocument = await loadingTask.promise;
     let fullText = "";
 
-    for (let i = 1; i <= pdfDocument.numPages; i++) {
-      const page = await pdfDocument.getPage(i);
-      const viewport = page.getViewport({ scale: 1 });
-      const textContent = await page.getTextContent();
-      const pageText = extractPageTextWithLayout(textContent.items, viewport.width, viewport.height);
-      if (pageText) {
-        fullText += (fullText ? "\n\n" : "") + pageText;
+    try {
+      for (let i = 1; i <= pdfDocument.numPages; i++) {
+        const page = await pdfDocument.getPage(i);
+        const viewport = page.getViewport({ scale: 1 });
+        const textContent = await page.getTextContent();
+        const pageText = extractPageTextWithLayout(textContent.items, viewport.width, viewport.height);
+        if (pageText) {
+          fullText += (fullText ? "\n\n" : "") + pageText;
+        }
       }
+    } finally {
+      pdfDocument.destroy?.()?.catch?.(() => undefined);
     }
 
     return fullText.trim();
@@ -342,7 +363,8 @@ async function extractTextFromPdf(buffer: ArrayBuffer): Promise<string> {
   }
 
   try {
-    return await new Promise((resolve, reject) => {
+    // pdf2json answers only through its events, and some files fire neither (6 Oct).
+    return await within(new Promise<string>((resolve, reject) => {
       const PDFParser = require("pdf2json");
       const pdfParser = new PDFParser(null, 1);
       pdfParser.on("pdfParser_dataError", (errData: any) => {
@@ -367,7 +389,7 @@ async function extractTextFromPdf(buffer: ArrayBuffer): Promise<string> {
         resolve(text || "");
       });
       pdfParser.parseBuffer(Buffer.from(safeSliceBuffer(buffer)));
-    });
+    }), PDF2JSON_LIMIT_MS, extractRawPdfStreamTextFallback(buffer), "pdf2json");
   } catch (err: any) {
     console.warn("[pdf2json] Uncaught parser exception, using raw stream fallback:", err.message || err);
     return extractRawPdfStreamTextFallback(buffer);
@@ -697,9 +719,9 @@ export async function extractText(
         console.log("[extractText] Tesseract failed — attempting Vision OCR pipeline fallback...");
         const { callNvidiaVisionOCR } = await import("../lib/llm");
         // Extract page images from the PDF buffer for vision processing
-        const pageImages = await extractImagesFromPdfBuffer(buffer, 5);
+        const pageImages = await within(extractImagesFromPdfBuffer(buffer, 5), VISION_LIMIT_MS, [] as Awaited<ReturnType<typeof extractImagesFromPdfBuffer>>, "PDF page images");
         if (pageImages && pageImages.length > 0) {
-          const visionText = await callNvidiaVisionOCR(ctx, pageImages, cvUploadId);
+          const visionText = await within(callNvidiaVisionOCR(ctx, pageImages, cvUploadId), VISION_LIMIT_MS, "", "vision OCR");
           if (visionText && visionText.trim().length >= 20) {
             console.log(`[extractText] Vision OCR pipeline fallback succeeded (${visionText.trim().length} chars).`);
             return { text: visionText, extractionModel: "vision-nvidia-pdf" };
@@ -1695,9 +1717,24 @@ async function runCvExtractionLocked(
 // Public Action — callable from client
 // ──────────────────────────────────────────────────
 
+/*
+ * CV reading may use at most this many of the backend's six action slots
+ * (6 Oct). A backlog of CVs took all six, and the end-of-day send, reply
+ * reading and even a deploy were refused with "Too many concurrent requests".
+ * A reading over the limit steps aside and is scheduled again shortly.
+ */
+const MAX_CONCURRENT_EXTRACTIONS = 3;
+
 export const processCvExtraction = internalAction({
   args: ExtractionActionArgs,
   handler: async (ctx, args): Promise<string | null> => {
+    const running = await ctx.runQuery(internal.cvs.cvUploads.runningExtractions, {}).catch(() => 0);
+    // `running` includes this one.
+    if (running > MAX_CONCURRENT_EXTRACTIONS) {
+      const later = 30_000 + Math.floor(Math.random() * 30_000);
+      await ctx.scheduler.runAfter(later, internal.cvs.cvExtraction.processCvExtraction, args);
+      return null;
+    }
     try {
       return await runCvExtraction(ctx, args);
     } catch (err: any) {
