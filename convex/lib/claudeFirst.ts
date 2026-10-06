@@ -2,7 +2,8 @@
 
 /**
  * Claude first, DeepSeek second, for matching — 5 Oct, at the owner's request.
- * Extraction stays on DeepSeek and never comes through here.
+ * CV extraction stays on DeepSeek and never comes through here. The one reading
+ * that does is a search sentence (match_read, 6 Oct).
  *
  * The Claude subscription runs only in the web app's container, so the
  * backend asks the app (src/app/api/internal/claude) over the private docker
@@ -18,7 +19,7 @@
  * Callers send no names or contacts: the prompt says what someone has done,
  * not who they are.
  */
-export type ClaudeFirstTask = "match_role" | "match_score" | "match_rank";
+export type ClaudeFirstTask = "match_role" | "match_score" | "match_rank" | "match_read";
 
 /**
  * The app's limit on one Claude answer (src/lib/claudeBridge). 6 Oct: CV-vs-job
@@ -37,6 +38,8 @@ export const CLAUDE_QUEUE_MS: Record<ClaudeFirstTask, number> = {
   match_role: 60_000,
   match_score: 60_000,
   match_rank: 20_000,
+  // Reading a search sentence: a TA is waiting on it, as for the ranking.
+  match_read: 20_000,
 };
 /** The caller's whole budget: a wait for a slot, one answer, and the trip over the network. */
 export function claudeBudgetMs(task: ClaudeFirstTask): number {

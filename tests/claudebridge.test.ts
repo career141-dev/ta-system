@@ -88,7 +88,7 @@ console.log("\nwaiting for a slot (6 Oct)");
 }
 
 console.log("\nthe time each call allows");
-for (const t of ["match_role", "match_score", "match_rank"] as const) {
+for (const t of ["match_role", "match_score", "match_rank", "match_read"] as const) {
   eq(`${t}: longer than one Claude answer`, claudeBudgetMs(t) > CLAUDE_ANSWER_MS, true);
 }
 eq("a search, where a TA is waiting, waits less than background scoring", claudeBudgetMs("match_rank") < claudeBudgetMs("match_score"), true);

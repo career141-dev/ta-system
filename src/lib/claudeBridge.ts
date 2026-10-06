@@ -19,7 +19,7 @@ import { CLAUDE_ANSWER_MS, CLAUDE_QUEUE_MS } from "../../convex/lib/claudeFirst"
  * Only the matching tasks below come through, and the backend sends them
  * without names or contacts (convex/lib/claudeFirst).
  */
-export const BRIDGE_TASKS = ["match_role", "match_score", "match_rank"] as const;
+export const BRIDGE_TASKS = ["match_role", "match_score", "match_rank", "match_read"] as const;
 export type BridgeTask = (typeof BRIDGE_TASKS)[number];
 
 const TIMEOUT_MS = CLAUDE_ANSWER_MS;
