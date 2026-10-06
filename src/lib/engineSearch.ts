@@ -196,10 +196,21 @@ const POOL_CAP = 200;
 const RERANK_BATCH = 10;
 
 const modules = () =>
-  Promise.all([import("../../convex/lib/jdParser"), import("../../convex/cvs/cvScoring")]).then(([parser, scoring]) => ({
-    parser,
-    scoring,
-  }));
+  Promise.all([
+    import("../../convex/lib/jdParser"),
+    import("../../convex/cvs/cvScoring"),
+    import("../../convex/lib/claudeFirst"),
+    import("@/lib/claudeBridge"),
+  ]).then(([parser, scoring, claudeFirst, bridge]) => {
+    // The re-rank is Claude first, as in the backend. Here the subscription is
+    // in this process, so it is asked directly, not over the network (6 Oct).
+    claudeFirst.answerInProcess(async (task, system, prompt) => {
+      const r = await bridge.askBridge({ task, system, prompt });
+      if (!r.ok) console.warn(`[claude-first] ${task} → deepseek: ${r.reason}`);
+      return r.ok ? r.text : null;
+    });
+    return { parser, scoring };
+  });
 
 type Requirements = import("../../convex/lib/jdParser").SearchRequirements;
 type Scored = import("../../convex/cvs/cvScoring").ScoredCandidate;

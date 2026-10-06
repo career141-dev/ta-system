@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { getOpenAI, getModelForTask, executeLLMWithNvidiaFallback } from "../lib/llm";
-import { askClaudeFirst, jsonIn } from "../lib/claudeFirst";
+import { askClaudeFirst, claudeBudgetMs, jsonIn } from "../lib/claudeFirst";
 import type { SearchRequirements } from "../lib/jdParser";
 import { jobLevelRank } from "../lib/roleLevel";
 
@@ -1274,7 +1274,7 @@ export async function scoreWithLLM(
 
     // Claude first (5 Oct), without the name: it is not needed to judge fit
     // and the subscription is a personal account. No usable answer, DeepSeek.
-    const claude = await askClaudeFirst("match_score", systemPrompt, buildPrompt(false), 60_000);
+    const claude = await askClaudeFirst("match_score", systemPrompt, buildPrompt(false), claudeBudgetMs("match_score"));
     const claudeJson = claude ? jsonIn(claude) : null;
     if (claudeJson && typeof claudeJson.score === "number") {
       return {
@@ -1456,8 +1456,8 @@ export async function scoreBatchWithLLM(
 
     // Claude first (5 Oct), with "Candidate #n" in place of names. An answer
     // with no evaluations in it counts as none: DeepSeek is asked as before.
-    // A TA is waiting on a search, so Claude gets 45s, not the full minute and a half.
-    const claude = await askClaudeFirst("match_rank", systemPrompt, buildPrompt(false), 45_000);
+    // A TA is waiting on a search, so it waits less for a free slot (claudeFirst).
+    const claude = await askClaudeFirst("match_rank", systemPrompt, buildPrompt(false), claudeBudgetMs("match_rank"));
     const claudeJson = claude ? jsonIn(claude) : null;
     if (Array.isArray(claudeJson?.evaluations) && claudeJson.evaluations.some((e: any) => typeof e?.id === "number")) {
       content = JSON.stringify(claudeJson);
