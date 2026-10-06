@@ -11,7 +11,11 @@ const nextConfig: NextConfig = {
   // platform binary is loaded by a runtime require the tracer cannot follow
   // — so the live image had none, and referee reading fell back to pdf2json
   // ("DOMMatrix is not defined", 5 Oct).
-  outputFileTracingIncludes: { "/**/*": ["./node_modules/@napi-rs/**/*"] },
+  // pdf.js also loads its worker file at runtime (6 Oct: "Cannot find module
+  // …/pdf.worker.mjs" on live), so that is traced too.
+  outputFileTracingIncludes: {
+    "/**/*": ["./node_modules/@napi-rs/**/*", "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs"],
+  },
   // Required as Node packages, not bundled, so they are traced into the
   // standalone server with their native parts.
   serverExternalPackages: ["pdfjs-dist", "@napi-rs/canvas"],
