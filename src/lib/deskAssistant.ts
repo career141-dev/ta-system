@@ -18,11 +18,11 @@
  */
 
 import { repo, setsForOpening, stageCounts } from "@/data/store";
-import { STAGE_LABEL, type Stage, type User } from "@/data/types";
-import { isDeskWide } from "./auth";
+import { ROLE_LABEL, STAGE_LABEL, type Application, type Assignment, type Stage, type User } from "@/data/types";
+import { can, isDeskWide, type Capability } from "./auth";
 import { colomboDayStart } from "./calendar";
 import { alertsFor } from "./sla";
-import { seatFor, visibleToSeat } from "./visibility";
+import { deskScope, seatFor, visiblePosts } from "./visibility";
 import { write, type AiResult } from "./ai";
 import { assess } from "./assessment";
 import { FIT_BANDS } from "./scoring";
@@ -39,46 +39,164 @@ function words(q: string) {
   return q.toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2);
 }
 
+/** Said in place of a name the store has not loaded — never a blank, never a guess. */
+const NOT_LOADED = "name not loaded";
+
+/*
+ * A desk-wide person with many jobs asking "who's in follow-up" or "where are
+ * my sets" got no names at all (6 Oct): detail was only built for the jobs the
+ * question named. For these whole-desk questions the most recently active jobs
+ * get detail, capped so the snapshot stays small, and the rest are counted.
+ */
+const DESK_WIDE_DETAIL = 10;
+const WHOLE_DESK_QUESTION = /follow.?ups?|\bsets?\b|\binterviews?\b|\bdirector\b|\boffers?\b|\bclient\b|shortlist\w*|\bmatch(es)?\b|\breview\b/i;
+
+/**
+ * The openings this person may hear about, what they may see on each, and
+ * which get names and numbers. Shared by `snapshotFor` and by
+ * `snapshotCandidateIds`, so the people loaded first are exactly the people
+ * the snapshot will name.
+ */
+function deskView(user: User, question: string) {
+  const clients = new Map(repo.clients().map((c) => [c.id, c.name]));
+  const openings = repo.openingsForUser(user).filter((o) => o.status === "open" || o.status === "on_hold");
+  const asked = words(question);
+  const mentions = (text: string) => words(text).some((w) => asked.includes(w));
+  const scoped = openings.map((o) => {
+    const assignment = repo.assignmentFor(o.id, user.id) ?? null;
+    const seat = seatFor(user, assignment?.role ?? null);
+    const rows = deskScope(repo.applications(o.id), seat);
+    return {
+      o,
+      seat,
+      own: rows.filter((r) => !r.takenBy).map((r) => r.row),
+      taken: rows.filter((r) => r.takenBy) as { row: Application; takenBy: string }[],
+    };
+  });
+  const named = new Set(scoped.filter((s) => mentions(`${s.o.title} ${clients.get(s.o.clientId) ?? ""}`)).map((s) => s.o.id));
+  const detail = new Set<string>();
+  let notDetailed = 0;
+  for (const s of scoped) {
+    if (openings.length <= 8 || named.has(s.o.id) || (!isDeskWide(user) && s.o.assignedTaIds.includes(user.id))) detail.add(s.o.id);
+  }
+  if (isDeskWide(user) && openings.length > 8 && named.size === 0 && WHOLE_DESK_QUESTION.test(question)) {
+    const lastActive = (s: (typeof scoped)[number]) => Math.max(0, ...s.own.map((a) => Math.max(a.lastStageChangedAt ?? 0, a.createdAt)));
+    const recent = [...scoped].sort((x, y) => lastActive(y) - lastActive(x)).slice(0, DESK_WIDE_DETAIL);
+    for (const s of recent) detail.add(s.o.id);
+    notDetailed = scoped.length - recent.length;
+  }
+  // Names and numbers only for a seat that sees the whole pipeline. A client
+  // seat gets counts of its own shortlist.
+  for (const s of scoped) if (s.seat.stages !== null) detail.delete(s.o.id);
+  return { clients, scoped, detail, notDetailed, asked };
+}
+
+/** Stages whose people the snapshot names in a list (everything but the raw intake and the closed). */
+const UNNAMED_STAGES = new Set<Stage>(["new_cv", "rejected", "dropped_out"]);
+const CANDIDATE_CAP = 3000;
+
+/**
+ * The candidate records the snapshot will name, for the route to load before
+ * building it (6 Oct). The store holds candidates only for the alert stages,
+ * so a top match or an interview could reach the model with a null name.
+ *
+ * Bounded: the named stages on the jobs that get detail first, then — only
+ * when the question holds a word that could be a person's name — everyone in
+ * scope, so "what stage is Thisara at" can find them. Never past 3,000, the
+ * same ceiling the action proposals use; never the whole database.
+ */
+export function snapshotCandidateIds(user: User, question: string): string[] {
+  const v = deskView(user, question);
+  const ids = new Set<string>();
+  const add = (id: string) => { if (ids.size < CANDIDATE_CAP) ids.add(id); };
+  for (const s of v.scoped) {
+    if (!v.detail.has(s.o.id)) continue;
+    for (const a of s.own) if (!UNNAMED_STAGES.has(a.stage)) add(a.candidateId);
+    for (const t of s.taken) add(t.row.candidateId);
+  }
+  const jobWords = new Set(v.scoped.flatMap((s) => words(`${s.o.title} ${v.clients.get(s.o.clientId) ?? ""}`)));
+  const mayBeName = v.asked.some((w) => w.length > 3 && !COMMON.has(w) && !INTENT_WORDS.has(w) && !jobWords.has(w));
+  if (mayBeName) {
+    for (const s of v.scoped) {
+      for (const a of s.own) add(a.candidateId);
+      for (const t of s.taken) add(t.row.candidateId);
+    }
+  }
+  return [...ids];
+}
+
+/** What this person's role may and may not do, from the one policy (lib/auth). */
+const ROLE_CAPS: [Capability, string][] = [
+  ["opening.act", "move candidates, log calls and record follow-up answers"],
+  ["opening.sourcing", "headhunt: Excel Tables, Suggestions, Research, Benchmark"],
+  ["opening.manage", "edit a job's terms, posts and team"],
+  ["decide.director", "record the Director's decision (move to Director shortlist)"],
+  ["decide.client", "record the client's decision (move to Client shortlist)"],
+  ["opening.create", "start a new opening"],
+  ["client.manage", "add and edit clients"],
+  ["database.read", "search the whole database"],
+  ["report.read", "read reports"],
+  ["commercial.manage", "fees, guarantees and placements"],
+  ["link.note", "leave notes for the TA on Excel Tables rows"],
+  ["user.manage", "add and edit people"],
+];
+
+/**
+ * Who is asking, in words the model can act on (6 Oct). The prompt said
+ * "a member of the TA desk" to everyone, so a client seat could be told to
+ * shortlist and a TA to approve for the Director.
+ */
+const ON_A_JOB = new Set(ROLE_CAPS.filter(([c]) => (c.startsWith("opening.") && c !== "opening.create") || c.startsWith("decide.")).map(([, label]) => label));
+
+export function roleBrief(user: User) {
+  // Opening-level rights are asked as if on one of their jobs; the policy
+  // itself refuses them on a job they are not on.
+  const assignment = { role: user.role === "client" ? "client_contact" : "primary_recruiter" } as Assignment;
+  const canDo: string[] = [];
+  const cannotDo: string[] = [];
+  for (const [cap, label] of ROLE_CAPS) (can(user, cap, { assignment }).ok ? canDo : cannotDo).push(label);
+  return {
+    name: user.name,
+    role: ROLE_LABEL[user.role],
+    sees: isDeskWide(user)
+      ? "the whole desk"
+      : user.role === "ta"
+        ? "the jobs they are on: their own candidates and the unclaimed pool; a colleague's only once shortlisted, by name"
+        : "only the jobs they have been put on, and only the stages their seat allows",
+    // Work on a job is theirs only on the jobs they are put on; the rest is desk-wide.
+    canDo: isDeskWide(user) ? canDo : canDo.map((c) => (ON_A_JOB.has(c) ? `${c} (on the jobs they are on)` : c)),
+    cannotDo,
+  };
+}
+
 /**
  * Everything the assistant may say about, for this person, right now.
  *
  * Detail — names, numbers, follow-up state — is included for every opening
- * when there are few, and only for the openings the question mentions when a
- * desk-wide person has many, so the snapshot stays small and quick.
+ * when there are few, for the ones the question names, and for a desk-wide
+ * person's ten most active jobs on a whole-desk question, so the snapshot
+ * stays small and quick.
  */
 export function snapshotFor(user: User, question: string, now = Date.now()) {
   const today = colomboDayStart(now);
   const weekAgo = today - 6 * DAY;
   const users = new Map(repo.users().map((u) => [u.id, u.name]));
-  const clients = new Map(repo.clients().map((c) => [c.id, c.name]));
-  const openings = repo.openingsForUser(user).filter((o) => o.status === "open" || o.status === "on_hold");
-  const asked = words(question);
-  const mentions = (text: string) => words(text).some((w) => asked.includes(w));
-  const detailFor = (o: (typeof openings)[number]) =>
-    openings.length <= 8 ||
-    mentions(`${o.title} ${clients.get(o.clientId) ?? ""}`) ||
-    (!isDeskWide(user) && o.assignedTaIds.includes(user.id));
+  const v = deskView(user, question);
+  const nameOf = (candidateId: string) => repo.candidate(candidateId)?.fullName ?? NOT_LOADED;
 
-  const followUpsByOpening = new Map<string, ReturnType<typeof repo.followUps>>();
-  for (const f of repo.followUps(now)) {
-    const list = followUpsByOpening.get(f.opening.id) ?? [];
-    list.push(f);
-    followUpsByOpening.set(f.opening.id, list);
-  }
+  const followUpsByApp = new Map(repo.followUps(now).map((f) => [f.application.id, f]));
 
-  const out = openings.map((o) => {
-    const assignment = repo.assignmentFor(o.id, user.id) ?? null;
-    const seat = seatFor(user, assignment?.role ?? null);
-    const apps = visibleToSeat(repo.applications(o.id), seat);
+  const out = v.scoped.map(({ o, own: apps, taken }) => {
     const counts = stageCounts(o.id);
     const visibleStages = new Set(apps.map((a) => a.stage));
     const applied = apps.filter((a) => a.sourcingChannel !== "SCOOP");
     const base = {
       id: o.id,
       title: o.title,
-      client: clients.get(o.clientId) ?? null,
+      client: v.clients.get(o.clientId) ?? null,
       status: o.status,
       jd: o.jdStatus === "approved" ? "approved" : "waiting for approval",
+      ...(o.jdStatus === "approved" ? {} : { jdLink: `/openings/${o.id}/jd` }),
       recruiters: o.assignedTaIds.map((t) => users.get(t) ?? t),
       cvsToday: applied.filter((a) => a.createdAt >= today).length,
       cvsLast7Days: applied.filter((a) => a.createdAt >= weekAgo).length,
@@ -87,13 +205,14 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
       ),
       link: `/openings/${o.id}`,
     };
-    // Names and numbers only for someone who sees the whole pipeline — a TA,
-    // lead, director or ops. A client seat gets counts of its own shortlist.
-    if (!detailFor(o) || seat.stages !== null) return base;
+    if (!v.detail.has(o.id)) return base;
 
     const candidate = (id: string) => repo.candidate(id);
-    const followUps = (followUpsByOpening.get(o.id) ?? [])
-      .filter((f) => isDeskWide(user) || f.application.ownerTaId === user.id || o.assignedTaIds.includes(user.id))
+    // Only the follow-ups in this person's own view. It read "any TA on the
+    // opening", which listed a colleague's follow-ups, numbers and all (6 Oct).
+    const followUps = apps
+      .map((a) => followUpsByApp.get(a.id))
+      .filter((f): f is NonNullable<typeof f> => !!f)
       .map((f) => ({
         name: f.candidate.fullName,
         phone: f.candidate.phone,
@@ -112,7 +231,7 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
       .sort((x, y) => x.i.scheduledAt - y.i.scheduledAt)
       .slice(0, 15)
       .map(({ i, a }) => ({
-        name: candidate(a.candidateId)?.fullName ?? null,
+        name: nameOf(a.candidateId),
         phone: candidate(a.candidateId)?.phone ?? null,
         at: when(i.scheduledAt),
         confirmed: Boolean(i.confirmedAt),
@@ -124,7 +243,7 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
         .filter((a) => stages.includes(a.stage))
         .slice(0, limit)
         .map((a) => ({
-          name: candidate(a.candidateId)?.fullName ?? null,
+          name: nameOf(a.candidateId),
           phone: candidate(a.candidateId)?.phone ?? null,
           stage: STAGE_LABEL[a.stage],
           set: a.setNumber,
@@ -138,20 +257,23 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
     const QUALS = /\b(ACCA|FCCA|CIMA|ACMA|CGMA|ACA|FCA|CPA|CFA|NEBOSH|IOSH|CIPS|CIPD|CIPM|ISMM|PMP|MBA|SLIM|CIM|AAT|Six Sigma|Lean Six Sigma)\b/g;
     // The same assessment the candidate list shows — computed, never parsed out
     // of a note written when the match was made (13 September review).
-    const matchApps = apps.filter((a) => a.stage === "matched").map((a) => ({ a, c: candidate(a.candidateId) })).filter((x) => x.c);
-    const assessed = assess(o.id, matchApps.map((x) => x.c!));
+    const matchApps = apps.filter((a) => a.stage === "matched");
+    const loaded = matchApps.map((a) => ({ a, c: candidate(a.candidateId) })).filter((x) => x.c);
+    const assessed = assess(o.id, loaded.map((x) => x.c!));
     const scores = assessed.ok
       ? new Map([...assessed.scores].map(([id, s]) => [id, s.overall]))
       : new Map<string, number>();
-    const matched = matchApps
+    const matched = loaded
       .map(({ a, c }) => ({ a, c, fit: scores.get(c!.id) ?? NaN }))
       .sort((x, y) => (Number.isNaN(y.fit) ? 0 : y.fit) - (Number.isNaN(x.fit) ? 0 : x.fit));
     const databaseMatches = {
       // Which rules produced the fit scores, or why there are none.
       assessment: assessed.ok ? { version: assessed.version } : { unavailable: assessed.message },
-      total: matched.length,
+      // Counted from the applications, not from the records loaded — a person
+      // whose record is not in memory is still a match (6 Oct).
+      total: matchApps.length,
       strong: matched.filter((x) => x.fit >= FIT_BANDS.strong).length,
-      unclaimed: matched.filter((x) => !x.a.ownerTaId).length,
+      unclaimed: matchApps.filter((a) => !a.ownerTaId).length,
       top: matched.slice(0, 12).map(({ a, c, fit }) => ({
         name: c!.fullName,
         fitScore: Number.isNaN(fit) ? null : fit,
@@ -167,12 +289,16 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
       ...base,
       waitingForReview: { newCvs: apps.filter((a) => a.stage === "new_cv" && !a.ownerTaId).length, databaseMatches: databaseMatches.unclaimed },
       databaseMatches,
-      posts: repo.jobPosts(o.id).map((p) => ({ title: p.title, status: p.status, cvsToday: p.cvCountToday, owner: users.get(p.assignedTaId ?? "") ?? null })),
+      // A TA hears about their own posts only — a colleague's post, its count
+      // and its title are theirs (12 Sep wall).
+      posts: (isDeskWide(user) ? repo.jobPosts(o.id) : visiblePosts(repo.jobPosts(o.id), user)).map((p) => ({ title: p.title, status: p.status, cvsToday: p.cvCountToday, owner: users.get(p.assignedTaId ?? "") ?? null })),
       sets: setsForOpening(o.id, isDeskWide(user) ? undefined : user.id).map((s) => ({
         recruiter: users.get(s.taId) ?? s.taId,
         set: s.setNumber,
         people: s.count,
-        status: s.status === "open" ? "still open (under 5)" : "closed",
+        // The 28 Sep rule (convex/lib/sets.ts): open across days until five or
+        // more are sent in one Colombo day. "Under 5" said otherwise.
+        status: s.status === "open" ? "still open (closes on a day five or more are sent)" : "closed",
       })),
       shortlistedToday: apps.filter((a) => (a.shortlistedAt ?? 0) >= today).length,
       followUps,
@@ -181,56 +307,81 @@ export function snapshotFor(user: User, question: string, now = Date.now()) {
       clientShortlist: people(["client_shortlist"]),
       offers: people(["offer"]),
       interviews,
+      // A colleague's shortlisted people: named so they are not approached
+      // twice, and nothing more — no number, no email, no link (12 Sep wall).
+      shortlistedByOthers: taken.slice(0, 25).map((t) => ({ name: nameOf(t.row.candidateId), shortlistedBy: users.get(t.takenBy) ?? "another recruiter", stage: STAGE_LABEL[t.row.stage] })),
     };
   });
 
-  // A name in the question: look for that person on the openings in scope.
+  // A name in the question: look for that person in this person's own view.
+  const asked = v.asked;
+  const nameMatches = (candidateId: string) => {
+    const c = repo.candidate(candidateId);
+    return !!c && words(c.fullName).some((w) => w.length > 3 && asked.includes(w));
+  };
   const nameHits = asked.length
-    ? openings
-        .flatMap((o) => {
-          const assignment = repo.assignmentFor(o.id, user.id) ?? null;
-          return visibleToSeat(repo.applications(o.id), seatFor(user, assignment?.role ?? null)).map((a) => ({ a, o }));
-        })
-        .map(({ a, o }) => ({ a, o, c: repo.candidate(a.candidateId) }))
-        .filter(({ c }) => c && words(c.fullName).some((w) => w.length > 3 && asked.includes(w)))
-        .slice(0, 10)
-        .map(({ a, o, c }) => ({
-          name: c!.fullName,
-          phone: c!.phone,
-          email: c!.email,
-          opening: o.title,
-          stage: STAGE_LABEL[a.stage],
-          owner: users.get(a.ownerTaId ?? "") ?? null,
-          link: `/openings/${o.id}/candidate/${a.id}`,
-        }))
+    ? [
+        ...v.scoped.flatMap(({ o, own }) =>
+          own.filter((a) => nameMatches(a.candidateId)).map((a) => {
+            const c = repo.candidate(a.candidateId)!;
+            return {
+              name: c.fullName,
+              phone: c.phone,
+              email: c.email,
+              opening: o.title,
+              stage: STAGE_LABEL[a.stage],
+              owner: users.get(a.ownerTaId ?? "") ?? null,
+              link: `/openings/${o.id}/candidate/${a.id}`,
+            };
+          }),
+        ),
+        ...v.scoped.flatMap(({ o, taken }) =>
+          taken.filter((t) => nameMatches(t.row.candidateId)).map((t) => ({
+            name: repo.candidate(t.row.candidateId)!.fullName,
+            opening: o.title,
+            stage: STAGE_LABEL[t.row.stage],
+            shortlistedBy: users.get(t.takenBy) ?? "another recruiter",
+          })),
+        ),
+      ].slice(0, 10)
     : [];
 
   return {
     now: when(now),
-    you: { name: user.name, role: user.role },
+    // "As of 10:42" — the numbers below were read at this minute (6 Oct).
+    asOf: new Date(now).toLocaleTimeString("en-GB", { timeZone: "Asia/Colombo", hour: "2-digit", minute: "2-digit" }),
+    you: roleBrief(user),
     openings: out,
+    ...(v.notDetailed > 0 ? { openingsWithoutDetail: v.notDetailed } : {}),
     peopleNamedInQuestion: nameHits,
     yourAlerts: alertsFor(user.id, now).slice(0, 15).map((a) => ({ detail: a.detail, action: a.action, urgent: a.urgent, link: a.href })),
   };
 }
 
-const SYSTEM = [
-  "You are the Intelligent Desk Assistant and Platform Guide inside Career141's recruitment platform, answering a member of the TA desk.",
+/*
+ * 6 Oct: the prompt told the model everyone was "a member of the TA desk",
+ * stated the 25 Sep set rule, and never said what the asker may do. Who is
+ * asking, and what their role allows, now comes in the snapshot (`you`).
+ */
+export const SYSTEM = [
+  "You are the desk assistant inside Career141's TA System. You work from the live records in the JSON snapshot, read at `asOf` (Colombo time).",
   "",
-  "You have two primary capabilities:",
-  "1. PLATFORM & WORKFLOW GUIDE: Explain how features work, guide recruiters through workflows, and provide direct markdown links to pages (e.g. [Database Search](/database), [Clients](/clients), [New Opening](/openings/new), [Openings](/openings)).",
-  "2. LIVE DESK ASSISTANT: Answer questions about the recruiter's live openings, candidates, pipeline stages, upcoming interviews, and alerts using the provided JSON snapshot.",
+  "Who you are talking to is `you` in the snapshot: their name, role, what they see, `canDo` and `cannotDo`.",
+  "- Only tell them to do things in `canDo`. If they ask about something in `cannotDo`, say plainly who can (a TA Lead, Director, Ops or Admin; a client seat reads its shortlist only).",
+  "- A TA sees their own candidates and the unclaimed pool on the jobs they are on. A colleague's candidate appears only in `shortlistedByOthers` or `peopleNamedInQuestion` with `shortlistedBy`: say it is shortlisted by that person and to leave it alone. Never give a number or email for it, and never say more than the snapshot holds.",
+  "- A TA Lead, Director, Ops or Admin sees the whole desk. If `openingsWithoutDetail` is set, say names are shown for the most active jobs only, and how many more there are.",
   "",
-  "Guidelines:",
-  "- When answering how-to or workflow questions, use the Platform Knowledge Base below. Be clear, concise, and provide actionable steps.",
-  "- When answering about specific numbers, candidates, or jobs on this person's desk, count accurately from the JSON snapshot. Never invent names, phone numbers, or dates.",
-  "- When mentioning an opening, candidate, or platform tool, format it as a clickable markdown link (e.g. [Database Search](/database), [Clients](/clients), [Brand Manager](/openings/op_brand)).",
-  "- Use friendly, professional words: say 'follow-up' rather than 'follow_up', 'new CV' rather than 'new_cv'.",
-  "- Sets are numbered per recruiter and a set closes once it reaches five candidates (The Rule of 5).",
-  "- A strong match has a fit score of 70+ (or >= 0.70 in semantic vector search).",
-  "- People waiting for review means new CVs plus database matches nobody has claimed yet.",
-  "- Be brief: answer in at most 6 short lines or bullets. No greeting, no closing offer of more help.",
-  "- Link only to pages listed in the sitemap below, or to a `link` value given in the snapshot. Never make up a page address; if a page belongs to one opening, say where to find it on that opening instead.",
+  "Answering:",
+  "- Desk questions: count from the snapshot only. Never invent names, numbers, dates or stages. A name shown as \"name not loaded\" is said that way. When you give counts, say \"as of <asOf>\".",
+  "- How-to questions: use the Platform Guide below, and only describe what it says the system does.",
+  "- When something needs attention — an alert, a follow-up with `needsPerson`, a set still open, a JD waiting for approval (`jdLink`), people waiting for review — give the exact `link` from the snapshot as a markdown link and the one next step.",
+  "- Plain words: 'follow-up' not 'follow_up', 'new CV' not 'new_cv'.",
+  "- Sets: numbered per recruiter per job. A set stays open across days until five or more CVs are sent in one Colombo day; that day closes it however many went, and the next day starts the next set.",
+  "- A strong match has a fit score of 70+.",
+  "- Waiting for review means new CVs plus database matches nobody has claimed yet.",
+  "- Be brief: at most 6 short lines or bullets. No greeting, no closing offer of more help.",
+  "- Link only to pages in the guide's page list, or to a `link`/`jdLink` value in the snapshot. Never make up a page address; if a page belongs to one opening and you have no link for it, say where to find it on that opening.",
+  "- You only read and propose. You never make a change yourself: a change typed as an instruction comes back as a proposal the person confirms.",
   "",
   PLATFORM_KNOWLEDGE,
 ].join("\n");
@@ -252,7 +403,7 @@ export async function askDesk(
   if (quick) return { ok: true, answer: quick, instant: true };
   const convo = history
     .slice(-6)
-    .map((t) => `${t.role === "user" ? "TA" : "Assistant"}: ${t.text.slice(0, 800)}`)
+    .map((t) => `${t.role === "user" ? "Them" : "Assistant"}: ${t.text.slice(0, 800)}`)
     .join("\n");
   const prompt = [
     "Snapshot:",
@@ -276,12 +427,13 @@ export async function askDesk(
  */
 const REAL_PAGE = [
   /^\/$/,
-  /^\/(clients|openings|database|alerts|reports|people|intake|search)$/,
+  /^\/(clients|openings|database|alerts|reports|people|intake|search|bin|review|voice)$/,
+  /^\/review\/[a-z0-9_]+$/,
   /^\/openings\/new$/,
   /^\/database\/(results|scan)$/,
   /^\/candidates\/[a-z0-9_]+$/,
   /^\/openings\/[a-z0-9_]+$/,
-  /^\/openings\/[a-z0-9_]+\/(jd|eod|database|linkedin-job|snippets|reference|hh|hh\/(suggestions|links|research))$/,
+  /^\/openings\/[a-z0-9_]+\/(jd|eod|database|linkedin-job|snippets|reference|scoops|hh|hh\/(suggestions|links|research))$/,
   /^\/openings\/[a-z0-9_]+\/pipeline\/[a-z_]+$/,
   /^\/openings\/[a-z0-9_]+\/candidate\/[a-z0-9_]+$/,
 ];
@@ -324,13 +476,18 @@ export function quickAnswer(snap: Snapshot, question: string, user: User): strin
   if (scope.length === 0) return "You're not on any open jobs right now.";
   const link = (o: Snapshot["openings"][number]) => `[${o.title}](${o.link})`;
   const detail = scope.filter((o): o is Extract<typeof o, { followUps: unknown }> => "followUps" in o);
+  // A desk-wide person's whole-desk question names people on their most
+  // active jobs only; say so, rather than let the list pass for everything.
+  const hidden = "openingsWithoutDetail" in snap ? snap.openingsWithoutDetail ?? 0 : 0;
+  const more = hidden ? `Names shown for your ${detail.length} most active jobs; ${hidden} more not shown — name a job to see it.` : "";
+  const asOf = ` (as of ${snap.asOf})`;
 
   if (/\b(cv|cvs|applica\w*|applicants?)\b/.test(q) && /\b(today|so far)\b/.test(q)) {
     const total = scope.reduce((n, o) => n + o.cvsToday, 0);
-    return [`${total} CV${total === 1 ? "" : "s"} today.`, ...scope.map((o) => `- ${link(o)}: ${o.cvsToday}`)].join("\n");
+    return [`${total} CV${total === 1 ? "" : "s"} today${asOf}.`, ...scope.map((o) => `- ${link(o)}: ${o.cvsToday}`)].join("\n");
   }
   if (/\b(cv|cvs|applica\w*|applicants?)\b/.test(q) && /\b(week|7 days|seven days)\b/.test(q)) {
-    return [`CVs in the last 7 days:`, ...scope.map((o) => `- ${link(o)}: ${o.cvsLast7Days}`)].join("\n");
+    return [`CVs in the last 7 days${asOf}:`, ...scope.map((o) => `- ${link(o)}: ${o.cvsLast7Days}`)].join("\n");
   }
   if (/follow.?ups?/.test(q)) {
     if (detail.length === 0) return null;
@@ -342,33 +499,37 @@ export function quickAnswer(snap: Snapshot, question: string, user: User): strin
       else rows = rows.filter(({ f }) => f.stillMissing.some((m) => topics.every((t) => m.toLowerCase().includes(t))));
       if (rows.length === 0) return "Nobody in follow-up is missing that.";
     }
-    if (rows.length === 0) return `Nobody is in follow-up on ${scope.length === 1 ? link(scope[0]) : "your jobs"} right now.`;
+    if (rows.length === 0) return [`Nobody is in follow-up on ${scope.length === 1 ? link(scope[0]) : "your jobs"} right now.`, more].filter(Boolean).join("\n");
+    const needYou = rows.filter(({ f }) => f.needsPerson).length;
     return [
-      `${rows.length} in follow-up:`,
+      `${rows.length} in follow-up${asOf}:`,
       ...rows.slice(0, 30).map(({ o, f }) =>
         `- [${f.name}](${f.link}) — ${f.phone ?? "no number"} · ${o.title}${f.stillMissing.length ? ` · still need ${f.stillMissing.join(", ").toLowerCase()}` : " · everything in"}${f.needsPerson ? " · needs you" : ""}`,
       ),
       rows.length > 30 ? `…and ${rows.length - 30} more.` : "",
+      // The next step, where a person is needed: the call tab is linked above.
+      needYou ? `${needYou} need${needYou === 1 ? "s" : ""} you — open the name to call and record the answer.` : "",
+      more,
     ].filter(Boolean).join("\n");
   }
   if (/\bdirector\b/.test(q)) {
     if (detail.length === 0) return null;
     const rows = detail.flatMap((o) => o.withDirector.map((p) => ({ o, p })));
-    if (rows.length === 0) return "Nobody is waiting on the Director.";
+    if (rows.length === 0) return ["Nobody is waiting on the Director.", more].filter(Boolean).join("\n");
     const jobs = detail.filter((o) => o.withDirector.length > 0);
-    return [`${rows.length} with the Director, on ${jobs.length} job${jobs.length === 1 ? "" : "s"}:`, ...jobs.map((o) => `- ${link(o)}: ${o.withDirector.map((p) => `[${p.name}](${p.link})`).join(", ")}`)].join("\n");
+    return [`${rows.length} with the Director, on ${jobs.length} job${jobs.length === 1 ? "" : "s"}:`, ...jobs.map((o) => `- ${link(o)}: ${o.withDirector.map((p) => `[${p.name}](${p.link})`).join(", ")}`), more].filter(Boolean).join("\n");
   }
   if (/\bclient\b/.test(q) && /\b(shortlist\w*|waiting|with)\b/.test(q)) {
     if (detail.length === 0) return null;
     const jobs = detail.filter((o) => o.clientShortlist.length > 0);
-    if (jobs.length === 0) return "Nobody is on a client shortlist right now.";
-    return ["On client shortlists:", ...jobs.map((o) => `- ${link(o)}: ${o.clientShortlist.map((p) => `[${p.name}](${p.link})`).join(", ")}`)].join("\n");
+    if (jobs.length === 0) return ["Nobody is on a client shortlist right now.", more].filter(Boolean).join("\n");
+    return ["On client shortlists:", ...jobs.map((o) => `- ${link(o)}: ${o.clientShortlist.map((p) => `[${p.name}](${p.link})`).join(", ")}`), more].filter(Boolean).join("\n");
   }
   if (/\boffers?\b/.test(q)) {
     if (detail.length === 0) return null;
     const jobs = detail.filter((o) => o.offers.length > 0);
-    if (jobs.length === 0) return "No offers out right now.";
-    return ["Offers out:", ...jobs.map((o) => `- ${link(o)}: ${o.offers.map((p) => `[${p.name}](${p.link})`).join(", ")}`)].join("\n");
+    if (jobs.length === 0) return ["No offers out right now.", more].filter(Boolean).join("\n");
+    return ["Offers out:", ...jobs.map((o) => `- ${link(o)}: ${o.offers.map((p) => `[${p.name}](${p.link})`).join(", ")}`), more].filter(Boolean).join("\n");
   }
   if (/shortlist\w*/.test(q) && /\btoday\b/.test(q)) {
     if (detail.length === 0) return null;
@@ -382,7 +543,7 @@ export function quickAnswer(snap: Snapshot, question: string, user: User): strin
     const rows = withMatches.map((o) => ({ o, n: o.waitingForReview.newCvs + o.waitingForReview.databaseMatches })).filter((r) => r.n > 0);
     const total = rows.reduce((n, r) => n + r.n, 0);
     if (total === 0) return "Nobody is waiting for review.";
-    return [`${total} waiting for review${scope.length > 1 ? ` across ${rows.length} job${rows.length === 1 ? "" : "s"}` : ""}:`, ...rows.sort((x, y) => y.n - x.n).map((r) => `- ${link(r.o)}: ${r.n} (${r.o.waitingForReview.newCvs} new CVs, ${r.o.waitingForReview.databaseMatches} database matches)`)].join("\n");
+    return [`${total} waiting for review${asOf}${scope.length > 1 ? ` across ${rows.length} job${rows.length === 1 ? "" : "s"}` : ""}:`, ...rows.sort((x, y) => y.n - x.n).map((r) => `- ${link(r.o)}: ${r.n} (${r.o.waitingForReview.newCvs} new CVs, ${r.o.waitingForReview.databaseMatches} database matches)`)].join("\n");
   }
   const QUALS_ASKED = [...question.matchAll(/\b(ACCA|FCCA|CIMA|ACMA|CGMA|ACA|FCA|CPA|CFA|NEBOSH|IOSH|CIPS|CIPD|CIPM|ISMM|PMP|MBA|SLIM|CIM|AAT|Six Sigma)\b/gi)].map((m) => m[1].toLowerCase());
   const QUAL_ASKED = QUALS_ASKED.length ? QUALS_ASKED.map((x) => x.toUpperCase()).join(" or ") : null;
@@ -432,7 +593,9 @@ export function quickAnswer(snap: Snapshot, question: string, user: User): strin
   if (named.length === 1 && /\b(how many|status|pipeline|where are we|how is|how's|stages?)\b/.test(q)) {
     const o = named[0];
     const parts = Object.entries(o.byStage).filter(([, n]) => n > 0).map(([stage, n]) => `${stage} ${n}`);
-    return `${link(o)}${o.client ? ` (${o.client})` : ""}: ${parts.length ? parts.join(" · ") : "nobody yet"}. ${o.cvsToday} CV${o.cvsToday === 1 ? "" : "s"} today, ${o.cvsLast7Days} this week. JD ${o.jd}.`;
+    // A JD still waiting is the next step on the job, so it is linked (6 Oct).
+    const jd = "jdLink" in o && o.jdLink ? `JD waiting for approval — [open the JD](${o.jdLink}).` : `JD ${o.jd}.`;
+    return `${link(o)}${o.client ? ` (${o.client})` : ""}: ${parts.length ? parts.join(" · ") : "nobody yet"}. ${o.cvsToday} CV${o.cvsToday === 1 ? "" : "s"} today, ${o.cvsLast7Days} this week${asOf}. ${jd}`;
   }
   if (/\bsets?\b/.test(q)) {
     if (detail.length === 0) return null;
@@ -441,13 +604,15 @@ export function quickAnswer(snap: Snapshot, question: string, user: User): strin
         ? [`- ${link(o)}: no sets yet`]
         : o.sets.map((st) => `- ${link(o)}: ${isDeskWide(user) ? `${st.recruiter}'s ` : ""}set ${st.set} — ${st.people} ${st.people === 1 ? "person" : "people"}, ${st.status.startsWith("still") ? "still open" : "closed"}`),
     );
-    return ["Sets:", ...lines].join("\n");
+    const open = detail.some((o) => o.sets.some((st) => st.status.startsWith("still")));
+    // The 28 Sep rule, said where it matters: an open set is not "under five".
+    return ["Sets:", ...lines, open ? "An open set closes on a day five or more CVs are sent." : "", more].filter(Boolean).join("\n");
   }
   if (/\binterviews?\b/.test(q)) {
     if (detail.length === 0) return null;
     const rows = detail.flatMap((o) => o.interviews.map((i) => ({ o, i })));
-    if (rows.length === 0) return "No interviews coming up.";
-    return [`${rows.length} interview${rows.length === 1 ? "" : "s"}:`, ...rows.map(({ o, i }) => `- [${i.name ?? "Candidate"}](${i.link}) · ${i.at} · ${o.title} · ${i.confirmed ? "confirmed" : "not confirmed yet"}`)].join("\n");
+    if (rows.length === 0) return ["No interviews coming up.", more].filter(Boolean).join("\n");
+    return [`${rows.length} interview${rows.length === 1 ? "" : "s"}:`, ...rows.map(({ o, i }) => `- [${i.name}](${i.link}) · ${i.at} · ${o.title} · ${i.confirmed ? "confirmed" : "not confirmed yet"}`), more].filter(Boolean).join("\n");
   }
   if (/\b(alerts?|urgent|overdue)\b/.test(q)) {
     if (snap.yourAlerts.length === 0) return "Nothing needs you right now.";

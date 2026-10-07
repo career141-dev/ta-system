@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { logSubscriptionUsage, readStream, runClaude } from "./claudeSub";
 import { claudeMatchOn } from "./claudeMatch";
+import { CLAUDE_ANSWER_MS, CLAUDE_QUEUE_MS } from "../../convex/lib/claudeFirst";
 
 /**
  * Claude first for the backend's matching calls — 5 Oct, at the owner's
@@ -9,18 +10,19 @@ import { claudeMatchOn } from "./claudeMatch";
  *
  * The subscription CLI lives in this container only; the backend cannot run
  * it. So the backend asks here (POST /api/internal/claude, over the private
- * docker network), and anything short of an answer — switched off, busy,
- * resting after a failure, slow, refused — is a 503 that sends the backend
- * to DeepSeek at once. It never waits in a queue: a CV scoring that has to
- * wait for Claude is slower than one DeepSeek answers now.
+ * docker network), and anything short of an answer — switched off, resting
+ * after a failure, slow, refused — is a 503 that sends the backend to
+ * DeepSeek at once. When every slot is taken a call waits its turn for a
+ * while (CLAUDE_QUEUE_MS) before going to DeepSeek. 6 Oct: refusing at once
+ * meant most CV scorings, which arrive in bursts, never reached Claude.
  *
  * Only the matching tasks below come through, and the backend sends them
  * without names or contacts (convex/lib/claudeFirst).
  */
-export const BRIDGE_TASKS = ["match_role", "match_score", "match_rank"] as const;
+export const BRIDGE_TASKS = ["match_role", "match_score", "match_rank", "match_read"] as const;
 export type BridgeTask = (typeof BRIDGE_TASKS)[number];
 
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = CLAUDE_ANSWER_MS;
 const MAX_PROMPT = 60_000;
 const DEFAULT_MODEL = "claude-sonnet-5-5";
 /** After a failure the subscription is usually still failing: the usage limit, a lapsed token. */
@@ -29,6 +31,8 @@ const REST_MS = 2 * 60_000;
 let running = 0;
 let restingUntil = 0;
 let restingFor = "";
+/** Calls waiting for a slot, first come first served. */
+let waiting: (() => void)[] = [];
 
 export function bridgeSecretOk(given: string | null): boolean {
   const secret = (process.env.C141_CLAUDE_BRIDGE_SECRET ?? "").trim();
@@ -67,13 +71,50 @@ export function resetBridge() {
   running = 0;
   restingUntil = 0;
   restingFor = "";
+  waiting = [];
+}
+
+/** Off or resting: no point waiting for a slot. */
+function closed(now = Date.now()): string | null {
+  if (!claudeMatchOn()) return "off";
+  if (now < restingUntil) return `resting: ${restingFor}`;
+  return null;
+}
+
+/** A slot, waiting up to waitMs for one; false when none came free in time. */
+export function takeSlot(waitMs: number): Promise<boolean> {
+  if (running < concurrency()) {
+    running++;
+    return Promise.resolve(true);
+  }
+  return new Promise((resolve) => {
+    const wake = () => {
+      clearTimeout(timer);
+      running++;
+      resolve(true);
+    };
+    const timer = setTimeout(() => {
+      waiting = waiting.filter((w) => w !== wake);
+      resolve(false);
+    }, waitMs);
+    waiting.push(wake);
+  });
+}
+
+export function releaseSlot() {
+  running--;
+  const next = waiting.shift();
+  if (next) next();
 }
 
 export async function askBridge(r: BridgeRequest): Promise<{ ok: true; text: string } | { ok: false; reason: string }> {
-  const why = bridgeUnavailable();
+  const why = closed();
   if (why) return { ok: false, reason: why };
-  running++;
+  if (!(await takeSlot(CLAUDE_QUEUE_MS[r.task]))) return { ok: false, reason: "busy" };
   try {
+    // It may have started resting while this call waited.
+    const now = closed();
+    if (now) return { ok: false, reason: now };
     const model = (process.env.C141_CLAUDE_MATCH_MODEL ?? "").trim() || DEFAULT_MODEL;
     const out = await runClaude(
       // No tools at all: it answers from the prompt, it does not act.
@@ -97,6 +138,6 @@ export async function askBridge(r: BridgeRequest): Promise<{ ok: true; text: str
     }
     return { ok: true, text };
   } finally {
-    running--;
+    releaseSlot();
   }
 }

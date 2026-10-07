@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { getOpenAI, getNvidiaOpenAI, getModelForTask, OPENROUTER_PRIMARY_MODEL } from "./llm";
+import { askClaudeFirst, claudeBudgetMs } from "./claudeFirst";
 
 function distinct(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
@@ -35,6 +36,38 @@ function normalizeRequirements(req: SearchRequirements): SearchRequirements {
     preferredSkills: distinct(req.preferredSkills ?? []),
     keywords: distinct(req.keywords ?? []),
   };
+}
+
+/**
+ * The requirements in a model's reply, wherever the object sits in it.
+ * Stripping a fence only worked when the fence was the whole reply; a sentence
+ * before or after it made JSON.parse throw, and the search silently fell back
+ * to raw words ("accountant, with, years…") (21 September). Null when the
+ * reply holds no usable reading.
+ */
+function requirementsIn(content: string, text: string): SearchRequirements | null {
+  const from = content.indexOf("{");
+  const to = content.lastIndexOf("}");
+  const parsed = JSON.parse(from >= 0 && to > from ? content.slice(from, to + 1) : content) as Partial<SearchRequirements>;
+  if (!parsed || !(parsed.title || (parsed.requiredSkills && parsed.requiredSkills.length > 0))) return null;
+  return normalizeRequirements({
+    title: parsed.title && parsed.title !== "Position" ? parsed.title : text.slice(0, 60),
+    alternativeTitles: parsed.alternativeTitles ?? [],
+    requiredSkills: parsed.requiredSkills ?? [],
+    preferredSkills: parsed.preferredSkills ?? [],
+    minYearsExperience: typeof parsed.minYearsExperience === "number" ? parsed.minYearsExperience : null,
+    industry: parsed.industry ?? null,
+    seniority: parsed.seniority ?? null,
+    location: parsed.location ?? null,
+    education: parsed.education ?? null,
+    summary: parsed.summary ?? text.slice(0, 120),
+    occupationSynonyms: parsed.occupationSynonyms ?? [],
+    keywords: parsed.keywords ?? [],
+    languages: parsed.languages ?? [],
+    clientCompany: parsed.clientCompany ?? null,
+    clientContactEmail: parsed.clientContactEmail ?? null,
+    salaryRange: parsed.salaryRange ?? null,
+  });
 }
 
 export async function extractSearchRequirements(
@@ -94,6 +127,23 @@ Return ONLY valid JSON with these fields:
 If the query is vague, infer the most likely role and include likely related skills so the search remains broad enough.
 For occupationSynonyms, include alternative job titles that represent the same occupation as the primary title — not seniority variations, but genuinely equivalent role names a candidate might use on their CV.`;
 
+  // Claude first for a search sentence (6 Oct, at the owner's request), DeepSeek
+  // second. Only a sentence typed into search: a pasted job description still
+  // goes to DeepSeek, as extraction does. A TA is watching this one, so it waits
+  // the short queue (match_read). Anything short of a usable answer — no slot,
+  // slow, refused, not JSON — falls through to the models below, unchanged.
+  if (kind === "natural_language") {
+    try {
+      const answer = await askClaudeFirst("match_read", prompt, text.slice(0, 7000), claudeBudgetMs("match_read"));
+      const requirements = answer ? requirementsIn(answer, text) : null;
+      if (requirements) {
+        return { requirements, usage: { promptTokens: 0, completionTokens: 0, model: "claude-subscription" } };
+      }
+    } catch (e: any) {
+      console.warn(`[extractSearchRequirements] Claude answer unusable, using DeepSeek: ${e?.message || e}`);
+    }
+  }
+
   // Clients are made per attempt, inside the try. Building both up front threw
   // "NVIDIA_API_KEY is not set" wherever that fallback key is absent — the web
   // app, which runs this for Database search — before DeepSeek was ever asked,
@@ -126,33 +176,10 @@ For occupationSynonyms, include alternative job titles that represent the same o
       const outputTokens = response.usage?.completion_tokens || 0;
       const content = response.choices[0]?.message?.content ?? "{}";
 
-      // The object, wherever it sits in the reply. Stripping a fence only
-      // worked when the fence was the whole reply; a sentence before or after
-      // it made JSON.parse throw, and the search silently fell back to raw
-      // words ("accountant, with, years…") (21 September).
-      const from = content.indexOf("{");
-      const to = content.lastIndexOf("}");
-      const parsed = JSON.parse(from >= 0 && to > from ? content.slice(from, to + 1) : content) as Partial<SearchRequirements>;
-      if (parsed && (parsed.title || (parsed.requiredSkills && parsed.requiredSkills.length > 0))) {
+      const requirements = requirementsIn(content, text);
+      if (requirements) {
         return {
-          requirements: normalizeRequirements({
-            title: parsed.title && parsed.title !== "Position" ? parsed.title : text.slice(0, 60),
-            alternativeTitles: parsed.alternativeTitles ?? [],
-            requiredSkills: parsed.requiredSkills ?? [],
-            preferredSkills: parsed.preferredSkills ?? [],
-            minYearsExperience: typeof parsed.minYearsExperience === "number" ? parsed.minYearsExperience : null,
-            industry: parsed.industry ?? null,
-            seniority: parsed.seniority ?? null,
-            location: parsed.location ?? null,
-            education: parsed.education ?? null,
-            summary: parsed.summary ?? text.slice(0, 120),
-            occupationSynonyms: parsed.occupationSynonyms ?? [],
-            keywords: parsed.keywords ?? [],
-            languages: parsed.languages ?? [],
-            clientCompany: parsed.clientCompany ?? null,
-            clientContactEmail: parsed.clientContactEmail ?? null,
-            salaryRange: parsed.salaryRange ?? null,
-          }),
+          requirements,
           usage: {
             promptTokens: inputTokens,
             completionTokens: outputTokens,

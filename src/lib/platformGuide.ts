@@ -1,174 +1,148 @@
 /**
- * Platform Knowledge Base for the Career141 Desk Assistant.
+ * What the desk assistant knows about how the platform works.
  *
- * Provides comprehensive domain knowledge about the recruitment system,
- * workflows, search engines, pipeline stages, and platform navigation.
+ * Checked against the code on 6 Oct 2026. The first version (13 Sep) had
+ * drifted: it described the 25 Sep set rule, a shared candidate pool for TAs,
+ * a stage list from before the board was rebuilt, a nav with pages it no
+ * longer has, and a new-opening form with fields it does not ask for. Every
+ * line here should be something the code does; when the code changes, change
+ * this with it.
  */
 
-export interface SystemGuideSection {
-  title: string;
-  url?: string;
-  summary: string;
-  details: string[];
-}
-
-export const PLATFORM_NAVIGATION = [
-  { label: "Dashboard", path: "/", description: "Desk overview, active openings, daily metrics, and urgent SLA alerts." },
-  { label: "Openings", path: "/openings", description: "All active and on-hold openings, candidate pipelines, and assignments." },
-  { label: "New Opening", path: "/openings/new", description: "Create a new role under a client, assign recruiters, and write briefs." },
-  { label: "Clients", path: "/clients", description: "Client accounts, commercial terms, signed ESA records, and primary contacts." },
-  { label: "Database Search", path: "/database", description: "Search 79,000+ candidate CVs by Plain English, Semantic Meaning, or Boolean." },
-  { label: "CV Intake", path: "/intake", description: "CVs that have arrived and are waiting to be admitted, merged or turned away." },
-  { label: "Alerts", path: "/alerts", description: "What needs attention now: follow-ups due, quiet adverts, waiting CVs." },
-  { label: "People & Directory", path: "/people", description: "Team directory, recruiter roles, and active TA assignments." },
-  { label: "Reports", path: "/reports", description: "Commercial pipeline value, time-to-fill analytics, and recruiter yield." },
-] as const;
-
 export const PLATFORM_KNOWLEDGE = `
-=== CAREER141 PLATFORM & WORKFLOW GUIDE ===
+=== CAREER141 PLATFORM GUIDE ===
 
-1. PLATFORM SITEMAP & CORE NAVIGATION:
-- Dashboard: [/](/) — Desk overview, open roles, today's CV count, and urgent alerts.
-- Database Search: [/database](/database) — Search across 79,000+ candidates in the talent pool.
-- Openings: [/openings](/openings) — Active jobs, stage counts, and pipeline boards.
-- Create Opening: [/openings/new](/openings/new) — Create a new opening under a client with target terms.
-- Clients Directory: [/clients](/clients) — Client companies, primary contacts, industry, and signed ESA terms.
-- Sourcing (headhunting): on each opening — open it from [/openings](/openings), then Headhunting → Suggestions, Excel Tables or Research. There is no desk-wide sourcing page.
-- CV Intake: [/intake](/intake) — CVs that have arrived and are waiting to be admitted.
-- Alerts: [/alerts](/alerts) — what needs attention now.
-- Reports: [/reports](/reports) — Analytics, time-to-fill, and fee projections.
+1. PAGES (top bar: Clients, Openings, Database, Alerts, Reports, Voice agent, Bin):
+- [Openings](/openings) — every job you can see, with stage counts and your working stage.
+- [New opening](/openings/new) — Client and Position first, then country, who it is hiring for, notes (typed or recorded) and, for a lead, the TAs. The TA writes and approves the JD next.
+- [Clients](/clients) — "+ Add a client": company, industry, main contact. "Save and create opening" carries on into its first opening; "Save client only" just saves. Only a lead, director or admin can add or edit clients.
+- [Database](/database) — search every CV on the desk.
+- [Alerts](/alerts) — what needs you now: follow-ups due, quiet posts, waiting CVs, open sets.
+- [Reports](/reports), [People](/people), [CV intake](/intake), [Recruiter review](/review).
+- [Bin](/bin) — deleted clients and openings, kept 7 days, then gone for good. Anyone on the desk except a viewer or client can restore; only a lead, director, ops or admin can delete for good early. Candidates are never deleted.
 
-2. CANDIDATE DATABASE SEARCH (3 MODES):
-The search engine at [/database](/database) searches over 79,000 candidates with three distinct search modes:
-- Plain English ("natural"): Parses queries automatically into filters (job titles, skills, location, min experience years, employers, notice period).
-- By Meaning ("meaning" / Semantic Vector Search): Uses OpenAI text-embedding-3-large (1024 dimensions) and our local Qdrant vector database (candidate_vectors collection). Ranks CVs mathematically by cosine similarity. Scores >= 0.75 are very strong matches, 0.70-0.75 are good matches. Ideal for conceptual queries like "Senior backend engineer with high-throughput distributed systems".
-- Boolean ("boolean"): Supports exact Boolean logic with operators AND, OR, NOT, parentheses, and quoted exact phrases (e.g. ("React" OR "Next.js") AND "TypeScript" NOT "Junior").
-- Saved Searches: Recruiters can save frequently run queries. Saved searches are stored permanently in Convex DB and appear in the "Mine" tab on [/database](/database).
-- Candidate Drawer: Clicking a candidate in search results opens the slide-over Candidate Drawer for quick inspection, allowing you to browse through candidates without losing search position.
+2. ON EACH OPENING (left sidebar). ATS half: Overview, Pipeline (one page per stage), Scoops, LinkedIn Job (one row per post; + adds a post), Job description, Database CVs, Snippets, End of day. Headhunting half: Overview, Research, Suggestions, Excel Tables. A client seat sees only the Job description and its own shortlist; headhunting pages are for recruiter seats.
+- Working stage: each TA sets theirs per job (100% full hunt, Follow-up, Add-on) from the menu on the opening or the Openings list. On an Add-on day, shortlists are tagged Add-on automatically, and the stage shows on the end-of-day email.
 
-3. CLIENT & OPENING WORKFLOW:
-- Creating a Client: Go to [/clients](/clients) and click "+ Add a client". A pop-up asks for Company name, Industry, Main contact, their title and email. "Save and create opening" saves the client and carries straight on into its first opening in the same pop-up; "Save client only" just saves it.
-- ESA (Exclusive Search Agreement): Tracked on each client card. Record the date when terms are signed.
-- Creating an Opening: Go to [/openings/new](/openings/new). Select the Client, enter Job Title, Job Order Number, Salary Range, and Priority Tier.
-- Priority Tiers (Target Time-to-Fill):
-  * P1: 2 weeks (14 days)
-  * P2: 3 weeks (21 days)
-  * P3: 1 month (30 days) — Standard default
-  * P4: 1.5 months (45 days)
-  * P5: 2 months (60 days)
-- Multi-TA Assignment: Multiple recruiters can be assigned to one Opening. All recruiters share the same candidate pool under that opening.
+3. STAGES: New CVs and Database match come in first. Then TA Follow-up, AI Follow-up, Director Review, Director shortlist, Client shortlist, Interview, Offer, Placed. Closed: Rejected, Dropped out.
+- AI Follow-up holds only the CVs the AI scored at or above the pass mark; nobody moves people into it by hand. TA Follow-up is a TA's own shortlist, and entering it starts the follow-up (AI call first, then WhatsApp and email).
+- Shortlisting someone from New CVs, Database match or AI Follow-up moves them to TA Follow-up under your name and gives them a set number.
+- Collision lock: the first TA to shortlist owns the candidate; another TA cannot act on them. A lead or director still can.
+- Two TAs on one job work apart: each sees their own candidates and the unclaimed pool, never the other's. Leads, directors, ops and admin see both.
+- Director Review needs the CV, expected salary and notice period on file. Current salary is optional. Words count: "Negotiable" or "Not disclosed" is accepted. The move is refused with what is still missing.
+- Director shortlist and Client shortlist record a decision: only a lead, director or admin (or the director/client seat on that job) can move someone there, or the reply is pasted in on the End of day page.
+- Placed needs a recorded placement with a joining date. Moving someone out of Placed (to Rejected or Dropped out) is for a TA Lead, Director, Ops or Admin only (since 2 Oct).
 
-4. CANDIDATE PIPELINE STAGES & SHORTLISTING RULES:
-A candidate progresses through defined stages:
-1. New CV (new_cv): Inbound application from a job post or email alias.
-2. Matched (matched): Sourced from database search or headhunting and linked to the opening.
-3. Follow-up (follow_up): Screening stage. Recruiter verifies availability, current salary, expected salary, and notice period.
-4. Shortlist / Sets (shortlist): Candidates qualified for submission.
-   * THE RULE OF FIVE (Sets): Shortlists are submitted in structured batches of 5 called "Sets". A set stays open until it reaches 5 candidates, after which it closes and progresses as a completed submission round.
-   * COLLISION LOCK: The first recruiter to shortlist a candidate on an opening holds ownership. Other recruiters see the candidate marked as locked to prevent two recruiters approaching the same person.
-5. Director Review (director_review): Internal leadership quality check before client submission.
-6. Client Review (client_shortlist): Profile submitted to client decision-makers.
-7. Interview (interview): Scheduled client rounds (Round 1, Technical, Cultural, Final).
-8. Offer (offer): Formal employment offer issued to the candidate.
-9. Placed (placed): Placement successfully completed; triggers billing and warranty period tracking.
-10. Rejected (rejected) / Dropped Out (dropped_out): Candidate did not pass or withdrew.
+4. SETS: numbered per TA per job. A set stays open across days until the TA sends five or more CVs in one Colombo day; that day closes it however many went, and the next day starts the next set. Four on Monday and three on Tuesday are all Set 1; six on Wednesday close Set 1; Thursday's first CV is Set 2.
 
-5. SOURCING & LINKEDIN TOOLS:
-- Sourcing, on each opening (open it from [/openings](/openings), then Headhunting → Suggestions): generates search strategies, extracts target companies, and searches for public LinkedIn profiles.
-- Link Vault: Sourced profile links can be pinned to an opening. Recruiter eye-marks indicate review status.
+5. TAGS:
+- Add-on: a profile worked beyond the role's scope. Set automatically on an Add-on working day, or by hand on a candidate or a table row.
+- Backup: once a job has someone at Offer or Interview, other CVs shortlisted for it become backups automatically. The TA can add or remove the tag.
+- The candidate list filters All / Add-ons only / Backups only.
 
-6. DESK ASSISTANT CAPABILITIES:
-- The assistant can answer how-to questions about any part of the system.
-- It can check your real-time desk numbers (openings, follow-ups, upcoming interviews, unreviewed CVs).
-- It can propose actions (e.g. "shortlist [Candidate Name]", "set salary 250k for [Candidate]") which require your confirmation before applying.
+6. HEADHUNTING (recruiter seats):
+- Research: reads the client and its competitors' websites and fills named fields, each with a source; anything it cannot verify stays empty. Benchmark is on the same page: who holds this role now at those companies.
+- Suggestions: real LinkedIn profiles we hold no CV for. Runs by itself once the JD is approved; a TA can refine it up to 3 rounds per job. "Add" puts a profile into Excel Tables.
+- Excel Tables: the TA's own table of profile links. "+" next to Excel Tables starts the next level (L1, L2…); a level can be renamed or deleted (its rows stay under All). Tabs: All, Pending, Interested, Not interested. Interested puts the person on the pipeline in TA Follow-up; Not interested rejects them. A TA sees only their own rows and rows a lead added. Pasting a link already in the table is refused and says whose it is.
+- Chrome extension: captures a LinkedIn profile into a job's table. TA accounts only; setup is shown on Excel Tables.
+- Headhunted CV upload: on the TA Follow-up page of a job, up to 10 PDF/DOC/DOCX files at once, 10 MB each. They land in TA Follow-up.
+- Scoops: on the job's Scoops page, upload CVs a director, lead or ops person sent you, with who sent them. Up to 10 at once.
+
+7. END OF DAY EMAIL (End of day page on a job): the Director copy is sent from your own mailbox. To and Cc start with the desk's usual addresses; on the Director copy you can add addresses or take any off, and it will not send with an empty To. A TA sends only the CVs they shortlisted; a lead sends for the desk. The client copy only records that it went. The reply moves people: a Director reply to Director shortlist, a client reply to Client shortlist.
+
+8. DATABASE SEARCH ([Database](/database)), three modes:
+- Plain English: the sentence is read into filters (title, skills, place, years, employer, notice).
+- By meaning: ranks CVs by meaning (vector search); if it cannot run, it falls back to word ranking.
+- Boolean: AND, OR, NOT, brackets and "exact phrases".
+
+9. PRIORITY TIERS (target time to fill, used for SLA alerts): P1 14 days, P2 21, P3 30, P4 45, P5 60.
+
+10. THIS ASSISTANT: reads the desk as the person asking sees it and answers with links. A change typed as an instruction ("shortlist Thisara on Brand Manager", "Thisara expected salary 250k") comes back as a proposal to confirm; nothing changes until they press Confirm, and the same checks as the buttons apply.
 `.trim();
 
 /**
- * Fast deterministic answers for common system help questions.
+ * Fast answers to the common how-to questions, no model needed.
  */
 export function quickWorkflowHelp(question: string): string | null {
   const q = question.toLowerCase().trim();
 
-  // How does semantic / vector search work?
   if (/\b(how\s+does|what\s+is)\b.*\b(meaning|semantic|vector|qdrant|embedding)\b/i.test(q)) {
     return [
-      "**By Meaning (Semantic Vector Search)** searches our database of over 79,000 candidates using AI vector embeddings:",
-      "- **How it works:** Your query is converted into a 1024-dimensional vector using OpenAI's embedding model and compared against indexed CV vectors in our local Qdrant database using cosine similarity.",
-      "- **Relevance Scores:** Scores above **0.75** indicate a very strong match. Scores between **0.70–0.75** represent good conceptual matches.",
-      "- **When to use:** Use this mode when searching for domain expertise, interchangeable skill sets, or conceptual requirements (e.g., *'High-scale fintech backend architect'*).",
+      "**By meaning** ranks CVs by what they mean, not the exact words:",
+      "- Use it for a skill set described several ways, e.g. *'high-volume retail store operations'*.",
+      "- If it cannot run, the search falls back to ranking by words.",
+      "- For exact terms use **Boolean**; for a quick sentence with filters use **Plain English**.",
       "",
-      "Try it on the [Database Search page](/database).",
+      "Try it on [Database](/database).",
     ].join("\n");
   }
 
-  // How do sets work?
-  if (/\b(what\s+is\s+a\s+set|how\s+do\s+sets\s+work|explain\s+sets|rule\s+of\s+5)\b/i.test(q)) {
+  if (/\b(what\s+is\s+a\s+set|how\s+do\s+sets\s+work|explain\s+sets|rule\s+of\s+5|when\s+does\s+a\s+set\s+close)\b/i.test(q)) {
     return [
-      "**Sets** are structured candidate batches submitted to clients on an opening:",
-      "- **The Rule of 5:** Candidates are grouped into sets of **5** per recruiter. A set remains 'open' until it reaches 5 shortlisted candidates, at which point it closes as a completed batch.",
-      "- **Why sets?** Submitting in batches of 5 ensures consistent candidate presentation and prevents piecemeal reviews by clients.",
-      "- **Collision Lock:** When you shortlist a candidate for an opening, you lock that candidate to yourself on that opening so colleagues don't approach them simultaneously.",
+      "**Sets** are numbered per TA, per job:",
+      "- A set stays open across days until you send **five or more CVs in one day** (Colombo time). That day closes it, however many went.",
+      "- The next day starts the next set. Four on Monday and three on Tuesday are all Set 1; six on Wednesday close Set 1; Thursday's first CV is Set 2.",
+      "- Shortlisting gives the person your current set number and locks them to you on that job.",
       "",
-      "You can track your sets on any [Opening page](/openings).",
+      "Ask \"where are my sets?\" to see yours.",
     ].join("\n");
   }
 
-  // How to add a client?
   if (/\b(how\s+to|how\s+do\s+i)\b.*\b(add|create|new)\b.*\bclient\b/i.test(q)) {
     return [
-      "**To create a new client:**",
-      "1. Navigate to the [Clients page](/clients).",
-      "2. Click the **'+ Add a client'** button at the top right.",
-      "3. Fill in **Company name**, **Industry**, and the **Main contact** (name, title, email).",
-      "4. Click **'Save and create opening'** to go straight on to the client's first opening in the same pop-up, or **'Save client only'**.",
-      "",
-      "The client is then available in every opening form.",
+      "**To add a client** (lead, director or admin):",
+      "1. Open [Clients](/clients) and press **+ Add a client**.",
+      "2. Fill in **Company name**, **Industry** and the **Main contact** (name, title, email).",
+      "3. **Save and create opening** carries on into its first opening; **Save client only** just saves it.",
     ].join("\n");
   }
 
-  // How to create an opening?
-  if (/\b(how\s+to|how\s+do\s+i)\b.*\b(add|create|new)\b.*\b(opening|job|role)\b/i.test(q)) {
+  if (/\b(how\s+to|how\s+do\s+i)\b.*\b(add|create|new|open)\b.*\b(opening|job|role)\b/i.test(q)) {
     return [
-      "**To create a new opening:**",
-      "1. Go to the [New Opening form](/openings/new).",
-      "2. Select the **Client** from the dropdown (or create one on [Clients](/clients) first).",
-      "3. Enter the **Position Title**, **Headcount**, and **Salary Range**.",
-      "4. Choose a **Priority Tier** (P1 for 14-day fill target, up to P5 for 60-day).",
-      "5. Assign the Lead and Recruiters who will work on the role.",
-      "",
-      "Once saved, you can add job posts and start matching candidates on [Openings](/openings).",
+      "**To start a new opening:**",
+      "1. Open [New opening](/openings/new).",
+      "2. Pick the **Client** and type the **Position**.",
+      "3. Add the country, who it is hiring for, and any notes (typed or recorded). A lead also picks the TAs.",
+      "4. Save. The TA writes and approves the JD next, on the opening's Job description page.",
     ].join("\n");
   }
 
-  // How do pipeline stages work?
   if (/\b(explain|what\s+are)\b.*\b(stages|pipeline|workflow)\b/i.test(q) || /\bpipeline\s+stages\b/i.test(q)) {
     return [
-      "**Career141 Candidate Pipeline Stages:**",
-      "1. **New CV:** Inbound application waiting for review.",
-      "2. **Matched:** Sourced candidate linked to the role from the database or headhunting.",
-      "3. **Follow-up:** Recruiter screening (verifying notice period, current & expected salary).",
-      "4. **Shortlist:** Qualified candidates compiled into sets of 5 for review.",
-      "5. **Director Review:** Internal review before client submission.",
-      "6. **Client Review:** Candidate presented to the hiring manager.",
-      "7. **Interview:** Formal interview rounds (Round 1, Tech, Cultural, Final).",
-      "8. **Offer:** Employment offer extended.",
-      "9. **Placed:** Candidate accepted and confirmed.",
-      "",
-      "View and manage candidates across these stages on the [Openings board](/openings).",
+      "**Stages, in order:**",
+      "- In: **New CVs**, **Database match**.",
+      "- **TA Follow-up** (your shortlist; the follow-up starts) and **AI Follow-up** (CVs the AI scored as a pass).",
+      "- **Director Review** (needs CV, expected salary and notice; current salary optional) → **Director shortlist** → **Client shortlist**.",
+      "- **Interview** → **Offer** → **Placed** (needs a joining date).",
+      "- Closed: **Rejected**, **Dropped out**.",
     ].join("\n");
   }
 
-  // What are Priority tiers?
+  if (/\b(director\s+review)\b.*\b(need|needs|require\w*|missing|before)\b|\b(need|needs|require\w*)\b.*\bdirector\s+review\b/i.test(q)) {
+    return [
+      "**To move someone to Director Review** they need, on file:",
+      "- the **CV**, **expected salary** and **notice period**.",
+      "- Current salary is optional. Words count: \"Negotiable\" or \"Not disclosed\" is accepted.",
+      "- If something is missing, the move is refused and says what. Add it on the candidate's page.",
+    ].join("\n");
+  }
+
+  if (/\b(move|take)\b.*\bout\s+of\s+placed\b|\bunplace\b/i.test(q)) {
+    return "Only a TA Lead, Director, Ops or Admin can move someone out of **Placed** (to Rejected or Dropped out) — ask your lead.";
+  }
+
+  if (/\b(bin|restore|undelete|deleted)\b/i.test(q) && /\b(how|where|what|can)\b/i.test(q)) {
+    return [
+      "Deleted clients and openings go to the [Bin](/bin) for **7 days**, then are gone for good.",
+      "- Anyone on the desk except a viewer or client can restore them there.",
+      "- Candidates are never deleted.",
+    ].join("\n");
+  }
+
   if (/\b(priority\s+tiers?|what\s+is\s+p1|p1\s+to\s+p5|time\s+to\s+fill)\b/i.test(q)) {
     return [
-      "**Priority Tiers define target Time-to-Fill for an opening:**",
-      "- **P1:** 2 weeks (14 days) — Urgent executive or critical hires.",
-      "- **P2:** 3 weeks (21 days) — High priority roles.",
-      "- **P3:** 1 month (30 days) — Standard roles (default).",
-      "- **P4:** 1.5 months (45 days) — Niche technical or senior roles.",
-      "- **P5:** 2 months (60 days) — Long-lead or overseas searches.",
-      "",
-      "These tiers drive SLA countdown timers and alerts across the platform.",
+      "**Priority tiers** set the target time to fill, and drive the SLA alerts:",
+      "- **P1:** 14 days · **P2:** 21 days · **P3:** 30 days · **P4:** 45 days · **P5:** 60 days.",
     ].join("\n");
   }
 

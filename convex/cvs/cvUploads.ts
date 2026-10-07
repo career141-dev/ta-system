@@ -851,3 +851,18 @@ export const unlockExtraction = internalMutation({
     if (await ctx.db.get(args.cvUploadId)) await ctx.db.patch(args.cvUploadId, { extractionLockedAt: undefined });
   },
 });
+
+/**
+ * How many CV readings are running right now (6 Oct). Read from the
+ * scheduler's own table, so it counts every way a reading is started.
+ */
+export const runningExtractions = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    let running = 0;
+    for (const f of await ctx.db.system.query("_scheduled_functions").order("desc").take(500)) {
+      if (f.name.endsWith("processCvExtraction") && f.state.kind === "inProgress") running++;
+    }
+    return running;
+  },
+});
