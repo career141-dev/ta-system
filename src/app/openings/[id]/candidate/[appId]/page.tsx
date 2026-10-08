@@ -39,6 +39,7 @@ import * as backend from "@/data/convex/backend";
 import { primeStore } from "@/data/prime";
 import { PreparedCvEditor } from "@/components/PreparedCvEditor";
 import { cameFromTables } from "@/lib/pipeline";
+import { CompanyReferenceSection } from "@/components/CompanyReferenceSection";
 
 /**
  * Finding 23 — Chat Log was a tab that explained why it was empty. A TA clicks
@@ -718,86 +719,25 @@ export default async function CandidateDrawer({
         )}
 
         {tab === "company_refs" && (
-          <div className="flex flex-col gap-5">
-            {/* Header: Company Name and Count */}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule pb-4">
-              <div>
-                <span className="text-[12px] font-semibold uppercase tracking-wider text-brand">Present Company</span>
-                <h3 className="mt-0.5 text-[18px] font-bold tracking-tight text-ink">
-                  {targetCompany || "No employer listed on candidate profile"}
-                </h3>
-              </div>
-
-              <span className="rounded-full bg-tag px-3 py-1 text-[12px] font-medium text-ink">
-                {companyColleagues.length} {companyColleagues.length === 1 ? "person" : "people"} in database
-              </span>
-            </div>
-
-            {/* Candidates from Database */}
-            {!targetCompany ? (
-              <div className="py-10 text-center text-[13px] text-ink-faint">
-                No company listed on this candidate&rsquo;s profile.
-              </div>
-            ) : companyColleagues.length === 0 ? (
-              <div className="py-10 text-center text-[13px] text-ink-faint">
-                No other candidates from <span className="font-medium text-ink-soft">{targetCompany}</span> found in the database.
-              </div>
-            ) : (
-              <div className="grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
-                {companyColleagues.map((colleague) => {
-                  const apps = repo.applicationsForCandidate(colleague.id);
-                  const latestApp = apps[0];
-                  return (
-                    <div
-                      key={colleague.id}
-                      className="flex flex-col justify-between rounded-xl border border-rule bg-paper p-4 transition-colors hover:border-brand-line"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[14px] font-semibold text-ink">{colleague.fullName}</span>
-                          {latestApp ? (
-                            <span className="rounded bg-tag px-1.5 py-0.5 text-[10.5px] text-ink-faint">
-                              {STAGE_LABEL[latestApp.stage] ?? latestApp.stage}
-                            </span>
-                          ) : (
-                            <span className="rounded bg-tag px-1.5 py-0.5 text-[10.5px] text-ink-faint">
-                              Database Candidate
-                            </span>
-                          )}
-                        </div>
-                        <p className="mt-1 text-[12.5px] font-medium text-ink-soft">{colleague.currentTitle || "Position not listed"}</p>
-                        <p className="mt-0.5 text-[11.5px] text-ink-faint">{colleague.currentEmployer || targetCompany}</p>
-                      </div>
-
-                      <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-rule/60 pt-2 text-[12px]">
-                        <div className="text-ink-soft">
-                          {colleague.phone ? (
-                            <a href={`tel:${colleague.phone}`} className="tabular mr-2 font-medium text-brand hover:underline">
-                              {colleague.phone}
-                            </a>
-                          ) : colleague.email ? (
-                            <a href={`mailto:${colleague.email}`} className="text-ink-soft hover:underline">
-                              {colleague.email}
-                            </a>
-                          ) : (
-                            <span className="text-ink-faint">No direct contact</span>
-                          )}
-                        </div>
-                        {latestApp && (
-                          <Link
-                            href={`/openings/${latestApp.openingId}/candidate/${latestApp.id}`}
-                            className="font-medium text-brand hover:underline"
-                          >
-                            View profile →
-                          </Link>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+          <CompanyReferenceSection
+            company={targetCompany}
+            openingId={id}
+            excludeCandidateId={c.id}
+            boxed={false}
+            initialColleagues={companyColleagues.map((colleague) => {
+              const apps = repo.applicationsForCandidate(colleague.id);
+              const latestApp = apps[0] ? { id: apps[0].id, openingId: apps[0].openingId, stage: apps[0].stage } : null;
+              return {
+                id: colleague.id,
+                fullName: colleague.fullName,
+                currentTitle: colleague.currentTitle || "",
+                currentEmployer: colleague.currentEmployer || targetCompany,
+                phone: colleague.phone ?? null,
+                email: colleague.email ?? null,
+                latestApp,
+              };
+            })}
+          />
         )}
       </section>
           </div>
