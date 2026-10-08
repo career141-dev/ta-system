@@ -35,6 +35,33 @@
     return s.length >= 2 ? s : null;
   }
 
+  const JUNK_COMPANY_REGEX =
+    /^(brave|chrome|firefox|safari|edge|opera|browser|linkedin|experience|education|contact\s*info|connections|message|more|connect|follow|pending|shortlisted|1st|2nd|3rd|\d+(?:st|nd|rd|th)|mutual\s*connection|about|skills|activity|interests|recommendations|volunteer|licenses\s*&\s*certifications|honors\s*&\s*awards|languages|organizations|publications|patents|courses|projects|test\s*scores)$/i;
+
+  function cleanCompany(raw) {
+    if (!raw || typeof raw !== "string") return null;
+    let s = raw.replace(/\s+/g, " ").trim();
+    // Remove "View company: ", "Current company: ", "Company: ", "Employer: ", "View employer: ", "See company: " prefixes
+    s = s.replace(/^(?:view|current|see|visit)?\s*(?:company|employer|organization|page(?:\s+for)?):\s*/i, "");
+    s = s.replace(/^(?:view|see|visit)\s+/i, "");
+    // Remove trailing "'s company page", " company page", " company profile"
+    s = s.replace(/(?:'s|’s)?\s*(?:company|organization)?\s*(?:page|profile)\s*$/i, "");
+    // Remove trailing "· Full-time", "· Part-time", "· Contract", "· Self-employed", "· Internship", "· Freelance", "· Seasonal"
+    s = s.replace(
+      /\s*[·•\-]\s*(?:full[-\s]time|part[-\s]time|contract|self[-\s]employed|freelance|internship|seasonal|apprenticeship|permanent).*$/i,
+      ""
+    );
+    // Remove trailing "... Click to skip to experience section." or "Click to..."
+    s = s.replace(/\.?\s*click to skip to .*$/i, "");
+    s = s.replace(/\.?\s*click to .*$/i, "");
+    // Remove trailing " logo" e.g. "DirectFN Sri Lanka logo" -> "DirectFN Sri Lanka"
+    s = s.replace(/\s+logo\s*$/i, "");
+    // Remove leading/trailing bullets, dashes, commas, colons
+    s = s.replace(/^[·•\-\s,:]+|[·•\-\s,:]+$/g, "").trim();
+    if (s.length < 2 || JUNK_COMPANY_REGEX.test(s)) return null;
+    return s;
+  }
+
   /**
    * LinkedIn ships a schema.org Person on the profile page in some views. It
    * survives class-name churn, so it is tried first.
@@ -93,13 +120,16 @@
   }
 
   function readExperience() {
+    const isDuration = (t) => /^\d+\s*(yrs?|mos?|years?|months?)\b/i.test(t || "");
     return entriesIn("experience")
-      .map(([title, company, dates]) => ({
-        title: title || "",
-        // "Career141 · Full-time" — the employment type is not the employer.
-        company: clean((company || "").split("·")[0]) || "",
-        dates: dates || null,
-      }))
+      .map(([a, b, c]) => {
+        const grouped = isDuration(b); // [Company, "3 yrs 2 mos", …]
+        return {
+          title: grouped ? "" : a || "",
+          company: cleanCompany(((grouped ? a : b) || "").split("·")[0]) || "",
+          dates: (grouped ? b : c) || null,
+        };
+      })
       .filter((e) => e.title || e.company)
       .slice(0, 25);
   }
@@ -310,10 +340,195 @@
     return null;
   }
 
-  /** Recruiter's headline is one string, "Title at Company" */
+  /**
+   * Parses headlines like:
+   * - "Full-Stack Engineer | React, Spring Boot, NestJS | Cloud (AWS)..." -> title: "Full-Stack Engineer"
+   * - "Senior Software Engineer at Google" -> title: "Senior Software Engineer", company: "Google"
+   * - "Lead Developer @ Stripe" -> title: "Lead Developer", company: "Stripe"
+   */
   function splitHeadline(headline) {
-    const m = headline && headline.match(/^(.*?)\s+at\s+(.+)$/i);
-    return m ? { title: clean(m[1]), company: clean(m[2]) } : { title: clean(headline), company: null };
+    if (!headline || typeof headline !== "string") return { title: null, company: null };
+    const h = headline.trim();
+    const atMatch = h.match(/^(.*?)\s+(?:at|@)\s+([^|•·\n]+)/i);
+    if (atMatch) {
+      const title = clean(atMatch[1]);
+      const company = cleanCompany(atMatch[2]);
+      if (title) return { title, company };
+    }
+    const parts = h.split(/\s+[|•·–—]\s+/).map(clean).filter(Boolean);
+    if (parts.length > 0) {
+      const firstPart = parts[0];
+      const firstAt = firstPart.match(/^(.*?)\s+(?:at|@)\s+(.+)$/i);
+      if (firstAt) {
+        return { title: clean(firstAt[1]), company: cleanCompany(firstAt[2]) };
+      }
+      return { title: firstPart, company: null };
+    }
+    return { title: clean(h), company: null };
+  }
+
+  const abs = (el) => {
+    const r = el.getBoundingClientRect();
+    return { top: r.top + window.scrollY, left: r.left + window.scrollX, h: r.height, w: r.width };
+  };
+
+  /** The profile's own name: the largest visible text starting with the name.
+   *  LinkedIn also keeps a small sticky copy of it in a mini header. */
+  function nameElement(fullName) {
+    if (!fullName) return null;
+    const cands = [...document.querySelectorAll("h1, h2, p")].filter((e) => {
+      const t = txt(e);
+      return (
+        t &&
+        t.startsWith(fullName) &&
+        t.length <= fullName.length + 14 &&
+        e.getBoundingClientRect().height > 0
+      );
+    });
+    const size = (e) => parseFloat(getComputedStyle(e).fontSize) || 0;
+    cands.sort((a, b) => size(b) - size(a) || abs(a).top - abs(b).top);
+    return cands[0] || null;
+  }
+
+  function topCardBox(fullName) {
+    const nameEl = nameElement(fullName);
+    if (!nameEl) return null;
+    let box = nameEl.closest("section");
+    if (!box) {
+      box = nameEl.parentElement;
+      for (let i = 0; i < 6 && box?.parentElement; i++) box = box.parentElement;
+    }
+    return box ? { nameEl, box } : null;
+  }
+
+  const SCHOOL_RE = /universit|college|school|institute|campus|academy|polytechnic|faculty/i;
+  let panelDbg = "";
+
+  /** Current employer from the top card, by position. Wide layout: a panel to the
+   *  right of the name, one row per logo + text (company first, school second).
+   *  Narrow layout: one line "Company · School". Schools are skipped, so a school
+   *  is never filed as an employer. */
+  function topCardCompany(fullName, headline) {
+    const nameEl = nameElement(fullName);
+    if (!nameEl) {
+      panelDbg = "panel: name not found";
+      return null;
+    }
+    const n = abs(nameEl);
+
+    let rows = [];
+    for (const img of document.querySelectorAll("img")) {
+      const b = abs(img);
+      if (b.w < 16 || b.w > 90) continue; // logos, not the profile photo
+      if (b.top < n.top - 30 || b.top > n.top + 220 || b.left < n.left + 250) continue;
+      let el = img.parentElement,
+        t = null;
+      for (let i = 0; i < 4 && el; i++, el = el.parentElement) {
+        const x = txt(el);
+        if (x && x.length < 90) {
+          t = x;
+          break;
+        }
+      }
+      if (t && !/mutual|connection|follower/i.test(t)) rows.push({ t, top: b.top });
+    }
+    rows.sort((a, b) => a.top - b.top);
+    rows = rows.filter((r, i) => !rows.some((o, j) => j !== i && o.t !== r.t && r.t.includes(o.t)));
+
+    let company = null;
+    for (const r of rows) {
+      if (SCHOOL_RE.test(r.t)) continue;
+      company = cleanCompany(r.t);
+      if (company) break;
+    }
+
+    let line = null;
+    if (!company && rows.length === 0) {
+      for (const p of document.querySelectorAll("p")) {
+        if (p.querySelector("p")) continue;
+        const b = abs(p);
+        const t = txt(p);
+        if (!t || b.h === 0 || b.top < n.top + 10 || b.top > n.top + 260 || b.left < n.left - 5) continue;
+        if (!/\s[·•]\s/.test(t) || /contact info|mutual|follower|connection/i.test(t)) continue;
+        if (headline && (t === headline || headline.includes(t))) continue;
+        line = t;
+        const first = t.split(/\s+[·•]\s+/)[0];
+        if (SCHOOL_RE.test(first) || /,/.test(first)) continue;
+        company = cleanCompany(first);
+        if (company) break;
+      }
+    }
+
+    panelDbg = `panel: ${rows.map((r) => r.t.slice(0, 20)).join(" / ") || (line ? "line: " + line.slice(0, 30) : "no rows")} → ${company || "none"}`;
+    return company;
+  }
+
+  const EMPLOYMENT_TYPES =
+    "full[-\\s]time|part[-\\s]time|contract|self[-\\s]employed|freelance|internship|apprenticeship|seasonal|permanent|temporary";
+  const COMPANY_LINE = new RegExp(`^(.{2,80}?)\\s+[·•]\\s+(?:${EMPLOYMENT_TYPES})\\b`, "i");
+  let companyDbg = "";
+
+  /** Current employer from the Experience section. An entry reads
+   *  "Company · Full-time" in a plain <p>, so match on that text, not on
+   *  LinkedIn's hashed class names. Prefers the entry dated "Present". */
+  function companyFromExperience() {
+    const heading = [...document.querySelectorAll("h2, h3, p, span, div")].find(
+      (e) => !e.children.length && /^experience$/i.test(txt(e) || "")
+    );
+    if (!heading) {
+      companyDbg = "Experience heading: not on page yet (scroll down once)";
+      return null;
+    }
+    const linesOf = (root) => [...root.querySelectorAll("p")].map((p) => ({ p, t: txt(p) })).filter((x) => x.t);
+    const after = (root) =>
+      linesOf(root).filter((x) => heading.compareDocumentPosition(x.p) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const has = (root) => after(root).some((x) => COMPANY_LINE.test(x.t));
+
+    let box = heading.closest("section");
+    if (!box || !has(box)) {
+      box = heading.parentElement;
+      for (let i = 0; i < 8 && box && !has(box); i++) box = box.parentElement;
+    }
+    if (!box) {
+      companyDbg = "Experience heading found, but no 'Company · Full-time' lines";
+      return null;
+    }
+
+    const all = after(box);
+    const entries = [];
+    all.forEach((x, i) => {
+      const m = x.t.match(COMPANY_LINE);
+      if (!m) return;
+      const near = all.slice(i + 1, i + 5).map((y) => y.t).join(" | ");
+      entries.push({ company: cleanCompany(m[1]), current: /\bpresent\b/i.test(near) });
+    });
+    const pick = entries.find((e) => e.current && e.company) || entries.find((e) => e.company);
+    companyDbg = `Experience entries: ${entries.length} | picked: ${
+      pick ? pick.company + (pick.current ? " (Present)" : " (latest)") : "none"
+    }`;
+    return pick ? pick.company : null;
+  }
+
+  /** Headline and location only. The company is not guessed from loose text or
+   *  image alts: a mutual connection's avatar would become the employer. */
+  function readTopCardLines(fullName) {
+    const none = { headline: null, location: null };
+    const ctx = topCardBox(fullName);
+    if (!ctx) return none;
+    const { nameEl, box } = ctx;
+    const pLines = [...box.querySelectorAll("p")]
+      .filter(
+        (p) =>
+          p !== nameEl &&
+          !nameEl.contains(p) &&
+          nameEl.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING
+      )
+      .map((p) => txt(p))
+      .filter((t) => t && !/^[·•]?\s*(1st|2nd|3rd)\+?$/i.test(t) && !/^\(?(he|she|they)\b[^a-z]*$/i.test(t));
+    const headline = pLines[0] || null;
+    const locLine = pLines.find((l) => /contact info/i.test(l));
+    const location = locLine ? locLine.replace(/\s*[·•]?\s*contact info\s*$/i, "").trim() : null;
+    return { headline, location };
   }
 
   function extractProfile() {
@@ -323,15 +538,33 @@
     const cardText = card ? card.innerText || "" : "";
 
     const fullName = readFullName(ld, recruiter);
-    const headline = readHeadline(ld, recruiter);
-    const location = readLocation(ld, recruiter);
+    const lineInfo = readTopCardLines(fullName);
+    const headline = readHeadline(ld, recruiter) || lineInfo.headline;
+    const location = readLocation(ld, recruiter) || lineInfo.location || null;
 
     const experience = readExperience();
 
-    const worksFor = ld?.worksFor?.[0]?.name ? clean(ld.worksFor[0].name) : null;
+    const worksFor = ld?.worksFor?.[0]?.name ? cleanCompany(ld.worksFor[0].name) : null;
     const jobTitle = Array.isArray(ld?.jobTitle) ? clean(ld.jobTitle[0]) : clean(ld?.jobTitle);
-    const recruiterTitleCompany =
-      !worksFor && !jobTitle && recruiter?.headline ? splitHeadline(recruiter.headline) : null;
+    const headlineSplit = splitHeadline(headline || recruiter?.headline);
+
+    const panelCompany = topCardCompany(fullName, headline);
+    const expCompany = companyFromExperience();
+    const currentCompany =
+      panelCompany ||
+      expCompany ||
+      experience[0]?.company ||
+      headlineSplit.company ||
+      worksFor ||
+      null;
+
+    const currentTitle =
+      jobTitle ||
+      headlineSplit.title ||
+      experience[0]?.title ||
+      recruiter?.headline ||
+      headline ||
+      null;
 
     const about =
       txt(sectionFor("about")?.querySelector('span[aria-hidden="true"]')) ||
@@ -341,11 +574,11 @@
     const degreeMatch = cardText.match(/\b(1st|2nd|3rd)\b/);
     const contact = readContact();
 
-    return {
+    const result = {
       fullName,
       headline,
-      currentTitle: jobTitle || recruiterTitleCompany?.title || experience[0]?.title || null,
-      currentCompany: worksFor || recruiterTitleCompany?.company || experience[0]?.company || null,
+      currentTitle,
+      currentCompany,
       location,
       about,
       connectionDegree: (degreeMatch ? degreeMatch[1] : null) || recruiter?.connectionDegree || null,
@@ -357,6 +590,8 @@
       phone: contact.phone,
       sourceUrl: location_href(),
     };
+
+    return result;
   }
 
   /** Without the tracking query, which is not part of who someone is. */

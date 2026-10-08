@@ -59,7 +59,13 @@ export type Capability =
   /** Give or update feedback on an interview — the interviewer's view of the candidate. */
   | "interview.feedback"
   /** The Voice agent practice line: talk to the screening agent as a candidate. */
-  | "voice.practice";
+  | "voice.practice"
+  /** Give a TA strategies to use on a job (the Strategy Planner). */
+  | "strategy.assign"
+  /** Edit the list of strategies a lead can choose from. */
+  | "strategy.manage"
+  /** A TA works the strategies they were given on a job: read their own, mark them started or done. */
+  | "strategy.work";
 
 /** Everything a decision needs to know, resolved by the caller. */
 export interface AuthContext {
@@ -126,6 +132,20 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       return user.role === "admin" || user.role === "director" || user.role === "ta_lead"
         ? ALLOW
         : deny("Only a director, lead or admin can change client records.");
+
+    case "strategy.assign":
+    case "strategy.manage":
+      // The lead decides how a job is worked (8 Oct); a TA does not assign
+      // strategies to themselves or to anyone else. Same people as client.manage.
+      return user.role === "admin" || user.role === "director" || user.role === "ta_lead"
+        ? ALLOW
+        : deny("Only a TA Lead, Director or Admin can assign strategies.");
+
+    case "strategy.work":
+      // The TA the strategies were given to, and only on a job they are on.
+      if (user.role !== "ta") return deny("Strategies are worked by the TA they were given to.");
+      if (!ctx.assignment || ctx.assignment.role === "client_contact") return deny("You are not on this opening.");
+      return ALLOW;
 
     case "database.read":
       // The whole database crosses every opening, so a client contact — who is

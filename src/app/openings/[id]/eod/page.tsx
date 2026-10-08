@@ -4,7 +4,8 @@ import { repo, setsForOpening, SET_SIZE } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
-import { EOD_CC_DEFAULTS, EOD_TO, needsResearchLink, validateResearchLink } from "@/lib/eod-format";
+import { EOD_CC_DEFAULTS, EOD_TO, eodEmailHtml, needsResearchLink, revisedSubject, validateResearchLink } from "@/lib/eod-format";
+import type { EodEmailCopy, User } from "@/data/types";
 import { readEodReply, readInboundReply } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
@@ -33,7 +34,7 @@ export default async function EodPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -84,6 +85,24 @@ export default async function EodPage({
   // The set tonight's CVs went into — the same figure as the SETS column.
   const nextSetNumber = latestSet?.setNumber ?? 1;
   const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
+
+  // The Director's emails sent in the last month, kept to read back and to
+  // correct and send again (8 Oct). A TA sees their own; a lead or director
+  // sees the desk's.
+  const copies =
+    kind === "director" ? repo.eodCopies(id).filter((c) => user.role !== "ta" || c.sentBy === user.id) : [];
+  // Opened to read: any version on that list.
+  const viewCopy = sp.view ? copies.find((c) => c.id === sp.view) : undefined;
+  // Opened to send again: only the sender's own, only inside its month.
+  const asked = kind === "director" && sp.resend ? repo.eodCopy(sp.resend) : undefined;
+  const resendCopy = asked && asked.openingId === id && asked.sentBy === user.id ? asked : undefined;
+  const resendRefused = sp.resend && !resendCopy
+    ? asked
+      ? "Only the person who sent that email can send it again — it goes from their own mailbox."
+      : "That email is more than a month old, so its copy has been cleared."
+    : sp.view && !viewCopy
+      ? "That email is more than a month old, so its copy has been cleared."
+      : null;
 
   return (
     <div className="mx-auto max-w-[1100px] py-1 sm:px-8 sm:py-9">
@@ -228,11 +247,33 @@ export default async function EodPage({
         </form>
       </details>
 
-      {/* ── Email Composer (for sending next set) ────────────────────────── */}
+      {copies.length > 0 && (
+        <SentHistory copies={copies} user={user} openingId={id} openId={resendCopy?.id} viewId={viewCopy?.id} />
+      )}
+
+      {viewCopy && <SentEmail copy={viewCopy} openingId={id} />}
+
+      {resendRefused && (
+        <p className="mb-6 rounded-xl bg-warn-soft px-5 py-3 text-[12.5px] text-warn">{resendRefused}</p>
+      )}
+
+      {resendCopy && (
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className="text-[14px] font-semibold">
+            Correcting the email sent {timeAt(resendCopy.sentAt)}
+          </h2>
+          <Link href={`/openings/${id}/eod?kind=director`} className="text-[12.5px] text-ink-soft hover:text-ink">
+            Cancel — back to a new email
+          </Link>
+        </div>
+      )}
+
+      {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
       <EodComposer
+        key={resendCopy?.id ?? "new"}
         openingId={id}
         kind={kind}
-        subject={formattedSubject}
+        subject={resendCopy ? revisedSubject(resendCopy.subject) : formattedSubject}
         toName={kind === "director" ? "Job Orders" : (director?.name ?? "Director")}
         toEmail={kind === "director" ? EOD_TO : (director?.email ?? "")}
         ccName={kind === "director" ? "" : (lead?.name ?? "")}
@@ -241,11 +282,24 @@ export default async function EodPage({
         eodCc={null}
         fixedCc={kind === "director" ? [...EOD_CC_DEFAULTS] : []}
         canAddRecipients={kind === "director"}
-        rows={rows}
-        effort={effort}
+        rows={resendCopy ? resendCopy.rows : rows}
+        effort={resendCopy ? resendCopy.effort : effort}
         senderName={user.name}
         alreadyOut={!!awaiting}
         needsResearchLink={needsResearchLink(user.role, kind)}
+        resend={
+          resendCopy
+            ? {
+                copyId: resendCopy.id,
+                introText: resendCopy.introText,
+                outroText: resendCopy.outroText,
+                researchLink: resendCopy.researchLink,
+                extraTo: resendCopy.extraTo,
+                extraCc: resendCopy.extraCc,
+                removed: resendCopy.removed,
+              }
+            : undefined
+        }
         openSetNote={
           latestSet
             ? latestSet.status === "closed"
@@ -324,6 +378,153 @@ export default async function EodPage({
         </section>
       )}
     </div>
+  );
+}
+
+/** How many emails the history shows before the rest fold away. */
+const HISTORY_SHOWN = 8;
+
+/**
+ * The Director's emails sent in the last month (8 Oct), each with its
+ * versions. Any version opens to read as it went; the sender can correct the
+ * newest and send it again when the TA Lead or a Director asks. Once the month
+ * is over the copies are deleted and the email drops off this list; the round
+ * and its reply stay on the page as before.
+ */
+function SentHistory({
+  copies,
+  user,
+  openingId,
+  openId,
+  viewId,
+}: {
+  copies: EodEmailCopy[];
+  user: User;
+  openingId: string;
+  openId?: string;
+  viewId?: string;
+}) {
+  // One entry per email, newest version first within it, newest email first.
+  const byRound = new Map<string, EodEmailCopy[]>();
+  for (const c of copies) byRound.set(c.roundId, [...(byRound.get(c.roundId) ?? []), c]);
+  const emails = [...byRound.values()]
+    .map((v) => v.sort((a, b) => b.version - a.version))
+    .sort((a, b) => b[0].sentAt - a[0].sentAt);
+
+  const entry = (versions: EodEmailCopy[]) => {
+    const latest = versions[0];
+    const first = versions[versions.length - 1];
+    const mine = latest.sentBy === user.id;
+    // A lead reads the desk's emails, so each says whose it is.
+    const sender = user.role === "ta" ? null : repo.user(latest.sentBy)?.name;
+    return (
+      <li key={latest.roundId} className="px-7 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate text-[12.5px] font-medium">{latest.subject}</p>
+            <p className="mt-0.5 text-[12px] text-ink-soft">
+              {sender ? `${sender} · ` : ""}
+              {latest.rows.length} {latest.rows.length === 1 ? "CV" : "CVs"} · to {latest.to.join(", ")}
+              {latest.cc.length ? ` · cc ${latest.cc.join(", ")}` : ""}
+            </p>
+          </div>
+          {mine &&
+            (openId === latest.id ? (
+              <span className="text-[12px] text-ink-faint">Open below</span>
+            ) : (
+              <Link
+                href={`/openings/${openingId}/eod?kind=director&resend=${latest.id}`}
+                className="shrink-0 rounded-full border border-brand px-4 py-1.5 text-[12px] font-medium text-brand transition-colors hover:bg-brand hover:text-white"
+              >
+                Edit and send again
+              </Link>
+            ))}
+        </div>
+        <ol className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">
+          {[...versions].reverse().map((v) => (
+            <li key={v.id}>
+              {v.version === 1 ? "Sent" : `Revised (${v.version - 1})`} {timeAt(v.sentAt)} ·{" "}
+              {viewId === v.id ? (
+                <span className="text-ink-soft">open below</span>
+              ) : (
+                <Link href={`/openings/${openingId}/eod?kind=director&view=${v.id}`} className="text-brand hover:underline">
+                  Read
+                </Link>
+              )}
+            </li>
+          ))}
+          <li>· Copy deleted {timeAt(first.expiresAt)}</li>
+        </ol>
+      </li>
+    );
+  };
+
+  return (
+    <section className="mb-6 overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule px-7 py-4">
+        <h2 className="text-[13.5px] font-semibold">
+          Sent emails <span className="ml-1.5 text-[12px] font-normal text-ink-faint">{emails.length}</span>
+        </h2>
+        <span className="text-[12px] text-ink-faint">Kept for a month to read, correct and send again, then deleted.</span>
+      </div>
+      <ul className="divide-y divide-rule">{emails.slice(0, HISTORY_SHOWN).map(entry)}</ul>
+      {emails.length > HISTORY_SHOWN && (
+        <details className="border-t border-rule">
+          <summary className="cursor-pointer px-7 py-3 text-[12.5px] text-ink-soft hover:text-ink">
+            {emails.length - HISTORY_SHOWN} older {emails.length - HISTORY_SHOWN === 1 ? "email" : "emails"}
+          </summary>
+          <ul className="divide-y divide-rule border-t border-rule">{emails.slice(HISTORY_SHOWN).map(entry)}</ul>
+        </details>
+      )}
+    </section>
+  );
+}
+
+/**
+ * One version of a sent email, as it went: the same HTML the email carried
+ * (lib/eod-format eodEmailHtml), in a sandboxed frame so nothing in it can run
+ * or reach the page. The CVs are listed by name; the stamped files are not kept.
+ */
+function SentEmail({ copy, openingId }: { copy: EodEmailCopy; openingId: string }) {
+  const sender = repo.user(copy.sentBy);
+  const html = eodEmailHtml({
+    rows: copy.rows,
+    effort: copy.effort,
+    senderName: sender?.name ?? "",
+    introText: copy.introText,
+    outroText: copy.outroText,
+    researchLink: copy.researchLink,
+  });
+  const line = (label: string, value: string) => (
+    <div className="flex gap-3">
+      <span className="w-[52px] shrink-0 text-ink-faint">{label}</span>
+      <span className="min-w-0 break-words">{value}</span>
+    </div>
+  );
+  return (
+    <section className="mb-6 overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+      <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-rule px-7 py-4">
+        <h2 className="text-[13.5px] font-semibold">
+          {copy.version === 1 ? "Sent" : `Revised (${copy.version - 1})`} {timeAt(copy.sentAt)}
+        </h2>
+        <Link href={`/openings/${openingId}/eod?kind=director`} className="text-[12.5px] text-ink-soft hover:text-ink">
+          Close
+        </Link>
+      </div>
+      <div className="flex flex-col gap-1.5 border-b border-rule px-7 py-4 text-[12.5px]">
+        {line("From", sender ? `${sender.name} · ${sender.email}` : "—")}
+        {line("To", copy.to.join(", ") || "—")}
+        {line("Cc", copy.cc.join(", ") || "Nobody")}
+        {line("Subject", copy.subject)}
+        {line("CVs", copy.rows.map((r) => `${r.name} - Career141.pdf`).join(", ") || "None")}
+      </div>
+      <iframe
+        title={`The email sent ${timeAt(copy.sentAt)}`}
+        sandbox=""
+        srcDoc={`<!doctype html><meta charset="utf-8"><body style="margin:16px 28px;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#171c18;background:#fff">${html}</body>`}
+        className="block h-[560px] w-full bg-white"
+      />
+    </section>
   );
 }
 

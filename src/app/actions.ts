@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, isReadOnly, type Capability } from "@/lib/auth";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
-import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
+import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { BACK_TO_TABLES_REASON } from "@/lib/pipeline";
@@ -50,7 +50,7 @@ import { linkKey, profileLink } from "@/lib/url";
 import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
-import { colomboLocalToInstant } from "@/lib/calendar";
+import { colomboDayFromValue, colomboDayStart, colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
@@ -4548,6 +4548,9 @@ export async function sendEod(formData: FormData) {
   // shortlist inbox. Nothing is recorded unless it went. The client's copy is
   // still sent by operations and only recorded here.
   let sentNote = "";
+  // What went, kept a month to read back, correct and send again (8 Oct). Saved
+  // once the round is open, since the copy belongs to it.
+  let copy: Omit<EodEmailCopy, "id" | "roundId" | "sentAt" | "expiresAt"> | null = null;
   if (kind === "director") {
     const { effortFromForm, effortRow, shortlistRowsFromForm, shortlistRows } = await import("@/lib/eod");
     const effort = effortFromForm(formData, effortRow(openingId, user));
@@ -4583,34 +4586,35 @@ export async function sendEod(formData: FormData) {
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
       rows: editedRows,
+      baseRows,
       introText,
       outroText,
       researchLink: research.url,
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
-    sentNote = r.note;
+    sentNote = r.note + (await saveEodEdits(editedRows, baseRows, fresh));
 
-    // What the TA corrected on the email goes onto the candidate too, so their
-    // CV's box, profile and Director review read the same (the desk, 29 Sep).
-    // Only after it went, and a detail that cannot be saved does not undo the
-    // send — it is said.
-    const { eodDetailChanges } = await import("@/lib/eod");
-    let unsaved = 0;
-    for (const edited of editedRows) {
-      if (!fresh.includes(edited.applicationId)) continue;
-      const base = baseRows.find((b) => b.applicationId === edited.applicationId);
-      const app = repo.application(edited.applicationId);
-      const change = base && app ? eodDetailChanges(base, edited) : null;
-      if (!change || !app) continue;
-      try {
-        repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
-        invalidateCandidate(app.candidateId);
-      } catch (e) {
-        unsaved++;
-        console.warn("[eod] details not saved to the candidate:", (e as Error).message);
-      }
-    }
-    if (unsaved) sentNote += ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`;
+    const sentRows = fresh.flatMap((id, i) => {
+      const row = editedRows.find((e) => e.applicationId === id);
+      return row ? [{ ...row, no: i + 1 }] : [];
+    });
+    copy = {
+      openingId,
+      version: 1,
+      sentBy: user.id,
+      subject: String(formData.get("subject") ?? "").trim(),
+      introText: introText ?? "",
+      outroText: outroText ?? "",
+      researchLink: research.url,
+      applicationIds: fresh,
+      rows: sentRows,
+      effort,
+      extraTo: toList.ok,
+      extraCc: ccList.ok,
+      removed: parseAddressList(String(formData.get("removed") ?? "")).ok,
+      to: recipients.to,
+      cc: recipients.cc,
+    };
   }
 
   // Anyone sent to the Director straight out of a finished follow-up moves to
@@ -4641,7 +4645,7 @@ export async function sendEod(formData: FormData) {
     if (isConvex()) await afterBackendWrite(openingId);
   }
 
-  repo.openReviewRound({
+  const round = repo.openReviewRound({
     openingId,
     kind,
     applicationIds: fresh,
@@ -4653,6 +4657,15 @@ export async function sendEod(formData: FormData) {
     subject: String(formData.get("subject") ?? ""),
     researchLink: research.url,
   });
+  if (copy) {
+    try {
+      repo.saveEodCopy({ ...copy, roundId: round.id });
+    } catch (e) {
+      // The email has gone and the round is open; only the copy to resend is missing.
+      console.warn("[eod] copy not kept:", (e as Error).message);
+      sentNote += " A copy to correct and send again could not be kept.";
+    }
+  }
 
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(
@@ -4667,6 +4680,149 @@ export async function sendEod(formData: FormData) {
   } finally {
     for (const id of fresh) eodInFlight.delete(holdKey(id));
   }
+}
+
+/**
+ * Send a Director's end-of-day email again, corrected (8 Oct).
+ *
+ * The TA Lead or a Director asks for a change; the email itself cannot be
+ * edited once it has gone, so the TA corrects the copy kept for the month and
+ * sends it again, "REVISED - " in front of the subject. Same people in the same
+ * order, so the reply's numbers still mean what they meant: no new round, no
+ * stage moves, no set numbers change — only the email goes again. From the
+ * sender's own mailbox, so only the sender can.
+ */
+export async function resendEod(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  const copyId = String(formData.get("copyId") ?? "");
+  await primeStore({ openingId, allApplications: true });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  const done = (message: string): never =>
+    redirect(`/openings/${openingId}/eod?kind=director&msg=${encodeURIComponent(message)}`);
+
+  const prev = repo.eodCopy(copyId);
+  if (!prev || prev.openingId !== openingId) return done("Not sent: that email is more than a month old, so its copy has been cleared.");
+  if (prev.sentBy !== user.id)
+    return done("Not sent: only the person who sent this email can send it again — it goes from their own mailbox.");
+  const versions = repo.eodCopies(openingId).filter((c) => c.roundId === prev.roundId);
+  const version = Math.max(prev.version, ...versions.map((c) => c.version)) + 1;
+
+  const hold = `${openingId}:resend:${prev.roundId}`;
+  if (eodInFlight.has(hold)) return done("It is being sent again right now.");
+  eodInFlight.add(hold);
+  try {
+    const toList = parseAddressList(String(formData.get("extraTo") ?? ""));
+    const ccList = parseAddressList(String(formData.get("extraCc") ?? ""));
+    const badAddress = [...toList.bad, ...ccList.bad];
+    if (badAddress.length)
+      return done(`Not sent: ${badAddress.join(", ")} ${badAddress.length === 1 ? "is not an email address" : "are not email addresses"}.`);
+    const removed = parseAddressList(String(formData.get("removed") ?? "")).ok;
+    const recipients = eodRecipients({ removed, extraTo: toList.ok, extraCc: ccList.ok, shortlistInbox: repo.shortlistInbox() });
+    if (recipients.to.length === 0) return done("Not sent: nobody is on the To line. Add an address as To.");
+    const research = checkResearchSubmission({
+      role: user.role,
+      kind: "director",
+      link: String(formData.get("chatgptLink") ?? ""),
+      confirmed: formData.get("researchConfirmed") === "on",
+    });
+    if (!research.ok) return done(`Not sent: ${research.reason}`);
+    const typed = String(formData.get("subject") ?? "").trim();
+    if (!typed) return done("Not sent: the email needs a subject.");
+
+    const { effortFromForm, shortlistRowsFromForm, rowsForApplications } = await import("@/lib/eod");
+    const { revisedSubject } = await import("@/lib/eod-format");
+    // The people as they went, never a list from the browser.
+    const baseRows = rowsForApplications(prev.applicationIds);
+    if (baseRows.length === 0) return done("Not sent: nobody from that email is on this opening any more.");
+    const ids = baseRows.map((r) => r.applicationId);
+    const editedRows = shortlistRowsFromForm(formData, baseRows);
+    // The composer opens on the copy as sent, so a change is measured against
+    // that copy. Measured against today's record, every salary or notice updated
+    // since the first send was put back to the month-old value (review, 8 Oct).
+    const sentRows = baseRows.map((b) => prev.rows.find((r) => r.applicationId === b.applicationId) ?? b);
+    const effort = effortFromForm(formData, prev.effort);
+    const subject = revisedSubject(typed);
+    const introText = formData.has("introText") ? String(formData.get("introText")) : prev.introText;
+    const outroText = formData.has("outroText") ? String(formData.get("outroText")) : prev.outroText;
+
+    const r = await emailEod({
+      openingId,
+      user,
+      applicationIds: ids,
+      to: recipients.to[0],
+      extraTo: recipients.to.slice(1),
+      cc: recipients.cc,
+      subject,
+      effort,
+      rows: editedRows,
+      baseRows: sentRows,
+      introText,
+      outroText,
+      researchLink: research.url,
+    });
+    if (!r.ok) return done(`Not sent: ${r.error}`);
+    let note = r.note + (await saveEodEdits(editedRows, sentRows, ids));
+
+    try {
+      repo.saveEodCopy({
+        openingId,
+        roundId: prev.roundId,
+        version,
+        sentBy: user.id,
+        // The first send's day, so a correction never stretches it.
+        expiresAt: prev.expiresAt,
+        subject,
+        introText,
+        outroText,
+        researchLink: research.url,
+        applicationIds: ids,
+        rows: editedRows,
+        effort,
+        extraTo: toList.ok,
+        extraCc: ccList.ok,
+        removed,
+        to: recipients.to,
+        cc: recipients.cc,
+      });
+      repo.markRoundRevised(prev.roundId, { researchLink: research.url });
+    } catch (e) {
+      console.warn("[eod] resent copy not kept:", (e as Error).message);
+      note += " This version could not be kept to send again.";
+    }
+
+    revalidatePath(`/openings/${openingId}`, "layout");
+    return done(`Sent again, marked REVISED. ${note} The Director's reply is still read against the same set.`);
+  } finally {
+    eodInFlight.delete(hold);
+  }
+}
+
+/**
+ * What the TA corrected on the email goes onto the candidate too, so their
+ * CV's box, profile and Director review read the same (the desk, 29 Sep).
+ * Only after it went, and a detail that cannot be saved does not undo the
+ * send — it is said, in the line this returns.
+ */
+async function saveEodEdits(editedRows: ShortlistRow[], baseRows: ShortlistRow[], ids: string[]): Promise<string> {
+  const { eodDetailChanges } = await import("@/lib/eod");
+  let unsaved = 0;
+  for (const edited of editedRows) {
+    if (!ids.includes(edited.applicationId)) continue;
+    const base = baseRows.find((b) => b.applicationId === edited.applicationId);
+    const app = repo.application(edited.applicationId);
+    const change = base && app ? eodDetailChanges(base, edited) : null;
+    if (!change || !app) continue;
+    try {
+      repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
+      invalidateCandidate(app.candidateId);
+    } catch (e) {
+      unsaved++;
+      console.warn("[eod] details not saved to the candidate:", (e as Error).message);
+    }
+  }
+  return unsaved
+    ? ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`
+    : "";
 }
 
 /**
@@ -4693,6 +4849,9 @@ async function emailEod(input: {
   subject: string;
   effort?: EffortRow;
   rows?: ShortlistRow[];
+  /** The rows as built from the records, before the TA's edits. A resend passes
+   *  its own: shortlistRows no longer lists people already in a round. */
+  baseRows?: ShortlistRow[];
   introText?: string;
   outroText?: string;
   researchLink?: string | null;
@@ -4708,38 +4867,23 @@ async function emailEod(input: {
     .filter((c): c is string => !!c);
   await primeStore({ openingId, candidateIds });
 
-  const { shortlistRows, effortRow } = await import("@/lib/eod");
+  const { shortlistRows, shortlistRowFor, effortRow } = await import("@/lib/eod");
   const { eodEmailHtml } = await import("@/lib/eod-format");
   const { preparedCvFileName } = await import("@/lib/pdf");
 
+  // The rows as built from the records, before the TA's edits on the page.
+  const baseRows = input.baseRows ?? shortlistRows(openingId, null, "director");
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
-  const byId = new Map((input.rows ?? shortlistRows(openingId, null, "director")).map((r) => [r.applicationId, r]));
-  // The rows as built from the records, before the TA's edits on the page.
-  const baseById = new Map(shortlistRows(openingId, null, "director").map((r) => [r.applicationId, r]));
+  const byId = new Map((input.rows ?? baseRows).map((r) => [r.applicationId, r]));
+  const baseById = new Map(baseRows.map((r) => [r.applicationId, r]));
   const rows = input.applicationIds
     .map((id, i) => {
       const existing = byId.get(id);
       if (existing) return { ...existing, no: i + 1 };
       const a = repo.application(id);
       const c = a ? repo.candidate(a.candidateId) : null;
-      if (!a || !c) return null;
-      return {
-        no: i + 1,
-        name: c.fullName,
-        age: c.age ? String(c.age) : "",
-        notice: c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : "",
-        notes: [
-          c.totalExperienceYears ? `>Total Experience - ${c.totalExperienceYears}yr` : "",
-          c.currentEmployer ? `>Currently at ${c.currentEmployer}` : "",
-          ...a.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean).map((n) => `>${n}`),
-        ].filter(Boolean).slice(0, 4),
-        currentCompany: c.currentEmployer ?? "",
-        currentDesignation: c.currentTitle ?? "",
-        currentRemuneration: c.currentSalary ?? "Not disclosed",
-        expectedRemuneration: c.expectedSalary ?? "Open to discuss",
-        applicationId: id,
-      };
+      return a && c ? shortlistRowFor(a, c, i + 1) : null;
     })
     .filter((r): r is NonNullable<typeof r> => !!r);
 
@@ -5464,4 +5608,330 @@ export async function clearReadAlertsAction(formData: FormData) {
   repo.clearReadAlerts(user.id);
   revalidatePath("/alerts");
   return done("Read alert history cleared.");
+}
+
+// ─── Strategy Planner (8 Oct) ────────────────────────────────────────────────
+//
+// A TA Lead puts TAs on strategies in a job's table; each TA fills in their rows and submits.
+// Every one of these resolves the opening from the record itself, never from
+// the opening the browser sent alongside it.
+
+/** authorize(), for an action whose record already says which opening it is on. */
+async function authorizeOn(openingId: string, capability: Capability): Promise<User> {
+  const user = await getCurrentUser();
+  if (!openingId || !repo.opening(openingId)) await fail("That opening no longer exists.");
+  const assignment = repo.assignmentFor(openingId, user.id) ?? null;
+  const decision = can(user, capability, { openingId, assignment, ownerTaId: null });
+  if (!decision.ok) await fail(decision.message);
+  return user;
+}
+
+function revalidateStrategies(openingId?: string) {
+  // The loaded tables are behind what was just written: the next load re-reads
+  // them, so the person sees their own change and the other side sees it too.
+  markTablesStale();
+  revalidatePath("/strategy", "layout");
+  if (openingId) revalidatePath(`/openings/${openingId}/strategies`);
+}
+
+/** The row a form names, and the opening it is really on. */
+function strategyRowOf(formData: FormData, field = "rowId") {
+  const row = repo.strategyAssignment(String(formData.get(field) ?? ""));
+  return row ?? null;
+}
+
+/**
+ * One bell per TA per job in ten minutes. A lead working down the table puts
+ * a TA on five strategies in a row, and five notifications for one sitting is
+ * noise. (In this process only: a restart forgets, which just allows one more.)
+ */
+const lastBell = new Map<string, number>();
+function bellDue(key: string, ms = 10 * 60_000): boolean {
+  const now = Date.now();
+  if (now - (lastBell.get(key) ?? 0) < ms) return false;
+  lastBell.set(key, now);
+  return true;
+}
+
+/** Put a TA on a strategy for a job ("Done by"). The TA Lead's side of the table. */
+export async function addStrategyDoneBy(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.assign");
+  const strategyId = String(formData.get("strategyId") ?? "");
+  const taId = String(formData.get("taId") ?? "");
+
+  // The TA must really be on this job and be a TA: the dropdown came from the browser.
+  const opening = repo.opening(openingId)!;
+  const ta = repo.user(taId);
+  if (!ta || ta.role !== "ta" || !ta.isActive || !opening.assignedTaIds.includes(taId)) {
+    await fail("That TA is not on this job.");
+  }
+  const s = repo.strategy(strategyId);
+  if (!s) await fail("That strategy is no longer on the list.");
+
+  const r = repo.addStrategyDoneBy({
+    openingId,
+    strategyId,
+    taId,
+    byUserId: user.id,
+    byRole: user.role,
+    today: colomboDayStart(Date.now()),
+  });
+  if (!r) await fail(`${s!.name} is retired. Bring it back on the Strategy list first.`);
+  revalidateStrategies(openingId);
+  if (!r!.added) await note(`${ta!.name} is already on ${s!.name}.`);
+
+  // The bell says where, not which: the strategies are read on the job's page.
+  if (isConvex() && taId !== user.id && bellDue(`${taId}:${openingId}`)) {
+    await convexMutation("ta/notifications:create", {
+      userId: taId,
+      type: "strategy_assigned",
+      title: "You were given strategies",
+      body: `${user.name} put you on strategies for ${opening.title}.`,
+      jobId: openingId,
+    }).catch((e) => console.error("[notifications] strategy_assigned failed:", e));
+    revalidatePath("/api/notifications");
+  }
+  await done(`Put ${ta!.name} on ${s!.name}.`);
+}
+
+/** Take a TA off a strategy. Whatever they already submitted stays on the row. */
+export async function removeStrategyDoneBy(formData: FormData) {
+  await primeStore();
+  const row = strategyRowOf(formData);
+  if (!row) await fail("That strategy is no longer on this job's table.");
+  await authorizeOn(row!.openingId, "strategy.assign");
+  const taId = String(formData.get("taId") ?? "");
+  if (!row!.doneBy.includes(taId)) await fail("They are not on that strategy.");
+  repo.removeStrategyDoneBy(row!.id, taId);
+  revalidateStrategies(row!.openingId);
+  await done("Taken off.");
+}
+
+/** The day the lead assigned a strategy; empty clears it. */
+export async function setStrategyAssignedDate(formData: FormData) {
+  await primeStore();
+  const row = strategyRowOf(formData);
+  if (!row) await fail("That strategy is no longer on this job's table.");
+  await authorizeOn(row!.openingId, "strategy.assign");
+  const typed = String(formData.get("date") ?? "").trim();
+  const day = colomboDayFromValue(typed);
+  if (typed && day === null) await fail("That is not a date.");
+  repo.setStrategyAssignedDate(row!.id, day);
+  revalidateStrategies(row!.openingId);
+  await done(day === null ? "Date cleared." : "Date saved.");
+}
+
+/** Strike a strategy through for a job ("cannot be used here"), or bring it back. */
+export async function setStrategyNotApplicable(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.assign");
+  const strategyId = String(formData.get("strategyId") ?? "");
+  const s = repo.strategy(strategyId) ?? repo.strategyRow(openingId, strategyId);
+  if (!s) await fail("That strategy is no longer on the list.");
+  const notApplicable = String(formData.get("na") ?? "") === "1";
+  repo.setStrategyNotApplicable({ openingId, strategyId, notApplicable, byUserId: user.id, byRole: user.role });
+  revalidateStrategies(openingId);
+  const name = "name" in s! ? s!.name : s!.strategyName;
+  await done(notApplicable ? `${name} is struck through for this job.` : `${name} can be used on this job again.`);
+}
+
+/**
+ * A TA submits their rows on a job: whether and when they used each strategy,
+ * and what they did and any improvement. Only rows they are on and that are not
+ * struck through are taken; the rest of the form is ignored, not trusted.
+ */
+export async function submitStrategyUpdate(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.work");
+  const ids = formData.getAll("rowId").map(String).filter(Boolean);
+  if (ids.length === 0) await fail("There is nothing to submit.");
+
+  const today = colomboDayStart(Date.now());
+  const rows: { rowId: string; doneAt: number | null; note: string | null }[] = [];
+  for (const id of ids) {
+    const row = repo.strategyAssignment(id);
+    if (!row || row.openingId !== openingId || row.notApplicable || !row.doneBy.includes(user.id)) continue;
+    const used = formData.get(`used_${id}`) === "on";
+    const typed = String(formData.get(`date_${id}`) ?? "").trim();
+    const day = colomboDayFromValue(typed);
+    if (used && typed && day === null) await fail(`That is not a date (${row.strategyName}).`);
+    const text = String(formData.get(`note_${id}`) ?? "").trim();
+    if (text.length > 500) await fail(`Keep the note under 500 characters (${row.strategyName}).`);
+    // Ticked "used" with no date means today; not ticked means not used yet.
+    rows.push({ rowId: id, doneAt: used ? day ?? today : null, note: text || null });
+  }
+  if (rows.length === 0) await fail("None of those strategies are yours to update.");
+
+  const taken = repo.submitStrategyRows({ openingId, taId: user.id, rows });
+  revalidateStrategies(openingId);
+
+  // The TA Lead is told a submission arrived, not what is in it.
+  const opening = repo.opening(openingId)!;
+  const leadId = opening.taLeadId;
+  if (isConvex() && leadId && leadId !== user.id && bellDue(`submit:${user.id}:${openingId}`, 5 * 60_000)) {
+    await convexMutation("ta/notifications:create", {
+      userId: leadId,
+      type: "strategy_assigned",
+      title: "A TA submitted strategies",
+      body: `${user.name} submitted their strategies on ${opening.title}.`,
+      jobId: openingId,
+    }).catch((e) => console.error("[notifications] strategy submit failed:", e));
+    revalidatePath("/api/notifications");
+  }
+  await done(`Submitted ${taken} ${taken === 1 ? "strategy" : "strategies"}. Your TA Lead can now see ${taken === 1 ? "it" : "them"}.`);
+}
+
+/** A TA removes a proof image they attached. */
+export async function removeStrategyProof(formData: FormData) {
+  await primeStore();
+  const row = strategyRowOf(formData);
+  if (!row) await fail("That strategy is no longer on this job's table.");
+  const user = await authorizeOn(row!.openingId, "strategy.work");
+  const proofId = String(formData.get("proofId") ?? "");
+  const proof = row!.proofs.find((p) => p.id === proofId);
+  if (!proof) await fail("That picture is already gone.");
+  if (proof!.addedBy !== user.id) await fail("Only the person who attached a picture can remove it.");
+  const gone = repo.removeStrategyProof(row!.id, proofId);
+  if (gone && isConvex()) await convexMutation("ta/strategies:proofDelete", { storageId: gone }).catch(() => {});
+  revalidateStrategies(row!.openingId);
+  await done("Picture removed.");
+}
+
+/** Add a strategy to the list, or change one. */
+export async function saveStrategy(formData: FormData) {
+  await primeStore();
+  const user = await getCurrentUser();
+  const decision = can(user, "strategy.manage");
+  if (!decision.ok) await fail(decision.message);
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) await fail("Give the strategy a name.");
+  if (name.length > 120) await fail("Keep the name under 120 characters.");
+  const description = String(formData.get("description") ?? "").trim().slice(0, 600) || null;
+  const group = String(formData.get("group") ?? "").trim().slice(0, 60) || null;
+  const id = String(formData.get("id") ?? "") || undefined;
+  const saved = repo.saveStrategy({ id, name, description, group, byUserId: user.id });
+  if (!saved) await fail("That name is already on the list, or the strategy no longer exists.");
+  revalidateStrategies();
+  await done(id ? "Strategy saved." : "Strategy added to the list.");
+}
+
+/** Retire a strategy from the list, or bring it back. Ones already given stay. */
+export async function setStrategyActive(formData: FormData) {
+  await primeStore();
+  const user = await getCurrentUser();
+  const decision = can(user, "strategy.manage");
+  if (!decision.ok) await fail(decision.message);
+  const s = repo.strategy(String(formData.get("id") ?? ""));
+  if (!s) await fail("That strategy no longer exists.");
+  const active = String(formData.get("active") ?? "") === "1";
+  // Bringing one back must not duplicate a name that has been used again.
+  if (active && repo.strategies().some((x) => x.id !== s!.id && x.name.trim().toLowerCase() === s!.name.trim().toLowerCase())) {
+    await fail("A strategy with that name is already on the list.");
+  }
+  repo.setStrategyActive(s!.id, active);
+  revalidateStrategies();
+  await done(active ? "Strategy is back on the list." : "Strategy retired. Ones already given stay as they are.");
+}
+
+export async function submitStrategyUpdateInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => submitStrategyUpdate(formData));
+}
+
+export async function removeStrategyProofInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeStrategyProof(formData));
+}
+
+export type CompanyReferenceColleague = {
+  id: string;
+  fullName: string;
+  currentTitle: string;
+  currentEmployer: string;
+  phone: string | null;
+  email: string | null;
+  latestApp?: { id: string; openingId: string; stage: string } | null;
+};
+
+/**
+ * Look up people in our database who work at the same company (Company Reference).
+ * Used in Candidate Profile and Excel Tables to find backchannel contacts and phone numbers.
+ */
+export async function getCompanyReferences(input: {
+  company: string;
+  excludeCandidateId?: string | null;
+  openingId?: string;
+}): Promise<{ ok: true; company: string; colleagues: CompanyReferenceColleague[] } | { ok: false; message: string }> {
+  const company = (input.company || "").trim();
+  if (!company) return { ok: true, company: "", colleagues: [] };
+
+  // Names, phones and emails across the whole database: always on a job the
+  // person may source for. Without an opening the check was skipped and any
+  // signed-in account, a client's too, could list a company's people (review, 8 Oct).
+  if (!input.openingId) return { ok: false, message: "Open this from a job." };
+  await primeStore({ openingId: input.openingId });
+  const user = await getCurrentUser();
+  const assignment = repo.assignmentFor(input.openingId, user.id) ?? null;
+  const allowed = can(user, "opening.sourcing", { openingId: input.openingId, assignment });
+  if (!allowed.ok) return { ok: false, message: allowed.message };
+
+  const colleagues: CompanyReferenceColleague[] = [];
+  const existingIds = new Set<string>();
+
+  const excludeId = input.excludeCandidateId || undefined;
+
+  // 1. From local memory store
+  const storeCandidates = repo.peopleAtCompany(company, excludeId);
+  for (const c of storeCandidates) {
+    if (existingIds.has(c.id)) continue;
+    const apps = repo.applicationsForCandidate(c.id);
+    const latestApp = apps[0] ? { id: apps[0].id, openingId: apps[0].openingId, stage: apps[0].stage } : null;
+    colleagues.push({
+      id: c.id,
+      fullName: c.fullName,
+      currentTitle: c.currentTitle ?? "",
+      currentEmployer: c.currentEmployer ?? company,
+      phone: c.phone ?? null,
+      email: c.email ?? null,
+      latestApp,
+    });
+    existingIds.add(c.id);
+  }
+
+  // 2. From Convex if enabled
+  if (isConvex()) {
+    try {
+      const backendResults = await convexQuery<{
+        candidates: { id: string; fullName: string; currentTitle: string; currentEmployer: string; phone: string | null; email: string | null }[];
+      }>("ta/candidates:peopleAtCompany", {
+        company,
+        excludeCandidateId: excludeId,
+      }).catch(() => null);
+
+      if (backendResults?.candidates) {
+        for (const cand of backendResults.candidates) {
+          if (!existingIds.has(cand.id)) {
+            const apps = repo.applicationsForCandidate(cand.id);
+            const latestApp = apps[0] ? { id: apps[0].id, openingId: apps[0].openingId, stage: apps[0].stage } : null;
+            colleagues.push({
+              id: cand.id,
+              fullName: cand.fullName,
+              currentTitle: cand.currentTitle,
+              currentEmployer: cand.currentEmployer || company,
+              phone: cand.phone,
+              email: cand.email,
+              latestApp,
+            });
+            existingIds.add(cand.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[getCompanyReferences] Convex lookup failed:", err);
+    }
+  }
+
+  return { ok: true, company, colleagues };
 }

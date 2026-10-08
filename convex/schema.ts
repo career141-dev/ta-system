@@ -1964,7 +1964,8 @@ export default defineSchema({
       v.literal("candidate_replied"),
       v.literal("candidate_unresponsive"),
       v.literal("opening_assigned"),
-      v.literal("scoop_received")
+      v.literal("scoop_received"),
+      v.literal("strategy_assigned")
     ),
     title: v.string(),
     body: v.string(),
@@ -2692,6 +2693,53 @@ export default defineSchema({
     .index("by_opening_candidate", ["openingId", "candidateId"]),
 
   /**
+   * The strategies a TA Lead can choose from (Strategy Planner, 8 Oct). The
+   * list is the desk's own and edited in the app; retired ones stay here so
+   * what was given under them still reads.
+   */
+  strategies: defineTable({
+    name: v.string(),
+    description: v.optional(v.union(v.string(), v.null())),
+    group: v.optional(v.union(v.string(), v.null())),
+    sortOrder: v.number(),
+    active: v.boolean(),
+    createdAt: v.number(),
+    createdBy: v.id("users"),
+  }).index("by_active", ["active", "sortOrder"]),
+
+  /**
+   * One row of a job's strategy table: a strategy on a job. The lead puts TAs on
+   * it (doneBy), dates it, or strikes it through (notApplicable); the TA fills
+   * doneAt, note and proofs and submits. A strategy nobody has acted on has no row.
+   */
+  strategyAssignments: defineTable({
+    openingId: v.id("jobs"),
+    strategyId: v.id("strategies"),
+    /** The name when the row was made, kept if the strategy is renamed or retired. */
+    strategyName: v.string(),
+    doneBy: v.array(v.id("users")),
+    assignedAt: v.optional(v.union(v.number(), v.null())),
+    assignedBy: v.optional(v.union(v.id("users"), v.null())),
+    byRole: v.optional(v.union(v.string(), v.null())),
+    notApplicable: v.boolean(),
+    doneAt: v.optional(v.union(v.number(), v.null())),
+    note: v.optional(v.union(v.string(), v.null())),
+    /** Proof images: the storage id, and when the TA submitted it (null until then). */
+    proofs: v.array(v.object({
+      id: v.string(),
+      contentType: v.string(),
+      size: v.number(),
+      addedAt: v.number(),
+      addedBy: v.id("users"),
+      submittedAt: v.union(v.number(), v.null()),
+    })),
+    submittedAt: v.optional(v.union(v.number(), v.null())),
+    submittedBy: v.optional(v.union(v.id("users"), v.null())),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_opening_strategy", ["openingId", "strategyId"]),
+
+  /**
    * A set of CVs sent out for a decision, and the decision that came back.
    *
    * The token is what makes the match reliable: it goes out in the subject and
@@ -2722,6 +2770,9 @@ export default defineSchema({
     /** The ChatGPT research link in the TA's end-of-day email (8 Oct). Rounds
      *  sent before it existed have none. */
     researchLink: v.optional(v.union(v.string(), v.null())),
+    /** Each time the TA sent this email again, corrected (8 Oct). The copies
+     *  are cleared after a month (eodEmailCopies); this keeps the fact. */
+    revisedAt: v.optional(v.array(v.number())),
     decisions: v.array(v.object({
       applicationId: v.id("applications"),
       outcome: v.union(
@@ -2735,6 +2786,47 @@ export default defineSchema({
     .index("by_opening", ["openingId"])
     .index("by_token", ["token"])
     .index("by_opening_kind", ["openingId", "kind"]),
+
+  /**
+   * The end-of-day email as it went, kept for a month so the TA can correct it
+   * and send it again (8 Oct). One row per version; every version shares the
+   * first send's expiresAt and all are deleted then (ta/eodCopies purgeExpired).
+   */
+  eodEmailCopies: defineTable({
+    openingId: v.id("jobs"),
+    roundId: v.id("reviewRounds"),
+    version: v.number(),
+    sentBy: v.id("users"),
+    sentAt: v.number(),
+    expiresAt: v.number(),
+    subject: v.string(),
+    introText: v.string(),
+    outroText: v.string(),
+    researchLink: v.optional(v.union(v.string(), v.null())),
+    applicationIds: v.array(v.id("applications")),
+    rows: v.array(v.object({
+      no: v.number(),
+      name: v.string(),
+      age: v.string(),
+      notice: v.string(),
+      notes: v.array(v.string()),
+      currentCompany: v.string(),
+      currentDesignation: v.string(),
+      currentRemuneration: v.string(),
+      expectedRemuneration: v.string(),
+      applicationId: v.id("applications"),
+    })),
+    /** The L-sheet line as the TA left it, targets included (lib/eod-format EffortRow). */
+    effort: v.any(),
+    extraTo: v.array(v.string()),
+    extraCc: v.array(v.string()),
+    removed: v.array(v.string()),
+    to: v.array(v.string()),
+    cc: v.array(v.string()),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_round", ["roundId"])
+    .index("by_expires", ["expiresAt"]),
 
   /** What was said on a call, structured where it could be read. */
   callFeedback: defineTable({

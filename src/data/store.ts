@@ -60,11 +60,15 @@ import type {
   ProfileSuggestion,
   ReviewDecision,
   ReviewRound,
+  EodEmailCopy,
   ResearchReport,
   SavedReport,
   SavedSearch,
   SearchCriteria,
   Stage,
+  Strategy,
+  StrategyAssignment,
+  StrategyProof,
   User,
   JobPost,
 } from "./types";
@@ -181,7 +185,8 @@ function backfill(db: Partial<Database>): Database {
     assignments: [], pipelineEvents: [], reviewRounds: [],
     alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
-    matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
+    matchRuns: [], matchExclusions: [], liveMirror: [], bin: [], eodEmailCopies: [],
+    strategies: [], strategyAssignments: [],
   } satisfies Database;
   const out = { ...empty } as Database;
   for (const key of Object.keys(empty) as (keyof Database)[]) {
@@ -483,6 +488,13 @@ const JD_NOT_APPROVED =
 export { SET_SIZE };
 
 /**
+ * How long a sent end-of-day email is kept, to read and to correct and send
+ * again: at least a month (the desk, 8 Oct — first asked for a day, then a
+ * month of history). 31 days, so no month is ever short.
+ */
+export const EOD_COPY_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
+
+/**
  * The set a newly shortlisted person joins — the rule is in convex/lib/sets.ts
  * (the desk, 28 September: five sent in one day closes a set), shared with
  * convex/ta/applications.ts, which numbers the live shortlists.
@@ -523,6 +535,11 @@ function channelForIntake(source: IntakeSource, jobPostId: Id | null): Applicati
   }
 }
 
+/** A strategy row with nothing on it any more: no TA, no date, not struck through, nothing submitted. */
+function strategyRowIsEmpty(r: StrategyAssignment): boolean {
+  return r.doneBy.length === 0 && r.assignedAt === null && !r.notApplicable && r.submittedAt === null && r.proofs.length === 0 && !r.note && r.doneAt === null;
+}
+
 /**
  * Lift an opening and everything filed under it off the desk, returning what
  * was taken so the Bin can put it back. The candidates stay, and a CV that
@@ -553,6 +570,8 @@ function takeOpening(db: Database, id: Id): Pick<BinEntry, "rows" | "intake"> {
     ["aiCalls", (r) => r.openingId === id],
     ["assignments", (r) => r.openingId === id],
     ["esaRecords", (r) => r.openingId === id],
+    ["eodEmailCopies", (r) => r.openingId === id],
+    ["strategyAssignments", (r) => r.openingId === id],
   ];
   const rows: Partial<Database> = {};
   for (const [key, test] of belongs) {
@@ -2479,6 +2498,56 @@ const rawRepo = {
     return load().reviewRounds.find((r) => r.id === id);
   },
 
+  /**
+   * Keep a copy of an end-of-day email as it went, for a month (8 Oct), so the
+   * TA can read it back, correct it and send it again. Version 1 starts the month; a resend
+   * passes the earlier version's `expiresAt`, so a correction never stretches
+   * it. On Convex the backend's purge deletes them (convex/ta/eodCopies); the
+   * file store has no cron, so it prunes here. Not on Convex: deleting a row
+   * the purge already took would refuse the whole save as a conflict.
+   */
+  saveEodCopy(input: Omit<EodEmailCopy, "id" | "sentAt" | "expiresAt"> & { expiresAt?: number }): EodEmailCopy {
+    const now = Date.now();
+    const copy: EodEmailCopy = {
+      ...input,
+      id: `eod_${Math.random().toString(36).slice(2, 10)}`,
+      sentAt: now,
+      expiresAt: input.expiresAt ?? now + EOD_COPY_KEPT_MS,
+    };
+    mutate((db) => {
+      if (!isConvex()) db.eodEmailCopies = db.eodEmailCopies.filter((c) => c.expiresAt > now);
+      db.eodEmailCopies.push(copy);
+    });
+    return copy;
+  },
+
+  /** An opening's copies still inside their month, newest first. */
+  eodCopies(openingId: Id): EodEmailCopy[] {
+    const now = Date.now();
+    return load()
+      .eodEmailCopies.filter((c) => c.openingId === openingId && c.expiresAt > now)
+      .sort((a, b) => b.sentAt - a.sentAt);
+  },
+
+  /** One copy, or nothing once its month is over — even before the purge has run. */
+  eodCopy(id: Id): EodEmailCopy | undefined {
+    const c = load().eodEmailCopies.find((x) => x.id === id);
+    return c && c.expiresAt > Date.now() ? c : undefined;
+  },
+
+  /**
+   * The round's set went out again, corrected. Kept after the copies are
+   * cleared. A corrected research link replaces the one the platform shows.
+   */
+  markRoundRevised(roundId: Id, opts: { at?: number; researchLink?: string | null } = {}): void {
+    mutate((db) => {
+      const r = db.reviewRounds.find((x) => x.id === roundId);
+      if (!r) return;
+      r.revisedAt = [...(r.revisedAt ?? []), opts.at ?? Date.now()];
+      if (opts.researchLink) r.researchLink = opts.researchLink;
+    });
+  },
+
   /** Matching an inbound reply to the set it answers. The token first, because
    *  it survives a forward; the thread only as a fallback. */
   roundByToken(token: string): ReviewRound | undefined {
@@ -2962,6 +3031,259 @@ const rawRepo = {
     mutate((db) => {
       db.savedSearches = db.savedSearches.filter((s) => s.id !== id);
     });
+  },
+
+  // ─── Strategy Planner (8 Oct) ─────────────────────────────────────────────
+  //
+  // The list a lead chooses from, and what she has given each TA on each job.
+  // Who may do what is decided before these are called (lib/auth, the actions);
+  // who may SEE which row is lib/visibility scopeStrategies.
+
+  /** The list in the desk's order; retired ones only when asked for. */
+  strategies(includeRetired = false): Strategy[] {
+    return load()
+      .strategies.filter((s) => includeRetired || s.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  },
+
+  strategy(id: Id): Strategy | undefined {
+    return load().strategies.find((s) => s.id === id);
+  },
+
+  /**
+   * Add a strategy, or change one (name, description, group). The same name
+   * (any capitals) as another still-listed strategy is refused: two "Boolean
+   * search" entries in a dropdown help nobody. Returns null when refused.
+   */
+  saveStrategy(input: { id?: Id; name: string; description: string | null; group: string | null; byUserId: Id }): Id | null {
+    const name = input.name.trim();
+    if (!name) return null;
+    const taken = load().strategies.some((s) => s.active && s.id !== input.id && s.name.trim().toLowerCase() === name.toLowerCase());
+    if (taken) return null;
+    // Changing one that is not there is a refusal, not a quiet new entry.
+    if (input.id && !load().strategies.some((s) => s.id === input.id)) return null;
+    const id = input.id ?? `st_${Math.random().toString(36).slice(2, 10)}`;
+    mutate((db) => {
+      const held = input.id ? db.strategies.find((s) => s.id === input.id) : undefined;
+      if (held) {
+        held.name = name;
+        held.description = input.description;
+        held.group = input.group;
+        return;
+      }
+      db.strategies.push({
+        id,
+        name,
+        description: input.description,
+        group: input.group,
+        sortOrder: db.strategies.reduce((m, s) => Math.max(m, s.sortOrder), 0) + 1,
+        active: true,
+        createdAt: Date.now(),
+        createdBy: input.byUserId,
+      });
+    });
+    return id;
+  },
+
+  /** Retire or bring back. Assignments already given are never touched. */
+  setStrategyActive(id: Id, active: boolean) {
+    mutate((db) => {
+      const s = db.strategies.find((x) => x.id === id);
+      if (s) s.active = active;
+    });
+  },
+
+  /**
+   * One opening's rows of the strategy table, or everyone's. A row exists only
+   * once the lead has acted on a strategy for the job; in the desk's list order.
+   */
+  strategyAssignments(openingId?: Id): StrategyAssignment[] {
+    const db = load();
+    const order = new Map(db.strategies.map((s) => [s.id, s.sortOrder]));
+    return db.strategyAssignments
+      .filter((a) => !openingId || a.openingId === openingId)
+      .sort((a, b) => (order.get(a.strategyId) ?? 1e9) - (order.get(b.strategyId) ?? 1e9) || a.strategyName.localeCompare(b.strategyName));
+  },
+
+  strategyAssignment(id: Id): StrategyAssignment | undefined {
+    return load().strategyAssignments.find((a) => a.id === id);
+  },
+
+  /** The row for one strategy on one job, if the lead has acted on it. */
+  strategyRow(openingId: Id, strategyId: Id): StrategyAssignment | undefined {
+    return load().strategyAssignments.find((a) => a.openingId === openingId && a.strategyId === strategyId);
+  },
+
+  /**
+   * Put a TA on a strategy for a job ("Done by"). Makes the row the first time,
+   * dated `today` and credited to the lead; a second TA on the same row is added
+   * to it, and the same TA twice is nothing. A strategy that is unknown, or
+   * retired with no row yet, is refused (null).
+   */
+  addStrategyDoneBy(input: {
+    openingId: Id;
+    strategyId: Id;
+    taId: Id;
+    byUserId: Id;
+    byRole: Role;
+    today: number;
+  }): { row: StrategyAssignment; created: boolean; added: boolean } | null {
+    let out: { row: StrategyAssignment; created: boolean; added: boolean } | null = null;
+    mutate((db) => {
+      const s = db.strategies.find((x) => x.id === input.strategyId);
+      let row = db.strategyAssignments.find((a) => a.openingId === input.openingId && a.strategyId === input.strategyId);
+      let created = false;
+      if (!row) {
+        if (!s || !s.active) return;
+        row = {
+          id: `sa_${Math.random().toString(36).slice(2, 10)}`,
+          openingId: input.openingId,
+          strategyId: input.strategyId,
+          strategyName: s.name,
+          doneBy: [],
+          assignedAt: input.today,
+          assignedBy: input.byUserId,
+          byRole: input.byRole,
+          notApplicable: false,
+          doneAt: null,
+          note: null,
+          proofs: [],
+          submittedAt: null,
+          submittedBy: null,
+        };
+        db.strategyAssignments.push(row);
+        created = true;
+      }
+      const added = !row.doneBy.includes(input.taId);
+      if (added) row.doneBy = [...row.doneBy, input.taId];
+      // A row that was only struck through, or dated, takes its date from the first TA put on it.
+      if (row.assignedAt === null) {
+        row.assignedAt = input.today;
+        row.assignedBy = input.byUserId;
+        row.byRole = input.byRole;
+      }
+      out = { row, created, added };
+    });
+    return out;
+  },
+
+  /** Take a TA off a row. A row left with nothing on it at all is removed. */
+  removeStrategyDoneBy(rowId: Id, taId: Id) {
+    mutate((db) => {
+      const row = db.strategyAssignments.find((a) => a.id === rowId);
+      if (!row) return;
+      row.doneBy = row.doneBy.filter((t) => t !== taId);
+      if (strategyRowIsEmpty(row)) db.strategyAssignments = db.strategyAssignments.filter((a) => a.id !== rowId);
+    });
+  },
+
+  /** The day the lead says it was assigned (null clears it). */
+  setStrategyAssignedDate(rowId: Id, day: number | null) {
+    mutate((db) => {
+      const row = db.strategyAssignments.find((a) => a.id === rowId);
+      if (row) row.assignedAt = day;
+    });
+  },
+
+  /**
+   * Strike a strategy through for a job ("cannot be used here"), or bring it
+   * back. Making the mark makes the row if there is none; clearing it from a
+   * row with nothing else on it removes the row. Nothing a TA submitted is lost.
+   */
+  setStrategyNotApplicable(input: { openingId: Id; strategyId: Id; notApplicable: boolean; byUserId: Id; byRole: Role }): boolean {
+    let ok = false;
+    mutate((db) => {
+      const s = db.strategies.find((x) => x.id === input.strategyId);
+      let row = db.strategyAssignments.find((a) => a.openingId === input.openingId && a.strategyId === input.strategyId);
+      if (!row) {
+        if (!input.notApplicable) {
+          ok = true;
+          return;
+        }
+        if (!s) return;
+        row = {
+          id: `sa_${Math.random().toString(36).slice(2, 10)}`,
+          openingId: input.openingId,
+          strategyId: input.strategyId,
+          strategyName: s.name,
+          doneBy: [],
+          assignedAt: null,
+          assignedBy: input.byUserId,
+          byRole: input.byRole,
+          notApplicable: false,
+          doneAt: null,
+          note: null,
+          proofs: [],
+          submittedAt: null,
+          submittedBy: null,
+        };
+        db.strategyAssignments.push(row);
+      }
+      row.notApplicable = input.notApplicable;
+      if (strategyRowIsEmpty(row)) db.strategyAssignments = db.strategyAssignments.filter((a) => a.id !== row!.id);
+      ok = true;
+    });
+    return ok;
+  },
+
+  /** Take the whole row off the job's table, whatever is on it. */
+  removeStrategyRow(id: Id) {
+    mutate((db) => {
+      db.strategyAssignments = db.strategyAssignments.filter((a) => a.id !== id);
+    });
+  },
+
+  /**
+   * A TA submits their rows on a job: when they used each strategy and what they
+   * did. Only a row they are on, and that is not struck through, is changed; its
+   * proofs become the lead's to see. Returns how many rows were taken in.
+   */
+  submitStrategyRows(input: {
+    openingId: Id;
+    taId: Id;
+    rows: { rowId: Id; doneAt: number | null; note: string | null }[];
+    now?: number;
+  }): number {
+    const now = input.now ?? Date.now();
+    let taken = 0;
+    mutate((db) => {
+      for (const r of input.rows) {
+        const row = db.strategyAssignments.find((a) => a.id === r.rowId);
+        if (!row || row.openingId !== input.openingId || row.notApplicable || !row.doneBy.includes(input.taId)) continue;
+        row.doneAt = r.doneAt;
+        row.note = r.note;
+        for (const p of row.proofs) if (p.submittedAt === null && p.addedBy === input.taId) p.submittedAt = now;
+        row.submittedAt = now;
+        row.submittedBy = input.taId;
+        taken++;
+      }
+    });
+    return taken;
+  },
+
+  /** Attach a proof image to a row. It stays the TA's own until they submit. */
+  addStrategyProof(rowId: Id, proof: StrategyProof): boolean {
+    let ok = false;
+    mutate((db) => {
+      const row = db.strategyAssignments.find((a) => a.id === rowId);
+      if (!row) return;
+      row.proofs = [...row.proofs, proof];
+      ok = true;
+    });
+    return ok;
+  },
+
+  /** Remove a proof; returns its storage id so the file can be deleted too. */
+  removeStrategyProof(rowId: Id, proofId: string): string | null {
+    let gone: string | null = null;
+    mutate((db) => {
+      const row = db.strategyAssignments.find((a) => a.id === rowId);
+      const p = row?.proofs.find((x) => x.id === proofId);
+      if (!row || !p) return;
+      row.proofs = row.proofs.filter((x) => x.id !== proofId);
+      gone = p.id;
+    });
+    return gone;
   },
 
   /**

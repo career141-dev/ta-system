@@ -39,7 +39,11 @@ export function EffortSheet({
   const initial: Draft = {
     kind: effort.hundredOrFollowUp || "100%",
     values: Object.fromEntries(EFFORT_NUMBERS.map((k) => [k, effort[k] == null ? "" : String(effort[k])])),
-    targets: {},
+    // A sent email's own targets, when it is opened to send again (8 Oct); the
+    // records give none, so a new email starts blank as before.
+    targets: Object.fromEntries(
+      Object.entries(effort.targets ?? {}).flatMap(([k, t]) => (t == null || t === "" ? [] : [[k, String(t)]])),
+    ),
   };
   const [draft, setDraft] = useState<Draft>(initial);
   // The draft as the page opened with it, before anything kept was read back.

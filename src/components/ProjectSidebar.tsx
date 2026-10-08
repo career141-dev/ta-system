@@ -96,6 +96,8 @@ export function ProjectSidebar({
     { href: `${base}/jd`, label: "Job description" },
     { href: `${base}/database`, label: "Database CVs" },
     { href: `${base}/snippets`, label: "Snippets" },
+    // What the TA Lead asked this TA to try on the job (Strategy Planner, 8 Oct).
+    { href: `${base}/strategies`, label: "Strategies" },
     // The Director and client round trips live on the end-of-day email
     // rather than a screen of their own: the set goes out on the email the
     // desk already sends, and the reply to it is what moves people.

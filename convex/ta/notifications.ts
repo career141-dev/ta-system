@@ -19,6 +19,8 @@ const NOTIFICATION_TYPE = v.union(
   v.literal("opening_assigned"),
   // CVs the Director, a TA Lead or Ops mailed to the TA (mailIntake, 27 Sep).
   v.literal("scoop_received"),
+  // A TA Lead gave the TA strategies on a job (Strategy Planner, 8 Oct).
+  v.literal("strategy_assigned"),
 );
 
 export const create = internalMutation({
