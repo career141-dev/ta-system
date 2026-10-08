@@ -716,6 +716,8 @@ export const TABLES: Record<string, TableModel> = {
   intake: identity("intakeItems", ["receivedFrom", "fileName", "fileHash", "sizeBytes", "rawText", "parsed", "match", "toAddress", "subject", "openingId", "jobPostId", "routedToTaId", "routeNote", "routeConfidence", "candidateId", "handledBy", "handledAt", "note"]),
   matchRuns: identity("matchRuns", ["note"]),
   callFeedback: identity("callFeedback", ["structured"]),
+  strategies: identity("strategies", ["description", "group"]),
+  strategyAssignments: identity("strategyAssignments", ["assignedAt", "assignedBy", "byRole", "doneAt", "note", "submittedAt", "submittedBy"]),
 };
 
 /** The app tables the store keeps. `liveMirror` is the JSON store's read-only copy and has no table. */

@@ -1964,7 +1964,8 @@ export default defineSchema({
       v.literal("candidate_replied"),
       v.literal("candidate_unresponsive"),
       v.literal("opening_assigned"),
-      v.literal("scoop_received")
+      v.literal("scoop_received"),
+      v.literal("strategy_assigned")
     ),
     title: v.string(),
     body: v.string(),
@@ -2690,6 +2691,53 @@ export default defineSchema({
   })
     .index("by_opening", ["openingId"])
     .index("by_opening_candidate", ["openingId", "candidateId"]),
+
+  /**
+   * The strategies a TA Lead can choose from (Strategy Planner, 8 Oct). The
+   * list is the desk's own and edited in the app; retired ones stay here so
+   * what was given under them still reads.
+   */
+  strategies: defineTable({
+    name: v.string(),
+    description: v.optional(v.union(v.string(), v.null())),
+    group: v.optional(v.union(v.string(), v.null())),
+    sortOrder: v.number(),
+    active: v.boolean(),
+    createdAt: v.number(),
+    createdBy: v.id("users"),
+  }).index("by_active", ["active", "sortOrder"]),
+
+  /**
+   * One row of a job's strategy table: a strategy on a job. The lead puts TAs on
+   * it (doneBy), dates it, or strikes it through (notApplicable); the TA fills
+   * doneAt, note and proofs and submits. A strategy nobody has acted on has no row.
+   */
+  strategyAssignments: defineTable({
+    openingId: v.id("jobs"),
+    strategyId: v.id("strategies"),
+    /** The name when the row was made, kept if the strategy is renamed or retired. */
+    strategyName: v.string(),
+    doneBy: v.array(v.id("users")),
+    assignedAt: v.optional(v.union(v.number(), v.null())),
+    assignedBy: v.optional(v.union(v.id("users"), v.null())),
+    byRole: v.optional(v.union(v.string(), v.null())),
+    notApplicable: v.boolean(),
+    doneAt: v.optional(v.union(v.number(), v.null())),
+    note: v.optional(v.union(v.string(), v.null())),
+    /** Proof images: the storage id, and when the TA submitted it (null until then). */
+    proofs: v.array(v.object({
+      id: v.string(),
+      contentType: v.string(),
+      size: v.number(),
+      addedAt: v.number(),
+      addedBy: v.id("users"),
+      submittedAt: v.union(v.number(), v.null()),
+    })),
+    submittedAt: v.optional(v.union(v.number(), v.null())),
+    submittedBy: v.optional(v.union(v.id("users"), v.null())),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_opening_strategy", ["openingId", "strategyId"]),
 
   /**
    * A set of CVs sent out for a decision, and the decision that came back.

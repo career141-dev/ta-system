@@ -195,6 +195,7 @@ import type * as ta_referenceSearch from "../ta/referenceSearch.js";
 import type * as ta_requirements from "../ta/requirements.js";
 import type * as ta_requirementsActions from "../ta/requirementsActions.js";
 import type * as ta_search from "../ta/search.js";
+import type * as ta_strategies from "../ta/strategies.js";
 import type * as ta_stages from "../ta/stages.js";
 import type * as ta_storage from "../ta/storage.js";
 import type * as ta_tables from "../ta/tables.js";
@@ -400,6 +401,7 @@ declare const fullApi: ApiFromModules<{
   "ta/requirements": typeof ta_requirements;
   "ta/requirementsActions": typeof ta_requirementsActions;
   "ta/search": typeof ta_search;
+  "ta/strategies": typeof ta_strategies;
   "ta/stages": typeof ta_stages;
   "ta/storage": typeof ta_storage;
   "ta/tables": typeof ta_tables;

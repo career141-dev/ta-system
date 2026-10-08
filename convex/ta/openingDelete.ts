@@ -74,6 +74,7 @@ const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   ["matchRuns", "by_opening", "openingId"],
   ["matchExclusions", "by_opening", "openingId"],
   ["reviewRounds", "by_opening", "openingId"],
+  ["strategyAssignments", "by_opening", "openingId"],
   // Left behind until 2 Oct: the job id is required on most of these, so a
   // row outliving its opening points at nothing.
   ["whatsappSessions", "by_jobId", "jobId"],
@@ -168,7 +169,15 @@ export const step = internalMutation({
         .query(table as never)
         .withIndex(index as never, (q: any) => q.eq(field, args.jobId))
         .take(Math.max(1, budget));
-      for (const r of rows) await del((r as { _id: string })._id);
+      for (const r of rows) {
+        // A strategy row's proof images are files in storage: they go with it.
+        if (table === "strategyAssignments") {
+          for (const p of (r as { proofs?: { id: string }[] }).proofs ?? []) {
+            await ctx.storage.delete(p.id as Id<"_storage">).catch(() => {});
+          }
+        }
+        await del((r as { _id: string })._id);
+      }
       if (budget <= 0) {
         await ctx.scheduler.runAfter(0, internal.ta.openingDelete.step, { jobId: args.jobId });
         return { done: false, stage: table };
