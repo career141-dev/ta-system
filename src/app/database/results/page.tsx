@@ -24,7 +24,8 @@ import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import type { DrawerCv } from "@/components/db/DbCandidateDrawer";
 import { keywordRetrieve } from "@/lib/retrieve";
-import { inLevelOrder, levelSectionFor } from "@/lib/levels";
+import { inSelectedLevels, levelOptions } from "@/lib/levels";
+import { LevelFilter } from "@/components/db/LevelFilter";
 import {
   cachedEngineSearch,
   deskCriteria,
@@ -363,7 +364,7 @@ async function ResultsView({
   // What is still ours to enforce. Where the engine ran it has already applied
   // place and years against its own fields; see `deskCriteria`.
   const narrowing = engineRanked ? deskCriteria(criteria) : criteria;
-  const { results, total, scanned, below } = repo.searchDatabase(narrowing, {
+  const { results, total: foundTotal, scanned, below } = repo.searchDatabase(narrowing, {
     boolean: mode === "boolean" ? q : null,
     limit: Number.MAX_SAFE_INTEGER,
     similarity,
@@ -421,17 +422,19 @@ async function ResultsView({
     return scoreB - scoreA || (b.candidate.totalExperienceYears ?? 0) - (a.candidate.totalExperienceYears ?? 0);
   });
 
-  // Then in level sections, highest level first, best fit first inside each —
-  // against the opening's level when the search is for one, the same sections
-  // Database CVs shows (5 Oct). Done across the whole list before paging, so a
-  // page never mixes the order.
-  const sectionOf = (c: (typeof results)[number]["candidate"]) => levelSectionFor(target, c);
-  results.splice(0, results.length, ...inLevelOrder(results, (r) => sectionOf(r.candidate)));
-  const sectionCount = new Map<string, number>();
-  for (const r of results) {
-    const label = sectionOf(r.candidate).label;
-    sectionCount.set(label, (sectionCount.get(label) ?? 0) + 1);
+  // The list stays in best-fit order. The levels it holds are a filter beside it
+  // (8 Oct): they used to cut the list into sections under headings, which
+  // buried the best fit under whichever level came first. The choices are
+  // counted over the whole list; ticked ones narrow it before paging, so a page
+  // never mixes the two.
+  const levelChoices = levelOptions(target, results.map((r) => r.candidate));
+  const pickedLevels = new Set(
+    (Array.isArray(sp.lvl) ? sp.lvl : sp.lvl ? [sp.lvl] : []).filter((k) => levelChoices.some((o) => o.key === k)),
+  );
+  if (pickedLevels.size) {
+    results.splice(0, results.length, ...results.filter((r) => inSelectedLevels(r.candidate, pickedLevels)));
   }
+  const total = pickedLevels.size ? results.length : foundTotal;
 
   const shown = results.slice((page - 1) * PAGE, page * PAGE);
 
@@ -510,6 +513,20 @@ async function ResultsView({
     p.set("page", String(n));
     if (edited) p.set("edited", "1");
     if (showBelow) p.set("below", "1");
+    for (const k of pickedLevels) p.append("lvl", k);
+    return `${base}?${p.toString()}`;
+  };
+
+  // The level filter's links: the same search with one level ticked or unticked,
+  // back on page one. Passing nothing clears them.
+  const levelHref = (toggle?: string) => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (edited) p.set("edited", "1");
+    if (showBelow) p.set("below", "1");
+    const next = new Set(pickedLevels);
+    if (toggle !== undefined) (next.has(toggle) ? next.delete(toggle) : next.add(toggle));
+    for (const k of next) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
 
@@ -538,6 +555,7 @@ async function ResultsView({
     if (page > 1) p.set("page", String(page));
     if (edited) p.set("edited", "1");
     if (showBelow) p.set("below", "1");
+    for (const k of pickedLevels) p.append("lvl", k);
     p.set("candidate", id);
     return `${base}?${p.toString()}`;
   };
@@ -548,6 +566,7 @@ async function ResultsView({
     if (page > 1) p.set("page", String(page));
     if (edited) p.set("edited", "1");
     if (showBelow) p.set("below", "1");
+    for (const k of pickedLevels) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   })();
   // "← Back to results" from a candidate's profile returns to exactly this list —
@@ -612,6 +631,9 @@ async function ResultsView({
     <>
       <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[400px_1fr]">
         <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
+          {/* First, so it is in view without scrolling past the explanation below. */}
+          <LevelFilter options={levelChoices} picked={pickedLevels} hrefFor={levelHref} jobTitle={target?.title ?? null} />
+
           <AiPanel
             criteria={criteria}
             ignored={ignored}
@@ -794,16 +816,6 @@ async function ResultsView({
             ) : (
               shown.map((r, i) => (
                 <div key={r.candidate.id}>
-                  {/* A level's heading before its first row, and again at the top of a page it carries on to. */}
-                  {(i === 0 || sectionOf(shown[i - 1].candidate).label !== sectionOf(r.candidate).label) && (
-                    <div className="border-b border-rule bg-paper px-6 py-2.5 text-[12px] font-medium text-ink-soft">
-                      {sectionOf(r.candidate).label}
-                      <span className="font-normal text-ink-faint">
-                        {" "}· {sectionCount.get(sectionOf(r.candidate).label) ?? 0}{" "}
-                        {(sectionCount.get(sectionOf(r.candidate).label) ?? 0) === 1 ? "candidate" : "candidates"}
-                      </span>
-                    </div>
-                  )}
                   <ResultRow
                     candidate={r.candidate}
                     fit={fit.get(r.candidate.id) ?? null}
