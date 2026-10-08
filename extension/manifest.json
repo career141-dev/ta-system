@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Career141 — Capture from LinkedIn",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Files the LinkedIn profile you are looking at into a Career141 opening. One profile, one button press, by you.",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [

@@ -16,6 +16,7 @@ import {
 } from "@/app/actions";
 import { FindCvButton } from "./FindCvButton";
 import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit";
+import { CompanyReferenceSection } from "./CompanyReferenceSection";
 import Link from "next/link";
 import { inputClass } from "./form";
 import { dateAt } from "@/lib/format";
@@ -86,6 +87,7 @@ export function LinkRow({
   const [removed, setRemoved] = useState(false);
   const [isEyeMarked, setIsEyeMarked] = useState(r.isEyeMarked);
   const [edit, setEdit] = useState(false);
+  const [companyRefOpen, setCompanyRefOpen] = useState(false);
   // Opened from "Add to pipeline" on a row that is not shortlisted yet.
   const [forPipeline, setForPipeline] = useState(false);
   const [allLog, setAllLog] = useState(false);
@@ -212,6 +214,15 @@ export function LinkRow({
               <p className="mt-0.5 text-[13px]">{r.title ?? "Title not recorded"}</p>
               <p className="mt-0.5 text-[12px] text-ink-faint">
                 {[r.company, r.phoneNumber].filter(Boolean).join(" · ") || "No company or number yet"}
+                {r.company && (
+                  <button
+                    type="button"
+                    onClick={() => setCompanyRefOpen((v) => !v)}
+                    className="ml-2 inline-flex items-center gap-1 font-medium text-brand hover:underline"
+                  >
+                    Company Reference →
+                  </button>
+                )}
               </p>
               <CvStatus entry={r} openingId={openingId} decide={decide} />
               {interest === "not_interested" && why && (
@@ -335,6 +346,19 @@ export function LinkRow({
                     Add note
                   </button>
                 )}
+                <button
+                  type="button"
+                  onClick={() => setCompanyRefOpen((v) => !v)}
+                  aria-expanded={companyRefOpen}
+                  title="View people in our database from the same company"
+                  className={`whitespace-nowrap rounded-full border px-4 py-1.5 text-[12.5px] font-medium transition-colors ${
+                    companyRefOpen
+                      ? "border-brand bg-brand text-white shadow-sm"
+                      : "border-brand-line text-brand hover:bg-brand-soft"
+                  }`}
+                >
+                  Company Reference
+                </button>
                 <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="entryId" value={r.id} />
@@ -522,6 +546,15 @@ export function LinkRow({
               )}
             </dd>
           </dl>
+
+          {companyRefOpen && (
+            <CompanyReferenceSection
+              company={r.company ?? ""}
+              openingId={openingId}
+              excludeCandidateId={r.candidateId ?? undefined}
+              onClose={() => setCompanyRefOpen(false)}
+            />
+          )}
 
           {!edit && <ActionNote result={answer} className="mt-3" />}
 

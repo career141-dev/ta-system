@@ -5844,3 +5844,94 @@ export async function submitStrategyUpdateInline(_: ActionResult | null, formDat
 export async function removeStrategyProofInline(_: ActionResult | null, formData: FormData) {
   return inline(() => removeStrategyProof(formData));
 }
+
+export type CompanyReferenceColleague = {
+  id: string;
+  fullName: string;
+  currentTitle: string;
+  currentEmployer: string;
+  phone: string | null;
+  email: string | null;
+  latestApp?: { id: string; openingId: string; stage: string } | null;
+};
+
+/**
+ * Look up people in our database who work at the same company (Company Reference).
+ * Used in Candidate Profile and Excel Tables to find backchannel contacts and phone numbers.
+ */
+export async function getCompanyReferences(input: {
+  company: string;
+  excludeCandidateId?: string | null;
+  openingId?: string;
+}): Promise<{ ok: true; company: string; colleagues: CompanyReferenceColleague[] } | { ok: false; message: string }> {
+  const company = (input.company || "").trim();
+  if (!company) return { ok: true, company: "", colleagues: [] };
+
+  // Names, phones and emails across the whole database: always on a job the
+  // person may source for. Without an opening the check was skipped and any
+  // signed-in account, a client's too, could list a company's people (review, 8 Oct).
+  if (!input.openingId) return { ok: false, message: "Open this from a job." };
+  await primeStore({ openingId: input.openingId });
+  const user = await getCurrentUser();
+  const assignment = repo.assignmentFor(input.openingId, user.id) ?? null;
+  const allowed = can(user, "opening.sourcing", { openingId: input.openingId, assignment });
+  if (!allowed.ok) return { ok: false, message: allowed.message };
+
+  const colleagues: CompanyReferenceColleague[] = [];
+  const existingIds = new Set<string>();
+
+  const excludeId = input.excludeCandidateId || undefined;
+
+  // 1. From local memory store
+  const storeCandidates = repo.peopleAtCompany(company, excludeId);
+  for (const c of storeCandidates) {
+    if (existingIds.has(c.id)) continue;
+    const apps = repo.applicationsForCandidate(c.id);
+    const latestApp = apps[0] ? { id: apps[0].id, openingId: apps[0].openingId, stage: apps[0].stage } : null;
+    colleagues.push({
+      id: c.id,
+      fullName: c.fullName,
+      currentTitle: c.currentTitle ?? "",
+      currentEmployer: c.currentEmployer ?? company,
+      phone: c.phone ?? null,
+      email: c.email ?? null,
+      latestApp,
+    });
+    existingIds.add(c.id);
+  }
+
+  // 2. From Convex if enabled
+  if (isConvex()) {
+    try {
+      const backendResults = await convexQuery<{
+        candidates: { id: string; fullName: string; currentTitle: string; currentEmployer: string; phone: string | null; email: string | null }[];
+      }>("ta/candidates:peopleAtCompany", {
+        company,
+        excludeCandidateId: excludeId,
+      }).catch(() => null);
+
+      if (backendResults?.candidates) {
+        for (const cand of backendResults.candidates) {
+          if (!existingIds.has(cand.id)) {
+            const apps = repo.applicationsForCandidate(cand.id);
+            const latestApp = apps[0] ? { id: apps[0].id, openingId: apps[0].openingId, stage: apps[0].stage } : null;
+            colleagues.push({
+              id: cand.id,
+              fullName: cand.fullName,
+              currentTitle: cand.currentTitle,
+              currentEmployer: cand.currentEmployer || company,
+              phone: cand.phone,
+              email: cand.email,
+              latestApp,
+            });
+            existingIds.add(cand.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("[getCompanyReferences] Convex lookup failed:", err);
+    }
+  }
+
+  return { ok: true, company, colleagues };
+}
