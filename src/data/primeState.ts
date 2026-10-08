@@ -22,7 +22,7 @@ export function blank(): Database {
     pipelineEvents: [], reviewRounds: [], linkVault: [], alerts: [], savedSearches: [],
     savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [],
-    settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
+    settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [], feedbacks: [],
   };
 }
 

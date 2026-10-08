@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, isReadOnly, type Capability } from "@/lib/auth";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
-import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
+import type { CvMatch, FollowUpCallOutcome, User, WorkingStage, FeedbackCategory, FeedbackPriority, FeedbackStatus, FeedbackItem } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { BACK_TO_TABLES_REASON } from "@/lib/pipeline";
@@ -5557,4 +5557,201 @@ export async function getCompanyReferences(input: {
 
   return { ok: true, company, colleagues };
 }
+
+/**
+ * Submit feedback or bug report from any TA.
+ * Initial status is always "pending_lead".
+ */
+export async function submitFeedbackAction(input: {
+  category: FeedbackCategory;
+  priority: FeedbackPriority;
+  title: string;
+  description: string;
+  pageUrl?: string;
+  openingId?: string;
+  screenshot?: string;
+}): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, message: "You must be logged in to submit feedback." };
+  }
+
+  const title = (input.title || "").trim();
+  const description = (input.description || "").trim();
+  if (!title || !description) {
+    return { ok: false, message: "Please provide both a title and description." };
+  }
+
+  const pageUrl = input.pageUrl === "/feedback" ? "" : (input.pageUrl || "");
+
+  const id = repo.addFeedback({
+    submittedBy: user.id,
+    submittedByName: user.name || "Anonymous",
+    submittedByRole: user.role,
+    category: input.category,
+    priority: input.priority,
+    title,
+    description,
+    pageUrl,
+    openingId: input.openingId,
+    screenshot: input.screenshot,
+    status: "pending_lead",
+  });
+
+  if (isConvex()) {
+    try {
+      await convexMutation("ta/feedbacks:submit", {
+        actorId: user.id,
+        category: input.category,
+        priority: input.priority,
+        title,
+        description,
+        pageUrl,
+        openingId: input.openingId,
+        screenshot: input.screenshot,
+      });
+    } catch (err) {
+      console.warn("[submitFeedbackAction] Convex write failed:", err);
+    }
+  }
+
+  revalidatePath("/feedback");
+  return { ok: true, id };
+}
+
+/**
+ * TA Lead reviews feedback:
+ * - "approved_for_admin": Escalates to Admin review queue
+ * - "resolved_by_lead": Resolved directly by Lead
+ * - "declined_by_lead": Declined by Lead
+ */
+export async function leadReviewFeedbackAction(input: {
+  feedbackId: string;
+  decision: "approved_for_admin" | "resolved_by_lead" | "declined_by_lead";
+  leadNotes?: string;
+}): Promise<{ ok: true; status: FeedbackStatus } | { ok: false; message: string }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, message: "Authentication required." };
+  }
+
+  if (user.role !== "ta_lead" && user.role !== "director" && user.role !== "admin") {
+    return { ok: false, message: "Only TA Leads, Directors, or Admins can review feedback submissions." };
+  }
+
+  const existing = repo.feedback(input.feedbackId);
+  if (!existing) {
+    return { ok: false, message: "Feedback item not found." };
+  }
+
+  const now = Date.now();
+  const patch: Partial<FeedbackItem> = {
+    status: input.decision,
+    leadReviewedBy: user.id,
+    leadReviewedByName: user.name || "TA Lead",
+    leadReviewedAt: now,
+    leadNotes: input.leadNotes?.trim() || undefined,
+    resolvedAt: input.decision === "resolved_by_lead" ? now : undefined,
+  };
+
+  repo.updateFeedback(input.feedbackId, patch);
+
+  if (isConvex()) {
+    try {
+      await convexMutation("ta/feedbacks:leadReview", {
+        actorId: user.id,
+        feedbackId: input.feedbackId,
+        decision: input.decision,
+        leadNotes: input.leadNotes,
+      });
+    } catch (err) {
+      console.warn("[leadReviewFeedbackAction] Convex write failed:", err);
+    }
+  }
+
+  revalidatePath("/feedback");
+  return { ok: true, status: input.decision };
+}
+
+/**
+ * Admin action on feedback that was approved and escalated by TA Lead:
+ * - "in_progress" | "resolved" | "declined_by_admin"
+ */
+export async function adminUpdateFeedbackAction(input: {
+  feedbackId: string;
+  status: "in_progress" | "resolved" | "declined_by_admin";
+  adminResolution?: string;
+}): Promise<{ ok: true; status: FeedbackStatus } | { ok: false; message: string }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, message: "Authentication required." };
+  }
+
+  if (user.role !== "admin" && user.role !== "director") {
+    return { ok: false, message: "Only Admins or Directors can update the Admin feedback queue." };
+  }
+
+  const existing = repo.feedback(input.feedbackId);
+  if (!existing) {
+    return { ok: false, message: "Feedback item not found." };
+  }
+
+  const now = Date.now();
+  const patch: Partial<FeedbackItem> = {
+    status: input.status,
+    adminReviewedBy: user.id,
+    adminReviewedByName: user.name || "Admin",
+    adminReviewedAt: now,
+    adminResolution: input.adminResolution?.trim() || undefined,
+    resolvedAt: input.status === "resolved" ? now : undefined,
+  };
+
+  repo.updateFeedback(input.feedbackId, patch);
+
+  if (isConvex()) {
+    try {
+      await convexMutation("ta/feedbacks:adminUpdate", {
+        actorId: user.id,
+        feedbackId: input.feedbackId,
+        status: input.status,
+        adminResolution: input.adminResolution,
+      });
+    } catch (err) {
+      console.warn("[adminUpdateFeedbackAction] Convex write failed:", err);
+    }
+  }
+
+  revalidatePath("/feedback");
+  return { ok: true, status: input.status };
+}
+
+/**
+ * Fetch feedbacks according to caller's role.
+ */
+export async function getFeedbacksAction(): Promise<{
+  ok: true;
+  feedbacks: FeedbackItem[];
+  currentUser: User | null;
+} | { ok: false; message: string }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  const feedbacks = repo.feedbacks(user ?? undefined);
+  return { ok: true, feedbacks, currentUser: user };
+}
+
+/**
+ * Mark all visible feedback items as seen for current user so the alert badge clears.
+ */
+export async function markFeedbackSeenAction(): Promise<{ ok: boolean }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  if (!user) return { ok: false };
+  repo.markAllFeedbackSeen(user.id, user);
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
 

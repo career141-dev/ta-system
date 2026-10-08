@@ -1441,6 +1441,7 @@ export interface Database {
   matchExclusions: MatchExclusion[];
   liveMirror: LiveMirrorRow[];
   bin: BinEntry[];
+  feedbacks: FeedbackItem[];
 }
 
 /**
@@ -1508,3 +1509,75 @@ export interface MatchExclusion {
   candidateId: Id;
   at: number;
 }
+
+// ─── TA Feedback & Approval System ──────────────────────────────────────────
+
+export type FeedbackCategory = "bug" | "feature" | "ui_ux" | "workflow" | "data_quality" | "other";
+export type FeedbackPriority = "low" | "medium" | "high" | "urgent";
+export type FeedbackStatus =
+  | "pending_lead"
+  | "approved_for_admin"
+  | "resolved_by_lead"
+  | "declined_by_lead"
+  | "in_progress"
+  | "resolved"
+  | "declined_by_admin";
+
+export const FEEDBACK_CATEGORY_LABEL: Record<FeedbackCategory, string> = {
+  bug: "Bug / Defect",
+  feature: "Feature Request",
+  ui_ux: "UI / UX Improvement",
+  workflow: "Workflow Question",
+  data_quality: "Data Quality",
+  other: "Other Feedback",
+};
+
+export const FEEDBACK_PRIORITY_LABEL: Record<FeedbackPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  urgent: "Urgent",
+};
+
+export const FEEDBACK_STATUS_LABEL: Record<
+  FeedbackStatus,
+  { label: string; tone: "warn" | "brand" | "ok" | "danger" | "muted" }
+> = {
+  pending_lead: { label: "Pending TA Lead Review", tone: "warn" },
+  approved_for_admin: { label: "Approved for Admin", tone: "brand" },
+  resolved_by_lead: { label: "Resolved by Lead", tone: "ok" },
+  declined_by_lead: { label: "Declined by Lead", tone: "muted" },
+  in_progress: { label: "In Progress (Admin)", tone: "brand" },
+  resolved: { label: "Resolved", tone: "ok" },
+  declined_by_admin: { label: "Declined by Admin", tone: "danger" },
+};
+
+export interface FeedbackItem {
+  id: Id;
+  submittedBy: Id;
+  submittedByName: string;
+  submittedByRole: Role;
+  createdAt: number;
+
+  category: FeedbackCategory;
+  priority: FeedbackPriority;
+  title: string;
+  description: string;
+  pageUrl?: string;
+  openingId?: string;
+
+  status: FeedbackStatus;
+
+  leadReviewedBy?: Id;
+  leadReviewedByName?: string;
+  leadReviewedAt?: number;
+  leadNotes?: string;
+
+  adminReviewedBy?: Id;
+  adminReviewedByName?: string;
+  adminReviewedAt?: number;
+  adminResolution?: string;
+  resolvedAt?: number;
+  screenshot?: string;
+}
+

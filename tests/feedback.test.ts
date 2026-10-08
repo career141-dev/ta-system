@@ -1,0 +1,181 @@
+/**
+ * TA Feedback & Approval System Tests:
+ * 1. TA Submits feedback -> initial status "pending_lead"
+ * 2. TA Lead Review Gate:
+ *    - Approval & Escalation -> "approved_for_admin" with lead notes
+ *    - Direct Resolution -> "resolved_by_lead"
+ *    - Decline -> "declined_by_lead"
+ * 3. Admin Queue:
+ *    - Escalated items appear in Admin queue
+ *    - Admin updates status ("in_progress", "resolved") with resolution notes
+ */
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+process.env.C141_STORE = "json";
+process.env.C141_TEST_RUN = "1";
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-feedback-"));
+process.chdir(tmp);
+const { repo } = await import("@/data/store");
+const { primeStore } = await import("@/data/prime");
+
+let pass = 0, fail = 0;
+const eq = (l: string, got: unknown, want: unknown) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  ok ? pass++ : fail++;
+  console.log(`${ok ? "  ok  " : "  FAIL"} ${l}${ok ? "" : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
+};
+
+console.log("\n1. TA Submission Workflow");
+await primeStore();
+repo.reset();
+
+const taUser = repo.users().find((u) => u.role === "ta")!;
+const leadUser = repo.users().find((u) => u.role === "ta_lead")!;
+const adminUser = repo.users().find((u) => u.role === "admin" || u.role === "director")!;
+
+// Submit feedback
+const fbId = repo.addFeedback({
+  submittedBy: taUser.id,
+  submittedByName: taUser.name,
+  submittedByRole: taUser.role,
+  category: "bug",
+  priority: "high",
+  title: "Candidate search dropdown glitch",
+  description: "When typing uppercase letters, results do not filter immediately.",
+  pageUrl: "/database",
+});
+
+const item1 = repo.feedback(fbId);
+eq("item created with id", Boolean(item1), true);
+eq("initial status is pending_lead", item1?.status, "pending_lead");
+eq("priority preserved", item1?.priority, "high");
+eq("category preserved", item1?.category, "bug");
+eq("pageUrl preserved", item1?.pageUrl, "/database");
+
+console.log("\n2. Visibility and Access Control");
+const taFeedbacks = repo.feedbacks(taUser);
+eq("TA sees their own submission", taFeedbacks.some((f) => f.id === fbId), true);
+
+const leadFeedbacks = repo.feedbacks(leadUser);
+eq("TA Lead sees submissions across desk", leadFeedbacks.some((f) => f.id === fbId), true);
+
+const adminFeedbacks = repo.feedbacks(adminUser);
+eq("Admin sees submissions", adminFeedbacks.some((f) => f.id === fbId), true);
+
+console.log("\n3. TA Lead Review Gate - Approval & Escalation");
+const leadNotes = "Verified by lead. Critical issue for candidate search.";
+const leadReviewAt = Date.now();
+repo.updateFeedback(fbId, {
+  status: "approved_for_admin",
+  leadReviewedBy: leadUser.id,
+  leadReviewedByName: leadUser.name,
+  leadReviewedAt: leadReviewAt,
+  leadNotes,
+});
+
+const item1Reviewed = repo.feedback(fbId);
+eq("status updated to approved_for_admin", item1Reviewed?.status, "approved_for_admin");
+eq("lead reviewer id recorded", item1Reviewed?.leadReviewedBy, leadUser.id);
+eq("lead review notes saved", item1Reviewed?.leadNotes, leadNotes);
+
+console.log("\n4. Admin Queue & Resolution");
+const adminResolution = "Fixed debounce and case-insensitivity in search filter v2.4.";
+const resolvedAt = Date.now();
+
+// Move to in_progress
+repo.updateFeedback(fbId, {
+  status: "in_progress",
+  adminReviewedBy: adminUser.id,
+  adminReviewedByName: adminUser.name,
+  adminReviewedAt: Date.now(),
+});
+eq("admin moved to in_progress", repo.feedback(fbId)?.status, "in_progress");
+
+// Resolve
+repo.updateFeedback(fbId, {
+  status: "resolved",
+  adminReviewedBy: adminUser.id,
+  adminReviewedByName: adminUser.name,
+  adminReviewedAt: resolvedAt,
+  adminResolution,
+  resolvedAt,
+});
+
+const item1Resolved = repo.feedback(fbId);
+eq("status updated to resolved", item1Resolved?.status, "resolved");
+eq("admin resolution text recorded", item1Resolved?.adminResolution, adminResolution);
+eq("resolved timestamp present", Boolean(item1Resolved?.resolvedAt), true);
+
+console.log("\n5. TA Lead Direct Resolution (Process/Training Question)");
+const fbId2 = repo.addFeedback({
+  submittedBy: taUser.id,
+  submittedByName: taUser.name,
+  submittedByRole: taUser.role,
+  category: "workflow",
+  priority: "low",
+  title: "How to export candidate notes to Excel?",
+  description: "Where is the export button located for interview rounds?",
+  pageUrl: "/openings/op_1",
+});
+
+repo.updateFeedback(fbId2, {
+  status: "resolved_by_lead",
+  leadReviewedBy: leadUser.id,
+  leadReviewedByName: leadUser.name,
+  leadReviewedAt: Date.now(),
+  leadNotes: "Go to Opening > Candidates > Export Table in the top right toolbar.",
+  resolvedAt: Date.now(),
+});
+
+const item2Resolved = repo.feedback(fbId2);
+eq("resolved directly by lead without admin escalation", item2Resolved?.status, "resolved_by_lead");
+eq("lead notes contain answer", item2Resolved?.leadNotes?.includes("Export Table"), true);
+
+console.log("\n6. TA Lead Decline Workflow");
+const fbId3 = repo.addFeedback({
+  submittedBy: taUser.id,
+  submittedByName: taUser.name,
+  submittedByRole: taUser.role,
+  category: "other",
+  priority: "low",
+  title: "Duplicate feature request",
+  description: "Add dark mode toggle.",
+  pageUrl: "/clients",
+});
+
+repo.updateFeedback(fbId3, {
+  status: "declined_by_lead",
+  leadReviewedBy: leadUser.id,
+  leadReviewedByName: leadUser.name,
+  leadReviewedAt: Date.now(),
+  leadNotes: "Dark mode already exists in the top right user menu.",
+});
+
+const item3Declined = repo.feedback(fbId3);
+eq("lead declined with explanatory note", item3Declined?.status, "declined_by_lead");
+
+console.log("\n7. TA Lead Alert Badge Notification & Clear on Open");
+// Clear read settings for a clean test
+repo.setSetting(`read_feedbacks:${leadUser.id}`, "[]");
+
+const fbNew = repo.addFeedback({
+  submittedBy: taUser.id,
+  submittedByName: taUser.name,
+  submittedByRole: taUser.role,
+  category: "bug",
+  priority: "urgent",
+  title: "Urgent issue on candidate follow-up",
+  description: "Screen freezes on long notes input.",
+});
+
+eq("TA lead has unseen alert badge for new feedback", repo.unseenFeedbackCount(leadUser) > 0, true);
+
+// When TA Lead opens feedback desk
+repo.markAllFeedbackSeen(leadUser.id, leadUser);
+eq("TA lead badge clears to 0 after opening feedback page", repo.unseenFeedbackCount(leadUser), 0);
+
+console.log(`\nResults: ${pass} passed, ${fail} failed\n`);
+if (fail > 0) process.exit(1);
+
