@@ -3,6 +3,7 @@ import { colomboGreeting } from "@/lib/calendar";
 import { repo } from "@/data/store";
 import { pageUser } from "@/lib/session";
 import { SearchBox } from "@/components/db/SearchBox";
+import { DbTabs } from "@/components/db/DbTabs";
 import { Suggestion } from "@/components/db/Suggestion";
 import { Illustration } from "@/components/db/Illustration";
 import { deleteSearch } from "@/app/actions";
@@ -99,6 +100,7 @@ export default async function DatabaseHome({
 
   return (
     <main className="mx-auto max-w-[720px] px-4 sm:px-6 pb-24 pt-8">
+      <DbTabs active="candidates" />
       <Illustration />
 
       <h1 className="mt-5 text-center text-[28px] font-semibold tracking-tight">

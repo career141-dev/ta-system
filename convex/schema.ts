@@ -728,7 +728,13 @@ export default defineSchema({
     lastContactedAt: v.optional(v.number()),
     extractedAt: v.optional(v.number()),
   })
-    .index("by_candidateId", ["candidateId"]),
+    .index("by_candidateId", ["candidateId"])
+    // Referral Search (8 Oct): "HR managers at Dialog" across ~33,000 referees.
+    // Before these, the only way to find a referee by company was to read the
+    // first 500 rows (ta/candidates:peopleAtCompany).
+    .searchIndex("search_company", { searchField: "company" })
+    .searchIndex("search_designation", { searchField: "designation" })
+    .searchIndex("search_name", { searchField: "name" }),
 
   candidates: defineTable({
     // New fields from PDF (kept optional to avoid breaking existing queries)

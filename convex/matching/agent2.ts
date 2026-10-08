@@ -771,13 +771,14 @@ Return ONLY valid JSON matching this schema:
             roleFamilyMatch: classRes.roleFamilyMatch,
           }, index);
 
-          // Calibrated NVIDIA E5 vector similarity score (baseline floor at 0.45)
-          const rawVector = c.vectorScore ?? 0.4;
+          // Calibrated for openai/text-embedding-3-small (1,024 dims in Qdrant):
+          // Baseline floor: 0.30 (loosely related), Target high: 0.60+ (very close semantic match)
+          const rawVector = c.vectorScore ?? 0.3;
           let normVectorScore = 0;
-          if (rawVector >= 0.45) {
-            normVectorScore = Math.min(100, Math.round(30 + ((rawVector - 0.45) / 0.30) * 70));
+          if (rawVector >= 0.30) {
+            normVectorScore = Math.min(100, Math.round(35 + Math.min(65, ((rawVector - 0.30) / 0.30) * 65)));
           } else {
-            normVectorScore = Math.max(0, Math.round((rawVector / 0.45) * 30));
+            normVectorScore = Math.max(0, Math.round((rawVector / 0.30) * 35));
           }
 
           // Blend 55% heuristic score with 45% calibrated vector similarity

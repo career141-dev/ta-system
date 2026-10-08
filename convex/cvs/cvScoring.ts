@@ -1414,14 +1414,15 @@ export async function scoreBatchWithLLM(
   const serialize = (withName: boolean) => candidates.map((c) => {
     const cvObj = c.cv || {};
     const name = (withName && cvObj.fullName) || `Candidate #${c.index}`;
-    const title = cvObj.currentTitle || (cvObj as any).currentJobTitle || "Not specified";
+    const title = cvObj.currentTitle || (cvObj as any).currentJobTitle || "Title unstated";
     const employer = cvObj.currentEmployer ? `@ ${cvObj.currentEmployer}` : "";
-    const exp = cvObj.yearsOfExperience ?? (cvObj as any).totalExperienceYears ?? "N/A";
-    const skills = Array.isArray(cvObj.skills)
-      ? cvObj.skills.map((s: any) => (typeof s === "object" ? s.value : String(s))).slice(0, 10).join(", ")
-      : "Not specified";
+    const exp = cvObj.yearsOfExperience ?? (cvObj as any).totalExperienceYears;
+    const expText = typeof exp === "number" ? `${exp}y exp` : "exp unstated";
+    const skills = Array.isArray(cvObj.skills) && cvObj.skills.length
+      ? cvObj.skills.map((s: any) => (typeof s === "object" ? s.value : String(s))).slice(0, 8).join(", ")
+      : "none listed";
 
-    return `[ID: ${c.index}] ${name} | ${title} ${employer} | ${exp} yrs exp | Skills: ${skills}`;
+    return `[ID: ${c.index}] ${name} | ${title} ${employer} | ${expText} | skills: ${skills}`.replace(/\s+/g, " ").trim();
   });
 
   const buildPrompt = (withName: boolean) => [
@@ -1445,7 +1446,7 @@ export async function scoreBatchWithLLM(
     {
       "id": number,
       "score": number (0-100),
-      "reason": "1-2 sentence TA evaluation in English highlighting key matching skills, experience, and role fit."
+      "reason": "1 concise sentence (<25 words) in English identifying the primary skill fit and any gap."
     }
   ]
 }`;
