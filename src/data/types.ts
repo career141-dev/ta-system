@@ -1,3 +1,5 @@
+import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
+
 /**
  * Domain model for the Career141 TA platform.
  *
@@ -633,7 +635,45 @@ export interface ReviewRound {
    * for senders who are not required to give one.
    */
   researchLink?: string | null;
+  /**
+   * Each time the TA sent this email again, corrected (8 Oct). The copies
+   * themselves are cleared after a month (EodEmailCopy); this keeps the fact.
+   */
+  revisedAt?: number[];
   decisions: ReviewDecision[];
+}
+
+/**
+ * The end-of-day email as it went, kept for a month (8 Oct) so the TA can
+ * correct it when the TA Lead or a Director asks and send it again. One row per
+ * version: 1 is the first send, every resend adds one. Every version of an
+ * email shares the first send's `expiresAt`, and all are deleted then
+ * (convex/ta/eodCopies purgeExpired) — a month of history, not an archive.
+ */
+export interface EodEmailCopy {
+  id: Id;
+  openingId: Id;
+  /** The round the first send opened. A resend opens none. */
+  roundId: Id;
+  version: number;
+  sentBy: Id;
+  sentAt: number;
+  expiresAt: number;
+  subject: string;
+  introText: string;
+  outroText: string;
+  researchLink: string | null;
+  /** The people, in the order numbered — fixed for every version. */
+  applicationIds: Id[];
+  rows: ShortlistRow[];
+  effort: EffortRow;
+  /** The composer's recipient state, so a resend rebuilds the lines the same way. */
+  extraTo: string[];
+  extraCc: string[];
+  removed: string[];
+  /** Who it actually went to, for the history line. */
+  to: string[];
+  cc: string[];
 }
 
 export interface ReviewDecision {
@@ -1441,6 +1481,7 @@ export interface Database {
   matchExclusions: MatchExclusion[];
   liveMirror: LiveMirrorRow[];
   bin: BinEntry[];
+  eodEmailCopies: EodEmailCopy[];
 }
 
 /**

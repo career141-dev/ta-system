@@ -6,7 +6,7 @@ import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, isReadOnly, type Capability } from "@/lib/auth";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
-import type { CvMatch, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
+import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { BACK_TO_TABLES_REASON } from "@/lib/pipeline";
@@ -4548,6 +4548,9 @@ export async function sendEod(formData: FormData) {
   // shortlist inbox. Nothing is recorded unless it went. The client's copy is
   // still sent by operations and only recorded here.
   let sentNote = "";
+  // What went, kept a month to read back, correct and send again (8 Oct). Saved
+  // once the round is open, since the copy belongs to it.
+  let copy: Omit<EodEmailCopy, "id" | "roundId" | "sentAt" | "expiresAt"> | null = null;
   if (kind === "director") {
     const { effortFromForm, effortRow, shortlistRowsFromForm, shortlistRows } = await import("@/lib/eod");
     const effort = effortFromForm(formData, effortRow(openingId, user));
@@ -4583,34 +4586,35 @@ export async function sendEod(formData: FormData) {
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
       rows: editedRows,
+      baseRows,
       introText,
       outroText,
       researchLink: research.url,
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
-    sentNote = r.note;
+    sentNote = r.note + (await saveEodEdits(editedRows, baseRows, fresh));
 
-    // What the TA corrected on the email goes onto the candidate too, so their
-    // CV's box, profile and Director review read the same (the desk, 29 Sep).
-    // Only after it went, and a detail that cannot be saved does not undo the
-    // send — it is said.
-    const { eodDetailChanges } = await import("@/lib/eod");
-    let unsaved = 0;
-    for (const edited of editedRows) {
-      if (!fresh.includes(edited.applicationId)) continue;
-      const base = baseRows.find((b) => b.applicationId === edited.applicationId);
-      const app = repo.application(edited.applicationId);
-      const change = base && app ? eodDetailChanges(base, edited) : null;
-      if (!change || !app) continue;
-      try {
-        repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
-        invalidateCandidate(app.candidateId);
-      } catch (e) {
-        unsaved++;
-        console.warn("[eod] details not saved to the candidate:", (e as Error).message);
-      }
-    }
-    if (unsaved) sentNote += ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`;
+    const sentRows = fresh.flatMap((id, i) => {
+      const row = editedRows.find((e) => e.applicationId === id);
+      return row ? [{ ...row, no: i + 1 }] : [];
+    });
+    copy = {
+      openingId,
+      version: 1,
+      sentBy: user.id,
+      subject: String(formData.get("subject") ?? "").trim(),
+      introText: introText ?? "",
+      outroText: outroText ?? "",
+      researchLink: research.url,
+      applicationIds: fresh,
+      rows: sentRows,
+      effort,
+      extraTo: toList.ok,
+      extraCc: ccList.ok,
+      removed: parseAddressList(String(formData.get("removed") ?? "")).ok,
+      to: recipients.to,
+      cc: recipients.cc,
+    };
   }
 
   // Anyone sent to the Director straight out of a finished follow-up moves to
@@ -4641,7 +4645,7 @@ export async function sendEod(formData: FormData) {
     if (isConvex()) await afterBackendWrite(openingId);
   }
 
-  repo.openReviewRound({
+  const round = repo.openReviewRound({
     openingId,
     kind,
     applicationIds: fresh,
@@ -4653,6 +4657,15 @@ export async function sendEod(formData: FormData) {
     subject: String(formData.get("subject") ?? ""),
     researchLink: research.url,
   });
+  if (copy) {
+    try {
+      repo.saveEodCopy({ ...copy, roundId: round.id });
+    } catch (e) {
+      // The email has gone and the round is open; only the copy to resend is missing.
+      console.warn("[eod] copy not kept:", (e as Error).message);
+      sentNote += " A copy to correct and send again could not be kept.";
+    }
+  }
 
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(
@@ -4667,6 +4680,145 @@ export async function sendEod(formData: FormData) {
   } finally {
     for (const id of fresh) eodInFlight.delete(holdKey(id));
   }
+}
+
+/**
+ * Send a Director's end-of-day email again, corrected (8 Oct).
+ *
+ * The TA Lead or a Director asks for a change; the email itself cannot be
+ * edited once it has gone, so the TA corrects the copy kept for the month and
+ * sends it again, "REVISED - " in front of the subject. Same people in the same
+ * order, so the reply's numbers still mean what they meant: no new round, no
+ * stage moves, no set numbers change — only the email goes again. From the
+ * sender's own mailbox, so only the sender can.
+ */
+export async function resendEod(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  const copyId = String(formData.get("copyId") ?? "");
+  await primeStore({ openingId, allApplications: true });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  const done = (message: string): never =>
+    redirect(`/openings/${openingId}/eod?kind=director&msg=${encodeURIComponent(message)}`);
+
+  const prev = repo.eodCopy(copyId);
+  if (!prev || prev.openingId !== openingId) return done("Not sent: that email is more than a month old, so its copy has been cleared.");
+  if (prev.sentBy !== user.id)
+    return done("Not sent: only the person who sent this email can send it again — it goes from their own mailbox.");
+  const versions = repo.eodCopies(openingId).filter((c) => c.roundId === prev.roundId);
+  const version = Math.max(prev.version, ...versions.map((c) => c.version)) + 1;
+
+  const hold = `${openingId}:resend:${prev.roundId}`;
+  if (eodInFlight.has(hold)) return done("It is being sent again right now.");
+  eodInFlight.add(hold);
+  try {
+    const toList = parseAddressList(String(formData.get("extraTo") ?? ""));
+    const ccList = parseAddressList(String(formData.get("extraCc") ?? ""));
+    const badAddress = [...toList.bad, ...ccList.bad];
+    if (badAddress.length)
+      return done(`Not sent: ${badAddress.join(", ")} ${badAddress.length === 1 ? "is not an email address" : "are not email addresses"}.`);
+    const removed = parseAddressList(String(formData.get("removed") ?? "")).ok;
+    const recipients = eodRecipients({ removed, extraTo: toList.ok, extraCc: ccList.ok, shortlistInbox: repo.shortlistInbox() });
+    if (recipients.to.length === 0) return done("Not sent: nobody is on the To line. Add an address as To.");
+    const research = checkResearchSubmission({
+      role: user.role,
+      kind: "director",
+      link: String(formData.get("chatgptLink") ?? ""),
+      confirmed: formData.get("researchConfirmed") === "on",
+    });
+    if (!research.ok) return done(`Not sent: ${research.reason}`);
+    const typed = String(formData.get("subject") ?? "").trim();
+    if (!typed) return done("Not sent: the email needs a subject.");
+
+    const { effortFromForm, shortlistRowsFromForm, rowsForApplications } = await import("@/lib/eod");
+    const { revisedSubject } = await import("@/lib/eod-format");
+    // The people as they went, never a list from the browser.
+    const baseRows = rowsForApplications(prev.applicationIds);
+    if (baseRows.length === 0) return done("Not sent: nobody from that email is on this opening any more.");
+    const ids = baseRows.map((r) => r.applicationId);
+    const editedRows = shortlistRowsFromForm(formData, baseRows);
+    const effort = effortFromForm(formData, prev.effort);
+    const subject = revisedSubject(typed);
+    const introText = formData.has("introText") ? String(formData.get("introText")) : prev.introText;
+    const outroText = formData.has("outroText") ? String(formData.get("outroText")) : prev.outroText;
+
+    const r = await emailEod({
+      openingId,
+      user,
+      applicationIds: ids,
+      to: recipients.to[0],
+      extraTo: recipients.to.slice(1),
+      cc: recipients.cc,
+      subject,
+      effort,
+      rows: editedRows,
+      baseRows,
+      introText,
+      outroText,
+      researchLink: research.url,
+    });
+    if (!r.ok) return done(`Not sent: ${r.error}`);
+    let note = r.note + (await saveEodEdits(editedRows, baseRows, ids));
+
+    try {
+      repo.saveEodCopy({
+        openingId,
+        roundId: prev.roundId,
+        version,
+        sentBy: user.id,
+        // The first send's day, so a correction never stretches it.
+        expiresAt: prev.expiresAt,
+        subject,
+        introText,
+        outroText,
+        researchLink: research.url,
+        applicationIds: ids,
+        rows: editedRows,
+        effort,
+        extraTo: toList.ok,
+        extraCc: ccList.ok,
+        removed,
+        to: recipients.to,
+        cc: recipients.cc,
+      });
+      repo.markRoundRevised(prev.roundId, { researchLink: research.url });
+    } catch (e) {
+      console.warn("[eod] resent copy not kept:", (e as Error).message);
+      note += " This version could not be kept to send again.";
+    }
+
+    revalidatePath(`/openings/${openingId}`, "layout");
+    return done(`Sent again, marked REVISED. ${note} The Director's reply is still read against the same set.`);
+  } finally {
+    eodInFlight.delete(hold);
+  }
+}
+
+/**
+ * What the TA corrected on the email goes onto the candidate too, so their
+ * CV's box, profile and Director review read the same (the desk, 29 Sep).
+ * Only after it went, and a detail that cannot be saved does not undo the
+ * send — it is said, in the line this returns.
+ */
+async function saveEodEdits(editedRows: ShortlistRow[], baseRows: ShortlistRow[], ids: string[]): Promise<string> {
+  const { eodDetailChanges } = await import("@/lib/eod");
+  let unsaved = 0;
+  for (const edited of editedRows) {
+    if (!ids.includes(edited.applicationId)) continue;
+    const base = baseRows.find((b) => b.applicationId === edited.applicationId);
+    const app = repo.application(edited.applicationId);
+    const change = base && app ? eodDetailChanges(base, edited) : null;
+    if (!change || !app) continue;
+    try {
+      repo.saveReviewDetails(app.id, app.candidateId, change.notes, change.patch);
+      invalidateCandidate(app.candidateId);
+    } catch (e) {
+      unsaved++;
+      console.warn("[eod] details not saved to the candidate:", (e as Error).message);
+    }
+  }
+  return unsaved
+    ? ` ${unsaved === 1 ? "One candidate's" : `${unsaved} candidates'`} edited details could not be saved to their record — check them on their page.`
+    : "";
 }
 
 /**
@@ -4693,6 +4845,9 @@ async function emailEod(input: {
   subject: string;
   effort?: EffortRow;
   rows?: ShortlistRow[];
+  /** The rows as built from the records, before the TA's edits. A resend passes
+   *  its own: shortlistRows no longer lists people already in a round. */
+  baseRows?: ShortlistRow[];
   introText?: string;
   outroText?: string;
   researchLink?: string | null;
@@ -4708,38 +4863,23 @@ async function emailEod(input: {
     .filter((c): c is string => !!c);
   await primeStore({ openingId, candidateIds });
 
-  const { shortlistRows, effortRow } = await import("@/lib/eod");
+  const { shortlistRows, shortlistRowFor, effortRow } = await import("@/lib/eod");
   const { eodEmailHtml } = await import("@/lib/eod-format");
   const { preparedCvFileName } = await import("@/lib/pdf");
 
+  // The rows as built from the records, before the TA's edits on the page.
+  const baseRows = input.baseRows ?? shortlistRows(openingId, null, "director");
   // The rows for exactly the people being sent, numbered in the order sent —
   // the order the Director's reply numbers refer to.
-  const byId = new Map((input.rows ?? shortlistRows(openingId, null, "director")).map((r) => [r.applicationId, r]));
-  // The rows as built from the records, before the TA's edits on the page.
-  const baseById = new Map(shortlistRows(openingId, null, "director").map((r) => [r.applicationId, r]));
+  const byId = new Map((input.rows ?? baseRows).map((r) => [r.applicationId, r]));
+  const baseById = new Map(baseRows.map((r) => [r.applicationId, r]));
   const rows = input.applicationIds
     .map((id, i) => {
       const existing = byId.get(id);
       if (existing) return { ...existing, no: i + 1 };
       const a = repo.application(id);
       const c = a ? repo.candidate(a.candidateId) : null;
-      if (!a || !c) return null;
-      return {
-        no: i + 1,
-        name: c.fullName,
-        age: c.age ? String(c.age) : "",
-        notice: c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : "",
-        notes: [
-          c.totalExperienceYears ? `>Total Experience - ${c.totalExperienceYears}yr` : "",
-          c.currentEmployer ? `>Currently at ${c.currentEmployer}` : "",
-          ...a.notes.map((n) => n.replace(/^>/, "").trim()).filter(Boolean).map((n) => `>${n}`),
-        ].filter(Boolean).slice(0, 4),
-        currentCompany: c.currentEmployer ?? "",
-        currentDesignation: c.currentTitle ?? "",
-        currentRemuneration: c.currentSalary ?? "Not disclosed",
-        expectedRemuneration: c.expectedSalary ?? "Open to discuss",
-        applicationId: id,
-      };
+      return a && c ? shortlistRowFor(a, c, i + 1) : null;
     })
     .filter((r): r is NonNullable<typeof r> => !!r);
 

@@ -60,6 +60,7 @@ import type {
   ProfileSuggestion,
   ReviewDecision,
   ReviewRound,
+  EodEmailCopy,
   ResearchReport,
   SavedReport,
   SavedSearch,
@@ -181,7 +182,7 @@ function backfill(db: Partial<Database>): Database {
     assignments: [], pipelineEvents: [], reviewRounds: [],
     alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
-    matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
+    matchRuns: [], matchExclusions: [], liveMirror: [], bin: [], eodEmailCopies: [],
   } satisfies Database;
   const out = { ...empty } as Database;
   for (const key of Object.keys(empty) as (keyof Database)[]) {
@@ -483,6 +484,13 @@ const JD_NOT_APPROVED =
 export { SET_SIZE };
 
 /**
+ * How long a sent end-of-day email is kept, to read and to correct and send
+ * again: at least a month (the desk, 8 Oct — first asked for a day, then a
+ * month of history). 31 days, so no month is ever short.
+ */
+export const EOD_COPY_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
+
+/**
  * The set a newly shortlisted person joins — the rule is in convex/lib/sets.ts
  * (the desk, 28 September: five sent in one day closes a set), shared with
  * convex/ta/applications.ts, which numbers the live shortlists.
@@ -553,6 +561,7 @@ function takeOpening(db: Database, id: Id): Pick<BinEntry, "rows" | "intake"> {
     ["aiCalls", (r) => r.openingId === id],
     ["assignments", (r) => r.openingId === id],
     ["esaRecords", (r) => r.openingId === id],
+    ["eodEmailCopies", (r) => r.openingId === id],
   ];
   const rows: Partial<Database> = {};
   for (const [key, test] of belongs) {
@@ -2477,6 +2486,56 @@ const rawRepo = {
 
   reviewRound(id: Id): ReviewRound | undefined {
     return load().reviewRounds.find((r) => r.id === id);
+  },
+
+  /**
+   * Keep a copy of an end-of-day email as it went, for a month (8 Oct), so the
+   * TA can read it back, correct it and send it again. Version 1 starts the month; a resend
+   * passes the earlier version's `expiresAt`, so a correction never stretches
+   * it. On Convex the backend's purge deletes them (convex/ta/eodCopies); the
+   * file store has no cron, so it prunes here. Not on Convex: deleting a row
+   * the purge already took would refuse the whole save as a conflict.
+   */
+  saveEodCopy(input: Omit<EodEmailCopy, "id" | "sentAt" | "expiresAt"> & { expiresAt?: number }): EodEmailCopy {
+    const now = Date.now();
+    const copy: EodEmailCopy = {
+      ...input,
+      id: `eod_${Math.random().toString(36).slice(2, 10)}`,
+      sentAt: now,
+      expiresAt: input.expiresAt ?? now + EOD_COPY_KEPT_MS,
+    };
+    mutate((db) => {
+      if (!isConvex()) db.eodEmailCopies = db.eodEmailCopies.filter((c) => c.expiresAt > now);
+      db.eodEmailCopies.push(copy);
+    });
+    return copy;
+  },
+
+  /** An opening's copies still inside their month, newest first. */
+  eodCopies(openingId: Id): EodEmailCopy[] {
+    const now = Date.now();
+    return load()
+      .eodEmailCopies.filter((c) => c.openingId === openingId && c.expiresAt > now)
+      .sort((a, b) => b.sentAt - a.sentAt);
+  },
+
+  /** One copy, or nothing once its month is over — even before the purge has run. */
+  eodCopy(id: Id): EodEmailCopy | undefined {
+    const c = load().eodEmailCopies.find((x) => x.id === id);
+    return c && c.expiresAt > Date.now() ? c : undefined;
+  },
+
+  /**
+   * The round's set went out again, corrected. Kept after the copies are
+   * cleared. A corrected research link replaces the one the platform shows.
+   */
+  markRoundRevised(roundId: Id, opts: { at?: number; researchLink?: string | null } = {}): void {
+    mutate((db) => {
+      const r = db.reviewRounds.find((x) => x.id === roundId);
+      if (!r) return;
+      r.revisedAt = [...(r.revisedAt ?? []), opts.at ?? Date.now()];
+      if (opts.researchLink) r.researchLink = opts.researchLink;
+    });
   },
 
   /** Matching an inbound reply to the set it answers. The token first, because

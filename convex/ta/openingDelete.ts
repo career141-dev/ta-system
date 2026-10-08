@@ -74,6 +74,7 @@ const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   ["matchRuns", "by_opening", "openingId"],
   ["matchExclusions", "by_opening", "openingId"],
   ["reviewRounds", "by_opening", "openingId"],
+  ["eodEmailCopies", "by_opening", "openingId"],
   // Left behind until 2 Oct: the job id is required on most of these, so a
   // row outliving its opening points at nothing.
   ["whatsappSessions", "by_jobId", "jobId"],

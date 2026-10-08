@@ -61,26 +61,41 @@ export function shortlistRows(
 
   return apps.flatMap((a, i) => {
     const c = repo.candidate(a.candidateId);
-    if (!c) return [];
-    return [
-      {
-        no: i + 1,
-        name: c.fullName,
-        age: c.age ? String(c.age) : "",
-        // Zero days is "immediate", which is the best answer there is — it was
-        // printed as a blank (audit finding 28).
-        // As said first ("2 months", "Not disclosed"), which has no days.
-        notice:
-          c.noticePeriod?.trim() ||
-          (c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : ""),
-        notes: HOUSE_NOTE(c, a),
-        currentCompany: c.currentEmployer ?? "",
-        currentDesignation: c.currentTitle ?? "",
-        currentRemuneration: c.currentSalary ?? "Not disclosed",
-        expectedRemuneration: c.expectedSalary ?? "Open to discuss",
-        applicationId: a.id,
-      },
-    ];
+    return c ? [shortlistRowFor(a, c, i + 1)] : [];
+  });
+}
+
+/** One person's line in table 1, from their record. */
+export function shortlistRowFor(a: Application, c: Candidate, no: number): ShortlistRow {
+  return {
+    no,
+    name: c.fullName,
+    age: c.age ? String(c.age) : "",
+    // Zero days is "immediate", which is the best answer there is — it was
+    // printed as a blank (audit finding 28).
+    // As said first ("2 months", "Not disclosed"), which has no days.
+    notice:
+      c.noticePeriod?.trim() ||
+      (c.noticePeriodDays === 0 ? "Immediate" : c.noticePeriodDays ? `${c.noticePeriodDays} days` : ""),
+    notes: HOUSE_NOTE(c, a),
+    currentCompany: c.currentEmployer ?? "",
+    currentDesignation: c.currentTitle ?? "",
+    currentRemuneration: c.currentSalary ?? "Not disclosed",
+    expectedRemuneration: c.expectedSalary ?? "Open to discuss",
+    applicationId: a.id,
+  };
+}
+
+/**
+ * Table 1 for exactly these people, in this order, whatever their stage —
+ * for an email already sent, whose people `shortlistRows` no longer lists
+ * because they are in a round (the resend, 8 Oct).
+ */
+export function rowsForApplications(ids: Id[]): ShortlistRow[] {
+  return ids.flatMap((id, i) => {
+    const a = repo.application(id);
+    const c = a ? repo.candidate(a.candidateId) : null;
+    return a && c ? [shortlistRowFor(a, c, i + 1)] : [];
   });
 }
 

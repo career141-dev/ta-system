@@ -2722,6 +2722,9 @@ export default defineSchema({
     /** The ChatGPT research link in the TA's end-of-day email (8 Oct). Rounds
      *  sent before it existed have none. */
     researchLink: v.optional(v.union(v.string(), v.null())),
+    /** Each time the TA sent this email again, corrected (8 Oct). The copies
+     *  are cleared after a month (eodEmailCopies); this keeps the fact. */
+    revisedAt: v.optional(v.array(v.number())),
     decisions: v.array(v.object({
       applicationId: v.id("applications"),
       outcome: v.union(
@@ -2735,6 +2738,47 @@ export default defineSchema({
     .index("by_opening", ["openingId"])
     .index("by_token", ["token"])
     .index("by_opening_kind", ["openingId", "kind"]),
+
+  /**
+   * The end-of-day email as it went, kept for a month so the TA can correct it
+   * and send it again (8 Oct). One row per version; every version shares the
+   * first send's expiresAt and all are deleted then (ta/eodCopies purgeExpired).
+   */
+  eodEmailCopies: defineTable({
+    openingId: v.id("jobs"),
+    roundId: v.id("reviewRounds"),
+    version: v.number(),
+    sentBy: v.id("users"),
+    sentAt: v.number(),
+    expiresAt: v.number(),
+    subject: v.string(),
+    introText: v.string(),
+    outroText: v.string(),
+    researchLink: v.optional(v.union(v.string(), v.null())),
+    applicationIds: v.array(v.id("applications")),
+    rows: v.array(v.object({
+      no: v.number(),
+      name: v.string(),
+      age: v.string(),
+      notice: v.string(),
+      notes: v.array(v.string()),
+      currentCompany: v.string(),
+      currentDesignation: v.string(),
+      currentRemuneration: v.string(),
+      expectedRemuneration: v.string(),
+      applicationId: v.id("applications"),
+    })),
+    /** The L-sheet line as the TA left it, targets included (lib/eod-format EffortRow). */
+    effort: v.any(),
+    extraTo: v.array(v.string()),
+    extraCc: v.array(v.string()),
+    removed: v.array(v.string()),
+    to: v.array(v.string()),
+    cc: v.array(v.string()),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_round", ["roundId"])
+    .index("by_expires", ["expiresAt"]),
 
   /** What was said on a call, structured where it could be read. */
   callFeedback: defineTable({

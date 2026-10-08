@@ -937,11 +937,18 @@ function addBin(registry: ReturnType<typeof cronJobs>) {
   registry.daily("ta-empty-bin", { hourUTC: 21, minuteUTC: 30 }, internal.ta.bin.emptyDue, {});
 }
 
+/** A sent end-of-day email's copies are deleted once their month is over (8 Oct). On both registries, like the Bin. */
+function addEodCopies(registry: ReturnType<typeof cronJobs>) {
+  registry.interval("ta-purge-eod-copies", { minutes: 41 }, internal.ta.eodCopies.purgeExpired, {});
+}
+
 addMailIntake(crons);
 addBin(crons);
+addEodCopies(crons);
 const quiet = cronJobs();
 addMailIntake(quiet);
 addBin(quiet);
+addEodCopies(quiet);
 // Only on the quiet registry: where every cron runs, the CV platform's own
 // queue, healer and SLA jobs above already cover this.
 addMaintenance(quiet);
