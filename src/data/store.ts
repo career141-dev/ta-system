@@ -2416,6 +2416,7 @@ const rawRepo = {
     trackedAt?: string | null;
     subject: string;
     dispatch?: ReviewRound["dispatch"];
+    researchLink?: string | null;
   }): ReviewRound {
     // Short, unambiguous, and readable in a subject line. Excludes the letters
     // that are misread when somebody retypes one by hand.
@@ -2441,6 +2442,7 @@ const rawRepo = {
       status: "awaiting",
       returnedAt: null,
       replyBody: null,
+      researchLink: input.researchLink ?? null,
       decisions: [],
     };
 

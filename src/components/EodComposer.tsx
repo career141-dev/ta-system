@@ -6,6 +6,7 @@ import {
   boxOverrides,
   eodDetailChanges,
   parseAddressList,
+  validateResearchLink,
   type EffortRow,
   type ShortlistRow,
 } from "@/lib/eod-format";
@@ -376,6 +377,7 @@ export function EodComposer({
   senderName,
   alreadyOut,
   openSetNote,
+  needsResearchLink,
 }: {
   openingId: string;
   kind: "director" | "client";
@@ -399,6 +401,8 @@ export function EodComposer({
    *  numbered lists in play and no way to tell which a reply answers. */
   alreadyOut: boolean;
   openSetNote: string | null;
+  /** A TA's email to the directors must carry their ChatGPT research link (8 Oct); the server checks it too. */
+  needsResearchLink: boolean;
 }) {
   const draftKey = `eod-composer-draft:${openingId}:${kind}`;
   const defaultIntro = "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position";
@@ -407,6 +411,12 @@ export function EodComposer({
   const [subject, setSubject] = useState(initialSubject);
   const [introText, setIntroText] = useState(defaultIntro);
   const [outroText, setOutroText] = useState(defaultOutro);
+  // The link is kept with the draft; the tick is not, so it is given afresh each send.
+  const [researchLink, setResearchLink] = useState("");
+  const [researchConfirmed, setResearchConfirmed] = useState(false);
+  const [researchTouched, setResearchTouched] = useState(false);
+  const researchCheck = validateResearchLink(researchLink);
+  const researchBlocked = needsResearchLink && (!researchCheck.ok || !researchConfirmed);
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
@@ -461,6 +471,7 @@ export function EodComposer({
         }
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
+        if (typeof saved.researchLink === "string") setResearchLink(saved.researchLink);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
         // Saved as the comma text the server reads, before and after the chips.
         if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
@@ -483,6 +494,7 @@ export function EodComposer({
           baseSubject: initialSubject,
           introText,
           outroText,
+          researchLink,
           shortlistDraft,
           extraTo: extraTo.join(", "),
           extraCc: extraCc.join(", "),
@@ -492,7 +504,7 @@ export function EodComposer({
     } catch {
       /* storage disabled */
     }
-  }, [restored, draftKey, subject, initialSubject, introText, outroText, shortlistDraft, extraTo, extraCc, removed]);
+  }, [restored, draftKey, subject, initialSubject, introText, outroText, researchLink, shortlistDraft, extraTo, extraCc, removed]);
 
   // Clear draft on send
   useEffect(() => {
@@ -907,6 +919,58 @@ export function EodComposer({
         </p>
       </section>
 
+      {needsResearchLink && (
+        <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+          <h3 className="text-[13.5px] font-semibold">
+            ChatGPT research link <span className="text-warn" aria-hidden="true">*</span>
+            <span className="sr-only">(required)</span>
+          </h3>
+          <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
+            Your TA Lead and the directors will open this from the email. In ChatGPT, open today&rsquo;s research
+            chat, choose <b>Share</b>, then <b>Create link</b>, and paste that link here. The address in your
+            browser&rsquo;s bar is private to you and will not open for them.
+          </p>
+          <input
+            form="eod-send"
+            name="chatgptLink"
+            type="text"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            required
+            value={researchLink}
+            onChange={(e) => setResearchLink(e.target.value)}
+            onBlur={() => setResearchTouched(true)}
+            placeholder="https://chatgpt.com/share/…"
+            aria-invalid={researchTouched && !researchCheck.ok}
+            aria-describedby="research-help"
+            className={`${inputClass} mt-3`}
+          />
+          <div id="research-help" className="mt-2 min-h-[18px] text-[12px]" aria-live="polite">
+            {researchCheck.ok ? (
+              <span className="text-brand">✓ A share link: {researchCheck.url.replace("https://", "")}</span>
+            ) : (
+              (researchTouched || researchLink.trim() !== "") && <span className="text-warn">{researchCheck.reason}</span>
+            )}
+          </div>
+          <label className="mt-3 flex max-w-[68ch] items-start gap-2.5 text-[12.5px] leading-relaxed text-ink-soft">
+            <input
+              form="eod-send"
+              type="checkbox"
+              name="researchConfirmed"
+              required
+              checked={researchConfirmed}
+              onChange={(e) => setResearchConfirmed(e.target.checked)}
+              className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--brand,#165b42)]"
+            />
+            <span>
+              I opened this link in a private window and it shows my research. It holds no candidate phone numbers,
+              emails or CV text, because anyone with the link can read it.
+            </span>
+          </label>
+        </section>
+      )}
+
       <form id="eod-send" action={sendEod} className="flex flex-wrap items-center gap-4">
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="kind" value={kind} />
@@ -922,8 +986,14 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={initialRows.length === 0 || nobodyOnTo}
-          title={nobodyOnTo ? "Add an address as To first" : undefined}
+          disabled={initialRows.length === 0 || nobodyOnTo || researchBlocked}
+          title={
+            nobodyOnTo
+              ? "Add an address as To first"
+              : researchBlocked
+                ? "Add your ChatGPT research link and tick the box first"
+                : undefined
+          }
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >

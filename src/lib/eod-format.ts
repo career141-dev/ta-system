@@ -1,5 +1,6 @@
-import type { Candidate, Id } from "@/data/types";
+import type { Candidate, Id, Role } from "@/data/types";
 import { noticePeriodToDays } from "./answered";
+import { externalUrl } from "./url";
 
 /**
  * The shape and column names of the end-of-day email, with no data access —
@@ -231,6 +232,66 @@ export function formatNoteHtml(note: string): string {
   return line;
 }
 
+// ─── The research link (8 Oct) ───────────────────────────────────────────────
+//
+// Every TA's end-of-day email carries the ChatGPT conversation they researched
+// with, so the TA leads, directors and anyone copied can open it. Whether a
+// recipient can really open a link cannot be checked from here (ChatGPT does not
+// answer a server, and a server-side fetch would be an open door), so the rule
+// is: it must be a ChatGPT *share* link, and the sender confirms they opened it
+// in a private window. Pure, so it is tested and the composer can use it too.
+
+export type ResearchLinkCheck = { ok: true; url: string } | { ok: false; reason: string };
+
+/** Exact hosts, never a substring: chatgpt.com.evil.example must not pass. */
+const RESEARCH_HOSTS = new Set(["chatgpt.com", "www.chatgpt.com", "chat.openai.com"]);
+
+export function validateResearchLink(raw: string | null | undefined): ResearchLinkCheck {
+  const said = (raw ?? "").trim();
+  if (!said) return { ok: false, reason: "Add your ChatGPT research link." };
+  if (said.length > 300) return { ok: false, reason: "That is too long to be a ChatGPT share link." };
+  // Two links, or a link inside a sentence: externalUrl would glue them into one address.
+  if (/\s/.test(said)) return { ok: false, reason: "Paste only the link, with nothing before or after it." };
+  const safe = externalUrl(said);
+  if (!safe) return { ok: false, reason: "That is not a web address. Paste the ChatGPT share link." };
+  const u = new URL(safe);
+  if (!RESEARCH_HOSTS.has(u.hostname.toLowerCase())) {
+    return { ok: false, reason: "Only ChatGPT share links (chatgpt.com/share/…) are accepted." };
+  }
+  if (/^\/(c|g|gpts?|chat)(\/|$)/i.test(u.pathname)) {
+    return { ok: false, reason: "That is your private chat link, and only you can open it. In ChatGPT choose Share, then Create link, and paste that one." };
+  }
+  const m = u.pathname.match(/^\/share\/(?:e\/)?([A-Za-z0-9_-]{8,})\/?$/);
+  if (!m) return { ok: false, reason: "That is not a ChatGPT share link. It should look like chatgpt.com/share/…" };
+  // https, the path only: a query or fragment is tracking, not part of the share.
+  return { ok: true, url: `https://${u.hostname.toLowerCase().replace(/^www\./, "")}${u.pathname.replace(/\/$/, "")}` };
+}
+
+/** Who must attach one: a TA sending the email that goes to the directors. Leads, directors and admins are exempt; the client copy sends no email. */
+export function needsResearchLink(role: Role, kind: "director" | "client"): boolean {
+  return role === "ta" && kind === "director";
+}
+
+/**
+ * What the send does with the link it was given. Where one is needed it must be
+ * a valid share link and the sender must have confirmed it; where it is not, a
+ * valid one is still used and anything else is ignored rather than blocking.
+ */
+export function checkResearchSubmission(input: {
+  role: Role;
+  kind: "director" | "client";
+  link: string | null | undefined;
+  confirmed: boolean;
+}): { ok: true; url: string | null } | { ok: false; reason: string } {
+  const checked = validateResearchLink(input.link);
+  if (!needsResearchLink(input.role, input.kind)) return { ok: true, url: checked.ok && input.kind === "director" ? checked.url : null };
+  if (!checked.ok) return { ok: false, reason: checked.reason };
+  if (!input.confirmed) {
+    return { ok: false, reason: "Tick the box to confirm you opened the link in a private window and it holds no candidate details." };
+  }
+  return { ok: true, url: checked.url };
+}
+
 /**
  * The end-of-day email as it is sent: the same greeting, the same two tables
  * and the same sign-off as the composer on screen. Inline styles only, because
@@ -245,6 +306,8 @@ export function eodEmailHtml(input: {
   outroText?: string;
   /** A line under the tables when some CVs could not be attached. */
   attachmentNote?: string | null;
+  /** The TA's ChatGPT research link; checked again here, so only a share link is ever written as an address. */
+  researchLink?: string | null;
 }): string {
   const th = 'style="border:1px solid #cfd6d1;background:#eef2ef;padding:6px 8px;text-align:left;font-size:11px;font-weight:600;white-space:nowrap"';
   const td = 'style="border:1px solid #cfd6d1;padding:6px 8px;vertical-align:top;font-size:12px"';
@@ -285,6 +348,12 @@ export function eodEmailHtml(input: {
       .map((p) => `<p>${p.split("\n").map(esc).join("<br>")}</p>`)
       .join("");
 
+  // The anchor, and the address itself in small type for a client that strips links.
+  const checked = input.researchLink ? validateResearchLink(input.researchLink) : null;
+  const research = checked?.ok
+    ? `<p style="margin:12px 0"><b>Research:</b> <a href="${esc(checked.url)}" style="color:#165b42">View ChatGPT Research</a><br><span style="font-size:11px;color:#6b736d">${esc(checked.url)}</span></p>`
+    : "";
+
   const intro =
     input.introText && input.introText.trim()
       ? formatParagraph(input.introText.trim())
@@ -299,6 +368,7 @@ export function eodEmailHtml(input: {
 ${intro}
 ${shortlist}
 ${effort}
+${research}
 ${input.attachmentNote ? `<p style="color:#6b736d">${esc(input.attachmentNote)}</p>` : ""}
 ${outro}
 </div>`;
