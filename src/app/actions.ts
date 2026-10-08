@@ -50,7 +50,7 @@ import { linkKey, profileLink } from "@/lib/url";
 import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
-import { colomboLocalToInstant } from "@/lib/calendar";
+import { colomboDayFromValue, colomboDayStart, colomboLocalToInstant } from "@/lib/calendar";
 import { dateAt } from "@/lib/format";
 import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
@@ -5604,4 +5604,239 @@ export async function clearReadAlertsAction(formData: FormData) {
   repo.clearReadAlerts(user.id);
   revalidatePath("/alerts");
   return done("Read alert history cleared.");
+}
+
+// ─── Strategy Planner (8 Oct) ────────────────────────────────────────────────
+//
+// A TA Lead puts TAs on strategies in a job's table; each TA fills in their rows and submits.
+// Every one of these resolves the opening from the record itself, never from
+// the opening the browser sent alongside it.
+
+/** authorize(), for an action whose record already says which opening it is on. */
+async function authorizeOn(openingId: string, capability: Capability): Promise<User> {
+  const user = await getCurrentUser();
+  if (!openingId || !repo.opening(openingId)) await fail("That opening no longer exists.");
+  const assignment = repo.assignmentFor(openingId, user.id) ?? null;
+  const decision = can(user, capability, { openingId, assignment, ownerTaId: null });
+  if (!decision.ok) await fail(decision.message);
+  return user;
+}
+
+function revalidateStrategies(openingId?: string) {
+  // The loaded tables are behind what was just written: the next load re-reads
+  // them, so the person sees their own change and the other side sees it too.
+  markTablesStale();
+  revalidatePath("/strategy", "layout");
+  if (openingId) revalidatePath(`/openings/${openingId}/strategies`);
+}
+
+/** The row a form names, and the opening it is really on. */
+function strategyRowOf(formData: FormData, field = "rowId") {
+  const row = repo.strategyAssignment(String(formData.get(field) ?? ""));
+  return row ?? null;
+}
+
+/**
+ * One bell per TA per job in ten minutes. A lead working down the table puts
+ * a TA on five strategies in a row, and five notifications for one sitting is
+ * noise. (In this process only: a restart forgets, which just allows one more.)
+ */
+const lastBell = new Map<string, number>();
+function bellDue(key: string, ms = 10 * 60_000): boolean {
+  const now = Date.now();
+  if (now - (lastBell.get(key) ?? 0) < ms) return false;
+  lastBell.set(key, now);
+  return true;
+}
+
+/** Put a TA on a strategy for a job ("Done by"). The TA Lead's side of the table. */
+export async function addStrategyDoneBy(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.assign");
+  const strategyId = String(formData.get("strategyId") ?? "");
+  const taId = String(formData.get("taId") ?? "");
+
+  // The TA must really be on this job and be a TA: the dropdown came from the browser.
+  const opening = repo.opening(openingId)!;
+  const ta = repo.user(taId);
+  if (!ta || ta.role !== "ta" || !ta.isActive || !opening.assignedTaIds.includes(taId)) {
+    await fail("That TA is not on this job.");
+  }
+  const s = repo.strategy(strategyId);
+  if (!s) await fail("That strategy is no longer on the list.");
+
+  const r = repo.addStrategyDoneBy({
+    openingId,
+    strategyId,
+    taId,
+    byUserId: user.id,
+    byRole: user.role,
+    today: colomboDayStart(Date.now()),
+  });
+  if (!r) await fail(`${s!.name} is retired. Bring it back on the Strategy list first.`);
+  revalidateStrategies(openingId);
+  if (!r!.added) await note(`${ta!.name} is already on ${s!.name}.`);
+
+  // The bell says where, not which: the strategies are read on the job's page.
+  if (isConvex() && taId !== user.id && bellDue(`${taId}:${openingId}`)) {
+    await convexMutation("ta/notifications:create", {
+      userId: taId,
+      type: "strategy_assigned",
+      title: "You were given strategies",
+      body: `${user.name} put you on strategies for ${opening.title}.`,
+      jobId: openingId,
+    }).catch((e) => console.error("[notifications] strategy_assigned failed:", e));
+    revalidatePath("/api/notifications");
+  }
+  await done(`Put ${ta!.name} on ${s!.name}.`);
+}
+
+/** Take a TA off a strategy. Whatever they already submitted stays on the row. */
+export async function removeStrategyDoneBy(formData: FormData) {
+  await primeStore();
+  const row = strategyRowOf(formData);
+  if (!row) await fail("That strategy is no longer on this job's table.");
+  await authorizeOn(row!.openingId, "strategy.assign");
+  const taId = String(formData.get("taId") ?? "");
+  if (!row!.doneBy.includes(taId)) await fail("They are not on that strategy.");
+  repo.removeStrategyDoneBy(row!.id, taId);
+  revalidateStrategies(row!.openingId);
+  await done("Taken off.");
+}
+
+/** The day the lead assigned a strategy; empty clears it. */
+export async function setStrategyAssignedDate(formData: FormData) {
+  await primeStore();
+  const row = strategyRowOf(formData);
+  if (!row) await fail("That strategy is no longer on this job's table.");
+  await authorizeOn(row!.openingId, "strategy.assign");
+  const typed = String(formData.get("date") ?? "").trim();
+  const day = colomboDayFromValue(typed);
+  if (typed && day === null) await fail("That is not a date.");
+  repo.setStrategyAssignedDate(row!.id, day);
+  revalidateStrategies(row!.openingId);
+  await done(day === null ? "Date cleared." : "Date saved.");
+}
+
+/** Strike a strategy through for a job ("cannot be used here"), or bring it back. */
+export async function setStrategyNotApplicable(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.assign");
+  const strategyId = String(formData.get("strategyId") ?? "");
+  const s = repo.strategy(strategyId) ?? repo.strategyRow(openingId, strategyId);
+  if (!s) await fail("That strategy is no longer on the list.");
+  const notApplicable = String(formData.get("na") ?? "") === "1";
+  repo.setStrategyNotApplicable({ openingId, strategyId, notApplicable, byUserId: user.id, byRole: user.role });
+  revalidateStrategies(openingId);
+  const name = "name" in s! ? s!.name : s!.strategyName;
+  await done(notApplicable ? `${name} is struck through for this job.` : `${name} can be used on this job again.`);
+}
+
+/**
+ * A TA submits their rows on a job: whether and when they used each strategy,
+ * and what they did and any improvement. Only rows they are on and that are not
+ * struck through are taken; the rest of the form is ignored, not trusted.
+ */
+export async function submitStrategyUpdate(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.work");
+  const ids = formData.getAll("rowId").map(String).filter(Boolean);
+  if (ids.length === 0) await fail("There is nothing to submit.");
+
+  const today = colomboDayStart(Date.now());
+  const rows: { rowId: string; doneAt: number | null; note: string | null }[] = [];
+  for (const id of ids) {
+    const row = repo.strategyAssignment(id);
+    if (!row || row.openingId !== openingId || row.notApplicable || !row.doneBy.includes(user.id)) continue;
+    const used = formData.get(`used_${id}`) === "on";
+    const typed = String(formData.get(`date_${id}`) ?? "").trim();
+    const day = colomboDayFromValue(typed);
+    if (used && typed && day === null) await fail(`That is not a date (${row.strategyName}).`);
+    const text = String(formData.get(`note_${id}`) ?? "").trim();
+    if (text.length > 500) await fail(`Keep the note under 500 characters (${row.strategyName}).`);
+    // Ticked "used" with no date means today; not ticked means not used yet.
+    rows.push({ rowId: id, doneAt: used ? day ?? today : null, note: text || null });
+  }
+  if (rows.length === 0) await fail("None of those strategies are yours to update.");
+
+  const taken = repo.submitStrategyRows({ openingId, taId: user.id, rows });
+  revalidateStrategies(openingId);
+
+  // The TA Lead is told a submission arrived, not what is in it.
+  const opening = repo.opening(openingId)!;
+  const leadId = opening.taLeadId;
+  if (isConvex() && leadId && leadId !== user.id && bellDue(`submit:${user.id}:${openingId}`, 5 * 60_000)) {
+    await convexMutation("ta/notifications:create", {
+      userId: leadId,
+      type: "strategy_assigned",
+      title: "A TA submitted strategies",
+      body: `${user.name} submitted their strategies on ${opening.title}.`,
+      jobId: openingId,
+    }).catch((e) => console.error("[notifications] strategy submit failed:", e));
+    revalidatePath("/api/notifications");
+  }
+  await done(`Submitted ${taken} ${taken === 1 ? "strategy" : "strategies"}. Your TA Lead can now see ${taken === 1 ? "it" : "them"}.`);
+}
+
+/** A TA removes a proof image they attached. */
+export async function removeStrategyProof(formData: FormData) {
+  await primeStore();
+  const row = strategyRowOf(formData);
+  if (!row) await fail("That strategy is no longer on this job's table.");
+  const user = await authorizeOn(row!.openingId, "strategy.work");
+  const proofId = String(formData.get("proofId") ?? "");
+  const proof = row!.proofs.find((p) => p.id === proofId);
+  if (!proof) await fail("That picture is already gone.");
+  if (proof!.addedBy !== user.id) await fail("Only the person who attached a picture can remove it.");
+  const gone = repo.removeStrategyProof(row!.id, proofId);
+  if (gone && isConvex()) await convexMutation("ta/strategies:proofDelete", { storageId: gone }).catch(() => {});
+  revalidateStrategies(row!.openingId);
+  await done("Picture removed.");
+}
+
+/** Add a strategy to the list, or change one. */
+export async function saveStrategy(formData: FormData) {
+  await primeStore();
+  const user = await getCurrentUser();
+  const decision = can(user, "strategy.manage");
+  if (!decision.ok) await fail(decision.message);
+  const name = String(formData.get("name") ?? "").trim();
+  if (!name) await fail("Give the strategy a name.");
+  if (name.length > 120) await fail("Keep the name under 120 characters.");
+  const description = String(formData.get("description") ?? "").trim().slice(0, 600) || null;
+  const group = String(formData.get("group") ?? "").trim().slice(0, 60) || null;
+  const id = String(formData.get("id") ?? "") || undefined;
+  const saved = repo.saveStrategy({ id, name, description, group, byUserId: user.id });
+  if (!saved) await fail("That name is already on the list, or the strategy no longer exists.");
+  revalidateStrategies();
+  await done(id ? "Strategy saved." : "Strategy added to the list.");
+}
+
+/** Retire a strategy from the list, or bring it back. Ones already given stay. */
+export async function setStrategyActive(formData: FormData) {
+  await primeStore();
+  const user = await getCurrentUser();
+  const decision = can(user, "strategy.manage");
+  if (!decision.ok) await fail(decision.message);
+  const s = repo.strategy(String(formData.get("id") ?? ""));
+  if (!s) await fail("That strategy no longer exists.");
+  const active = String(formData.get("active") ?? "") === "1";
+  // Bringing one back must not duplicate a name that has been used again.
+  if (active && repo.strategies().some((x) => x.id !== s!.id && x.name.trim().toLowerCase() === s!.name.trim().toLowerCase())) {
+    await fail("A strategy with that name is already on the list.");
+  }
+  repo.setStrategyActive(s!.id, active);
+  revalidateStrategies();
+  await done(active ? "Strategy is back on the list." : "Strategy retired. Ones already given stay as they are.");
+}
+
+export async function submitStrategyUpdateInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => submitStrategyUpdate(formData));
+}
+
+export async function removeStrategyProofInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeStrategyProof(formData));
 }

@@ -24,6 +24,7 @@ export function blank(): Database {
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [],
     settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
     eodEmailCopies: [],
+    strategies: [], strategyAssignments: [],
   };
 }
 

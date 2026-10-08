@@ -18,7 +18,7 @@ const WHOLE = new Set([
   "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
   "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "jdChat", "intake",
   "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
-  "matchExclusions", "callFeedback", "interviews", "eodEmailCopies",
+  "matchExclusions", "callFeedback", "interviews", "eodEmailCopies", "strategies", "strategyAssignments",
 ]);
 
 export const page = internalQuery({

@@ -806,6 +806,71 @@ export interface LeadNote {
   byRole: Role;
 }
 
+// ─── Strategy Planner (8 Oct) ────────────────────────────────────────────────
+//
+// A TA Lead decides how a job is worked. Each job has one table, a row per
+// strategy: she puts TAs on the rows ("Done by"), dates them, and strikes
+// through the ones that cannot be used on this job. The TAs see their rows and
+// the struck-through ones, fill in what they did with an optional proof image,
+// and submit; she then reads what was submitted. The list of strategies is the
+// desk's own (edited in the app); a row keeps the name it was made under, so a
+// strategy renamed or retired later still reads as it did.
+
+/** One strategy a lead can choose from. */
+export interface Strategy {
+  id: Id;
+  name: string;
+  description: string | null;
+  /** A heading the list is grouped under, if the desk groups them. */
+  group: string | null;
+  sortOrder: number;
+  /** Retired strategies cannot be given again; ones already given stay. */
+  active: boolean;
+  createdAt: number;
+  createdBy: Id;
+}
+
+/** A picture a TA attached as proof of a strategy. Only its id is kept here; the image is in storage. */
+export interface StrategyProof {
+  /** The storage id of the image. */
+  id: string;
+  contentType: string;
+  size: number;
+  addedAt: number;
+  addedBy: Id;
+  /** Set when the TA submits. Until then the lead does not see it. */
+  submittedAt: number | null;
+}
+
+/**
+ * One strategy on one job: a row of the job's table. It exists once the lead has
+ * acted on it (put a TA on it, dated it or struck it through); a strategy
+ * nobody has touched is a blank row and has no record.
+ */
+export interface StrategyAssignment {
+  id: Id;
+  openingId: Id;
+  strategyId: Id;
+  /** The name when the row was made, kept if the strategy is renamed or retired. */
+  strategyName: string;
+  /** The TAs it is given to ("Done by"). */
+  doneBy: Id[];
+  /** The day the lead assigned it (a Colombo day), or null. */
+  assignedAt: number | null;
+  assignedBy: Id | null;
+  /** The giver's role when they gave it. */
+  byRole: Role | null;
+  /** Struck through: cannot be used on this job. */
+  notApplicable: boolean;
+  /** What the TA submitted: the day it was used, and what they did. */
+  doneAt: number | null;
+  note: string | null;
+  proofs: StrategyProof[];
+  /** When the TA last submitted this row; the lead sees the row's TA fields only from then. */
+  submittedAt: number | null;
+  submittedBy: Id | null;
+}
+
 // ─── Alerts (spec §12) ───────────────────────────────────────────────────────
 
 export type AlertKind =
@@ -1482,6 +1547,8 @@ export interface Database {
   liveMirror: LiveMirrorRow[];
   bin: BinEntry[];
   eodEmailCopies: EodEmailCopy[];
+  strategies: Strategy[];
+  strategyAssignments: StrategyAssignment[];
 }
 
 /**

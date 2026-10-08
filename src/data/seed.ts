@@ -30,6 +30,8 @@ import type {
   SavedSearch,
   SourcingChannel,
   Stage,
+  Strategy,
+  StrategyAssignment,
   User,
   FollowUpCallOutcome,
 } from "./types";
@@ -37,6 +39,7 @@ import { matchAgainst } from "@/lib/dedup";
 import { parseCv, problemsWith } from "@/lib/ingest";
 import { draftsFor, followUpFor, STANDARD_QUESTIONS, type Contact } from "@/lib/followup";
 import { routeInbound, routeNote } from "@/lib/routing";
+import { DESK_STRATEGIES } from "@/lib/strategyPlanner";
 
 const DAY = 86_400_000;
 const now = Date.now();
@@ -1082,6 +1085,22 @@ function cvText(x: {
  *  measured in hours rather than days. */
 const hoursAgo = (h: number) => now - h * 3_600_000;
 
+/**
+ * The desk's strategies as the owner gave them (8 Oct), so the Strategy Planner
+ * has its list on a laptop (the sample data of deploy/local/start-ui.sh and the
+ * tests). The live list is loaded by ta/strategies:seedCatalogue, and edited in
+ * the app. No job has any row: nothing is assigned until a lead assigns it.
+ */
+function makeStrategies(): { strategies: Strategy[]; strategyAssignments: StrategyAssignment[] } {
+  const at = Date.UTC(2026, 9, 1);
+  return {
+    strategies: DESK_STRATEGIES.map((name, i) => ({
+      id: `st_desk${i + 1}`, name, description: null, group: null, sortOrder: i + 1, active: true, createdAt: at, createdBy: "u_lead",
+    })),
+    strategyAssignments: [],
+  };
+}
+
 function makeIntake(): IntakeItem[] {
   const existingA = candidates[0];
   const existingB = candidates[1];
@@ -1236,5 +1255,5 @@ export function buildSeed(): Database {
   // Research, benchmarks and suggestions are generated on demand and cost money
   // to produce. Seeding fakes would teach the desk to trust output nothing
   // fetched, which is the opposite of what these features are for.
-  return { users, briefs, clients, openings, jobPosts, candidates, referees, applications, callFeedback, interviews, linkVault, alerts, savedSearches, savedReports: [], assignments: [], pipelineEvents: makeEvents(), reviewRounds: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [], intake: makeIntake(), outreach: makeOutreach(), ...makeClosings(), esaRecords: makeEsas(), aiCalls: [], settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [], eodEmailCopies: [] };
+  return { users, briefs, clients, openings, jobPosts, candidates, referees, applications, callFeedback, interviews, linkVault, alerts, savedSearches, savedReports: [], assignments: [], pipelineEvents: makeEvents(), reviewRounds: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [], intake: makeIntake(), outreach: makeOutreach(), ...makeClosings(), esaRecords: makeEsas(), aiCalls: [], settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [], eodEmailCopies: [], ...makeStrategies() };
 }

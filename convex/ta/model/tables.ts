@@ -717,6 +717,8 @@ export const TABLES: Record<string, TableModel> = {
   matchRuns: identity("matchRuns", ["note"]),
   callFeedback: identity("callFeedback", ["structured"]),
   eodEmailCopies: identity("eodEmailCopies", ["researchLink"]),
+  strategies: identity("strategies", ["description", "group"]),
+  strategyAssignments: identity("strategyAssignments", ["assignedAt", "assignedBy", "byRole", "doneAt", "note", "submittedAt", "submittedBy"]),
 };
 
 /** The app tables the store keeps. `liveMirror` is the JSON store's read-only copy and has no table. */

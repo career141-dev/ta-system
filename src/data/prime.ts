@@ -391,7 +391,7 @@ const WHOLE_TABLES = [
   "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
   "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "jdChat", "intake",
   "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
-  "matchExclusions", "callFeedback", "interviews", "eodEmailCopies",
+  "matchExclusions", "callFeedback", "interviews", "eodEmailCopies", "strategies", "strategyAssignments",
 ] as const;
 
 async function loadWholeTables(): Promise<Partial<Database>> {

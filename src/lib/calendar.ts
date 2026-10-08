@@ -209,3 +209,22 @@ export function colomboLocalToInstant(local: string): number | null {
   const utc = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0));
   return utc - COLOMBO_OFFSET_MS;
 }
+
+/**
+ * A Colombo day as the "YYYY-MM-DD" a date input holds and shows. Reading it
+ * with `toISOString().slice(0, 10)` gives UTC, which for the first five and a
+ * half hours of a Colombo day is still yesterday.
+ */
+export function colomboDateValue(at: number | null | undefined): string {
+  if (at === null || at === undefined || !Number.isFinite(at)) return "";
+  return new Date(at + COLOMBO_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/** A date input's "YYYY-MM-DD" as the start of that Colombo day; null for an empty or invalid value. */
+export function colomboDayFromValue(value: string | null | undefined): number | null {
+  const v = (value ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const at = colomboLocalToInstant(v);
+  // Feb 30 and the like roll over to March: refuse a date that is not itself.
+  return at !== null && colomboDateValue(at) === v ? at : null;
+}

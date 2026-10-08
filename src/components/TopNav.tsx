@@ -18,6 +18,8 @@ import { allows } from "@/lib/auth";
 const NAV = [
   { href: "/clients", label: "Clients" },
   { href: "/openings", label: "Openings" },
+  // TA Leads give the TAs strategies per job (8 Oct); shown only to those who may.
+  { href: "/strategy", label: "Strategy Planner" },
   { href: "/database", label: "Database" },
   // Intake, follow-ups and placements are deliberately NOT here.
   //
@@ -62,7 +64,11 @@ export function TopNav({
   const onThisPage = scope.action !== "/search" || path === "/search";
   const current = onThisPage ? params.get("q") ?? "" : "";
 
-  const links = NAV.filter((n) => n.href !== "/voice" || allows(user, "voice.practice"));
+  const links = NAV.filter(
+    (n) =>
+      (n.href !== "/voice" || allows(user, "voice.practice")) &&
+      (n.href !== "/strategy" || allows(user, "strategy.assign")),
+  );
   const badge = alertCount > 0 && (
     <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
       {alertCount}
