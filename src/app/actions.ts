@@ -4736,6 +4736,10 @@ export async function resendEod(formData: FormData) {
     if (baseRows.length === 0) return done("Not sent: nobody from that email is on this opening any more.");
     const ids = baseRows.map((r) => r.applicationId);
     const editedRows = shortlistRowsFromForm(formData, baseRows);
+    // The composer opens on the copy as sent, so a change is measured against
+    // that copy. Measured against today's record, every salary or notice updated
+    // since the first send was put back to the month-old value (review, 8 Oct).
+    const sentRows = baseRows.map((b) => prev.rows.find((r) => r.applicationId === b.applicationId) ?? b);
     const effort = effortFromForm(formData, prev.effort);
     const subject = revisedSubject(typed);
     const introText = formData.has("introText") ? String(formData.get("introText")) : prev.introText;
@@ -4751,13 +4755,13 @@ export async function resendEod(formData: FormData) {
       subject,
       effort,
       rows: editedRows,
-      baseRows,
+      baseRows: sentRows,
       introText,
       outroText,
       researchLink: research.url,
     });
     if (!r.ok) return done(`Not sent: ${r.error}`);
-    let note = r.note + (await saveEodEdits(editedRows, baseRows, ids));
+    let note = r.note + (await saveEodEdits(editedRows, sentRows, ids));
 
     try {
       repo.saveEodCopy({
