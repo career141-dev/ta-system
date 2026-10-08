@@ -4,7 +4,7 @@ import { repo, setsForOpening, SET_SIZE } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
-import { EOD_CC_DEFAULTS, EOD_TO } from "@/lib/eod-format";
+import { EOD_CC_DEFAULTS, EOD_TO, needsResearchLink, validateResearchLink } from "@/lib/eod-format";
 import { readEodReply, readInboundReply } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
@@ -122,6 +122,8 @@ export default async function EodPage({
               {awaiting.trackedAt ? ` · watching ${awaiting.trackedAt}` : ""}
             </span>
           </div>
+
+          <ResearchLine link={awaiting.researchLink} className="border-b border-rule px-7 py-2.5" />
 
           <ol className="divide-y divide-rule">
             {waiting.map((w, i) => {
@@ -243,6 +245,7 @@ export default async function EodPage({
         effort={effort}
         senderName={user.name}
         alreadyOut={!!awaiting}
+        needsResearchLink={needsResearchLink(user.role, kind)}
         openSetNote={
           latestSet
             ? latestSet.status === "closed"
@@ -292,6 +295,8 @@ export default async function EodPage({
                     )}
                   </div>
 
+                  <ResearchLine link={r.researchLink} className="mt-3" />
+
                   {r.replyBody && (
                     <div className="mt-3 rounded-lg bg-tag/60 px-3.5 py-2 text-[12.5px] text-ink-soft">
                       <span className="font-medium text-ink">{kind === "director" ? "Director" : "Client"} reply: </span>
@@ -319,5 +324,24 @@ export default async function EodPage({
         </section>
       )}
     </div>
+  );
+}
+
+/**
+ * The research link the TA sent with this round (8 Oct), for the TA leads and
+ * directors who want to open it from the platform as well as from the email.
+ * Rounds sent before the field existed, and the client copy, have none: nothing
+ * is shown. Checked again here, so only a share link is ever an address.
+ */
+function ResearchLine({ link, className }: { link?: string | null; className?: string }) {
+  const checked = link ? validateResearchLink(link) : null;
+  if (!checked?.ok) return null;
+  return (
+    <p className={`text-[12px] ${className ?? ""}`}>
+      <span className="text-ink-faint">Research: </span>
+      <a href={checked.url} target="_blank" rel="noopener noreferrer" className="text-brand hover:underline">
+        View ChatGPT Research
+      </a>
+    </p>
   );
 }

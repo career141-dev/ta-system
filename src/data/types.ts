@@ -627,6 +627,12 @@ export interface ReviewRound {
   returnedAt: number | null;
   /** The reply as received, kept so a parse can be re-read or disputed. */
   replyBody: string | null;
+  /**
+   * The ChatGPT research link the TA put in this email (8 Oct), as it was sent.
+   * Null for rounds sent before the field existed, for the client copy, and
+   * for senders who are not required to give one.
+   */
+  researchLink?: string | null;
   decisions: ReviewDecision[];
 }
 

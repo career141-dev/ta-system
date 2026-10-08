@@ -2719,6 +2719,9 @@ export default defineSchema({
     returnedAt: v.optional(v.union(v.number(), v.null())),
     /** The reply as received, kept so a parse can be re-read or disputed. */
     replyBody: v.optional(v.union(v.string(), v.null())),
+    /** The ChatGPT research link in the TA's end-of-day email (8 Oct). Rounds
+     *  sent before it existed have none. */
+    researchLink: v.optional(v.union(v.string(), v.null())),
     decisions: v.array(v.object({
       applicationId: v.id("applications"),
       outcome: v.union(

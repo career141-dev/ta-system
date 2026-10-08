@@ -18,7 +18,7 @@ import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
-import { EOD_TO, eodRecipients, parseAddressList } from "@/lib/eod-format";
+import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from "@/lib/eod-format";
 import { noticePeriodToDays } from "@/lib/answered";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
@@ -4530,6 +4530,17 @@ export async function sendEod(formData: FormData) {
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
       "Not sent: nobody is on the To line. Add an address as To.",
     )}`);
+  // A TA's end-of-day email carries their ChatGPT research link (8 Oct). Checked
+  // here, not only on the button: the form can arrive from a stale page. Leads and
+  // directors are not held to it, and the client copy sends no email.
+  const research = checkResearchSubmission({
+    role: user.role,
+    kind,
+    link: String(formData.get("chatgptLink") ?? ""),
+    confirmed: formData.get("researchConfirmed") === "on",
+  });
+  if (!research.ok)
+    redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${research.reason}`)}`);
   const sentTo = kind === "director" ? recipients.to[0] : String(formData.get("to") ?? "");
 
   // The Director's copy is really sent now, through Microsoft Graph from the
@@ -4574,6 +4585,7 @@ export async function sendEod(formData: FormData) {
       rows: editedRows,
       introText,
       outroText,
+      researchLink: research.url,
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
     sentNote = r.note;
@@ -4639,6 +4651,7 @@ export async function sendEod(formData: FormData) {
     // The address the reply is watched on: copied in, and on the reply-to.
     trackedAt: repo.shortlistInbox(),
     subject: String(formData.get("subject") ?? ""),
+    researchLink: research.url,
   });
 
   revalidatePath(`/openings/${openingId}`, "layout");
@@ -4682,6 +4695,7 @@ async function emailEod(input: {
   rows?: ShortlistRow[];
   introText?: string;
   outroText?: string;
+  researchLink?: string | null;
 }): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
   const opening = repo.opening(openingId);
@@ -4770,6 +4784,7 @@ async function emailEod(input: {
     senderName: user.name,
     introText: input.introText,
     outroText: input.outroText,
+    researchLink: input.researchLink,
     attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
   });
 
