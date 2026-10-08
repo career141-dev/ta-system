@@ -191,6 +191,7 @@ import type * as ta_notifications from "../ta/notifications.js";
 import type * as ta_openingDelete from "../ta/openingDelete.js";
 import type * as ta_openings from "../ta/openings.js";
 import type * as ta_outreach from "../ta/outreach.js";
+import type * as ta_referenceSearch from "../ta/referenceSearch.js";
 import type * as ta_requirements from "../ta/requirements.js";
 import type * as ta_requirementsActions from "../ta/requirementsActions.js";
 import type * as ta_search from "../ta/search.js";
@@ -395,6 +396,7 @@ declare const fullApi: ApiFromModules<{
   "ta/openingDelete": typeof ta_openingDelete;
   "ta/openings": typeof ta_openings;
   "ta/outreach": typeof ta_outreach;
+  "ta/referenceSearch": typeof ta_referenceSearch;
   "ta/requirements": typeof ta_requirements;
   "ta/requirementsActions": typeof ta_requirementsActions;
   "ta/search": typeof ta_search;
