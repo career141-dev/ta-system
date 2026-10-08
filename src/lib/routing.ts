@@ -585,7 +585,11 @@ function strippedSubject(raw: string): string {
   let out = raw.trim();
   let changed = true;
   while (changed) {
-    const next = out.replace(/^(re|fw|fwd|aw|sv|vs)\s*(\[\d+\])?\s*:\s*/i, "");
+    // "REVISED - " is the resent end-of-day email (lib/eod-format revisedSubject,
+    // 8 Oct): a reply to either version answers the same set.
+    const next = out
+      .replace(/^(re|fw|fwd|aw|sv|vs)\s*(\[\d+\])?\s*:\s*/i, "")
+      .replace(/^revised\s*[-:–—]\s*/i, "");
     changed = next !== out;
     out = next;
   }

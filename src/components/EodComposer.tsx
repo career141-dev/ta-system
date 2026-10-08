@@ -12,7 +12,7 @@ import {
 } from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
-import { sendEod } from "@/app/actions";
+import { resendEod, sendEod } from "@/app/actions";
 import { SubmitButton } from "./Submit";
 
 function noteLineToHtml(line: string): string {
@@ -359,6 +359,10 @@ function EodNotesEditor({
  * table cells (age, notice, notes, current company, designation, current/expected remuneration),
  * L-sheet effort numbers/dates/assignee, and sign-off message can all be edited directly on screen.
  * Edits are kept in this browser's localStorage until sent so nothing is lost on page reload.
+ *
+ * With `resend`, it is an email already sent, opened from the copy kept for the
+ * month (8 Oct): everything starts as it went, the people cannot change, and
+ * Send goes to resendEod, which marks the subject REVISED.
  */
 export function EodComposer({
   openingId,
@@ -378,6 +382,7 @@ export function EodComposer({
   alreadyOut,
   openSetNote,
   needsResearchLink,
+  resend,
 }: {
   openingId: string;
   kind: "director" | "client";
@@ -403,16 +408,28 @@ export function EodComposer({
   openSetNote: string | null;
   /** A TA's email to the directors must carry their ChatGPT research link (8 Oct); the server checks it too. */
   needsResearchLink: boolean;
+  /** An email already sent, opened from its copy to correct and send again (8 Oct). */
+  resend?: {
+    copyId: string;
+    introText: string;
+    outroText: string;
+    researchLink: string | null;
+    extraTo: string[];
+    extraCc: string[];
+    removed: string[];
+  };
 }) {
-  const draftKey = `eod-composer-draft:${openingId}:${kind}`;
+  const draftKey = resend
+    ? `eod-composer-draft:${openingId}:${kind}:resend:${resend.copyId}`
+    : `eod-composer-draft:${openingId}:${kind}`;
   const defaultIntro = "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position";
   const defaultOutro = `Thank You\nBest Regards,\n\n${senderName}\nExecutive - Talent Acquisition`;
 
   const [subject, setSubject] = useState(initialSubject);
-  const [introText, setIntroText] = useState(defaultIntro);
-  const [outroText, setOutroText] = useState(defaultOutro);
+  const [introText, setIntroText] = useState(resend ? resend.introText : defaultIntro);
+  const [outroText, setOutroText] = useState(resend ? resend.outroText : defaultOutro);
   // The link is kept with the draft; the tick is not, so it is given afresh each send.
-  const [researchLink, setResearchLink] = useState("");
+  const [researchLink, setResearchLink] = useState(resend?.researchLink ?? "");
   const [researchConfirmed, setResearchConfirmed] = useState(false);
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
@@ -420,14 +437,14 @@ export function EodComposer({
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
-  const [extraTo, setExtraTo] = useState<string[]>([]);
-  const [extraCc, setExtraCc] = useState<string[]>([]);
+  const [extraTo, setExtraTo] = useState<string[]>(resend?.extraTo ?? []);
+  const [extraCc, setExtraCc] = useState<string[]>(resend?.extraCc ?? []);
   const [draftAddress, setDraftAddress] = useState("");
   const [addAs, setAddAs] = useState<"to" | "cc">("to");
   const [addressError, setAddressError] = useState<string | null>(null);
   // The desk's own To and Cc can be taken off too (1 Oct); the server leaves
   // off whatever is named here (lib/eod-format eodRecipients).
-  const [removed, setRemoved] = useState<string[]>([]);
+  const [removed, setRemoved] = useState<string[]>(resend?.removed ?? []);
   const isOff = (a: string | null | undefined) => !!a && removed.includes(a.toLowerCase());
   const takeOff = (a: string) => setRemoved((prev) => (prev.includes(a.toLowerCase()) ? prev : [...prev, a.toLowerCase()]));
   const putBack = (a: string) => {
@@ -864,7 +881,7 @@ export function EodComposer({
             <EffortSheet
               effort={effort}
               formId="eod-send"
-              draftKey={`eod-effort:${openingId}:${effort.date}`}
+              draftKey={resend ? `eod-effort:${openingId}:resend:${resend.copyId}` : `eod-effort:${openingId}:${effort.date}`}
               openingId={openingId}
             />
           </div>
@@ -971,8 +988,9 @@ export function EodComposer({
         </section>
       )}
 
-      <form id="eod-send" action={sendEod} className="flex flex-wrap items-center gap-4">
+      <form id="eod-send" action={resend ? resendEod : sendEod} className="flex flex-wrap items-center gap-4">
         <input type="hidden" name="openingId" value={openingId} />
+        {resend && <input type="hidden" name="copyId" value={resend.copyId} />}
         <input type="hidden" name="kind" value={kind} />
         <input type="hidden" name="to" value={toEmail} />
         {/* The order here is the order they are numbered in the table, which is
@@ -997,10 +1015,14 @@ export function EodComposer({
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
-          {kind === "director" ? "Send email" : "Record that it went to the client"}
+          {resend ? "Send again as REVISED" : kind === "director" ? "Send email" : "Record that it went to the client"}
         </SubmitButton>
         {kind === "director" && (
-          <span className="text-[11.5px] text-ink-faint">Press once — the CVs are stamped and attached before it goes.</span>
+          <span className="text-[11.5px] text-ink-faint">
+            {resend
+              ? "Press once — it goes to the same people, with the same CVs, numbered as before."
+              : "Press once — the CVs are stamped and attached before it goes."}
+          </span>
         )}
       </form>
     </div>

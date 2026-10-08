@@ -23,6 +23,7 @@ export function blank(): Database {
     savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [],
     settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
+    eodEmailCopies: [],
   };
 }
 

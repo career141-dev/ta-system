@@ -185,6 +185,17 @@ export function eodRecipients(opts: {
   return { to, cc };
 }
 
+/**
+ * The subject of an end-of-day email sent again, corrected (8 Oct):
+ * "REVISED - SET 2 - DELMO - BRAND MANAGER - 3 CVs", so the Director can tell
+ * which is current. Once only, however many times it is resent. The reply is
+ * still matched to the same round (lib/routing strippedSubject ignores it).
+ */
+export function revisedSubject(subject: string): string {
+  const bare = subject.trim().replace(/^(?:revised\s*[-:–—]?\s*)+/i, "").trim();
+  return `REVISED - ${bare}`;
+}
+
 const esc = (s: unknown) =>
   String(s ?? "")
     .replace(/&/g, "&amp;")

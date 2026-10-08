@@ -391,7 +391,7 @@ const WHOLE_TABLES = [
   "briefs", "jobPosts", "assignments", "pipelineEvents", "reviewRounds", "linkVault", "alerts",
   "savedSearches", "savedReports", "researchReports", "benchmarks", "suggestions", "chat", "jdChat", "intake",
   "outreach", "offers", "placements", "esaRecords", "aiCalls", "settings", "matchRuns",
-  "matchExclusions", "callFeedback", "interviews",
+  "matchExclusions", "callFeedback", "interviews", "eodEmailCopies",
 ] as const;
 
 async function loadWholeTables(): Promise<Partial<Database>> {
@@ -411,6 +411,14 @@ async function loadWholeTables(): Promise<Partial<Database>> {
           try {
             page = await convexQuery("ta/tables:page", { table, cursor, numItems });
           } catch (e) {
+            // A table this app knows and the backend does not yet: the app went
+            // out before the backend did, or a local backend runs older
+            // functions (eodEmailCopies, 8 Oct). Read as empty rather than
+            // failing every page; writes to it are refused and said where made.
+            if (/is not loaded whole/i.test((e as Error).message)) {
+              console.warn(`[prime] the backend does not serve "${table}" yet; read as empty until its functions are deployed.`);
+              return [table, [] as unknown[]] as const;
+            }
             if (numItems <= 50 || !/timed out|Server Error|fetch failed/i.test((e as Error).message)) throw e;
             numItems = Math.floor(numItems / 2);
             pages--;
