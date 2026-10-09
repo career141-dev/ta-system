@@ -821,6 +821,9 @@ export default defineSchema({
     cvMissingUploadId: v.optional(v.id("cvUploads")),
     vectorEmbeddingId: v.optional(v.string()),
     pastJobTitles: v.optional(v.array(v.string())),
+    // Every employer, current first, joined with " | " (lib/employers). Kept by
+    // refreshEmployersText; searched by search_employers_all (9 Oct).
+    employersText: v.optional(v.string()),
     sector: v.optional(v.string()),
     overallStatus: v.optional(
       v.union(
@@ -946,6 +949,10 @@ export default defineSchema({
     // database at a company, not just the newest few hundred (24 Sep).
     .searchIndex("search_employer", {
       searchField: "currentEmployer",
+    })
+    // Database search by company, now or before: "HR personnel in Dialog" (9 Oct).
+    .searchIndex("search_employers_all", {
+      searchField: "employersText",
     }),
 
   applications: defineTable({
@@ -2721,6 +2728,8 @@ export default defineSchema({
     assignedAt: v.optional(v.union(v.number(), v.null())),
     assignedBy: v.optional(v.union(v.id("users"), v.null())),
     byRole: v.optional(v.union(v.string(), v.null())),
+    /** Ticked for the job by the lead (9 Oct); absent on older rows. */
+    selected: v.optional(v.union(v.boolean(), v.null())),
     notApplicable: v.boolean(),
     doneAt: v.optional(v.union(v.number(), v.null())),
     note: v.optional(v.union(v.string(), v.null())),

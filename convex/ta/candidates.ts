@@ -37,7 +37,7 @@ import { cvFileMissing } from "../../src/lib/cvMissing";
 async function withCareer(
   ctx: QueryCtx,
   id: Id<"candidates">,
-  shape: "list" | "full" = "list",
+  shape: "list" | "full" | "search" = "list",
 ): Promise<Doc<"candidates"> | null> {
   const candidate = await ctx.db.get(id);
   if (!candidate) return null;
@@ -67,6 +67,17 @@ async function withCareer(
   if (cvFileMissing(candidate)) out.cvFileMissing = true;
   if (candidate.locationStructured?.raw_text) out.locationStructured = { raw_text: candidate.locationStructured.raw_text };
   if (Array.isArray(candidate.education) && candidate.education.length) out.education = [candidate.education[0]];
+  /*
+   * Database search scores these too (cvs/cvScoring, 9 Oct): the summary's
+   * opening for the title, past titles at 80% of a current one, and every
+   * employer for "HR personnel in Dialog". Only the search asks for them, so
+   * the alert badge's 740-row list stays as light as before.
+   */
+  if (shape === "search") {
+    if (candidate.summary) out.summary = candidate.summary.slice(0, 400);
+    if (candidate.pastJobTitles?.length) out.pastJobTitles = candidate.pastJobTitles.slice(0, 12);
+    if (candidate.employersText) out.employersText = candidate.employersText;
+  }
   return out as unknown as Doc<"candidates">;
 }
 
@@ -82,7 +93,12 @@ const LIST_FIELDS = [
 ] as const;
 
 export const getBatch = internalQuery({
-  args: { actorId: v.optional(v.string()), candidateIds: v.array(v.string()) },
+  args: {
+    actorId: v.optional(v.string()),
+    candidateIds: v.array(v.string()),
+    /** "search" adds what Database search scores on; lists leave it out. */
+    shape: v.optional(v.literal("search")),
+  },
   handler: async (ctx, args) => {
     const user = await optionalActor(ctx, args.actorId);
     // Only meaningful when a person was named; an unnamed caller holds the
@@ -100,7 +116,7 @@ export const getBatch = internalQuery({
      * because the alert badge in the layout needs those records.
      */
     const docs = await Promise.all(
-      args.candidateIds.slice(0, 500).map((id) => withCareer(ctx, id as Id<"candidates">)),
+      args.candidateIds.slice(0, 500).map((id) => withCareer(ctx, id as Id<"candidates">, args.shape ?? "list")),
     );
     return docs.filter((c): c is Doc<"candidates"> => c !== null);
   },

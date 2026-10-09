@@ -14,8 +14,9 @@ import { countsOf, dayLabel, proofsVisibleTo, strategyTable } from "@/lib/strate
 
 /**
  * Strategies on this job (8 Oct), as the TA sees them: the strategies their TA
- * Lead put them on, and the ones struck through for the job (crossed out, so they
- * know not to use them). They fill in what they did and submit it.
+ * Lead ticked for the job (9 Oct; it was only the ones they were put on), and
+ * the ones struck through (crossed out, so they know not to use them). They fill
+ * in what they did and submit it.
  *
  * Rows are narrowed by `scopeStrategies` on every read, not by what this page
  * chooses to draw. A lead or director who opens the page is sent to the Strategy
@@ -31,12 +32,10 @@ export default async function OpeningStrategiesPage({ params }: { params: Promis
   const isLead = allows(user, "strategy.assign");
 
   const visible = scopeStrategies(repo.strategyAssignments(id), user);
-  const mine = visible.filter((r) => r.doneBy.includes(user.id) && !r.notApplicable);
-  // Progress is on the TA's own rows; the struck-through count is the job's.
-  const counts = { ...countsOf(mine), notApplicable: visible.filter((r) => r.notApplicable).length };
+  const counts = countsOf(visible);
   const nameOf = (uid: string) => repo.user(uid)?.name ?? "Someone";
 
-  // Only the rows this person may see become lines: assigned ones and struck-through ones.
+  // Only the rows this person may see become lines: ticked ones and struck-through ones.
   const lines = strategyTable(repo.strategies(true), visible).filter((l) => l.row);
   const rows: TaStrategyRow[] = lines.map(({ strategy, row }) => {
     const r = row!;
@@ -64,22 +63,22 @@ export default async function OpeningStrategiesPage({ params }: { params: Promis
         <p className="rounded-xl border border-rule bg-surface px-6 py-10 text-center text-[13px] text-ink-soft">
           The strategy table for this job is in the{" "}
           <Link href={`/strategy/${id}`} className="font-medium text-brand hover:underline">Strategy Planner</Link>:
-          put TAs on strategies, strike through the ones that cannot be used here, and read what the TAs submit.
+          tick the strategies to use, put TAs on them, strike through the ones that cannot be used here, and read what the TAs submit.
         </p>
       ) : (
         <>
           <StatRow
             items={[
-              { n: counts.assigned, label: "Given to you" },
-              { n: counts.done, label: "Used, as submitted" },
+              { n: counts.assigned, label: "Strategies for this job" },
+              { n: counts.done, label: "Done" },
               { n: counts.notApplicable, label: "Not for this job" },
             ]}
           />
           {rows.length === 0 ? (
             <div className="rounded-xl border border-rule bg-surface px-8 py-14 text-center">
-              <p className="text-[14px] font-medium">No strategies for you on this job yet</p>
+              <p className="text-[14px] font-medium">No strategies for this job yet</p>
               <p className="mx-auto mt-1.5 max-w-[48ch] text-[12.5px] leading-relaxed text-ink-faint">
-                Your TA Lead has not put you on any strategy for this job. They will appear here, and you will get a notification.
+                Your TA Lead has not ticked any strategy for this job. They will appear here once they do.
               </p>
             </div>
           ) : (

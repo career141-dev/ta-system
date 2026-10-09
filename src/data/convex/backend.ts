@@ -333,6 +333,26 @@ export async function keywordSearchMany(
   return [...best].map(([candidateId, score]) => ({ candidateId, score })).sort((a, b) => b.score - a.score);
 }
 
+/**
+ * Everyone who worked at these companies, now or before (9 Oct). The first
+ * name is the one typed, the rest its spellings; each hit is confirmed against
+ * the career, so the score says whether they are there now (100) or were (80).
+ */
+export async function employerSearch(
+  actor: Actor,
+  companies: string[],
+  scope: "current" | "any" = "any",
+  limit = 200,
+): Promise<{ candidateId: Id; score: number; when: "current" | "past" }[]> {
+  const named = companies.map((c) => c.trim()).filter((c) => c.length > 1).slice(0, 5);
+  if (!named.length) return [];
+  return convexQuery<{ candidateId: Id; score: number; when: "current" | "past" }[]>("matching/search:searchByEmployer", {
+    companies: named,
+    scope,
+    limit,
+  });
+}
+
 /** How many candidates there are, without reading any of them. */
 export async function candidateStats(actor: Actor): Promise<{ total: number; sampled: boolean }> {
   return convexQuery<{ total: number; sampled: boolean }>("ta/candidates:stats", {
@@ -453,7 +473,7 @@ export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, 
  * The same rows in the backend's own shape — for the matching engine's scorer
  * (convex/cvs/cvScoring), which reads fields the platform's type does not keep.
  */
-export async function candidateDocsByIds(actor: Actor, ids: Id[]): Promise<LiveCandidate[]> {
+export async function candidateDocsByIds(actor: Actor, ids: Id[], shape?: "search"): Promise<LiveCandidate[]> {
   if (ids.length === 0) return [];
   const out: LiveCandidate[] = [];
   // The backend caps a batch at 500; page rather than silently truncating, and
@@ -471,6 +491,7 @@ export async function candidateDocsByIds(actor: Actor, ids: Id[]): Promise<LiveC
         convexQuery<LiveCandidate[]>("ta/candidates:getBatch", {
           actorId: actor.id ?? undefined,
           candidateIds: page,
+          ...(shape ? { shape } : {}),
         }),
       ),
     );
