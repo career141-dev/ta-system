@@ -19,7 +19,7 @@
 import type {
   Application, AssignmentRole, JobPost, LinkVaultEntry, ProfileSuggestion, Stage, StrategyAssignment, User,
 } from "@/data/types";
-import { isDeskWide, isReadOnly } from "@/lib/auth";
+import { isDeskWide, isReadOnly, isTa, seesEveryTaRow } from "@/lib/auth";
 import { isTicked } from "@/lib/strategyPlanner";
 
 /**
@@ -88,13 +88,17 @@ export function scopeApplications(
  * one opening still read each other's work. The collision it guarded against
  * is caught where it happens: pasting a link already in the table is refused
  * with whose it is (addLink, app/actions.ts).
+ *
+ * TA Support reads every TA's rows on the job (9 Oct) — with two TAs on one
+ * opening they see both tables in one. Acting on another TA's row is still
+ * refused (opening.sourcing in lib/auth), so this is a view, not a hand-over.
  */
 export function scopeLinks(
   rows: LinkVaultEntry[],
   user: User,
   addedByDeskWide: (userId: string) => boolean,
 ): Scoped<LinkVaultEntry>[] {
-  if (!isScoped(user)) return rows.map((row) => ({ row, takenBy: null }));
+  if (!isScoped(user) || seesEveryTaRow(user)) return rows.map((row) => ({ row, takenBy: null }));
   return rows
     .filter((r) => r.addedBy === user.id || addedByDeskWide(r.addedBy))
     .map((row) => ({ row, takenBy: null }));
@@ -191,7 +195,7 @@ export function seatFor(user: User, assignment: AssignmentRole | null | undefine
       return { role: assignment, canSeeSourcing: true, canAct: true, stages: null };
     case "primary_recruiter":
     case "supporting_recruiter":
-      return { role: assignment, canSeeSourcing: true, canAct: true, stages: null, ownDeskOf: user.role === "ta" ? user.id : null };
+      return { role: assignment, canSeeSourcing: true, canAct: true, stages: null, ownDeskOf: isTa(user) ? user.id : null };
     default:
       // Not on this opening at all.
       return { role: null, canSeeSourcing: false, canAct: false, stages: [] };
@@ -263,6 +267,6 @@ export function rowIsAnotherTas(
  */
 export function scopeStrategies(rows: StrategyAssignment[], user: User): StrategyAssignment[] {
   if (!isScoped(user)) return rows;
-  if (user.role !== "ta") return [];
+  if (!isTa(user)) return [];
   return rows.filter((r) => isTicked(r) || r.notApplicable);
 }

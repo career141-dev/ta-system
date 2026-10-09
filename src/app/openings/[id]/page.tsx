@@ -11,7 +11,7 @@ import { JdApproval } from "@/components/JdApproval";
 import { JobDetailsSummary } from "@/components/JobDetailsSummary";
 import { OpeningAdmin } from "./OpeningAdmin";
 import { computeAlerts } from "@/lib/sla";
-import { allows } from "@/lib/auth";
+import { allows, isTa } from "@/lib/auth";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { MatchingStatus } from "@/components/MatchingStatus";
@@ -157,7 +157,7 @@ export default async function OverviewPage({
           .map((b) => ({
             id: b.id,
             author: users.find((u) => u.id === b.capturedBy)?.name ?? "Someone on the desk",
-            isLead: users.find((u) => u.id === b.capturedBy)?.role !== "ta",
+            isLead: !isTa(users.find((u) => u.id === b.capturedBy)),
             notes: b.notesMarkdown.trim(),
             at: dateAt(b.capturedAt),
           }))}
@@ -294,8 +294,8 @@ export default async function OverviewPage({
                   .map((u) => ({ id: u.id, name: u.name, role: u.role }))}
                 /* The TA running the role can correct its details. Deleting it,
                    and everything filed under it, stays with the lead. */
-                canEdit={o.assignedTaIds.includes(user.id) || user.role !== "ta"}
-                canDelete={user.role !== "ta"}
+                canEdit={o.assignedTaIds.includes(user.id) || !isTa(user)}
+                canDelete={!isTa(user)}
                 counts={{
                   applications: repo.applications(id).length,
                   posts: repo.jobPosts(id).length,

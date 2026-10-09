@@ -31,6 +31,8 @@ const ROLE_MAP: Record<string, string> = {
   ta_lead: "ta_manager",
   director: "director",
   ta: "recruiter",
+  // Works as a TA does; the wider Excel Tables view is the web app's (9 Oct).
+  ta_support: "recruiter",
   ops: "ops",
   client: "client",
   viewer: "viewer",
@@ -142,6 +144,7 @@ const deskRole = v.union(
   v.literal("director"),
   v.literal("ta_lead"),
   v.literal("ta"),
+  v.literal("ta_support"),
   v.literal("ops"),
   v.literal("client"),
   v.literal("viewer"),

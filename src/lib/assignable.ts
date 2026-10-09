@@ -1,4 +1,5 @@
 import type { User } from "@/data/types";
+import { isTa } from "@/lib/auth";
 
 /**
  * Who an opening can be assigned to: active TAs, and nobody else.
@@ -9,5 +10,5 @@ import type { User } from "@/data/types";
  * and by the save that checks it.
  */
 export function assignableTas(users: User[]): User[] {
-  return users.filter((u) => u.isActive && u.role === "ta").sort((a, b) => a.name.localeCompare(b.name));
+  return users.filter((u) => u.isActive && isTa(u)).sort((a, b) => a.name.localeCompare(b.name));
 }

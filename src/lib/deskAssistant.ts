@@ -19,7 +19,7 @@
 
 import { repo, setsForOpening, stageCounts } from "@/data/store";
 import { ROLE_LABEL, STAGE_LABEL, type Application, type Assignment, type Stage, type User } from "@/data/types";
-import { can, isDeskWide, type Capability } from "./auth";
+import { can, isDeskWide, isTa, type Capability } from "./auth";
 import { colomboDayStart } from "./calendar";
 import { alertsFor } from "./sla";
 import { deskScope, seatFor, visiblePosts } from "./visibility";
@@ -160,7 +160,7 @@ export function roleBrief(user: User) {
     role: ROLE_LABEL[user.role],
     sees: isDeskWide(user)
       ? "the whole desk"
-      : user.role === "ta"
+      : isTa(user)
         ? "the jobs they are on: their own candidates and the unclaimed pool; a colleague's only once shortlisted, by name"
         : "only the jobs they have been put on, and only the stages their seat allows",
     // Work on a job is theirs only on the jobs they are put on; the rest is desk-wide.

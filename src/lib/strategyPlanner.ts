@@ -1,5 +1,6 @@
 import type { Opening, Strategy, StrategyAssignment, StrategyProof, User } from "@/data/types";
 import { COLOMBO_OFFSET_MS, colomboDateValue } from "@/lib/calendar";
+import { isTa } from "@/lib/auth";
 
 /**
  * The Strategy Planner's view of the desk (8 Oct): every job still being worked,
@@ -66,7 +67,7 @@ export function plannerByTa(
   rows: StrategyAssignment[],
 ): { groups: PlannerGroup[]; unstaffed: Opening[] } {
   const live = openings.filter(isPlannable);
-  const tas = users.filter((u) => u.role === "ta" && u.isActive);
+  const tas = users.filter((u) => isTa(u) && u.isActive);
   const groups: PlannerGroup[] = [];
   for (const ta of tas) {
     const mine = live.filter((o) => o.assignedTaIds.includes(ta.id));
@@ -97,7 +98,7 @@ export interface PlannerJobLine {
  * with no TA is listed too; its strategies can be ticked before anyone is on it.
  */
 export function plannerJobs(openings: Opening[], users: User[], rows: StrategyAssignment[], clientName: (id: string) => string): PlannerJobLine[] {
-  const tas = users.filter((u) => u.role === "ta" && u.isActive);
+  const tas = users.filter((u) => isTa(u) && u.isActive);
   return openings
     .filter(isPlannable)
     .map((opening) => ({
@@ -167,7 +168,7 @@ export function proofsForLead(row: StrategyAssignment): StrategyProof[] {
 
 /** The proofs one person may see on a row: a lead the submitted ones, a TA the ones they attached themselves. */
 export function proofsVisibleTo(row: StrategyAssignment, user: Pick<User, "id" | "role">): StrategyProof[] {
-  if (user.role === "ta") return row.proofs.filter((p) => p.addedBy === user.id);
+  if (isTa(user)) return row.proofs.filter((p) => p.addedBy === user.id);
   if (user.role === "admin" || user.role === "director" || user.role === "ta_lead" || user.role === "ops") return proofsForLead(row);
   return [];
 }

@@ -93,7 +93,7 @@ import { healthFor, overallStatus } from "@/lib/health";
 import { acceptAnswer, applyPlan, CALL_CONSENT_TEXT, modeState, writePolicy } from "@/lib/voice";
 import { dataDir } from "./dataDir";
 import { isConvex } from "./mode";
-import { isDeskWide } from "@/lib/auth";
+import { isDeskWide, isTa } from "@/lib/auth";
 import { bumpPrimed, getCommitter, realId, recordAliases, hasCandidate, missingCandidateMessage, primed, primedVersion, primedVocabulary, resetStore } from "./primeState";
 import { describeCommitError, diffTables, renameIds, restoreTables, snapshotTables } from "./unitOfWork";
 import { WORKING_STAGES, workingStageKey } from "@/lib/workingStage";
@@ -635,7 +635,7 @@ const rawRepo = {
 
   openingsForUser(user: User): Opening[] {
     const all = load().openings;
-    if (user.role === "ta") return all.filter((o) => o.assignedTaIds.includes(user.id) || !!repo.assignmentFor(o.id, user.id));
+    if (isTa(user)) return all.filter((o) => o.assignedTaIds.includes(user.id) || !!repo.assignmentFor(o.id, user.id));
     if (user.role === "ta_lead") return all.filter((o) => o.taLeadId === user.id || o.assignedTaIds.includes(user.id));
     // A client or a viewer sees the openings they have been put on, and no
     // others — this returned every opening on the desk for them.
@@ -1859,7 +1859,7 @@ const rawRepo = {
         // one, and an address on a director is an address nothing delivers to.
         routingEmail:
           input.routingEmail ??
-          (input.role === "ta" || input.role === "ta_lead"
+          (input.role === "ta" || input.role === "ta_support" || input.role === "ta_lead"
             ? `${input.name.toLowerCase().replace(/[^a-z]/g, "")}.jobs@career141.com`
             : null),
         role: input.role,

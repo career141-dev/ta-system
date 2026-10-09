@@ -6,6 +6,7 @@ import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { TokenInput, inputClass } from "./form";
 import { Confirm } from "./Confirm";
 import type { JobPost, User } from "@/data/types";
+import { isTa } from "@/lib/auth";
 
 const STATUS_LABEL: Record<JobPost["status"], string> = {
   draft: "Draft",
@@ -399,7 +400,7 @@ export function PostManager({
                       >
                         <option value="">Unassigned</option>
                         {users
-                          .filter((u) => u.role === "ta")
+                          .filter((u) => isTa(u))
                           .map((u) => (
                             <option key={u.id} value={u.id}>
                               {u.name}

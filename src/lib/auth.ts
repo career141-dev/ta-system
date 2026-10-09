@@ -101,6 +101,25 @@ export function isDeskWide(user: User): boolean {
   return DESK_WIDE.includes(user.role);
 }
 
+/**
+ * A TA working their own desk — a TA, or TA Support (9 Oct). TA Support has a
+ * TA's access in every respect but one: on a job's Excel Tables they read the
+ * rows of every TA on it (seesEveryTaRow). Every "is this a TA" check asks
+ * this, so the two seats cannot drift apart.
+ */
+export function isTa(user: Pick<User, "role"> | null | undefined): boolean {
+  return user?.role === "ta" || user?.role === "ta_support";
+}
+
+/**
+ * TA Support on Excel Tables: every TA's rows on the job, not only their own
+ * (9 Oct). Reading only — another TA's row is still theirs to work, so the
+ * sourcing check below refuses acting on it exactly as it does for a TA.
+ */
+export function seesEveryTaRow(user: User): boolean {
+  return user.role === "ta_support";
+}
+
 export function isReadOnly(user: User): boolean {
   return READ_ONLY.includes(user.role);
 }
@@ -143,7 +162,7 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
 
     case "strategy.work":
       // The TA the strategies were given to, and only on a job they are on.
-      if (user.role !== "ta") return deny("Strategies are worked by the TA they were given to.");
+      if (!isTa(user)) return deny("Strategies are worked by the TA they were given to.");
       if (!ctx.assignment || ctx.assignment.role === "client_contact") return deny("You are not on this opening.");
       return ALLOW;
 
@@ -189,7 +208,7 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       }
       // A table row another TA added is theirs. Callers name an owner only for
       // rows (repo.openingOf), so nothing else is narrowed by this (2 Oct).
-      if (ctx.assignment && ctx.ownerTaId && ctx.ownerTaId !== user.id && user.role === "ta") {
+      if (ctx.assignment && ctx.ownerTaId && ctx.ownerTaId !== user.id && isTa(user)) {
         return deny("That row is another recruiter's. Their table is theirs to work.");
       }
       return ctx.assignment ? ALLOW : deny("You are not on this opening.");
@@ -213,7 +232,7 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       if (
         ctx.ownerTaId &&
         ctx.ownerTaId !== user.id &&
-        user.role === "ta"
+        isTa(user)
       ) {
         return deny("Another recruiter has claimed this candidate.");
       }
@@ -260,7 +279,7 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
 
     case "voice.practice":
       // Taken off the TA seat (2 Oct). Leads, directors, admin and ops keep it.
-      return user.role === "ta"
+      return isTa(user)
         ? deny("The voice agent practice line is not available on a Talent Acquisition account.")
         : ALLOW;
   }

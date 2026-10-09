@@ -9,6 +9,7 @@ import type { Role, User } from "@/data/types";
 
 const ROLES: { value: Role; label: string; note: string }[] = [
   { value: "ta", label: "Talent Acquisition", note: "Works openings. Sees their own desk." },
+  { value: "ta_support", label: "TA Support", note: "Works openings as a TA does, and reads every TA's Excel Tables rows on them." },
   { value: "ta_lead", label: "TA Lead", note: "Assigns work and sees every desk." },
   { value: "director", label: "Director", note: "Reviews shortlists." },
   { value: "ops", label: "Operations", note: "Runs the process, not the roles." },

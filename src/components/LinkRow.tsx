@@ -70,6 +70,7 @@ export function LinkRow({
   interest = "pending",
   canNote = false,
   viewerId = "",
+  readOnly = false,
 }: {
   entry: LinkVaultEntry;
   openingId: string;
@@ -83,6 +84,12 @@ export function LinkRow({
   canNote?: boolean;
   /** Who is looking — the author of a note may remove it. */
   viewerId?: string;
+  /**
+   * Another TA's row, shown to TA Support (9 Oct): read, not worked. The
+   * server refuses the writes anyway (opening.sourcing); this leaves out the
+   * buttons that would only be refused.
+   */
+  readOnly?: boolean;
 }) {
   const [removed, setRemoved] = useState(false);
   const [isEyeMarked, setIsEyeMarked] = useState(r.isEyeMarked);
@@ -150,6 +157,16 @@ export function LinkRow({
   return (
     <article className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="flex gap-3.5">
+        {readOnly ? (
+          <span
+            title={isEyeMarked ? "Eye-marked — a high-conviction profile" : undefined}
+            className={`mt-1 grid h-[15px] w-[15px] shrink-0 place-items-center rounded-[3px] border text-[10px] leading-none ${
+              isEyeMarked ? "border-brand bg-brand text-white" : "border-rule text-transparent"
+            }`}
+          >
+            ✓
+          </span>
+        ) : (
         <form
           onSubmit={(e) => {
             setIsEyeMarked((prev) => !prev);
@@ -170,6 +187,7 @@ export function LinkRow({
             ✓
           </button>
         </form>
+        )}
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
@@ -205,6 +223,11 @@ export function LinkRow({
                 {r.isAddOn && (
                   <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">Add-on</span>
                 )}
+                {readOnly && (
+                  <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft" title="Another TA's row — theirs to work">
+                    {addedByName}&rsquo;s · view only
+                  </span>
+                )}
                 {notes.length > 0 && (
                   <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">
                     Note from {noteByline(notes[0], userNames).role}
@@ -224,10 +247,11 @@ export function LinkRow({
                   </button>
                 )}
               </p>
-              <CvStatus entry={r} openingId={openingId} decide={decide} />
+              <CvStatus entry={r} openingId={openingId} decide={decide} readOnly={readOnly} />
               {interest === "not_interested" && why && (
                 <p className="mt-1 text-[12px] text-danger">Not interested — {why.note}</p>
               )}
+              {!readOnly && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 {/* Not interested asks why first (the desk, 29 Sep); the reason
                     goes on the Rejected entry and on this row's log. */}
@@ -297,6 +321,7 @@ export function LinkRow({
                     </form>
                   ))}
               </div>
+              )}
             </div>
 
             <div className="flex w-full shrink-0 flex-col items-start gap-2 sm:w-auto sm:items-end">
@@ -308,7 +333,7 @@ export function LinkRow({
                   >
                     In {STAGE_LABEL[onPipeline.stage]} →
                   </Link>
-                ) : r.outcome === "shortlisted" && r.name ? (
+                ) : readOnly ? null : r.outcome === "shortlisted" && r.name ? (
                   <form onSubmit={(e) => toPipeline.run(submitted(e).formData)}>
                     <input type="hidden" name="openingId" value={openingId} />
                     <input type="hidden" name="entryId" value={r.id} />
@@ -359,6 +384,8 @@ export function LinkRow({
                 >
                   Company Reference
                 </button>
+                {!readOnly && (
+                <>
                 <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="entryId" value={r.id} />
@@ -383,6 +410,8 @@ export function LinkRow({
                 >
                   Change outcome ⇕
                 </button>
+                </>
+                )}
                 <a
                   href={externalUrl(r.linkedinUrl) ?? undefined}
                   target="_blank"
@@ -391,6 +420,8 @@ export function LinkRow({
                 >
                   Open profile
                 </a>
+                {!readOnly && (
+                <>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -416,6 +447,8 @@ export function LinkRow({
                 >
                   •••
                 </button>
+                </>
+                )}
               </div>
               <p className="text-right text-[11px] leading-snug text-ink-faint">
                 Added {dateAt(r.createdAt)}
@@ -558,7 +591,7 @@ export function LinkRow({
 
           {!edit && <ActionNote result={answer} className="mt-3" />}
 
-          {edit && (
+          {edit && !readOnly && (
             <div className="mt-4 grid grid-cols-[minmax(0,1fr)] gap-6 border-t border-rule pt-4 lg:grid-cols-2">
               <form
                 onSubmit={(e) => {
@@ -712,10 +745,13 @@ function CvStatus({
   entry: r,
   openingId,
   decide,
+  readOnly = false,
 }: {
   entry: LinkVaultEntry;
   openingId: string;
   decide: ReturnType<typeof useInline>;
+  /** Another TA's row: what was matched is shown, deciding it is theirs. */
+  readOnly?: boolean;
 }) {
   const m = r.cvMatch ?? null;
   const pill = "mt-1.5 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-2.5 py-1.5 text-[12px]";
@@ -742,7 +778,7 @@ function CvStatus({
         {m?.reasons.length ? <span className="text-ink-faint">· {m.reasons.join(", ")}</span> : null}
         {/* Linked by the matching on its own: a TA can say it is someone else
             (1 Oct — profiles were landing on the wrong person). */}
-        {m && m.candidateId === r.candidateId && m.decided !== "same" && (
+        {!readOnly && m && m.candidateId === r.candidateId && m.decided !== "same" && (
           <form onSubmit={(e) => decide.run(submitted(e).formData)} className="inline">
             <input type="hidden" name="openingId" value={openingId} />
             <input type="hidden" name="entryId" value={r.id} />
@@ -759,6 +795,13 @@ function CvStatus({
         )}
         <ActionNote result={decide.result} className="w-full" />
       </div>
+    );
+  }
+  if (m?.strength === "possible" && !m.decided && readOnly) {
+    return (
+      <p className="mt-1.5 text-[12px] text-ink-faint">
+        Possibly {m.fullName}, already in our database — for the TA working this row to confirm
+      </p>
     );
   }
   if (m?.strength === "possible" && !m.decided) {
@@ -789,7 +832,7 @@ function CvStatus({
     <>
       <p className="mt-1.5 text-[12px] text-ink-faint">Not matched to anyone in our database yet</p>
       {/* The matching only links when certain; Find CV asks on demand (1 Oct). */}
-      <FindCvButton openingId={openingId} entryId={r.id} />
+      {!readOnly && <FindCvButton openingId={openingId} entryId={r.id} />}
     </>
   );
 }

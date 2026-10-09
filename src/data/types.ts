@@ -13,13 +13,16 @@ export type Id = string;
 // ─── People ──────────────────────────────────────────────────────────────────
 
 /** Spec §13. `ops` chases client reviews; `client` and `viewer` are read-only. */
-export type Role = "admin" | "director" | "ta_lead" | "ta" | "ops" | "client" | "viewer";
+/** `ta_support` works exactly as a TA does, and on Excel Tables also reads the
+ *  rows of every other TA on the job (9 Oct). */
+export type Role = "admin" | "director" | "ta_lead" | "ta" | "ta_support" | "ops" | "client" | "viewer";
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: "Admin",
   director: "Director",
   ta_lead: "TA Lead",
   ta: "Talent Acquisition",
+  ta_support: "TA Support",
   ops: "Operations",
   client: "Client",
   viewer: "Viewer",

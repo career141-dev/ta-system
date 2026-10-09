@@ -8,6 +8,7 @@ import { SubmitButton } from "@/components/Submit";
 import { saveStrategy } from "@/app/actions";
 import { StrategyLeadTable } from "@/components/StrategyLeadTable";
 import { leadLine, strategyTable } from "@/lib/strategyPlanner";
+import { isTa } from "@/lib/auth";
 
 /**
  * One job in the Strategy Planner (8 Oct): its table of strategies, one row each.
@@ -28,7 +29,7 @@ export default async function StrategyJobPage({ params }: { params: Promise<{ op
   const lines = strategyTable(repo.strategies(true), repo.strategyAssignments(openingId));
   const tas = opening.assignedTaIds
     .map((id) => repo.user(id))
-    .filter((u): u is NonNullable<typeof u> => !!u && u.role === "ta" && u.isActive);
+    .filter((u): u is NonNullable<typeof u> => !!u && isTa(u) && u.isActive);
   const nameOf = (id: string | null) => (id ? repo.user(id)?.name ?? "Someone" : "");
   const headings = [...new Set(repo.strategies().map((s) => s.group).filter((g): g is string => !!g))];
 

@@ -302,7 +302,7 @@ const ROLES: Record<string, Role> = {
 };
 
 /** This platform's roles, as `taRole` stores them. */
-const TA_ROLES = new Set<string>(["admin", "director", "ta_lead", "ta", "ops", "client", "viewer"]);
+const TA_ROLES = new Set<string>(["admin", "director", "ta_lead", "ta", "ta_support", "ops", "client", "viewer"]);
 
 export interface BackendUser {
   _id: string;
