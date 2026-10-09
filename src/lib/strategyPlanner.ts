@@ -1,5 +1,5 @@
 import type { Opening, Strategy, StrategyAssignment, StrategyProof, User } from "@/data/types";
-import { COLOMBO_OFFSET_MS } from "@/lib/calendar";
+import { COLOMBO_OFFSET_MS, colomboDateValue } from "@/lib/calendar";
 
 /**
  * The Strategy Planner's view of the desk (8 Oct): every job still being worked,
@@ -16,7 +16,16 @@ export interface StrategyCounts {
   notApplicable: number;
 }
 
-/** A row counts toward progress unless it is struck through. */
+/**
+ * Ticked for the job: the lead chose it, so the TAs on the job see it (9 Oct).
+ * A row from before the tick box has no answer and counts as ticked once a TA
+ * is on it, which is how those rows reached their TA until now.
+ */
+export function isTicked(r: Pick<StrategyAssignment, "selected" | "doneBy">): boolean {
+  return r.selected ?? r.doneBy.length > 0;
+}
+
+/** A row counts toward progress when it is ticked or has a TA on it, unless it is struck through. */
 export function countsOf(rows: StrategyAssignment[]): StrategyCounts {
   const c: StrategyCounts = { assigned: 0, done: 0, notApplicable: 0 };
   for (const r of rows) {
@@ -24,7 +33,7 @@ export function countsOf(rows: StrategyAssignment[]): StrategyCounts {
       c.notApplicable++;
       continue;
     }
-    if (r.doneBy.length === 0) continue;
+    if (!isTicked(r) && r.doneBy.length === 0) continue;
     c.assigned++;
     if (r.doneAt !== null) c.done++;
   }
@@ -75,6 +84,30 @@ export function plannerByTa(
   return { groups, unstaffed };
 }
 
+export interface PlannerJobLine {
+  opening: Opening;
+  /** The active TAs on the job, in name order. */
+  tas: User[];
+  counts: StrategyCounts;
+}
+
+/**
+ * The planner as one table of jobs (9 Oct): every job still being worked, by
+ * client and then title, with its TAs and how far its strategies have got. A job
+ * with no TA is listed too; its strategies can be ticked before anyone is on it.
+ */
+export function plannerJobs(openings: Opening[], users: User[], rows: StrategyAssignment[], clientName: (id: string) => string): PlannerJobLine[] {
+  const tas = users.filter((u) => u.role === "ta" && u.isActive);
+  return openings
+    .filter(isPlannable)
+    .map((opening) => ({
+      opening,
+      tas: tas.filter((t) => opening.assignedTaIds.includes(t.id)).sort((a, b) => a.name.localeCompare(b.name)),
+      counts: countsOf(rows.filter((r) => r.openingId === opening.id)),
+    }))
+    .sort((a, b) => clientName(a.opening.clientId).localeCompare(clientName(b.opening.clientId)) || a.opening.title.localeCompare(b.opening.title));
+}
+
 /** One line of a job's table: a strategy, and the row the lead has made for it, if any. */
 export interface StrategyTableLine {
   strategy: Pick<Strategy, "id" | "name" | "description" | "group" | "active">;
@@ -104,6 +137,25 @@ export function strategyTable(strategies: Strategy[], rows: StrategyAssignment[]
   return lines;
 }
 
+/** A line of the lead's table, ready to draw (9 Oct). The shape is StrategyLeadTable's LeadStrategyLine. */
+export function leadLine({ strategy, row }: StrategyTableLine, nameOf: (id: string | null) => string) {
+  return {
+    strategyId: strategy.id,
+    name: strategy.name,
+    description: strategy.description,
+    active: strategy.active,
+    rowId: row?.id ?? null,
+    ticked: row ? isTicked(row) : false,
+    struck: !!row?.notApplicable,
+    doneBy: (row?.doneBy ?? []).map((id) => ({ id, name: nameOf(id) })),
+    assignedValue: colomboDateValue(row?.assignedAt ?? null),
+    doneValue: colomboDateValue(row?.doneAt ?? null),
+    note: row?.note ?? "",
+    submittedLabel: row?.submittedAt ? `Submitted by ${nameOf(row.submittedBy)}, ${dayLabel(row.submittedAt)}` : null,
+    proofIds: row ? proofsForLead(row).map((p) => p.id) : [],
+  };
+}
+
 /**
  * What a lead may read of a TA's row: the proofs the TA has submitted. Dates and
  * the note are only ever written at submit, so they are already the submitted
@@ -113,9 +165,9 @@ export function proofsForLead(row: StrategyAssignment): StrategyProof[] {
   return row.proofs.filter((p) => p.submittedAt !== null);
 }
 
-/** The proofs one person may see on a row: a lead the submitted ones, a TA on the row all of theirs. */
+/** The proofs one person may see on a row: a lead the submitted ones, a TA the ones they attached themselves. */
 export function proofsVisibleTo(row: StrategyAssignment, user: Pick<User, "id" | "role">): StrategyProof[] {
-  if (user.role === "ta") return row.doneBy.includes(user.id) ? row.proofs.filter((p) => p.addedBy === user.id) : [];
+  if (user.role === "ta") return row.proofs.filter((p) => p.addedBy === user.id);
   if (user.role === "admin" || user.role === "director" || user.role === "ta_lead" || user.role === "ops") return proofsForLead(row);
   return [];
 }
@@ -137,7 +189,10 @@ export function groupStrategies<T extends { group: string | null }>(items: T[]):
   return [...named, ...rest].map((heading) => ({ heading, items: by.get(heading)! }));
 }
 
-/** The desk's own strategies, in the order the owner gave them (8 Oct). Loaded by ta/strategies:seedCatalogue and the local sample data. */
+/**
+ * The desk's own strategies, in the order the owner gave them (8 Oct; the last
+ * four added 9 Oct). Loaded by ta/strategies:seedCatalogue and the local sample data.
+ */
 export const DESK_STRATEGIES: string[] = [
   "LinkedIn Search",
   "Recruiter Search & POST",
@@ -154,6 +209,10 @@ export const DESK_STRATEGIES: string[] = [
   "AI Search",
   "Identify shortlisted candidates and do company",
   "Email Campaign",
+  "Aura",
+  "ChatGPT",
+  "Gemini",
+  "Linked Post",
 ];
 
 /** A Colombo day for the table: "8 Oct 2026", or a dash. (Not dateAt, which reads in the server's zone.) */

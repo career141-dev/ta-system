@@ -4,32 +4,40 @@ import { primeStore } from "@/data/prime";
 import { pageUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { StatRow } from "@/components/StatRow";
-import { countsOf, plannerByTa, type StrategyCounts } from "@/lib/strategyPlanner";
+import { StrategyLeadTable } from "@/components/StrategyLeadTable";
+import { countsOf, dayLabel, leadLine, plannerJobs, strategyTable, type StrategyCounts } from "@/lib/strategyPlanner";
 
 /**
  * The Strategy Planner (8 Oct) — for TA Leads, directors and admins.
  *
- * Every job still being worked, under the TA who has it. Opening a job is where
- * the lead gives that TA strategies; this page is the overview of who has been
- * given what, and how far they have got.
+ * One table of every job still being worked (9 Oct, the lead's layout): client,
+ * position, the day it was assigned, its TAs and how far its strategies have
+ * got. A job opens in place to its strategies, where the lead ticks the ones
+ * the TAs should use, puts TAs on them and keeps the dates and notes.
  */
-export default async function StrategyPlannerPage() {
+export default async function StrategyPlannerPage({ searchParams }: { searchParams: Promise<{ job?: string }> }) {
+  const { job } = await searchParams;
   await primeStore();
   const user = await pageUser("strategy.assign");
   const rows = repo.strategyAssignments();
-  const { groups, unstaffed } = plannerByTa(repo.openings(), repo.users(), rows);
-  const all = countsOf(rows);
+  const clientName = (id: string) => repo.client(id)?.name ?? "";
+  const jobs = plannerJobs(repo.openings(), repo.users(), rows, clientName);
+  const all = countsOf(rows.filter((r) => jobs.some((j) => j.opening.id === r.openingId)));
   const canManage = allows(user, "strategy.manage");
-  const jobsInPlay = new Set(groups.flatMap((g) => g.jobs.map((j) => j.opening.id))).size + unstaffed.length;
+  const strategies = repo.strategies(true);
+  const nameOf = (id: string | null) => (id ? repo.user(id)?.name ?? "Someone" : "");
+
+  const th = "px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-faint";
+  const cols = "grid grid-cols-[minmax(150px,1.2fr)_minmax(200px,2fr)_120px_minmax(130px,1fr)_150px] items-center gap-x-4";
 
   return (
-    <main className="mx-auto max-w-[1000px] px-4 pb-24 pt-8 sm:px-6">
+    <main className="mx-auto max-w-[1280px] px-4 pb-24 pt-8 sm:px-6">
       <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-[22px] font-semibold tracking-tight">Strategy Planner</h1>
-          <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-ink-soft">
-            Every job being worked, under its TA. Open a job to put TAs on its strategies and strike through the ones
-            that cannot be used there; the TAs fill in what they did and submit it, and you read it on the job.
+          <p className="mt-1 max-w-[70ch] text-[13px] leading-relaxed text-ink-soft">
+            Open a job to tick the strategies its TAs should use, put a TA on each and keep the dates and a note. The TAs
+            see only the ticked ones; N/A crosses one out for the job. Changes save as you make them.
           </p>
         </div>
         {canManage && (
@@ -41,70 +49,77 @@ export default async function StrategyPlannerPage() {
 
       <StatRow
         items={[
-          { n: jobsInPlay, label: "Jobs being worked" },
-          { n: all.assigned, label: "Strategies assigned" },
-          { n: all.done, label: "Used, as submitted" },
+          { n: jobs.length, label: "Jobs being worked" },
+          { n: all.assigned, label: "Strategies in use" },
+          { n: all.done, label: "Done" },
         ]}
       />
 
-      {groups.length === 0 && unstaffed.length === 0 ? (
+      {jobs.length === 0 ? (
         <p className="rounded-xl border border-rule bg-surface px-6 py-12 text-center text-[13px] text-ink-faint">
           No job is being worked right now.
         </p>
+      ) : strategies.length === 0 ? (
+        <p className="rounded-xl border border-rule bg-surface px-6 py-12 text-center text-[13px] text-ink-faint">
+          The strategy list is empty.{" "}
+          {canManage && <Link href="/strategy/manage" className="text-brand hover:underline">Add the desk&apos;s strategies</Link>}
+        </p>
       ) : (
-        <div className="flex flex-col gap-5">
-          {groups.map((g) => (
-            <section key={g.ta.id} className="overflow-hidden rounded-xl border border-rule bg-surface">
-              <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-rule px-5 py-3.5">
-                <h2 className="text-[14px] font-semibold">{g.ta.name}</h2>
-                <span className="text-[12px] text-ink-faint">
-                  {g.jobs.length} {g.jobs.length === 1 ? "job" : "jobs"} · <Progress c={g.counts} />
-                </span>
-              </header>
-              <ul className="divide-y divide-rule">
-                {g.jobs.map(({ opening, counts }) => (
-                  <li key={opening.id}>
-                    <Link href={`/strategy/${opening.id}`} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-3 transition-colors hover:bg-tag">
-                      <span className="min-w-0">
-                        <span className="text-[13px] font-medium">{opening.title}</span>
-                        <span className="ml-2 text-[12px] text-ink-faint">{repo.client(opening.clientId)?.name ?? ""}</span>
-                        {opening.status === "on_hold" && <span className="ml-2 rounded-full bg-tag px-2 py-0.5 text-[10.5px] text-ink-soft">On hold</span>}
-                      </span>
-                      <span className="text-[12px] text-ink-soft">
-                        {counts.assigned === 0 ? <span className="text-warn">No strategies yet</span> : <Progress c={counts} />}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-
-          {unstaffed.length > 0 && (
-            <section className="overflow-hidden rounded-xl border border-dashed border-rule-strong bg-surface">
-              <header className="border-b border-rule px-5 py-3.5">
-                <h2 className="text-[14px] font-semibold">No TA on these yet</h2>
-                <p className="mt-0.5 text-[12px] text-ink-faint">Put a TA on the job first (Overview, then team) and it will appear under them.</p>
-              </header>
-              <ul className="divide-y divide-rule">
-                {unstaffed.map((o) => (
-                  <li key={o.id} className="px-5 py-3 text-[13px]">
-                    <Link href={`/openings/${o.id}`} className="font-medium hover:underline">{o.title}</Link>
-                    <span className="ml-2 text-[12px] text-ink-faint">{repo.client(o.clientId)?.name ?? ""}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+        <div className="overflow-x-auto rounded-xl border border-rule bg-surface">
+          <div className="min-w-[860px]">
+            <div className={`${cols} border-b border-rule bg-paper`}>
+              <span className={th}>Client</span>
+              <span className={th}>Position</span>
+              <span className={th}>Date assigned</span>
+              <span className={th}>Assignee</span>
+              <span className={th}>Progress</span>
+            </div>
+            {jobs.map(({ opening, tas, counts }) => {
+              const lines = strategyTable(strategies, rows.filter((r) => r.openingId === opening.id)).map((l) => leadLine(l, nameOf));
+              return (
+                <details key={opening.id} open={job === opening.id} className="group border-b border-rule last:border-b-0">
+                  <summary className={`${cols} cursor-pointer list-none py-3 transition-colors hover:bg-tag group-open:bg-tag/60 [&::-webkit-details-marker]:hidden`}>
+                    <span className="flex min-w-0 items-center gap-2 px-4 text-[12.5px] uppercase tracking-wide text-ink-soft">
+                      <span aria-hidden className="text-[10px] text-ink-faint transition-transform group-open:rotate-90">▶</span>
+                      <span className="truncate">{clientName(opening.clientId)}</span>
+                    </span>
+                    <span className="min-w-0 px-4 text-[13px] font-medium uppercase tracking-wide">
+                      {opening.title}
+                      {opening.status === "on_hold" && <span className="ml-2 rounded-full bg-paper px-2 py-0.5 text-[10.5px] normal-case tracking-normal text-ink-soft">On hold</span>}
+                    </span>
+                    <span className="px-4 text-[12.5px] text-ink-soft tabular">{dayLabel(opening.assignedAt)}</span>
+                    <span className="min-w-0 truncate px-4 text-[12.5px]">
+                      {tas.length ? tas.map((t) => t.name).join(", ") : <span className="text-warn">No TA yet</span>}
+                    </span>
+                    <span className="px-4"><Progress c={counts} /></span>
+                  </summary>
+                  <div className="border-t border-rule bg-paper/40">
+                    <StrategyLeadTable openingId={opening.id} tas={tas.map((t) => ({ id: t.id, name: t.name }))} lines={lines} />
+                    <p className="flex flex-wrap gap-x-4 px-4 pb-3 text-[11.5px] text-ink-faint">
+                      <Link href={`/strategy/${opening.id}`} className="text-brand hover:underline">Open on its own page</Link>
+                      <Link href={`/openings/${opening.id}`} className="text-brand hover:underline">Open the job</Link>
+                    </p>
+                  </div>
+                </details>
+              );
+            })}
+          </div>
         </div>
       )}
     </main>
   );
 }
 
-/** "3 assigned · 1 used", leaving out what is zero. Struck-through strategies are not progress. */
+/** "2 of 6 done" with a bar; struck-through strategies are not progress. */
 function Progress({ c }: { c: StrategyCounts }) {
-  if (c.assigned === 0) return <span>none assigned</span>;
-  const parts = [`${c.assigned} assigned`, c.done ? `${c.done} used` : null].filter(Boolean);
-  return <span className="tabular">{parts.join(" · ")}</span>;
+  if (c.assigned === 0) return <span className="text-[12px] text-ink-faint">Not started</span>;
+  const pct = Math.round((c.done / c.assigned) * 100);
+  return (
+    <span className="flex flex-col gap-1">
+      <span className="text-[11.5px] text-ink-soft tabular">{c.done} of {c.assigned} done</span>
+      <span className="h-1.5 w-full overflow-hidden rounded-full bg-rule">
+        <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
+      </span>
+    </span>
+  );
 }
