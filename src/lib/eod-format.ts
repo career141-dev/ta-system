@@ -400,17 +400,30 @@ const taNotes = (notes: string[]) =>
  * (the desk, 29 Sep): salaries, notice and their own notes — the same details
  * as the CV's box and the Director review form. Saved when the email goes, so
  * the CV, the profile and the next email say what this one said. Null when
- * nothing of these was changed. Name, age, company and designation are the
- * email's wording only and stay there.
+ * nothing of these was changed. Name and age are the email's wording only and
+ * stay there; company and designation are saved too since the TA corrects
+ * them on the profile (owner, 9 Oct).
  */
+type DetailPatch = Partial<
+  Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod" | "currentTitle" | "currentEmployer">
+>;
+
 export function eodDetailChanges(
   base: ShortlistRow,
   edited: ShortlistRow,
 ): {
-  patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">>;
+  patch: DetailPatch;
   notes: string[] | null;
 } | null {
-  const patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">> = {};
+  const patch: DetailPatch = {};
+  // A copy saved before these columns were editable may not carry them.
+  const said = (v: string | undefined) => (v ?? "").trim();
+  if (said(edited.currentDesignation) !== said(base.currentDesignation)) {
+    patch.currentTitle = said(edited.currentDesignation) || null;
+  }
+  if (said(edited.currentCompany) !== said(base.currentCompany)) {
+    patch.currentEmployer = said(edited.currentCompany) || null;
+  }
   if (edited.currentRemuneration.trim() !== base.currentRemuneration.trim()) {
     patch.currentSalary = edited.currentRemuneration.trim() || null;
   }
@@ -435,6 +448,8 @@ export function eodDetailChanges(
  * "Not disclosed" for an unknown salary never reaches the CV.
  */
 export function boxOverrides(change: ReturnType<typeof eodDetailChanges>): {
+  currentDesignation?: string | null;
+  currentCompany?: string | null;
   currentSalary?: string | null;
   expectedSalary?: string | null;
   noticePeriod?: string | null;
@@ -442,6 +457,8 @@ export function boxOverrides(change: ReturnType<typeof eodDetailChanges>): {
 } {
   if (!change) return {};
   const out: ReturnType<typeof boxOverrides> = {};
+  if ("currentTitle" in change.patch) out.currentDesignation = change.patch.currentTitle ?? null;
+  if ("currentEmployer" in change.patch) out.currentCompany = change.patch.currentEmployer ?? null;
   if ("currentSalary" in change.patch) out.currentSalary = change.patch.currentSalary ?? null;
   if ("expectedSalary" in change.patch) out.expectedSalary = change.patch.expectedSalary ?? null;
   if ("noticePeriod" in change.patch) out.noticePeriod = change.patch.noticePeriod ?? null;

@@ -4130,12 +4130,21 @@ export async function saveReviewDetails(formData: FormData) {
     customNotes.push(l ? `${l}: ${v}` : v);
   }
 
-  const patch = {
+  const patch: Parameters<typeof repo.saveReviewDetails>[3] = {
     currentSalary: currentSalary || null,
     expectedSalary: expectedSalary || null,
     noticePeriodDays: noticeDays,
     noticePeriod: noticeText || (noticeDays !== null ? (noticeDays === 0 ? "Immediate" : `${noticeDays} days`) : null),
   };
+  // Designation and company come from the CV; the TA corrects them when the
+  // call says otherwise (9 Oct). Written only when changed, so a plain Save
+  // does not rewrite the CV's reading — or clear it from a form that lacks them.
+  const candidate = repo.candidate(app.candidateId);
+  for (const [field, key] of [["currentDesignation", "currentTitle"], ["currentCompany", "currentEmployer"]] as const) {
+    if (!formData.has(field)) continue;
+    const value = String(formData.get(field) ?? "").trim() || null;
+    if (value !== ((candidate?.[key] ?? "").trim() || null)) patch[key] = value;
+  }
 
   try {
     repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);

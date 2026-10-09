@@ -485,6 +485,8 @@ export default async function CandidateDrawer({
           expectedSalary={c.expectedSalary}
           noticePeriodDays={c.noticePeriodDays}
           noticePeriod={c.noticePeriod}
+          currentDesignation={c.currentTitle}
+          currentCompany={c.currentEmployer}
           hasCv={Boolean(c.cvFileName || cvFile?.ok)}
           notes={app.notes?.filter((n) => !isSystemNote(n))}
         />

@@ -65,8 +65,9 @@ export async function preparedCvFile(
   const { pdf } = buildPreparedCv(
     {
       fullName: c.fullName,
-      currentTitle: c.currentTitle,
-      currentEmployer: c.currentEmployer,
+      // A correction made on the email is the page's heading too, not only the box's.
+      currentTitle: annotation.currentDesignation !== undefined ? annotation.currentDesignation : c.currentTitle,
+      currentEmployer: annotation.currentCompany !== undefined ? annotation.currentCompany : c.currentEmployer,
       location: c.location,
       totalExperienceYears: c.totalExperienceYears,
       educationDegree: c.educationDegree,

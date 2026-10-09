@@ -11,7 +11,7 @@ import path from "node:path";
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-eodbox-"));
 process.chdir(tmp);
 const { repo } = await import("@/data/store");
-const { eodDetailChanges } = await import("@/lib/eod");
+const { eodDetailChanges, shortlistRowFor } = await import("@/lib/eod");
 const { formatNoteHtml, stripNoteFormatting } = await import("@/lib/eod-format");
 const { noticePeriodToDays } = await import("@/lib/answered");
 const { buildAnnotationLines, printedBoxExtent, stampPdfWithCareer141Box } = await import("@/lib/pdf");
@@ -34,7 +34,9 @@ const base: ShortlistRow = {
 
 console.log("\nwhat the TA changed");
 eq("nothing changed: nothing to save", eodDetailChanges(base, { ...base }), null);
-eq("name, age, company, designation are the email's own", eodDetailChanges(base, { ...base, name: "N. Perera", age: "35", currentCompany: "X", currentDesignation: "Y" }), null);
+eq("name and age are the email's own", eodDetailChanges(base, { ...base, name: "N. Perera", age: "35" }), null);
+eq("a corrected company and designation are saved (9 Oct)", eodDetailChanges(base, { ...base, currentCompany: "Hayleys PLC", currentDesignation: "Senior Brand Manager" }), { patch: { currentTitle: "Senior Brand Manager", currentEmployer: "Hayleys PLC" }, notes: null });
+eq("a cleared company is saved as none", eodDetailChanges(base, { ...base, currentCompany: "  " })?.patch, { currentEmployer: null });
 eq("a new expected salary", eodDetailChanges(base, { ...base, expectedRemuneration: "LKR 350,000" }), { patch: { expectedSalary: "LKR 350,000" }, notes: null });
 eq("a new notice, as said and in days", eodDetailChanges(base, { ...base, notice: "2 months" })?.patch, { noticePeriod: "2 months", noticePeriodDays: noticePeriodToDays("2 months") });
 eq("the house lines are not the TA's notes", eodDetailChanges(base, { ...base, notes: [">Strong in retail"] }), null);
@@ -50,6 +52,11 @@ console.log("\nsaved to the candidate");
   const notesBefore = repo.application(app.id)!.notes;
   repo.saveReviewDetails(app.id, app.candidateId, null, {});
   eq("notes left alone when the TA did not change them", repo.application(app.id)!.notes, notesBefore);
+  const moved = eodDetailChanges(base, { ...base, currentCompany: "Hayleys PLC", currentDesignation: "Senior Brand Manager" })!;
+  repo.saveReviewDetails(app.id, app.candidateId, moved.notes, moved.patch);
+  const after = repo.candidate(app.candidateId)!;
+  eq("the candidate has the email's company and designation", [after.currentEmployer, after.currentTitle], ["Hayleys PLC", "Senior Brand Manager"]);
+  eq("and the next email reads them", [shortlistRowFor(app, after, 1).currentCompany, shortlistRowFor(app, after, 1).currentDesignation], ["Hayleys PLC", "Senior Brand Manager"]);
 }
 
 console.log("\nthe box on the CV");

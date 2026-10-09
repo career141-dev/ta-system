@@ -41,10 +41,12 @@ export async function GET(
   const ox = Number(q.get("x"));
   const oy = Number(q.get("y"));
   const at = q.has("x") && q.has("y") && Number.isFinite(ox) && Number.isFinite(oy) ? { x: ox, y: oy } : undefined;
-  const asked = ["current", "expected", "notice", "notes"].some((k) => q.has(k));
+  const asked = ["designation", "company", "current", "expected", "notice", "notes"].some((k) => q.has(k));
   const held = boxContent(app, c, repo.opening(app.openingId));
   const annotation = asked
     ? {
+        currentDesignation: q.get("designation") ?? held.currentDesignation,
+        currentCompany: q.get("company") ?? held.currentCompany,
         currentSalary: q.get("current") ?? held.currentSalary,
         expectedSalary: q.get("expected") ?? held.expectedSalary,
         noticePeriod: q.get("notice") ?? held.noticePeriod,
