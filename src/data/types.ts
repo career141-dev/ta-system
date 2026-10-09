@@ -1554,10 +1554,83 @@ export interface Database {
   matchRuns: MatchRun[];
   matchExclusions: MatchExclusion[];
   liveMirror: LiveMirrorRow[];
-  bin: BinEntry[];
   eodEmailCopies: EodEmailCopy[];
   strategies: Strategy[];
   strategyAssignments: StrategyAssignment[];
+  bin: BinEntry[];
+  feedbacks: FeedbackItem[];
+}
+
+// ─── TA Feedback & Support System ──────────────────────────────────────────
+
+export type FeedbackCategory =
+  | "bug"
+  | "feature_request"
+  | "ui_issue"
+  | "performance"
+  | "workflow"
+  | "other";
+
+export type FeedbackPriority = "low" | "medium" | "high" | "urgent";
+
+export type FeedbackStatus =
+  | "pending_lead"
+  | "approved_for_admin"
+  | "resolved_by_lead"
+  | "declined_by_lead"
+  | "in_progress"
+  | "resolved"
+  | "declined_by_admin";
+
+export const FEEDBACK_CATEGORY_LABEL: Record<FeedbackCategory, string> = {
+  bug: "Bug Report",
+  feature_request: "Feature Request",
+  ui_issue: "UI / Layout Issue",
+  performance: "Performance / Speed",
+  workflow: "Workflow / Process",
+  other: "General Feedback",
+};
+
+export const FEEDBACK_PRIORITY_LABEL: Record<FeedbackPriority, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  urgent: "Urgent",
+};
+
+export const FEEDBACK_STATUS_LABEL: Record<FeedbackStatus, string> = {
+  pending_lead: "Pending Lead Review",
+  approved_for_admin: "Approved (Admin Queue)",
+  resolved_by_lead: "Resolved by Lead",
+  declined_by_lead: "Declined by Lead",
+  in_progress: "In Progress (Admin)",
+  resolved: "Resolved by Admin",
+  declined_by_admin: "Declined by Admin",
+};
+
+export interface FeedbackItem {
+  id: Id;
+  submittedBy: Id;
+  submittedByName: string;
+  submittedByRole: Role;
+  createdAt: number;
+  category: FeedbackCategory;
+  priority: FeedbackPriority;
+  title: string;
+  description: string;
+  pageUrl?: string;
+  openingId?: Id;
+  screenshot?: string;
+  status: FeedbackStatus;
+  leadReviewedBy?: Id;
+  leadReviewedByName?: string;
+  leadReviewedAt?: number;
+  leadNotes?: string;
+  adminReviewedBy?: Id;
+  adminReviewedByName?: string;
+  adminReviewedAt?: number;
+  adminResolution?: string;
+  resolvedAt?: number;
 }
 
 /**
@@ -1625,3 +1698,4 @@ export interface MatchExclusion {
   candidateId: Id;
   at: number;
 }
+

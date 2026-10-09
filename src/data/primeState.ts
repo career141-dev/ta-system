@@ -25,6 +25,7 @@ export function blank(): Database {
     settings: [], matchRuns: [], matchExclusions: [], liveMirror: [], bin: [],
     eodEmailCopies: [],
     strategies: [], strategyAssignments: [],
+    feedbacks: [],
   };
 }
 

@@ -71,6 +71,8 @@ import type {
   StrategyProof,
   User,
   JobPost,
+  FeedbackItem,
+  FeedbackStatus,
 } from "./types";
 import { RETIRED_STAGES } from "./types";
 import { buildSeed } from "./seed";
@@ -103,6 +105,31 @@ import { backupPrimary } from "../../convex/lib/backup";
 const DATA_DIR = dataDir();
 const DB_FILE = path.join(DATA_DIR, "db.json");
 const LOCK_FILE = path.join(DATA_DIR, "db.lock");
+const FEEDBACKS_FILE = path.join(DATA_DIR, "feedbacks.json");
+
+function loadFeedbacksFromFile(): FeedbackItem[] {
+  try {
+    if (fs.existsSync(FEEDBACKS_FILE)) {
+      const text = fs.readFileSync(FEEDBACKS_FILE, "utf-8");
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn("[feedbacks] Failed to read feedbacks.json:", err);
+  }
+  return [];
+}
+
+function saveFeedbacksToFile(feedbacks: FeedbackItem[]) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = path.join(DATA_DIR, `.feedbacks.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`);
+    fs.writeFileSync(tmp, JSON.stringify(feedbacks, null, 2));
+    fs.renameSync(tmp, FEEDBACKS_FILE);
+  } catch (err) {
+    console.warn("[feedbacks] Failed to write feedbacks.json:", err);
+  }
+}
 
 let cache: Database | null = null;
 /** Bumped on every write in this process, so derived indexes know to rebuild. */
@@ -188,6 +215,7 @@ function backfill(db: Partial<Database>): Database {
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
     matchRuns: [], matchExclusions: [], liveMirror: [], bin: [], eodEmailCopies: [],
     strategies: [], strategyAssignments: [],
+    feedbacks: [],
   } satisfies Database;
   const out = { ...empty } as Database;
   for (const key of Object.keys(empty) as (keyof Database)[]) {
@@ -627,6 +655,107 @@ const rawRepo = {
   users: (): User[] => load().users,
   user: (id: Id) => load().users.find((u) => u.id === id) ?? null,
 
+  feedbacks: (filterUser?: User): FeedbackItem[] => {
+    if (!filterUser) return [];
+    const all = ((load().feedbacks ?? []) as FeedbackItem[]).slice().sort((a, b) => b.createdAt - a.createdAt);
+
+    if (filterUser.role === "ta_lead" || filterUser.role === "director") {
+      return all;
+    }
+    if (filterUser.role === "admin") {
+      // Admins should only see what a lead has approved (or their own submissions)
+      return all.filter(
+        (f) =>
+          f.status === "approved_for_admin" ||
+          f.status === "in_progress" ||
+          f.status === "resolved" ||
+          f.status === "declined_by_admin" ||
+          f.submittedBy === filterUser.id ||
+          (filterUser.name && f.submittedByName?.toLowerCase() === filterUser.name.toLowerCase())
+      );
+    }
+    return all.filter(
+      (f) =>
+        f.submittedBy === filterUser.id ||
+        (filterUser.name && f.submittedByName?.toLowerCase() === filterUser.name.toLowerCase())
+    );
+  },
+  feedback: (id: Id): FeedbackItem | null => {
+    const all = (load().feedbacks ?? []) as FeedbackItem[];
+    return all.find((f) => f.id === id) ?? null;
+  },
+  addFeedback: (
+    item: Omit<FeedbackItem, "id" | "createdAt" | "status"> & { id?: Id; status?: FeedbackStatus }
+  ): Id => {
+    const id = item.id ?? `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const full: FeedbackItem = {
+      id,
+      createdAt: Date.now(),
+      status: item.status ?? "pending_lead",
+      ...item,
+    };
+    mutate((db) => {
+      if (!db.feedbacks) db.feedbacks = [];
+      db.feedbacks.unshift(full);
+    });
+    return full.id;
+  },
+  updateFeedback: (id: Id, patch: Partial<FeedbackItem>) => {
+    mutate((db) => {
+      if (!db.feedbacks) db.feedbacks = [];
+      const idx = db.feedbacks.findIndex((f) => f.id === id);
+      if (idx !== -1) {
+        db.feedbacks[idx] = { ...db.feedbacks[idx], ...patch };
+      }
+    });
+  },
+  deleteFeedback: (id: Id) => {
+    mutate((db) => {
+      if (!db.feedbacks) return;
+      db.feedbacks = db.feedbacks.filter((f) => f.id !== id);
+    });
+  },
+
+  readFeedbackIds(userId: Id): Set<string> {
+    const raw = rawRepo.setting(`read_feedbacks:${userId}`, "");
+    if (!raw) return new Set();
+    try {
+      const arr = JSON.parse(raw);
+      return new Set(Array.isArray(arr) ? arr : []);
+    } catch {
+      return new Set();
+    }
+  },
+
+  markFeedbacksRead(userId: Id, feedbackIds: string[]): void {
+    const current = rawRepo.readFeedbackIds(userId);
+    for (const id of feedbackIds) current.add(id);
+    rawRepo.setSetting(`read_feedbacks:${userId}`, JSON.stringify([...current]));
+  },
+
+  markAllFeedbackSeen(userId: Id, filterUser?: User): void {
+    const items = rawRepo.feedbacks(filterUser);
+    const ids = items.map((f) => f.id);
+    rawRepo.markFeedbacksRead(userId, ids);
+  },
+
+  unseenFeedbackCount(user: User): number {
+    if (!user) return 0;
+    const readIds = rawRepo.readFeedbackIds(user.id);
+    const all = (load().feedbacks ?? []) as FeedbackItem[];
+    if (user.role === "ta_lead" || user.role === "director") {
+      return all.filter((f) => f.status === "pending_lead" && !readIds.has(f.id)).length;
+    }
+    if (user.role === "admin") {
+      return all.filter((f) => f.status === "approved_for_admin" && !readIds.has(f.id)).length;
+    }
+    // For regular TAs: count their own submissions with updates they haven't seen yet
+    return all.filter((f) => {
+      const isMine = f.submittedBy === user.id || (user.name && f.submittedByName?.toLowerCase() === user.name.toLowerCase());
+      if (!isMine) return false;
+      return f.status !== "pending_lead" && !readIds.has(f.id);
+    }).length;
+  },
   clients: () => load().clients,
   client: (id: Id) => load().clients.find((c) => c.id === id) ?? null,
 

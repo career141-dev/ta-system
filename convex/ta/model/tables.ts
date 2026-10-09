@@ -719,6 +719,19 @@ export const TABLES: Record<string, TableModel> = {
   eodEmailCopies: identity("eodEmailCopies", ["researchLink"]),
   strategies: identity("strategies", ["description", "group"]),
   strategyAssignments: identity("strategyAssignments", ["assignedAt", "assignedBy", "byRole", "selected", "doneAt", "note", "submittedAt", "submittedBy"]),
+  feedbacks: identity("feedbacks", [
+    "openingId",
+    "leadReviewedBy",
+    "leadReviewedByName",
+    "leadReviewedAt",
+    "leadNotes",
+    "adminReviewedBy",
+    "adminReviewedByName",
+    "adminReviewedAt",
+    "adminResolution",
+    "resolvedAt",
+    "screenshot",
+  ]),
 };
 
 /** The app tables the store keeps. `liveMirror` is the JSON store's read-only copy and has no table. */
