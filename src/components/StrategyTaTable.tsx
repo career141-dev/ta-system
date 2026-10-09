@@ -23,9 +23,9 @@ export interface TaStrategyRow {
 }
 
 /**
- * The TA's side of a job's strategy table (8 Oct): the rows they were put on,
- * and the ones struck through for the job (crossed out, so they know not to use
- * them). They tick what they used, set the date, say what they did and any
+ * The TA's side of a job's strategy table (8 Oct): the strategies ticked for
+ * the job (9 Oct), and the ones struck through (crossed out, so they know not to
+ * use them). Filling in a ticked row nobody put them on puts them on it. They tick what they used, set the date, say what they did and any
  * improvement, optionally attach a picture as proof, and press Submit; the TA
  * Lead reads it from then. A picture can be attached before submitting but stays
  * theirs alone until they do.

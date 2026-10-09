@@ -51,6 +51,7 @@ import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, ty
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
 import { colomboDayFromValue, colomboDayStart, colomboLocalToInstant } from "@/lib/calendar";
+import { isTicked } from "@/lib/strategyPlanner";
 import { dateAt } from "@/lib/format";
 import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
@@ -5740,8 +5741,10 @@ export async function setStrategyNotApplicable(formData: FormData) {
 
 /**
  * A TA submits their rows on a job: whether and when they used each strategy,
- * and what they did and any improvement. Only rows they are on and that are not
- * struck through are taken; the rest of the form is ignored, not trusted.
+ * and what they did and any improvement. Only rows ticked for the job (or that
+ * they are on) and not struck through are taken; the rest of the form is
+ * ignored, not trusted. A ticked row nobody put them on is taken only when they
+ * filled it in, so it does not become theirs by being on the page (9 Oct).
  */
 export async function submitStrategyUpdate(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
@@ -5754,13 +5757,16 @@ export async function submitStrategyUpdate(formData: FormData) {
   const rows: { rowId: string; doneAt: number | null; note: string | null }[] = [];
   for (const id of ids) {
     const row = repo.strategyAssignment(id);
-    if (!row || row.openingId !== openingId || row.notApplicable || !row.doneBy.includes(user.id)) continue;
+    if (!row || row.openingId !== openingId || row.notApplicable) continue;
+    const onIt = row.doneBy.includes(user.id);
+    if (!onIt && !isTicked(row)) continue;
     const used = formData.get(`used_${id}`) === "on";
     const typed = String(formData.get(`date_${id}`) ?? "").trim();
     const day = colomboDayFromValue(typed);
     if (used && typed && day === null) await fail(`That is not a date (${row.strategyName}).`);
     const text = String(formData.get(`note_${id}`) ?? "").trim();
     if (text.length > 500) await fail(`Keep the note under 500 characters (${row.strategyName}).`);
+    if (!onIt && !used && !text) continue;
     // Ticked "used" with no date means today; not ticked means not used yet.
     rows.push({ rowId: id, doneAt: used ? day ?? today : null, note: text || null });
   }
@@ -5783,6 +5789,45 @@ export async function submitStrategyUpdate(formData: FormData) {
     revalidatePath("/api/notifications");
   }
   await done(`Submitted ${taken} ${taken === 1 ? "strategy" : "strategies"}. Your TA Lead can now see ${taken === 1 ? "it" : "them"}.`);
+}
+
+/**
+ * The lead's edits on a line of a job's strategy table (9 Oct), saved as each
+ * one changes: `field` is "selected" (the tick), "assignedAt", "doneAt" (dates,
+ * empty clears) or "note".
+ */
+export async function updateStrategyLine(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.assign");
+  const strategyId = String(formData.get("strategyId") ?? "");
+  const s = repo.strategy(strategyId) ?? repo.strategyRow(openingId, strategyId);
+  if (!s) await fail("That strategy is no longer on the list.");
+  const field = String(formData.get("field") ?? "");
+  const value = String(formData.get("value") ?? "").trim();
+  const patch: { selected?: boolean; assignedAt?: number | null; doneAt?: number | null; note?: string | null } = {};
+  if (field === "selected") {
+    patch.selected = value === "1";
+  } else if (field === "assignedAt" || field === "doneAt") {
+    const day = colomboDayFromValue(value);
+    if (value && day === null) await fail("That is not a date.");
+    patch[field] = day;
+  } else if (field === "note") {
+    if (value.length > 500) await fail("Keep the note under 500 characters.");
+    patch.note = value || null;
+  } else {
+    await fail("Nothing to save.");
+  }
+  if (!repo.updateStrategyLine({ openingId, strategyId, byUserId: user.id, byRole: user.role, ...patch })) {
+    await fail("That strategy is retired. Bring it back on the Strategy list first.");
+  }
+  revalidateStrategies(openingId);
+  const name = "name" in s! ? s!.name : s!.strategyName;
+  await done(
+    field === "selected"
+      ? patch.selected ? `${name} is ticked: the TAs on this job can see it.` : `${name} is unticked: the TAs no longer see it.`
+      : field === "note" ? "Note saved." : "Date saved.",
+  );
 }
 
 /** A TA removes a proof image they attached. */
@@ -5835,6 +5880,22 @@ export async function setStrategyActive(formData: FormData) {
   repo.setStrategyActive(s!.id, active);
   revalidateStrategies();
   await done(active ? "Strategy is back on the list." : "Strategy retired. Ones already given stay as they are.");
+}
+
+export async function addStrategyDoneByInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addStrategyDoneBy(formData));
+}
+
+export async function removeStrategyDoneByInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeStrategyDoneBy(formData));
+}
+
+export async function setStrategyNotApplicableInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => setStrategyNotApplicable(formData));
+}
+
+export async function updateStrategyLineInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => updateStrategyLine(formData));
 }
 
 export async function submitStrategyUpdateInline(_: ActionResult | null, formData: FormData) {

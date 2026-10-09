@@ -2721,6 +2721,8 @@ export default defineSchema({
     assignedAt: v.optional(v.union(v.number(), v.null())),
     assignedBy: v.optional(v.union(v.id("users"), v.null())),
     byRole: v.optional(v.union(v.string(), v.null())),
+    /** Ticked for the job by the lead (9 Oct); absent on older rows. */
+    selected: v.optional(v.union(v.boolean(), v.null())),
     notApplicable: v.boolean(),
     doneAt: v.optional(v.union(v.number(), v.null())),
     note: v.optional(v.union(v.string(), v.null())),

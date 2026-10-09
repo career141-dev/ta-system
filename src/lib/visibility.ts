@@ -20,6 +20,7 @@ import type {
   Application, AssignmentRole, JobPost, LinkVaultEntry, ProfileSuggestion, Stage, StrategyAssignment, User,
 } from "@/data/types";
 import { isDeskWide, isReadOnly } from "@/lib/auth";
+import { isTicked } from "@/lib/strategyPlanner";
 
 /**
  * Whose view is narrowed: everybody who is not desk-wide.
@@ -252,9 +253,10 @@ export function rowIsAnotherTas(
 /**
  * The job's strategy table, as each person may see it (8 Oct).
  *
- * A TA sees the rows they are on, and the rows struck through for the job, so
- * they know what not to use. They do not see another TA's rows, or strategies
- * nobody has put them on. Leads, directors, ops and admin see every row. A
+ * A TA sees the strategies ticked for the job, and the rows struck through, so
+ * they know what not to use (9 Oct: it was only the rows they were on until the
+ * lead asked for the tick box). They do not see strategies nobody ticked, even
+ * when they are named on one. Leads, directors, ops and admin see every row. A
  * client or viewer account sees none: the table is how the desk works a job.
  * Applied on every read, not only on the TA's page: every assignee can open
  * every page of an opening, so the page cannot be the guard.
@@ -262,5 +264,5 @@ export function rowIsAnotherTas(
 export function scopeStrategies(rows: StrategyAssignment[], user: User): StrategyAssignment[] {
   if (!isScoped(user)) return rows;
   if (user.role !== "ta") return [];
-  return rows.filter((r) => r.doneBy.includes(user.id) || r.notApplicable);
+  return rows.filter((r) => isTicked(r) || r.notApplicable);
 }

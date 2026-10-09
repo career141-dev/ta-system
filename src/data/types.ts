@@ -860,6 +860,12 @@ export interface StrategyAssignment {
   assignedBy: Id | null;
   /** The giver's role when they gave it. */
   byRole: Role | null;
+  /**
+   * Ticked by the lead: one of the strategies chosen for this job, which every
+   * TA on it sees (9 Oct). Null on rows from before the tick, which count as
+   * ticked once a TA is on them — see `isTicked`.
+   */
+  selected: boolean | null;
   /** Struck through: cannot be used on this job. */
   notApplicable: boolean;
   /** What the TA submitted: the day it was used, and what they did. */

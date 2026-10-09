@@ -45,7 +45,7 @@ eq("a row holds up to five", [checkProofUpload({ size: 10, head: PNG, existing: 
 
 const row = (over: Partial<StrategyAssignment> = {}): StrategyAssignment => ({
   id: "sa_1", openingId: "op", strategyId: "st_1", strategyName: "LinkedIn Search", doneBy: ["u_nuha"], assignedAt: 1, assignedBy: "u_lead",
-  byRole: "ta_lead", notApplicable: false, doneAt: null, note: null, submittedAt: null, submittedBy: null,
+  byRole: "ta_lead", selected: null, notApplicable: false, doneAt: null, note: null, submittedAt: null, submittedBy: null,
   proofs: [
     { id: "pending", contentType: "image/png", size: 1, addedAt: 1, addedBy: "u_nuha", submittedAt: null },
     { id: "sent", contentType: "image/png", size: 1, addedAt: 1, addedBy: "u_nuha", submittedAt: 5 },
@@ -56,7 +56,9 @@ const person = (role: User["role"], id: string, isActive = true) => ({ id, role,
 
 console.log("\nWho may attach");
 eq("the TA on the row", mayAttachProof(person("ta", "u_nuha"), row()), true);
-eq("another TA", mayAttachProof(person("ta", "u_imalsha"), row()), false);
+eq("another TA on the job, on a ticked row (9 Oct)", mayAttachProof(person("ta", "u_imalsha"), row()), true);
+eq("not on an unticked row", mayAttachProof(person("ta", "u_nuha"), row({ selected: false })), false);
+eq("not on an older row with nobody on it", mayAttachProof(person("ta", "u_nuha"), row({ doneBy: [] })), false);
 eq("a lead does not attach for them", mayAttachProof(person("ta_lead", "u_lead"), row()), false);
 eq("a client", mayAttachProof(person("client", "u_nuha"), row()), false);
 eq("a deactivated TA", mayAttachProof(person("ta", "u_nuha", false), row()), false);

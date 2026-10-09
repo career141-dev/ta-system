@@ -77,6 +77,7 @@ import { buildSeed } from "./seed";
 import { INTERVIEW_STATUS_LABEL, interviewStatus, whenLabel } from "@/lib/interviews";
 import { canMove, eventTypeFor } from "@/lib/pipeline";
 import { colomboDayStart } from "@/lib/calendar";
+import { isTicked } from "@/lib/strategyPlanner";
 import { evalBoolean, haystackFor, parseBoolean, type Vocabulary } from "@/lib/query";
 import { matchCandidate, type Result } from "@/lib/match";
 import { employerRelated, matchAgainst, planMerge } from "@/lib/dedup";
@@ -537,7 +538,28 @@ function channelForIntake(source: IntakeSource, jobPostId: Id | null): Applicati
 
 /** A strategy row with nothing on it any more: no TA, no date, not struck through, nothing submitted. */
 function strategyRowIsEmpty(r: StrategyAssignment): boolean {
-  return r.doneBy.length === 0 && r.assignedAt === null && !r.notApplicable && r.submittedAt === null && r.proofs.length === 0 && !r.note && r.doneAt === null;
+  return r.doneBy.length === 0 && !r.selected && r.assignedAt === null && !r.notApplicable && r.submittedAt === null && r.proofs.length === 0 && !r.note && r.doneAt === null;
+}
+
+/** A fresh row of a job's strategy table, before anything is on it. */
+function newStrategyRow(openingId: Id, s: Strategy, byUserId: Id, byRole: Role): StrategyAssignment {
+  return {
+    id: `sa_${Math.random().toString(36).slice(2, 10)}`,
+    openingId,
+    strategyId: s.id,
+    strategyName: s.name,
+    doneBy: [],
+    assignedAt: null,
+    assignedBy: byUserId,
+    byRole,
+    selected: null,
+    notApplicable: false,
+    doneAt: null,
+    note: null,
+    proofs: [],
+    submittedAt: null,
+    submittedBy: null,
+  };
 }
 
 /**
@@ -3135,27 +3157,14 @@ const rawRepo = {
       let created = false;
       if (!row) {
         if (!s || !s.active) return;
-        row = {
-          id: `sa_${Math.random().toString(36).slice(2, 10)}`,
-          openingId: input.openingId,
-          strategyId: input.strategyId,
-          strategyName: s.name,
-          doneBy: [],
-          assignedAt: input.today,
-          assignedBy: input.byUserId,
-          byRole: input.byRole,
-          notApplicable: false,
-          doneAt: null,
-          note: null,
-          proofs: [],
-          submittedAt: null,
-          submittedBy: null,
-        };
+        row = { ...newStrategyRow(input.openingId, s, input.byUserId, input.byRole), assignedAt: input.today };
         db.strategyAssignments.push(row);
         created = true;
       }
       const added = !row.doneBy.includes(input.taId);
       if (added) row.doneBy = [...row.doneBy, input.taId];
+      // A TA is put on a strategy the job uses, so putting them on ticks it (9 Oct).
+      row.selected = true;
       // A row that was only struck through, or dated, takes its date from the first TA put on it.
       if (row.assignedAt === null) {
         row.assignedAt = input.today;
@@ -3201,22 +3210,7 @@ const rawRepo = {
           return;
         }
         if (!s) return;
-        row = {
-          id: `sa_${Math.random().toString(36).slice(2, 10)}`,
-          openingId: input.openingId,
-          strategyId: input.strategyId,
-          strategyName: s.name,
-          doneBy: [],
-          assignedAt: null,
-          assignedBy: input.byUserId,
-          byRole: input.byRole,
-          notApplicable: false,
-          doneAt: null,
-          note: null,
-          proofs: [],
-          submittedAt: null,
-          submittedBy: null,
-        };
+        row = newStrategyRow(input.openingId, s, input.byUserId, input.byRole);
         db.strategyAssignments.push(row);
       }
       row.notApplicable = input.notApplicable;
@@ -3234,9 +3228,51 @@ const rawRepo = {
   },
 
   /**
+   * The lead's edits on a line of the job's table (9 Oct): the tick, the date
+   * assigned, the date done and the note, each saved as it is changed. Only the
+   * fields given are touched. The line's row is made if there is none, and a row
+   * left with nothing on it is removed. A strategy that is unknown, or retired
+   * with no row yet, is refused (false).
+   */
+  updateStrategyLine(input: {
+    openingId: Id;
+    strategyId: Id;
+    byUserId: Id;
+    byRole: Role;
+    selected?: boolean;
+    assignedAt?: number | null;
+    doneAt?: number | null;
+    note?: string | null;
+  }): boolean {
+    let ok = false;
+    mutate((db) => {
+      let row = db.strategyAssignments.find((a) => a.openingId === input.openingId && a.strategyId === input.strategyId);
+      if (!row) {
+        const s = db.strategies.find((x) => x.id === input.strategyId);
+        if (!s || !s.active) return;
+        row = newStrategyRow(input.openingId, s, input.byUserId, input.byRole);
+        db.strategyAssignments.push(row);
+      }
+      if (input.selected !== undefined) row.selected = input.selected;
+      if (input.assignedAt !== undefined) {
+        row.assignedAt = input.assignedAt;
+        row.assignedBy = input.byUserId;
+        row.byRole = input.byRole;
+      }
+      if (input.doneAt !== undefined) row.doneAt = input.doneAt;
+      if (input.note !== undefined) row.note = input.note;
+      if (strategyRowIsEmpty(row)) db.strategyAssignments = db.strategyAssignments.filter((a) => a.id !== row!.id);
+      ok = true;
+    });
+    return ok;
+  },
+
+  /**
    * A TA submits their rows on a job: when they used each strategy and what they
-   * did. Only a row they are on, and that is not struck through, is changed; its
-   * proofs become the lead's to see. Returns how many rows were taken in.
+   * did. Only a row ticked for the job (or one they are on) and not struck
+   * through is changed; a TA who fills in a ticked row nobody put them on joins
+   * its Done by (9 Oct). Its proofs become the lead's to see. Returns how many
+   * rows were taken in.
    */
   submitStrategyRows(input: {
     openingId: Id;
@@ -3249,7 +3285,11 @@ const rawRepo = {
     mutate((db) => {
       for (const r of input.rows) {
         const row = db.strategyAssignments.find((a) => a.id === r.rowId);
-        if (!row || row.openingId !== input.openingId || row.notApplicable || !row.doneBy.includes(input.taId)) continue;
+        if (!row || row.openingId !== input.openingId || row.notApplicable) continue;
+        if (!row.doneBy.includes(input.taId)) {
+          if (!isTicked(row)) continue;
+          row.doneBy = [...row.doneBy, input.taId];
+        }
         row.doneAt = r.doneAt;
         row.note = r.note;
         for (const p of row.proofs) if (p.submittedAt === null && p.addedBy === input.taId) p.submittedAt = now;

@@ -60,22 +60,33 @@ console.log("\nWho sees which row");
 {
   const row = (id: string, doneBy: string[], notApplicable = false): StrategyAssignment => ({
     id, openingId: "op", strategyId: `s_${id}`, strategyName: id.toUpperCase(), doneBy, assignedAt: 1, assignedBy: "u_ta_lead",
-    byRole: "ta_lead", notApplicable, doneAt: null, note: null, proofs: [], submittedAt: null, submittedBy: null,
+    byRole: "ta_lead", selected, notApplicable, doneAt: null, note: null, proofs: [], submittedAt: null, submittedBy: null,
   });
-  const rows = [row("a", ["u_ta"]), row("b", ["u_other"]), row("c", ["u_ta", "u_other"]), row("d", [], true), row("e", ["u_other"], true)];
-  eq("a TA sees theirs and the struck-through ones", scopeStrategies(rows, user("ta")).map((r) => r.id), ["a", "c", "d", "e"]);
-  eq("the other TA sees theirs and the struck-through ones", scopeStrategies(rows, user("ta", { id: "u_other" })).map((r) => r.id), ["b", "c", "d", "e"]);
-  eq("a third TA sees only the struck-through ones", scopeStrategies(rows, user("ta", { id: "u_third" })).map((r) => r.id), ["d", "e"]);
-  eq("a lead sees all", scopeStrategies(rows, user("ta_lead")).length, 5);
-  eq("a director sees all", scopeStrategies(rows, user("director")).length, 5);
+  // 9 Oct: what a TA sees is what the lead ticked, not only what they are on.
+  // A row from before the tick box (selected null) counts as ticked when it has a TA.
+  let selected: boolean | null = null;
+  const old = [row("a", ["u_ta"]), row("b", ["u_other"]), row("c", [], false)];
+  selected = true;
+  const tickedNoTa = row("f", []);
+  selected = false;
+  const untickedButNamed = row("g", ["u_ta"]);
+  const struckUnticked = row("e", ["u_other"], true);
+  selected = null;
+  const rows = [...old, row("d", [], true), struckUnticked, tickedNoTa, untickedButNamed];
+  eq("a TA sees every ticked row and the struck-through ones", scopeStrategies(rows, user("ta")).map((r) => r.id), ["a", "b", "d", "e", "f"]);
+  eq("a third TA sees the same", scopeStrategies(rows, user("ta", { id: "u_third" })).map((r) => r.id), ["a", "b", "d", "e", "f"]);
+  eq("an older row with nobody on it is not ticked", scopeStrategies(rows, user("ta")).some((r) => r.id === "c"), false);
+  eq("an unticked row is hidden even from the TA named on it", scopeStrategies(rows, user("ta")).some((r) => r.id === "g"), false);
+  eq("a lead sees all", scopeStrategies(rows, user("ta_lead")).length, 7);
+  eq("a director sees all", scopeStrategies(rows, user("director")).length, 7);
   eq("a client sees none, not even the struck-through", scopeStrategies(rows, user("client")).length, 0);
   eq("a viewer sees none", scopeStrategies(rows, user("viewer")).length, 0);
 }
 
 console.log("\nThe desk's list");
 {
-  eq("the 15 strategies, in the owner's order", repo.strategies().map((s) => s.name), DESK_STRATEGIES);
-  eq("fifteen", DESK_STRATEGIES.length, 15);
+  eq("the 19 strategies, in the owner's order", repo.strategies().map((s) => s.name), DESK_STRATEGIES);
+  eq("nineteen", DESK_STRATEGIES.length, 19);
   const id = repo.saveStrategy({ name: "  Build a talent pool  ", description: "Keep warm", group: "Pipeline", byUserId: "u_lead" });
   eq("a strategy is added", !!id && repo.strategy(id!)?.name, "Build a talent pool");
   eq("it joins the end of the list", repo.strategies().at(-1)?.id, id);
@@ -110,6 +121,7 @@ console.log("\nThe lead puts TAs on strategies");
 {
   const a = repo.addStrategyDoneBy({ openingId: o.id, strategyId: li.id, taId: "u_nuha", ...lead });
   eq("a row is made on the first assignment, dated that day", [a?.created, a?.added, a?.row.assignedAt, a?.row.doneBy], [true, true, today, ["u_nuha"]]);
+  eq("putting a TA on a strategy ticks it", a?.row.selected, true);
   eq("it keeps the strategy's name", a?.row.strategyName, li.name);
   const b = repo.addStrategyDoneBy({ openingId: o.id, strategyId: li.id, taId: "u_imalsha", ...lead });
   eq("a second TA joins the same row, no second row", [b?.created, b?.added, b?.row.doneBy, repo.strategyAssignments(o.id).length], [false, true, ["u_nuha", "u_imalsha"], 1]);
@@ -128,8 +140,25 @@ console.log("\nThe lead puts TAs on strategies");
   repo.removeStrategyDoneBy(row.id, "u_nuha");
   eq("a row left with a date still stays", !!repo.strategyAssignment(row.id), true);
   repo.setStrategyAssignedDate(row.id, null);
+  repo.updateStrategyLine({ openingId: o.id, strategyId: li.id, selected: false, byUserId: "u_lead", byRole: "ta_lead" });
   repo.removeStrategyDoneBy(row.id, "u_nuha");
   eq("a row left with nothing on it goes", repo.strategyAssignment(row.id), undefined);
+}
+
+console.log("\nThe lead ticks strategies and edits a line in place (9 Oct)");
+{
+  const edit = (patch: { selected?: boolean; assignedAt?: number | null; doneAt?: number | null; note?: string | null }) =>
+    repo.updateStrategyLine({ openingId: o.id, strategyId: li.id, byUserId: "u_lead", byRole: "ta_lead", ...patch });
+  eq("ticking an untouched strategy makes a ticked row", [edit({ selected: true }), repo.strategyRow(o.id, li.id)?.selected, repo.strategyRow(o.id, li.id)?.doneBy], [true, true, []]);
+  edit({ assignedAt: today, doneAt: today, note: "Two InMails out" });
+  const r = repo.strategyRow(o.id, li.id)!;
+  eq("the dates and the note are saved", [r.assignedAt, r.doneAt, r.note], [today, today, "Two InMails out"]);
+  edit({ note: null });
+  eq("only the field given is changed", [repo.strategyRow(o.id, li.id)?.note, repo.strategyRow(o.id, li.id)?.doneAt], [null, today]);
+  edit({ selected: false, assignedAt: null, doneAt: null });
+  eq("unticked and cleared, the row goes", repo.strategyRow(o.id, li.id), undefined);
+  eq("unticking an untouched strategy leaves nothing", [edit({ selected: false }), repo.strategyRow(o.id, li.id)], [true, undefined]);
+  eq("an unknown strategy is refused", repo.updateStrategyLine({ openingId: o.id, strategyId: "st_nope", selected: true, byUserId: "u_lead", byRole: "ta_lead" }), false);
 }
 
 console.log("\nStriking a strategy through for a job");
@@ -177,11 +206,19 @@ console.log("\nThe TA fills the row in and submits");
       { rowId: "sa_nope", doneAt: today, note: "x" },
     ],
   });
-  eq("only their own row, not struck through, is taken in", taken, 1);
+  eq("their own row, not struck through, is taken in", taken, 2);
+  eq("filling in a ticked row nobody put them on puts them on it", repo.strategyAssignment(theirs.id)?.doneBy, ["u_imalsha", "u_nuha"]);
   const after = repo.strategyAssignment(mine.id)!;
   eq("what they wrote is on the row, stamped", [after.doneAt, after.note, after.submittedAt, after.submittedBy], [today, "Searched twice; found six.", 1_000, "u_nuha"]);
   eq("their proof is now the lead's to see", proofsForLead(after).map((p) => p.id), ["stg_1"]);
-  eq("another TA's row is untouched", [repo.strategyAssignment(theirs.id)?.note, repo.strategyAssignment(theirs.id)?.submittedAt], [null, null]);
+  // Put the row back as it was for the progress counts below.
+  repo.removeStrategyDoneBy(theirs.id, "u_nuha");
+  repo.updateStrategyLine({ openingId: o.id, strategyId: dh.id, doneAt: null, note: null, byUserId: "u_lead", byRole: "ta_lead" });
+  repo.updateStrategyLine({ openingId: o.id, strategyId: dh.id, selected: false, byUserId: "u_lead", byRole: "ta_lead" });
+  eq("an unticked row is not taken in", repo.submitStrategyRows({ openingId: o.id, taId: "u_nuha", rows: [{ rowId: theirs.id, doneAt: today, note: "x" }] }), 0);
+  repo.updateStrategyLine({ openingId: o.id, strategyId: dh.id, selected: true, byUserId: "u_lead", byRole: "ta_lead" });
+  const back = repo.strategyAssignment(theirs.id)!;
+  eq("the other TA's row is as it was", [back.doneBy, back.doneAt, back.note], [["u_imalsha"], null, null]);
   eq("a struck-through row cannot be filled in", [repo.strategyAssignment(struck.id)?.note, repo.strategyAssignment(struck.id)?.submittedAt], [null, null]);
 
   const gone = repo.removeStrategyProof(mine.id, "stg_1");
