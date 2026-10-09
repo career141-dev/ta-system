@@ -578,6 +578,61 @@ export function EodComposer({
 
   return (
     <div className="flex flex-col gap-5">
+      {/* First on the page (9 Oct): at the bottom, under the CV table and the
+          attachments, TAs scrolled past it and asked where it was. It belongs to
+          the send form through form="eod-send", wherever it sits. */}
+      {needsResearchLink && (
+        <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+          <h3 className="text-[13.5px] font-semibold">
+            ChatGPT research link <span className="text-warn" aria-hidden="true">*</span>
+            <span className="sr-only">(required)</span>
+          </h3>
+          <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
+            Your TA Lead and the directors will open this from the email. In ChatGPT, open today&rsquo;s research
+            chat, choose <b>Share</b>, then <b>Create link</b>, and paste that link here. The address in your
+            browser&rsquo;s bar is private to you and will not open for them.
+          </p>
+          <input
+            form="eod-send"
+            name="chatgptLink"
+            type="text"
+            inputMode="url"
+            autoComplete="off"
+            spellCheck={false}
+            required
+            value={researchLink}
+            onChange={(e) => setResearchLink(e.target.value)}
+            onBlur={() => setResearchTouched(true)}
+            placeholder="https://chatgpt.com/share/…"
+            aria-invalid={researchTouched && !researchCheck.ok}
+            aria-describedby="research-help"
+            className={`${inputClass} mt-3`}
+          />
+          <div id="research-help" className="mt-2 min-h-[18px] text-[12px]" aria-live="polite">
+            {researchCheck.ok ? (
+              <span className="text-brand">✓ A share link: {researchCheck.url.replace("https://", "")}</span>
+            ) : (
+              (researchTouched || researchLink.trim() !== "") && <span className="text-warn">{researchCheck.reason}</span>
+            )}
+          </div>
+          <label className="mt-3 flex max-w-[68ch] items-start gap-2.5 text-[12.5px] leading-relaxed text-ink-soft">
+            <input
+              form="eod-send"
+              type="checkbox"
+              name="researchConfirmed"
+              required
+              checked={researchConfirmed}
+              onChange={(e) => setResearchConfirmed(e.target.checked)}
+              className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--brand,#165b42)]"
+            />
+            <span>
+              I opened this link in a private window and it shows my research. It holds no candidate phone numbers,
+              emails or CV text, because anyone with the link can read it.
+            </span>
+          </label>
+        </section>
+      )}
+
       <section className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex flex-col gap-3 border-b border-rule px-7 py-5">
           <div className="flex flex-col gap-2 text-[12.5px]">
@@ -935,58 +990,6 @@ export function EodComposer({
           Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
         </p>
       </section>
-
-      {needsResearchLink && (
-        <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
-          <h3 className="text-[13.5px] font-semibold">
-            ChatGPT research link <span className="text-warn" aria-hidden="true">*</span>
-            <span className="sr-only">(required)</span>
-          </h3>
-          <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
-            Your TA Lead and the directors will open this from the email. In ChatGPT, open today&rsquo;s research
-            chat, choose <b>Share</b>, then <b>Create link</b>, and paste that link here. The address in your
-            browser&rsquo;s bar is private to you and will not open for them.
-          </p>
-          <input
-            form="eod-send"
-            name="chatgptLink"
-            type="text"
-            inputMode="url"
-            autoComplete="off"
-            spellCheck={false}
-            required
-            value={researchLink}
-            onChange={(e) => setResearchLink(e.target.value)}
-            onBlur={() => setResearchTouched(true)}
-            placeholder="https://chatgpt.com/share/…"
-            aria-invalid={researchTouched && !researchCheck.ok}
-            aria-describedby="research-help"
-            className={`${inputClass} mt-3`}
-          />
-          <div id="research-help" className="mt-2 min-h-[18px] text-[12px]" aria-live="polite">
-            {researchCheck.ok ? (
-              <span className="text-brand">✓ A share link: {researchCheck.url.replace("https://", "")}</span>
-            ) : (
-              (researchTouched || researchLink.trim() !== "") && <span className="text-warn">{researchCheck.reason}</span>
-            )}
-          </div>
-          <label className="mt-3 flex max-w-[68ch] items-start gap-2.5 text-[12.5px] leading-relaxed text-ink-soft">
-            <input
-              form="eod-send"
-              type="checkbox"
-              name="researchConfirmed"
-              required
-              checked={researchConfirmed}
-              onChange={(e) => setResearchConfirmed(e.target.checked)}
-              className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--brand,#165b42)]"
-            />
-            <span>
-              I opened this link in a private window and it shows my research. It holds no candidate phone numbers,
-              emails or CV text, because anyone with the link can read it.
-            </span>
-          </label>
-        </section>
-      )}
 
       <form id="eod-send" action={resend ? resendEod : sendEod} className="flex flex-wrap items-center gap-4">
         <input type="hidden" name="openingId" value={openingId} />
