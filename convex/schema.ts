@@ -3017,5 +3017,57 @@ export default defineSchema({
     .index("by_status_next", ["status", "nextAttemptAt"])
     .index("by_receivedAt", ["receivedAt"]),
 
+  feedbacks: defineTable({
+    submittedBy: v.string(), // user id
+    submittedByName: v.string(),
+    submittedByRole: v.string(),
+    createdAt: v.number(),
+
+    category: v.union(
+      v.literal("bug"),
+      v.literal("feature"),
+      v.literal("ui_ux"),
+      v.literal("workflow"),
+      v.literal("data_quality"),
+      v.literal("other")
+    ),
+    priority: v.union(
+      v.literal("low"),
+      v.literal("medium"),
+      v.literal("high"),
+      v.literal("urgent")
+    ),
+    title: v.string(),
+    description: v.string(),
+    pageUrl: v.string(),
+    openingId: v.optional(v.string()),
+
+    status: v.union(
+      v.literal("pending_lead"),
+      v.literal("approved_for_admin"),
+      v.literal("resolved_by_lead"),
+      v.literal("declined_by_lead"),
+      v.literal("in_progress"),
+      v.literal("resolved"),
+      v.literal("declined_by_admin")
+    ),
+
+    leadReviewedBy: v.optional(v.string()),
+    leadReviewedByName: v.optional(v.string()),
+    leadReviewedAt: v.optional(v.number()),
+    leadNotes: v.optional(v.string()),
+
+    adminReviewedBy: v.optional(v.string()),
+    adminReviewedByName: v.optional(v.string()),
+    adminReviewedAt: v.optional(v.number()),
+    adminResolution: v.optional(v.string()),
+    resolvedAt: v.optional(v.number()),
+    screenshot: v.optional(v.string()),
+  })
+    .index("by_status", ["status"])
+    .index("by_submittedBy", ["submittedBy"])
+    .index("by_createdAt", ["createdAt"]),
+
 }, { schemaValidation: false });
+
 
