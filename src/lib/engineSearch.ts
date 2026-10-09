@@ -33,6 +33,7 @@ import * as backend from "@/data/convex/backend";
 import { embedQuery } from "@/lib/embed";
 import { searchVectors } from "@/lib/qdrantSearch";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
+import { employerMatch, excludedByEmployer, employersInText, describeEmployerHit } from "../../convex/lib/employers";
 
 export interface EngineHit {
   candidateId: Id;
@@ -44,7 +45,11 @@ export interface EngineHit {
     experience?: string;
     location?: string;
     industry?: string;
+    /** "works there now" / "worked there before", when a company was asked for. */
+    employer?: string;
   };
+  /** "Works at Dialog Axiata (2021–now)", when a company was asked for. */
+  employerLine?: string;
 }
 
 export interface EngineSearch {
@@ -56,6 +61,10 @@ export interface EngineSearch {
     minYears?: number;
     interpretation: string;
     keywords: string[];
+    /** The companies the candidates must have worked at, as the engine read them. */
+    employers?: string[];
+    employerScope?: "current" | "any";
+    excludeEmployers?: string[];
   };
   hits: EngineHit[];
 }
@@ -173,8 +182,16 @@ const engineCache = new Map<string, CacheEntry>();
 type EngineArgs = ReturnType<typeof engineArgs>;
 
 function engineArgs(query: string, criteria: SearchCriteria, limit: number, edited: boolean) {
+  /*
+   * The search as a conversation (9 Oct): the messages arrive one per line,
+   * and the model reads them in order, so a later "in Colombo instead"
+   * replaces the place rather than sitting beside it. The words and the
+   * vectors still search the messages joined into one request.
+   */
+  const turns = query.split(/\n+/).map((t) => t.trim().replace(/\s+/g, " ")).filter(Boolean);
   return {
-    query: query.trim().replace(/\s+/g, " "),
+    query: turns.map((t) => t.replace(/[.\s]+$/, "")).join(". "),
+    turns,
     location: criteria.locations[0] ?? undefined,
     minExperience: criteria.minExperience ?? undefined,
     maxExperience: criteria.maxExperience ?? undefined,
@@ -183,9 +200,15 @@ function engineArgs(query: string, criteria: SearchCriteria, limit: number, edit
     // summary or name. That is the desk's own meaning of a skill chip, so a
     // chip the recruiter set maps straight across.
     customFilters: edited && criteria.skills.length ? criteria.skills : undefined,
+    // A company chip the recruiter set or removed is what they mean. Left to
+    // the parser, its vocabulary only knows a sample of current employers, so
+    // the model's reading is used instead.
+    employers: edited ? criteria.employers : undefined,
+    // "Not from Dialog" is a literal phrase, read exactly, like a place.
+    excludeEmployers: criteria.excludeEmployers.length ? criteria.excludeEmployers : undefined,
     limit,
     /** Read by the quick pass only; not part of what the engine is asked. */
-    chips: { titles: criteria.titles, skills: criteria.skills, industries: criteria.industries },
+    chips: { titles: criteria.titles, skills: criteria.skills, industries: criteria.industries, employers: criteria.employers },
   };
 }
 
@@ -214,14 +237,15 @@ const modules = () =>
 
 type Requirements = import("../../convex/lib/jdParser").SearchRequirements;
 type Scored = import("../../convex/cvs/cvScoring").ScoredCandidate;
-type Doc = LiveCandidate & { vectorScore: number };
+type Doc = LiveCandidate & { vectorScore?: number };
 
 /** The model's reading of a sentence depends on nothing else, so it is shared across chips. */
 const intents = new Map<string, { at: number; value: ReturnType<typeof readSentence> }>();
 
-function readSentence(parser: Awaited<ReturnType<typeof modules>>["parser"], text: string) {
-  const settle = reserve("database search: read the query", maxModelCost(MODEL, 6000 + text.length, 1400));
-  const run = parser.extractSearchRequirements(text, "natural_language");
+function readSentence(parser: Awaited<ReturnType<typeof modules>>["parser"], turns: string[]) {
+  const text = turns.join("\n");
+  const settle = reserve("database search: read the query", maxModelCost(MODEL, 7000 + text.length, 1400));
+  const run = parser.extractConversationRequirements(turns);
   run.then(
     (r) => settle(modelCost(MODEL, r.usage.promptTokens, r.usage.completionTokens)),
     () => settle(0),
@@ -229,11 +253,11 @@ function readSentence(parser: Awaited<ReturnType<typeof modules>>["parser"], tex
   return run;
 }
 
-function intentFor(parser: Awaited<ReturnType<typeof modules>>["parser"], text: string) {
-  const key = text.toLowerCase();
+function intentFor(parser: Awaited<ReturnType<typeof modules>>["parser"], turns: string[]) {
+  const key = turns.join("\n").toLowerCase();
   const held = intents.get(key);
   if (held && Date.now() - held.at < ENGINE_CACHE_MS) return held.value;
-  const value = readSentence(parser, text);
+  const value = readSentence(parser, turns);
   intents.set(key, { at: Date.now(), value });
   value.catch(() => intents.delete(key));
   while (intents.size > ENGINE_CACHE_MAX) intents.delete(intents.keys().next().value!);
@@ -246,14 +270,16 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
 
   // 1 and 2 overlap: the words and the vectors are searched on the sentence
   // itself while the model reads it.
-  const intent = withModel ? intentFor(parser, q) : null;
+  const intent = withModel ? intentFor(parser, args.turns) : null;
   // Which routes failed. One down is fine — the other still answers — but an
   // empty answer with a route down is not "nothing matched": it was cached as
   // that for five minutes, and a refresh could not clear it (21 Sep).
   const down: string[] = [];
   const firstPass = Promise.all([
     vectorPool(q, args, down),
-    backend.keywordSearchMany(NO_ACTOR, [q, ...args.chips.titles, ...args.chips.skills.slice(0, 3)], FETCH_LIMIT).catch((e) => {
+    // The latest message on its own too: "working at ABC" glued to the
+    // messages before it is a weaker query than either alone.
+    backend.keywordSearchMany(NO_ACTOR, [q, ...args.turns.slice(-2).reverse(), ...args.chips.titles, ...args.chips.skills.slice(0, 3)], FETCH_LIMIT).catch((e) => {
       down.push(`keyword search (${(e as Error)?.message ?? e})`);
       return [];
     }),
@@ -265,7 +291,19 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     industry: args.industry ?? parsed.industry,
     location: args.location ?? parsed.location,
     minYearsExperience: args.minExperience && args.minExperience > 0 ? args.minExperience : parsed.minYearsExperience ?? null,
+    employers: args.employers ?? parsed.employers ?? [],
+    excludeEmployers: [...new Set([...(args.excludeEmployers ?? []), ...(parsed.excludeEmployers ?? [])])],
   };
+  const employersAsked = req.employers ?? [];
+
+  // The company asked for: everyone who worked there, from the employer
+  // indexes. Vectors and words cannot know an employer, so these come first.
+  const atCompany: Promise<{ candidateId: Id; score: number }[]> = employersAsked.length
+    ? backend.employerSearch(NO_ACTOR, employersAsked, req.employerScope ?? "any", POOL_CAP).catch((e) => {
+        down.push(`company search (${(e as Error)?.message ?? e})`);
+        return [];
+      })
+    : Promise.resolve([]);
 
   // The engine's own search terms, as the action picks them: title, alternative
   // titles, required skills, then its term builder — the first three.
@@ -281,23 +319,31 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
       return [];
     });
   }
-  const [[vectors, words], more] = await Promise.all([firstPass, secondPass]);
-  if (down.length && vectors.length + words.length + more.length === 0) {
+  const [[vectors, words], more, employed] = await Promise.all([firstPass, secondPass, atCompany]);
+  if (down.length && vectors.length + words.length + more.length + employed.length === 0) {
     console.warn(`[database search] no results with ${down.join("; ")}`);
     throw new Error("The search could not reach part of the database just now, so this is not a real \"nothing found\". Try again in a moment.");
   }
 
-  // 3. Fusion: vector hits first, then words, no one twice.
+  // 3. Fusion: people at the company asked for first, then vector hits, then
+  // words, no one twice.
   const vectorScore = new Map<Id, number>();
   for (const v of vectors) if (!vectorScore.has(v.candidateId)) vectorScore.set(v.candidateId, v.score);
-  const ids = [...new Set([...vectorScore.keys(), ...words.map((w) => w.candidateId), ...more.map((w) => w.candidateId)])].slice(0, POOL_CAP);
+  const employedIds = new Set(employed.map((e) => e.candidateId));
+  const ids = [...new Set([...employed.map((e) => e.candidateId), ...vectorScore.keys(), ...words.map((w) => w.candidateId), ...more.map((w) => w.candidateId)])].slice(0, POOL_CAP);
 
-  const docs = await backend.candidateDocsByIds(NO_ACTOR, ids);
+  // The search shape: summary, past titles and every employer, which the
+  // score reads and a plain list leaves out (9 Oct).
+  const docs = await backend.candidateDocsByIds(NO_ACTOR, ids, "search");
   const byId = new Map(docs.map((d) => [d._id, d]));
   const pool: Doc[] = ids.flatMap((id) => {
     const d = byId.get(id);
     // Anyone whose CV file was lost in the Cloud move is left out (src/lib/cvMissing.ts).
-    return d && !d.cvFileMissing ? [{ ...d, vectorScore: vectorScore.get(id) ?? 0 }] : [];
+    // Someone found only by company has no similarity to blend in; a zero
+    // would cut a perfect match to "weak" (9 Oct). Words-only hits keep the
+    // zero they always had.
+    const similarity = vectorScore.get(id) ?? (employedIds.has(id) ? undefined : 0);
+    return d && !d.cvFileMissing ? [{ ...d, vectorScore: similarity }] : [];
   });
   if (pool.length === 0) {
     return { interpretation: interpretationOf(req, intent !== null), hits: [] };
@@ -305,7 +351,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
 
   // The action's strict filters, with its progressive fallback: if they leave
   // nobody, score everyone rather than show nothing.
-  const filtered = strictFilters(pool, args);
+  const filtered = strictFilters(pool, args, req);
   const candidates = filtered.length > 0 ? filtered : pool;
 
   // 4. The engine's weighted score.
@@ -339,7 +385,13 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     hits: final
       .filter((f) => f.score > 0)
       .slice(0, args.limit)
-      .map((f) => ({ candidateId: f.c.cv._id, score: Math.round(f.score), reason: f.reason, breakdown: breakdownOf(f.c, req) })),
+      .map((f) => ({
+        candidateId: f.c.cv._id,
+        score: Math.round(f.score),
+        reason: f.reason,
+        breakdown: breakdownOf(f.c, req),
+        ...(f.c.employerHit ? { employerLine: describeEmployerHit(f.c.employerHit) } : {}),
+      })),
   };
 }
 
@@ -363,8 +415,17 @@ async function vectorPool(q: string, args: EngineArgs, down: string[] = []): Pro
 }
 
 /** The action's `applyFiltersStrictly`, for the arguments this screen sends. */
-function strictFilters(list: Doc[], args: EngineArgs): Doc[] {
+function strictFilters(list: Doc[], args: EngineArgs, req: Requirements): Doc[] {
   let out = list;
+  // A named company keeps only people who worked there, now or before (owner,
+  // 9 Oct). If that leaves nobody, the caller scores everyone, as for place.
+  const employers = req.employers ?? [];
+  if (employers.length) {
+    out = out.filter((c) => employerMatch(employers, c as never, req.employerScope ?? "any") !== null);
+  }
+  if (req.excludeEmployers?.length) {
+    out = out.filter((c) => !excludedByEmployer(req.excludeEmployers!, c as never));
+  }
   if (args.location) {
     const want = args.location.toLowerCase().trim();
     out = out.filter((c) => {
@@ -404,6 +465,7 @@ function breakdownOf(c: Scored, req: Requirements): EngineHit["breakdown"] {
     experience: req.minYearsExperience != null ? (years >= req.minYearsExperience ? "meets target" : "below range") : "not specified",
     location: c.locationStatus === "match" ? "match" : c.locationStatus === "different" ? "different" : "not specified",
     industry: c.industryScore === 100 ? "match" : "different",
+    ...(c.employerHit ? { employer: c.employerHit.when === "current" ? "works there now" : "worked there before" } : {}),
   };
 }
 
@@ -416,6 +478,9 @@ function interpretationOf(req: Requirements, read: boolean): EngineSearch["inter
     // Empty until a model has read the sentence: the chips are not a reading of it.
     interpretation: read ? req.summary : "",
     keywords: read ? req.keywords : [],
+    employers: req.employers?.length ? req.employers : undefined,
+    employerScope: req.employerScope,
+    excludeEmployers: req.excludeEmployers?.length ? req.excludeEmployers : undefined,
   };
 }
 
@@ -439,6 +504,18 @@ function requirementsFromChips(args: EngineArgs): Requirements {
     clientCompany: null,
     clientContactEmail: null,
     salaryRange: null,
+    // Before the model has read the messages: the company chips, or failing
+    // that a company named after "at", "in" or "from" ("HR people at Dialog").
+    ...companiesBeforeTheModel(args),
+  };
+}
+
+function companiesBeforeTheModel(args: EngineArgs): Pick<Requirements, "employers" | "employerScope" | "excludeEmployers"> {
+  const read = employersInText(args.turns.join(". "));
+  return {
+    employers: args.employers ?? (args.chips.employers.length ? args.chips.employers : read.employers),
+    employerScope: read.scope,
+    excludeEmployers: [...(args.excludeEmployers ?? []), ...read.excludeEmployers],
   };
 }
 
@@ -540,6 +617,9 @@ export function scoreFromEngine(hit: EngineHit): Score {
   line("Skills", b.skills, `Skills: ${b.skills}.`);
   line("Experience", b.experience, `Experience: ${b.experience}.`);
   line("Industry", b.industry, `Industry: ${b.industry}.`);
+  if (hit.employerLine) {
+    explanation.push({ part: "Title", score: null, weight: null, points: 0, detail: `Company: ${hit.employerLine}.` });
+  }
   if (b.location) {
     explanation.push({
       part: "Penalty",
@@ -609,6 +689,8 @@ export function hitsAndMisses(
       else misses.push(want);
     }
   }
+  // The company asked for, as this person's CV names it.
+  if (hit.employerLine) hits.push(hit.employerLine);
   if (b.experience === "below range" && criteria.minExperience != null) {
     misses.push(`${criteria.minExperience}+ years`);
   }

@@ -3,6 +3,7 @@ import { getOpenAI, getModelForTask, executeLLMWithNvidiaFallback } from "../lib
 import { askClaudeFirst, claudeBudgetMs, jsonIn } from "../lib/claudeFirst";
 import type { SearchRequirements } from "../lib/jdParser";
 import { jobLevelRank } from "../lib/roleLevel";
+import { employerMatch, describeEmployerHit, type EmployerHit, type JobLine } from "../lib/employers";
 
 function normalizeText(value: string): string {
   if (!value) return "";
@@ -614,12 +615,15 @@ function scoreLocation(jobLocation: string | null, candidateLocation?: string | 
 
 function buildCandidateTitleText(cv: {
   currentTitle?: string;
+  currentJobTitle?: string;
   summary?: string;
   fullName?: string;
   rawText?: string;
 }): string {
   return [
-    cv.currentTitle,
+    // Rows written since the move carry currentJobTitle only, and the search
+    // action passes only that name, so the title went unread (9 Oct).
+    cv.currentTitle || cv.currentJobTitle,
     cv.summary?.slice(0, 160),
     cv.fullName,
     cv.rawText?.slice(0, 240),
@@ -632,10 +636,16 @@ export type ScoredCandidate = {
     _id: string;
     fullName?: string;
     currentTitle?: string;
+    currentJobTitle?: string;
     currentEmployer?: string;
     industries?: string[];
     seniorityLevel?: string;
     yearsOfExperience?: number;
+    totalExperienceYears?: number;
+    pastJobTitles?: string[];
+    jobHistory?: JobLine[];
+    employersText?: string;
+    certifications?: string[];
     location?: string;
     skills?: string[];
     rawText?: string;
@@ -649,6 +659,9 @@ export type ScoredCandidate = {
   industryScore: number;
   locationScore: number;
   overallScore: number;
+  /** 0 when the search named no company or this person never worked at one of them. */
+  employerScore?: number;
+  employerHit?: EmployerHit | null;
   locationStatus: "match" | "region_match" | "different" | "not specified";
   locationGate?: string;
   locationPenalty?: number;
@@ -1072,7 +1085,18 @@ export function scoreCandidateAgainstRequirements(
   }
 
   // Title Match Dimension incorporating Soft Weighted Role-Family Equivalence multiplier
-  const baseTitleScore = scoreTitleMatchImpl(jobTitleVariants, candidateTitleText);
+  // A past title counts at 80% of the same title held now: an HR Executive who
+  // is now an Office Manager is still worth showing for an HR search (9 Oct).
+  // Scored one title at a time, not added to the text above, because a long
+  // text dilutes the token overlap the title score is built on.
+  const pastTitles = distinct([
+    ...(cv.pastJobTitles ?? []),
+    ...(cv.jobHistory ?? []).map((j) => j.title ?? ""),
+  ]).slice(0, 8);
+  const pastTitleScore = pastTitles.length
+    ? Math.round(0.8 * Math.max(...pastTitles.map((t) => scoreTitleMatchImpl(jobTitleVariants, t))))
+    : 0;
+  const baseTitleScore = Math.max(scoreTitleMatchImpl(jobTitleVariants, candidateTitleText), pastTitleScore);
   const candTitleLower = candidateTitleText.toLowerCase();
   const jobTitleLower = (req.title || "").toLowerCase();
   const hasDirectTitleOverlap = jobTitleLower.split(/\s+/).filter(w => w.length > 3).some(w => candTitleLower.includes(w));
@@ -1089,7 +1113,15 @@ export function scoreCandidateAgainstRequirements(
   const titleScore = Math.round(roleFamilyMultiplier * baseTitleScore);
 
   const seniorityScore = calculateAsymmetricSeniorityScore(jobSeniority, candidateSeniority);
-  const experienceScore = yearsScore(cv.yearsOfExperience ?? null, req.minYearsExperience, effectiveMaxYears);
+  const candidateYears = cv.yearsOfExperience ?? cv.totalExperienceYears ?? null;
+  const experienceScore = yearsScore(candidateYears, req.minYearsExperience, effectiveMaxYears);
+  // The company asked for, matched on the current employer and every past one
+  // (lib/employers). Owner, 9 Oct: a named company keeps only people who worked
+  // there; the search filters on that before scoring, and this ranks them,
+  // current employees first.
+  const employersAsked = req.employers ?? [];
+  const employerHit = employersAsked.length ? employerMatch(employersAsked, cv, req.employerScope ?? "any") : null;
+  const employerScore = employerHit?.score ?? 0;
   const skillScores = scoreSkills(requiredSkills, preferredSkills, candidateSkills);
   const hasMissingRequired = requiredSkills.length > 0 && skillScores.missingRequired.length > 0;
   const skillScore = skillScores.score;
@@ -1103,8 +1135,10 @@ export function scoreCandidateAgainstRequirements(
   const locationPenalty = locEval.penalty;
 
   let overallScore: number;
-  if (titleScore === 0 && skillScore === 0) {
-    // Hard domain isolation: Zero title match + Zero skill match = 0 score
+  if (titleScore === 0 && skillScore === 0 && !employerHit) {
+    // Hard domain isolation: Zero title match + Zero skill match = 0 score.
+    // Not when the person worked at the company asked for: "everyone at
+    // Dialog" names no role, and they are exactly who was asked for.
     overallScore = 0;
   } else if (normalizedJobSeniority === "intern" || normalizedJobSeniority === "entry_level" || req.title?.toLowerCase().includes("intern")) {
     // For Intern / Entry Level roles, give higher weight to Seniority & Experience alignment
@@ -1129,6 +1163,12 @@ export function scoreCandidateAgainstRequirements(
       (experienceScore * 0.16) +
       (industryScore * 0.06)
     );
+  }
+
+  // The company is a quarter of the score when one was named, the rest scaled
+  // to fit. Someone at the company now outranks someone who left.
+  if (employersAsked.length) {
+    overallScore = Math.round(overallScore * 0.75 + employerScore * 0.25);
   }
 
   // Universal Domain Compatibility Scaling (Applies to ALL industries):
@@ -1189,8 +1229,8 @@ export function scoreCandidateAgainstRequirements(
       ? candidateSeniority
         ? `Seniority appears to be ${candidateSeniority}.`
         : "Seniority is not clearly stated."
-      : cv.yearsOfExperience != null
-        ? `${cv.yearsOfExperience} years of experience versus the ${req.minYearsExperience}+ year target.`
+      : candidateYears != null
+        ? `${candidateYears} years of experience versus the ${req.minYearsExperience}+ year target.`
         : "Years of experience could not be clearly confirmed.";
 
   const skillReason =
@@ -1212,13 +1252,15 @@ export function scoreCandidateAgainstRequirements(
     industryScore,
     locationScore,
     overallScore,
+    employerScore,
+    employerHit,
     locationStatus,
     locationGate,
     locationPenalty,
     matchedRequired: skillScores.matchedRequired,
     missingRequired: skillScores.missingRequired,
     matchedPreferred: skillScores.matchedPreferred,
-    reason: `${titleReason} ${experienceReason} ${skillReason}`.trim(),
+    reason: `${employerHit ? `${describeEmployerHit(employerHit)}. ` : ""}${titleReason} ${experienceReason} ${skillReason}`.trim(),
   };
 }
 
@@ -1344,7 +1386,7 @@ export function selectLlmPool(candidates: ScoredCandidate[]): ScoredCandidate[] 
 
 export function buildDeterministicTaReason(candidate: ScoredCandidate, req: SearchRequirements): string {
   const name = candidate.cv.fullName || "Candidate";
-  const title = candidate.cv.currentTitle || "Professional";
+  const title = candidate.cv.currentTitle || candidate.cv.currentJobTitle || "Professional";
   const exp = candidate.cv.yearsOfExperience ?? (candidate.cv as any).totalExperienceYears;
   const matched = (candidate.matchedRequired || []).slice(0, 4);
   const missing = (candidate.missingRequired || []).slice(0, 3);
@@ -1381,6 +1423,7 @@ export function buildDeterministicTaReason(candidate: ScoredCandidate, req: Sear
       parts.push(`Note: Matched skills may be tangentially related — verify domain relevance.`);
     }
   }
+  if (candidate.employerHit) parts.push(`${describeEmployerHit(candidate.employerHit)}.`);
   if (exp != null) parts.push(`Brings ${exp} years of total professional experience.`);
   if (missing.length > 0) parts.push(`Skill gaps to note: ${missing.join(", ")}.`);
 
@@ -1422,7 +1465,10 @@ export async function scoreBatchWithLLM(
       ? cvObj.skills.map((s: any) => (typeof s === "object" ? s.value : String(s))).slice(0, 8).join(", ")
       : "none listed";
 
-    return `[ID: ${c.index}] ${name} | ${title} ${employer} | ${expText} | skills: ${skills}`.replace(/\s+/g, " ").trim();
+    // When a company was asked for, the model sees where this person worked
+    // there, so it does not mark down someone whose job at it was an earlier one.
+    const atCompany = c.employerHit ? ` | ${describeEmployerHit(c.employerHit)}` : "";
+    return `[ID: ${c.index}] ${name} | ${title} ${employer} | ${expText} | skills: ${skills}${atCompany}`.replace(/\s+/g, " ").trim();
   });
 
   const buildPrompt = (withName: boolean) => [
@@ -1433,6 +1479,7 @@ export async function scoreBatchWithLLM(
     `Min Experience: ${req.minYearsExperience ?? "Not specified"} years`,
     `Seniority: ${req.seniority || "Not specified"}`,
     `Industry: ${req.industry || "Not specified"}`,
+    req.employers?.length ? `Company: worked at ${req.employers[0]}${req.employerScope === "current" ? " now" : " (now or before)"}` : "",
     jdSnippet ? `Summary: ${jdSnippet}` : "",
     ``,
     `CANDIDATE POOL TO EVALUATE:`,
