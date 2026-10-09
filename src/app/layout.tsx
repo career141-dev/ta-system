@@ -8,6 +8,7 @@ import { currentUser } from "@/lib/session";
 import { alertsFor } from "@/lib/sla";
 import { ClerkProvider, Show } from "@clerk/nextjs";
 import { DeskAssistant } from "@/components/DeskAssistant";
+import { FeedbackWidget } from "@/components/FeedbackWidget";
 import { NavigationProgress } from "@/components/NavigationProgress";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
@@ -46,6 +47,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   // where six were waiting.
   const readAlertIds = user ? repo.readAlertIds(user.id) : new Set<string>();
   const alertCount = user ? alertsFor(user.id).filter((a) => !readAlertIds.has(a.id)).length : 0;
+  const feedbackBadgeCount = user ? repo.unseenFeedbackCount(user) : 0;
   /*
    * Microsoft Clarity — heatmaps, session replays, rage clicks (28 Sep). Off
    * unless CLARITY_PROJECT_ID is set on the server; read per request, so the
@@ -84,7 +86,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {uiOnly() ? (
           // Laptop screen work without a sign-in service (lib/uiOnly.ts).
           <>
-            {user ? <TopNav user={user} alertCount={alertCount} /> : null}
+            {user ? <TopNav user={user} alertCount={alertCount} feedbackBadgeCount={feedbackBadgeCount} /> : null}
             <Suspense fallback={null}>
               <NavigationProgress />
             </Suspense>
@@ -93,10 +95,11 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </Suspense>
             {children}
             {user ? <DeskAssistant /> : null}
+            {user ? <FeedbackWidget /> : null}
           </>
         ) : (
         <ClerkProvider signInUrl="/signin" signUpUrl="/signup" afterSignOutUrl="/signin">
-          {user ? <TopNav user={user} alertCount={alertCount} /> : null}
+          {user ? <TopNav user={user} alertCount={alertCount} feedbackBadgeCount={feedbackBadgeCount} /> : null}
           <Suspense fallback={null}>
             <NavigationProgress />
           </Suspense>
@@ -105,6 +108,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </Suspense>
           {children}
           {user ? <DeskAssistant /> : null}
+          {user ? <FeedbackWidget /> : null}
         </ClerkProvider>
         )}
       </body>

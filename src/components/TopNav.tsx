@@ -37,6 +37,7 @@ const NAV = [
   { href: "/reports", label: "Reports" },
   // Practice calls with the AI screening agent (as the CV platform's Aura page).
   { href: "/voice", label: "Voice agent" },
+  { href: "/feedback", label: "Feedback" },
   // Deleted clients and openings, restorable for seven days (28 Sep).
   { href: "/bin", label: "Bin" },
 ];
@@ -46,10 +47,13 @@ const NAV = [
 export function TopNav({
   user,
   alertCount = 0,
+  feedbackBadgeCount = 0,
 }: {
   user: User;
   /** Unactioned alerts for this person — the reason to look. */
   alertCount?: number;
+  /** Unreviewed feedback items requiring action/attention. */
+  feedbackBadgeCount?: number;
 }) {
   const path = usePathname();
   const params = useSearchParams();
@@ -72,6 +76,11 @@ export function TopNav({
   const badge = alertCount > 0 && (
     <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
       {alertCount}
+    </span>
+  );
+  const feedbackBadge = feedbackBadgeCount > 0 && (
+    <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
+      {feedbackBadgeCount}
     </span>
   );
   const searchBox = (where: string, width: string) => (
@@ -140,6 +149,7 @@ export function TopNav({
           >
             {n.label}
             {n.href === "/alerts" && badge}
+            {n.href === "/feedback" && feedbackBadge}
           </Link>
         ))}
       </nav>
@@ -170,6 +180,13 @@ export function TopNav({
                 className="block px-3 py-2 text-[12.5px] hover:bg-paper"
               >
                 People and roles
+              </Link>
+              <Link
+                href="/feedback"
+                onClick={() => setOpen(false)}
+                className="block px-3 py-2 text-[12.5px] hover:bg-paper"
+              >
+                Feedback & Support
               </Link>
               {user.role === "admin" && (
                 <Link
@@ -217,6 +234,7 @@ export function TopNav({
               >
                 {n.label}
                 {n.href === "/alerts" && badge}
+                {n.href === "/feedback" && feedbackBadge}
               </Link>
             ))}
           </nav>
