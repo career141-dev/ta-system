@@ -660,7 +660,7 @@ export const aiSearch = internalAction({
 
     // Score all candidate matches across title, skills, experience, and domain
     const ranked = filteredResults
-      .map((cv: ScoredCandidateDoc, index: number) => scoreCandidateAgainstRequirements(cv as any, effectiveReq, index))
+      .map((cv: ScoredCandidateDoc, index: number) => scoreCandidateAgainstRequirements(cv as any, effectiveReq, index, { pastTitles: true }))
       .sort((a: ScoredCandidate, b: ScoredCandidate) =>
         (b.overallScore - a.overallScore) ||
         (b.titleScore - a.titleScore) ||

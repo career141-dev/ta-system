@@ -1064,7 +1064,13 @@ export function scoreCandidateAgainstRequirements(
     currentRolePenalty?: number;
     roleFamilyMatch?: "exact" | "synonym" | "adjacent" | "unrelated";
   },
-  index: number
+  index: number,
+  /**
+   * Count past job titles (at 80%). Only the Database search asks for it
+   * (matching/search.ts): an applicant's score moves them into AI Follow-up
+   * at 60, and the owner kept that as it was (9 Oct).
+   */
+  opts: { pastTitles?: boolean } = {},
 ): ScoredCandidate {
   const candidateTitleText = buildCandidateTitleText(cv);
   const candidateSkills = distinct((cv.skills ?? []).map(normaliseSkill));
@@ -1089,10 +1095,9 @@ export function scoreCandidateAgainstRequirements(
   // is now an Office Manager is still worth showing for an HR search (9 Oct).
   // Scored one title at a time, not added to the text above, because a long
   // text dilutes the token overlap the title score is built on.
-  const pastTitles = distinct([
-    ...(cv.pastJobTitles ?? []),
-    ...(cv.jobHistory ?? []).map((j) => j.title ?? ""),
-  ]).slice(0, 8);
+  const pastTitles = opts.pastTitles
+    ? distinct([...(cv.pastJobTitles ?? []), ...(cv.jobHistory ?? []).map((j) => j.title ?? "")]).slice(0, 8)
+    : [];
   const pastTitleScore = pastTitles.length
     ? Math.round(0.8 * Math.max(...pastTitles.map((t) => scoreTitleMatchImpl(jobTitleVariants, t))))
     : 0;

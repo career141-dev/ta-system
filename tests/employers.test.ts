@@ -96,7 +96,9 @@ eq("no employer hit for someone never there", never.employerHit, null);
   const moved = { _id: "d", currentJobTitle: "Office Manager", pastJobTitles: ["HR Executive"] };
   const plain = { _id: "e", currentJobTitle: "Office Manager" };
   const noCompany = { ...req, employers: [] };
-  eq("a past title counts towards the title", scoreCandidateAgainstRequirements(moved as never, noCompany as never, 0).titleScore > scoreCandidateAgainstRequirements(plain as never, noCompany as never, 1).titleScore, true);
+  eq("in the Database search, a past title counts towards the title", scoreCandidateAgainstRequirements(moved as never, noCompany as never, 0, { pastTitles: true }).titleScore > scoreCandidateAgainstRequirements(plain as never, noCompany as never, 1, { pastTitles: true }).titleScore, true);
+  // An applicant's score moves them into AI Follow-up at 60; the owner kept it as it was (9 Oct).
+  eq("for an applicant, a past title does not raise the score", scoreCandidateAgainstRequirements(moved as never, noCompany as never, 0).titleScore, scoreCandidateAgainstRequirements(plain as never, noCompany as never, 1).titleScore);
 }
 {
   // "Everyone at Dialog" names no role; the people there are still the answer.
