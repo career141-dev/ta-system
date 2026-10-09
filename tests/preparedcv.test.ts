@@ -29,6 +29,13 @@ const held = boxContent(
 );
 eq("salary kept, empty expected left out", boxItems(held).slice(1, 3), ["CURRENT SALARY - LKR 250,000", "NOTICE PERIOD - 1 month"]);
 eq("notes without system lines, plus the job's own answers", held.notes, ["Driving licence: Yes", "Can join after bonus", "Current location: Colombo 05"]);
+const who = boxContent(
+  { notes: [], answers: {} },
+  { currentSalary: "LKR 250,000", expectedSalary: null, noticePeriodDays: 30, currentTitle: "Brand Manager", currentEmployer: "Hayleys PLC" },
+  null,
+);
+eq("designation and company first, then the money (9 Oct)", boxItems(who).slice(1, 4), ["CURRENT DESIGNATION - Brand Manager", "CURRENT COMPANY - Hayleys PLC", "CURRENT SALARY - LKR 250,000"]);
+eq("a box with none still prints no empty lines", boxItems(empty).some((l) => /DESIGNATION|COMPANY/.test(l)), false);
 eq("notice from days", noticeText({ noticePeriodDays: 30 }), "30 Days");
 eq("zero days is Immediate", noticeText({ noticePeriodDays: 0 }), "Immediate");
 eq("words win over days", noticeText({ noticePeriodDays: 30, noticePeriod: "immediate" }), "Immediate");
@@ -84,6 +91,8 @@ console.log("\nthe end-of-day attachment says what the email says");
   const items = annotationItems({ ...held, ...boxOverrides(eodDetailChanges(row, edited)) });
   eq("the untouched 'Not disclosed' is not printed", items.some((l) => /DISCLOSED|Not disclosed/i.test(l)), false);
   eq("the edited expected salary is", items.includes("EXPECTED SALARY - LKR 300,000"), true);
+  const moved = { ...row, currentCompany: "Hayleys PLC", currentDesignation: "Brand Manager" };
+  eq("a company corrected on the email reaches the box", boxOverrides(eodDetailChanges(row, moved)), { currentDesignation: "Brand Manager", currentCompany: "Hayleys PLC" });
 }
 
 console.log("\nthe saved spot is stored and read back");

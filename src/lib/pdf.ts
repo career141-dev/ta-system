@@ -19,6 +19,8 @@ const GREEN = { r: 0.047, g: 0.478, b: 0.047 }; // #0C7A0C
 const PAGE = { w: 595.28, h: 841.89 }; // A4 points
 
 export interface CvAnnotation {
+  currentDesignation?: string | null;
+  currentCompany?: string | null;
   currentSalary?: string | null;
   expectedSalary?: string | null;
   noticePeriod?: string | number | null;
@@ -177,6 +179,8 @@ export function isSystemNote(note: string): boolean {
 export function annotationItems(a: CvAnnotation): string[] {
   const np = a.noticePeriod == null ? "" : String(a.noticePeriod).trim();
   return boxItems({
+    currentDesignation: a.currentDesignation?.trim() || null,
+    currentCompany: a.currentCompany?.trim() || null,
     currentSalary: a.currentSalary?.trim() || null,
     expectedSalary: a.expectedSalary?.trim() || null,
     noticePeriod: np ? noticeText({ noticePeriod: np, noticePeriodDays: null }) : null,

@@ -70,6 +70,8 @@ export function ReviewDetailsForm({
   expectedSalary,
   noticePeriodDays,
   noticePeriod,
+  currentDesignation = null,
+  currentCompany = null,
   hasCv,
   notes = [],
   // None by default: a bare "12000" already on file, for a Gulf role, was
@@ -82,6 +84,9 @@ export function ReviewDetailsForm({
   expectedSalary: string | null;
   noticePeriodDays: number | null;
   noticePeriod?: string | null;
+  /** As read from the CV until the TA corrects it on the call (9 Oct). */
+  currentDesignation?: string | null;
+  currentCompany?: string | null;
   hasCv: boolean;
   notes?: string[];
   defaultCurrency?: string;
@@ -96,6 +101,8 @@ export function ReviewDetailsForm({
   const [expCurrency, setExpCurrency] = useState(exp);
   const [expVal, setExpVal] = useState(initialExpAmount);
   const [npVal, setNpVal] = useState(noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : ""));
+  const [designation, setDesignation] = useState(currentDesignation ?? "");
+  const [company, setCompany] = useState(currentCompany ?? "");
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [upload, setUpload] = useState<{
@@ -126,6 +133,14 @@ export function ReviewDetailsForm({
   useEffect(() => {
     setNpVal(noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : ""));
   }, [noticePeriod, noticePeriodDays]);
+
+  useEffect(() => {
+    setDesignation(currentDesignation ?? "");
+  }, [currentDesignation]);
+
+  useEffect(() => {
+    setCompany(currentCompany ?? "");
+  }, [currentCompany]);
 
   useEffect(() => {
     setCustomFields(parseInitialDetails(notes));
@@ -282,6 +297,29 @@ export function ReviewDetailsForm({
             value={npVal}
             onChange={(e) => setNpVal(e.target.value)}
             placeholder="e.g. 30 days, 5 days, Immediate, 2 months, Not disclosed"
+            className={inputClass}
+          />
+        </label>
+      </div>
+      {/* Filled from the CV; corrected here when the call says otherwise (9 Oct). */}
+      <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-2">
+        <label>
+          <span className="mb-1 block text-[11.5px] text-ink-soft">Current designation</span>
+          <input
+            name="currentDesignation"
+            value={designation}
+            onChange={(e) => setDesignation(e.target.value)}
+            placeholder={currentDesignation ? "e.g. Senior Accountant" : "Not on the CV — ask on the call"}
+            className={inputClass}
+          />
+        </label>
+        <label>
+          <span className="mb-1 block text-[11.5px] text-ink-soft">Current company</span>
+          <input
+            name="currentCompany"
+            value={company}
+            onChange={(e) => setCompany(e.target.value)}
+            placeholder={currentCompany ? "e.g. Hayleys PLC" : "Not on the CV — ask on the call"}
             className={inputClass}
           />
         </label>

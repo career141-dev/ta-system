@@ -24,6 +24,7 @@ import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
 import { resolveActor } from "../lib/auth";
 import { TABLES, looselySame, sameValue, type ModelCx, type Row } from "./model/tables";
+import { refreshEmployersText } from "../candidates/candidates";
 
 const opValidator = v.object({
   table: v.string(),
@@ -157,6 +158,12 @@ export const apply = internalMutation({
         await ctx.db.replace(doc._id as never, clean(body) as never);
       } else if (Object.keys(patch).length > 0) {
         await ctx.db.patch(doc._id as never, clean(patch) as never);
+      }
+      // A company the TA corrected on the profile or the end-of-day email is
+      // who database search finds there now (9 Oct); employersText is not a
+      // field the app holds, so it is kept in step here.
+      if (model.backend === "candidates" && ("currentEmployer" in patch || unsets.includes("currentEmployer"))) {
+        await refreshEmployersText(ctx, doc._id as never);
       }
     }
 

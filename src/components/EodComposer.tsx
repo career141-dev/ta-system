@@ -562,6 +562,8 @@ export function EodComposer({
     const base = initialRows.find((b) => b.applicationId === r.applicationId);
     const over = base ? boxOverrides(eodDetailChanges(base, r)) : {};
     const q = new URLSearchParams();
+    if ("currentDesignation" in over) q.set("designation", over.currentDesignation ?? "");
+    if ("currentCompany" in over) q.set("company", over.currentCompany ?? "");
     if ("currentSalary" in over) q.set("current", over.currentSalary ?? "");
     if ("expectedSalary" in over) q.set("expected", over.expectedSalary ?? "");
     if ("noticePeriod" in over) q.set("notice", over.noticePeriod ?? "");

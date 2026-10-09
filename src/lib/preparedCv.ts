@@ -21,6 +21,9 @@ import { BOX } from "./career141Box";
 import { stripNoteFormatting } from "./eod-format";
 
 export interface BoxContent {
+  /** From the CV, or as the TA corrected it on the call (9 Oct). */
+  currentDesignation?: string | null;
+  currentCompany?: string | null;
   currentSalary: string | null;
   expectedSalary: string | null;
   noticePeriod: string | null;
@@ -44,7 +47,11 @@ export function noticeText(c: Pick<Candidate, "noticePeriodDays"> & { noticePeri
 /** Everything the desk holds for this candidate on this opening, and nothing invented. */
 export function boxContent(
   app: Pick<Application, "notes" | "answers">,
-  c: Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays"> & { noticePeriod?: string | null },
+  c: Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays"> & {
+    noticePeriod?: string | null;
+    currentTitle?: string | null;
+    currentEmployer?: string | null;
+  },
   opening: Pick<Opening, "followUpQuestions"> | null,
 ): BoxContent {
   const notes = (app.notes ?? [])
@@ -57,6 +64,8 @@ export function boxContent(
     if (a && !notes.some((n) => n.toLowerCase().startsWith(q.label.toLowerCase()))) notes.push(`${q.label}: ${a}`);
   }
   return {
+    currentDesignation: c.currentTitle?.trim() || null,
+    currentCompany: c.currentEmployer?.trim() || null,
     currentSalary: c.currentSalary?.trim() || null,
     expectedSalary: c.expectedSalary?.trim() || null,
     noticePeriod: noticeText(c),
@@ -67,6 +76,9 @@ export function boxContent(
 /** The box's lines before wrapping; the first is the header. Empty values are left out. */
 export function boxItems(b: BoxContent): string[] {
   const items = ["CAREER141 CANDIDATE"];
+  // The Director reads who they are now before what they earn (owner, 9 Oct).
+  if (b.currentDesignation) items.push(`CURRENT DESIGNATION - ${b.currentDesignation}`);
+  if (b.currentCompany) items.push(`CURRENT COMPANY - ${b.currentCompany}`);
   if (b.currentSalary) items.push(`CURRENT SALARY - ${b.currentSalary}`);
   if (b.expectedSalary) items.push(`EXPECTED SALARY - ${b.expectedSalary}`);
   if (b.noticePeriod) items.push(`NOTICE PERIOD - ${b.noticePeriod}`);

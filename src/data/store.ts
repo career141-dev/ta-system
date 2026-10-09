@@ -1822,7 +1822,7 @@ const rawRepo = {
     candidateId: Id,
     /** The TA's notes; null leaves them as they are. */
     notes: string[] | null,
-    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod">>,
+    patch: Partial<Pick<Candidate, "currentSalary" | "expectedSalary" | "noticePeriodDays" | "noticePeriod" | "currentTitle" | "currentEmployer">>,
   ) {
     mutate((db) => {
       const a = db.applications.find((x) => x.id === applicationId);
