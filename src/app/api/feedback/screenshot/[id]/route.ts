@@ -16,9 +16,13 @@ export async function GET(
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  // Look up feedback item by id first, or use id directly as storageId
-  const item = repo.feedback(id);
-  const screenshotKey = item ? item.screenshot : id;
+  // Only a feedback item this person may see, and only its own screenshot
+  // (review of #157, 9 Oct). The id used to fall back to a raw storage id,
+  // which let any signed-in account, a client's too, fetch any stored file —
+  // CVs among them. A screenshot of the desk can show candidates as well, so
+  // the list's own rule decides who sees it.
+  const item = repo.feedbacks(user).find((f) => f.id === id) ?? null;
+  const screenshotKey = item?.screenshot ?? null;
 
   if (!screenshotKey) {
     return new NextResponse("Not found", { status: 404 });
@@ -58,8 +62,8 @@ export async function GET(
   }
 
   try {
-    const storageId = screenshotKey.replace(/^convex:/, "");
-    const url = await convexQuery<string | null>("ta/feedbacks:screenshotUrl", { storageId });
+    // The backend checks again who may see the item (ta/feedbacks maySee).
+    const url = await convexQuery<string | null>("ta/feedbacks:screenshotUrl", { actorId: user.id, feedbackId: id });
     if (!url) {
       return new NextResponse("Screenshot not found in storage", { status: 404 });
     }

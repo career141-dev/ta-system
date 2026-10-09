@@ -108,6 +108,7 @@ import type * as lib_currentRoleClassifier from "../lib/currentRoleClassifier.js
 import type * as lib_doNotContact from "../lib/doNotContact.js";
 import type * as lib_employers from "../lib/employers.js";
 import type * as lib_experience from "../lib/experience.js";
+import type * as lib_feedbackAccess from "../lib/feedbackAccess.js";
 import type * as lib_firstPost from "../lib/firstPost.js";
 import type * as lib_followUpScope from "../lib/followUpScope.js";
 import type * as lib_templateBudget from "../lib/templateBudget.js";
@@ -174,6 +175,7 @@ import type * as ta_dispatchRecord from "../ta/dispatchRecord.js";
 import type * as ta_eodCopies from "../ta/eodCopies.js";
 import type * as ta_eodMail from "../ta/eodMail.js";
 import type * as ta_employersText from "../ta/employersText.js";
+import type * as ta_feedbacks from "../ta/feedbacks.js";
 import type * as ta_firstPost from "../ta/firstPost.js";
 import type * as ta_fixes2609 from "../ta/fixes2609.js";
 import type * as ta_followUp from "../ta/followUp.js";
@@ -317,6 +319,7 @@ declare const fullApi: ApiFromModules<{
   "lib/doNotContact": typeof lib_doNotContact;
   "lib/employers": typeof lib_employers;
   "lib/experience": typeof lib_experience;
+  "lib/feedbackAccess": typeof lib_feedbackAccess;
   "lib/firstPost": typeof lib_firstPost;
   "lib/followUpScope": typeof lib_followUpScope;
   "lib/templateBudget": typeof lib_templateBudget;
@@ -383,6 +386,7 @@ declare const fullApi: ApiFromModules<{
   "ta/eodCopies": typeof ta_eodCopies;
   "ta/eodMail": typeof ta_eodMail;
   "ta/employersText": typeof ta_employersText;
+  "ta/feedbacks": typeof ta_feedbacks;
   "ta/firstPost": typeof ta_firstPost;
   "ta/fixes2609": typeof ta_fixes2609;
   "ta/followUp": typeof ta_followUp;

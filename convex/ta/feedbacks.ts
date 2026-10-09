@@ -13,6 +13,7 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { requireActor, optionalActor } from "./guard";
+import { deskRole, isAdminRole, isLeadRole, maySee } from "../lib/feedbackAccess";
 
 const CATEGORIES = v.union(
   v.literal("bug"),
@@ -44,13 +45,6 @@ function actorName(u: { fullName?: string; name?: string }): string {
   return u.fullName || u.name || "Anonymous";
 }
 
-function isLeadRole(role: string): boolean {
-  return role === "ta_lead" || role === "director";
-}
-
-function isAdminRole(role: string): boolean {
-  return role === "admin" || role === "director";
-}
 
 export const submit = internalMutation({
   args: {
@@ -71,7 +65,7 @@ export const submit = internalMutation({
     const id = await db.insert("feedbacks", {
       submittedBy: actor._id as string,
       submittedByName: actorName(actor as { fullName?: string; name?: string }),
-      submittedByRole: actor.role || "ta",
+      submittedByRole: deskRole(actor),
       createdAt: now,
       category: args.category,
       priority: args.priority,
@@ -100,7 +94,7 @@ export const leadReview = internalMutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorId);
-    const role = actor.role || "";
+    const role = deskRole(actor);
     if (!isLeadRole(role)) {
       throw new Error("Only TA Leads or Directors can review feedback submissions.");
     }
@@ -138,7 +132,7 @@ export const adminUpdate = internalMutation({
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorId);
-    const role = actor.role || "";
+    const role = deskRole(actor);
     if (!isAdminRole(role)) {
       throw new Error("Only Admins or Directors can update the admin feedback queue.");
     }
@@ -163,12 +157,28 @@ export const adminUpdate = internalMutation({
   },
 });
 
+/**
+ * The screenshot of one feedback item, for someone allowed to see that item.
+ * It took a bare storage id and asked nobody before (review of #157, 9 Oct):
+ * any signed-in account, a client's included, could have fetched any file in
+ * storage — CVs among them — by its id. Now it is the item's own screenshot,
+ * or nothing.
+ */
 export const screenshotUrl = internalQuery({
-  args: { storageId: v.string() },
+  args: { actorId: v.string(), feedbackId: v.string() },
   handler: async (ctx, args) => {
-    const clean = args.storageId.replace(/^convex:/, "");
-    if (!clean) return null;
-    return await ctx.storage.getUrl(clean as never);
+    const actor = await requireActor(ctx, args.actorId);
+    const id = ctx.db.normalizeId("feedbacks", args.feedbackId);
+    const row = id ? await ctx.db.get(id) : null;
+    if (!row || !maySee(actor, row) || !row.screenshot) return null;
+    const clean = row.screenshot.replace(/^convex:/, "");
+    if (!clean || clean.startsWith("data:")) return null;
+    // The id is whatever the browser sent with the feedback, so it could name a
+    // CV. Only an image is ever served as a screenshot.
+    const fileId = ctx.db.system.normalizeId("_storage", clean);
+    const meta = fileId ? await ctx.db.system.get(fileId) : null;
+    if (!meta || !(meta.contentType ?? "").startsWith("image/")) return null;
+    return await ctx.storage.getUrl(fileId!);
   },
 });
 
@@ -180,7 +190,6 @@ export const listFeedbacks = internalQuery({
   handler: async (ctx, args) => {
     const actor = await optionalActor(ctx, args.actorId);
     if (!actor) return [];
-    const role = actor.role || "ta";
 
     let rows: Record<string, any>[];
     if (args.status) {
@@ -192,24 +201,9 @@ export const listFeedbacks = internalQuery({
       rows = (await (ctx.db as any).query("feedbacks").collect()) as Record<string, any>[];
     }
 
-    // Role filtering:
-    // TA Leads and Directors see all feedback
-    // Admins see only what a lead has approved (or their own submissions)
-    // TAs see only their own submissions
-    if (isLeadRole(role)) {
-      // see all
-    } else if (isAdminRole(role)) {
-      rows = rows.filter(
-        (r) =>
-          r.status === "approved_for_admin" ||
-          r.status === "in_progress" ||
-          r.status === "resolved" ||
-          r.status === "declined_by_admin" ||
-          r.submittedBy === (actor._id as string)
-      );
-    } else {
-      rows = rows.filter((r) => r.submittedBy === (actor._id as string));
-    }
+    // Leads and directors see all; admins what a lead sent on, and their own;
+    // everyone else only their own (maySee, shared with the screenshot).
+    rows = rows.filter((r) => maySee(actor, r as { submittedBy: string; status: string }));
 
     rows.sort((a, b) => b.createdAt - a.createdAt);
     return rows.map((r) => ({
