@@ -8,7 +8,7 @@ import { ProjectHeader } from "../ProjectHeader";
 import { dateAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { JobDetailsPanel } from "@/components/JobDetailsPanel";
-import { allows } from "@/lib/auth";
+import { allows, isTa } from "@/lib/auth";
 import { MatchingStatus } from "@/components/MatchingStatus";
 import { detailsFollowNotes } from "@/lib/jdChat";
 import type { JdChatTurn } from "@/components/JdChat";
@@ -38,7 +38,7 @@ export default async function JdPage({
     .map((b) => ({
       id: b.id,
       author: repo.user(b.capturedBy)?.name ?? "Someone on the desk",
-      isLead: repo.user(b.capturedBy)?.role !== "ta",
+      isLead: !isTa(repo.user(b.capturedBy)),
       notes: [b.notesMarkdown.trim(), b.transcriptStatus === "ready" ? b.transcript ?? "" : ""].filter(Boolean).join("\n\n"),
       at: dateAt(b.capturedAt),
     }));
@@ -55,7 +55,7 @@ export default async function JdPage({
     .map((b) => ({
       id: b.id,
       author: repo.user(b.capturedBy)?.name ?? "Someone on the desk",
-      isLead: repo.user(b.capturedBy)?.role !== "ta",
+      isLead: !isTa(repo.user(b.capturedBy)),
       notes: [b.notesMarkdown.trim(), b.transcriptStatus === "ready" ? b.transcript ?? "" : ""].filter(Boolean).join("\n\n"),
       at: dateAt(b.capturedAt),
     }));

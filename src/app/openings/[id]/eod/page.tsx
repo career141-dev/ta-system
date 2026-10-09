@@ -14,6 +14,7 @@ import { requireSourcingSeat } from "../sourcingGate";
 import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { extractReplyText } from "@/lib/reviewReply";
+import { isTa } from "@/lib/auth";
 
 const PAGE_SIZE = 10;
 
@@ -51,7 +52,7 @@ export default async function EodPage({
   const director = repo.users().find((u) => u.role === "director");
   const lead = repo.user(o.taLeadId);
 
-  const rows = shortlistRows(id, user.role === "ta" ? user.id : null, kind);
+  const rows = shortlistRows(id, isTa(user) ? user.id : null, kind);
   const effort = effortRow(id, user);
 
   // This TA's own sets — each recruiter numbers their own.
@@ -90,7 +91,7 @@ export default async function EodPage({
   // correct and send again (8 Oct). A TA sees their own; a lead or director
   // sees the desk's.
   const copies =
-    kind === "director" ? repo.eodCopies(id).filter((c) => user.role !== "ta" || c.sentBy === user.id) : [];
+    kind === "director" ? repo.eodCopies(id).filter((c) => !isTa(user) || c.sentBy === user.id) : [];
   // Opened to read: any version on that list.
   const viewCopy = sp.view ? copies.find((c) => c.id === sp.view) : undefined;
   // Opened to send again: only the sender's own, only inside its month.
@@ -416,7 +417,7 @@ function SentHistory({
     const first = versions[versions.length - 1];
     const mine = latest.sentBy === user.id;
     // A lead reads the desk's emails, so each says whose it is.
-    const sender = user.role === "ta" ? null : repo.user(latest.sentBy)?.name;
+    const sender = isTa(user) ? null : repo.user(latest.sentBy)?.name;
     return (
       <li key={latest.roundId} className="px-7 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">

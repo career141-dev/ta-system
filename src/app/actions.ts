@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { can, isDeskWide, isReadOnly, type Capability } from "@/lib/auth";
+import { can, isDeskWide, isReadOnly, isTa, type Capability } from "@/lib/auth";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -975,7 +975,7 @@ function jdBriefsFor(openingId: string): JdBrief[] {
     const transcript = b.transcriptStatus === "ready" && b.transcript ? `\n\nFrom the recording:\n${b.transcript}` : "";
     return {
       author: author?.name ?? "someone on the desk",
-      role: author?.role === "ta" ? ("ta" as const) : ("lead" as const),
+      role: isTa(author) ? ("ta" as const) : ("lead" as const),
       notes: `${b.notesMarkdown ?? ""}${transcript}`,
     };
   });
@@ -1077,7 +1077,7 @@ export async function amendJd(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const o = repo.opening(openingId);
   if (!o) return;
-  if (!o.assignedTaIds.includes(user.id) && user.role === "ta") return;
+  if (!o.assignedTaIds.includes(user.id) && isTa(user)) return;
   const jd = String(formData.get("jdMarkdown") ?? "");
   if (isConvex()) {
     let r: { reextracting: boolean } | null = null;
@@ -2772,7 +2772,7 @@ export async function deleteReport(formData: FormData) {
 // is discarded on commit — so these used to look saved and change nothing.
 // They now write through `ta/users`, which checks for an admin itself.
 
-const DESK_ROLES = ["admin", "director", "ta_lead", "ta", "ops", "client", "viewer"] as const;
+const DESK_ROLES = ["admin", "director", "ta_lead", "ta", "ta_support", "ops", "client", "viewer"] as const;
 
 function personFrom(formData: FormData) {
   const role = String(formData.get("role") ?? "ta");
@@ -4507,7 +4507,7 @@ export async function sendEod(formData: FormData) {
   // A TA sends only the people they shortlisted on this opening (the desk, 2 Oct): the list
   // came from the browser, so it is checked here, not only when the page is drawn. A lead or
   // director sends for the desk.
-  const mine = (id: string) => user.role !== "ta" || repo.application(id)?.ownerTaId === user.id;
+  const mine = (id: string) => !isTa(user) || repo.application(id)?.ownerTaId === user.id;
   const notMine = ids.filter((id) => !mine(id));
   const fresh = ids.filter((id) => mine(id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && repo.application(id)?.openingId === openingId);
   if (notMine.length > 0 && fresh.length === 0)
@@ -5674,7 +5674,7 @@ export async function addStrategyDoneBy(formData: FormData) {
   // The TA must really be on this job and be a TA: the dropdown came from the browser.
   const opening = repo.opening(openingId)!;
   const ta = repo.user(taId);
-  if (!ta || ta.role !== "ta" || !ta.isActive || !opening.assignedTaIds.includes(taId)) {
+  if (!ta || !isTa(ta) || !ta.isActive || !opening.assignedTaIds.includes(taId)) {
     await fail("That TA is not on this job.");
   }
   const s = repo.strategy(strategyId);

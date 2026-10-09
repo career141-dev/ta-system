@@ -138,7 +138,8 @@ export const WORKS_THE_DESK = ["primary_recruiter", "supporting_recruiter", "dir
  */
 export function isTaOnOwnDesk(user: Doc<"users">): boolean {
   const explicit = (user as { taRole?: string | null }).taRole;
-  if (explicit) return explicit === "ta";
+  // TA Support works its own desk exactly as a TA does (9 Oct).
+  if (explicit) return explicit === "ta" || explicit === "ta_support";
   return user.role === "recruiter" || user.role === "ta" || user.role === "test_ta";
 }
 

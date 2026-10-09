@@ -2,7 +2,7 @@ import { repo } from "@/data/store";
 import { AddLinkForm } from "./AddLinkForm";
 import { LinkRow } from "./LinkRow";
 import { scopeLinks } from "@/lib/visibility";
-import { can, isDeskWide } from "@/lib/auth";
+import { can, isDeskWide, seesEveryTaRow } from "@/lib/auth";
 import type { User } from "@/data/types";
 import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
@@ -48,7 +48,8 @@ export function LinkVaultTable({
   const users = repo.users();
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
   // A TA's table is their own, plus whatever a lead put in for them. Another
-  // TA's rows are not shown, even ones they have taken on (5 Oct).
+  // TA's rows are not shown, even ones they have taken on (5 Oct). TA Support
+  // reads every TA's rows on the job (9 Oct).
   const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
   const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
   // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
@@ -123,9 +124,9 @@ export function LinkVaultTable({
           ))}
         </nav>
         <div className="flex flex-wrap items-center gap-3 pb-2">
-          {/* For leads, who see every TA's rows. A TA's table is their own
-              (scopeLinks), so the filter would only repeat it (1 Oct). */}
-          {isDeskWide(user) && adders.length > 1 && (
+          {/* For leads and TA Support, who see every TA's rows. A TA's table
+              is their own (scopeLinks), so the filter would only repeat it (1 Oct). */}
+          {(isDeskWide(user) || seesEveryTaRow(user)) && adders.length > 1 && (
             <nav aria-label="Added by" className="flex flex-wrap items-center gap-1 text-[12px]">
               <span className="text-ink-faint">Added by</span>
               {["", ...adders].map((id) => (
@@ -178,6 +179,7 @@ export function LinkVaultTable({
                 userNames={userNames}
                 canNote={canNote}
                 viewerId={user.id}
+                readOnly={seesEveryTaRow(user) && r.addedBy !== user.id && !deskWide.has(r.addedBy)}
               />
             ))}
           </div>

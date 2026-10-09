@@ -7,6 +7,7 @@ import { Pager } from "@/components/Pager";
 import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 import { linkedinStatus, type LinkedInStatus } from "@/lib/linkedinStatus";
 import { LinkedInPill } from "@/components/LinkedInPill";
+import { isTa } from "@/lib/auth";
 
 /**
  * The TA Lead's view — spec §13: allocation across the team, who is under the
@@ -24,7 +25,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
   // A TA matches by name, or by carrying a role that matches.
   const tas = repo
     .users()
-    .filter((u) => u.role === "ta")
+    .filter((u) => isTa(u))
     .filter((u) => matchesQuery(q, u.name) || openings.some((o) => o.assignedTaIds.includes(u.id) && roleMatches(o)));
   const alerts = computeAlerts();
 

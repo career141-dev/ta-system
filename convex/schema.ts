@@ -49,6 +49,8 @@ export default defineSchema({
       v.literal("director"),
       v.literal("ta_lead"),
       v.literal("ta"),
+      // A TA who also reads every TA's Excel Tables rows on their jobs (9 Oct).
+      v.literal("ta_support"),
       v.literal("ops"),
       v.literal("client"),
       v.literal("viewer"),
