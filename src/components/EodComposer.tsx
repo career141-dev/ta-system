@@ -936,11 +936,20 @@ export function EodComposer({
         </p>
       </section>
 
-      {needsResearchLink && (
+      {/* Shown to everyone on the directors' email (9 Oct): an admin or lead may add one
+          too; only a TA must. The server already takes a valid link from anyone. */}
+      {kind === "director" && (
         <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <h3 className="text-[13.5px] font-semibold">
-            ChatGPT research link <span className="text-warn" aria-hidden="true">*</span>
-            <span className="sr-only">(required)</span>
+            ChatGPT research link{" "}
+            {needsResearchLink ? (
+              <>
+                <span className="text-warn" aria-hidden="true">*</span>
+                <span className="sr-only">(required)</span>
+              </>
+            ) : (
+              <span className="font-normal text-ink-faint">(optional)</span>
+            )}
           </h3>
           <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
             Your TA Lead and the directors will open this from the email. In ChatGPT, open today&rsquo;s research
@@ -954,7 +963,7 @@ export function EodComposer({
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
-            required
+            required={needsResearchLink}
             value={researchLink}
             onChange={(e) => setResearchLink(e.target.value)}
             onBlur={() => setResearchTouched(true)}
@@ -975,7 +984,7 @@ export function EodComposer({
               form="eod-send"
               type="checkbox"
               name="researchConfirmed"
-              required
+              required={needsResearchLink}
               checked={researchConfirmed}
               onChange={(e) => setResearchConfirmed(e.target.checked)}
               className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--brand,#165b42)]"
