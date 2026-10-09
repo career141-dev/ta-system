@@ -23,6 +23,7 @@ export function AiPanel({
   total,
   read: engineRead = null,
   engineTerms = null,
+  companies = null,
 }: {
   criteria: SearchCriteria;
   ignored: string[];
@@ -37,6 +38,9 @@ export function AiPanel({
   read?: string | null;
   /** The terms the engine searched on. Absent when it did not run. */
   engineTerms?: string[] | null;
+  /** The companies the engine read out of the conversation (9 Oct). The first
+   *  name is the one asked for; the rest are its other spellings. */
+  companies?: { names: string[]; scope: "current" | "any"; exclude: string[] } | null;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const chips: Chip[] = describe(criteria);
@@ -147,6 +151,23 @@ export function AiPanel({
           {engineRead && (
             <p className="rounded-lg bg-paper px-3 py-2.5 text-[12.5px] leading-relaxed text-ink">
               {engineRead}
+            </p>
+          )}
+          {/* A company named in the search is a filter (owner, 9 Oct), so the
+              panel says so plainly: a TA who sees only Dialog people knows why. */}
+          {companies && companies.names.length > 0 && (
+            <p className="text-[12.5px] leading-relaxed text-ink">
+              Only people who {companies.scope === "current" ? "work at" : "work or worked at"}{" "}
+              <span className="font-semibold">{companies.names[0]}</span>
+              {companies.names.length > 1 && (
+                <span className="text-ink-soft"> (also matched as {companies.names.slice(1).join(", ")})</span>
+              )}
+              .
+            </p>
+          )}
+          {companies && companies.exclude.length > 0 && (
+            <p className="text-[12.5px] leading-relaxed text-ink">
+              Leaving out people at <span className="font-semibold">{companies.exclude.join(", ")}</span> now.
             </p>
           )}
           <p className="text-[12.5px] leading-relaxed text-ink-soft">

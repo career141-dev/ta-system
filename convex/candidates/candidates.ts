@@ -9,6 +9,7 @@ import { answersById } from "../lib/followUpScope";
 import { CV_FILE_KEYS, fillBlanksOnly } from "../lib/fillBlanks";
 import { findSameCandidate } from "../lib/sameCandidate";
 import { replaceHeldCv } from "../cvs/cvReplace";
+import { employersTextOf } from "../lib/employers";
 
 export const listCandidates = internalQuery({
   args: {
@@ -365,6 +366,7 @@ export const updateCandidateAfterLazyParse = internalMutation({
     }
 
     // Sync candidate details across applications and compute/update overall status
+    await refreshEmployersText(ctx, candidateId);
     await syncCandidateSummaryToApplications(ctx, candidateId);
     await syncCandidateOverallStatus(ctx, candidateId);
 
@@ -617,6 +619,7 @@ export const updateCandidateFields = internalMutation({
       }
 
       await checkAndAdvanceFollowUp(ctx, targetId);
+      await refreshEmployersText(ctx, targetId);
       await syncCandidateSummaryToApplications(ctx, targetId);
       await syncCandidateOverallStatus(ctx, targetId);
     }
@@ -782,6 +785,7 @@ export const createCandidate = internalMutation({
       }
 
       await checkAndAdvanceFollowUp(ctx, existingCandidateId);
+      await refreshEmployersText(ctx, existingCandidateId);
       await syncCandidateSummaryToApplications(ctx, existingCandidateId);
       await syncCandidateOverallStatus(ctx, existingCandidateId);
       return existingCandidateId;
@@ -833,6 +837,7 @@ export const createCandidate = internalMutation({
     }
 
     await checkAndAdvanceFollowUp(ctx, newId);
+    await refreshEmployersText(ctx, newId);
     await syncCandidateSummaryToApplications(ctx, newId);
     await syncCandidateOverallStatus(ctx, newId);
     return newId;
@@ -1287,6 +1292,23 @@ export const syncCandidateOverallStatusInternal = internalMutation({
     await syncCandidateOverallStatus(ctx, args.candidateId);
   },
 });
+
+/**
+ * Keeps `employersText` (the current employer and every company in the career,
+ * searched by `search_employers_all`) in step with the row and the résumé.
+ * Run wherever a CV or the details are written, before the summary sync. The
+ * career rule is withCareer's: the résumé's history when it has one (9 Oct).
+ */
+export async function refreshEmployersText(ctx: any, candidateId: Id<"candidates">) {
+  const candidate = await ctx.db.get(candidateId);
+  if (!candidate) return;
+  const resume = await ctx.db
+    .query("candidateResumes")
+    .withIndex("by_candidateId", (q: any) => q.eq("candidateId", candidateId))
+    .first();
+  const text = employersTextOf(candidate, resume);
+  if ((candidate.employersText ?? undefined) !== text) await ctx.db.patch(candidateId, { employersText: text });
+}
 
 export async function syncCandidateSummaryToApplications(ctx: any, candidateId: Id<"candidates">) {
   const candidate = await ctx.db.get(candidateId);

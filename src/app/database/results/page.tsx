@@ -144,8 +144,6 @@ async function Results({ sp }: { sp: Params }) {
   // notice, salary — and lets the similarity rank everything else.
   // Every message of the conversation, a later one winning where they disagree (5 Oct).
   const parsed = mode !== "boolean" ? parseConversation(q, vocab) : null;
-  // What the engine, the words and the vectors are searched on: the whole conversation.
-  const text = mode === "boolean" ? q : conversationText(q);
   const criteria = edited ? criteriaFromParams(sp) : (parsed?.criteria ?? criteriaFromParams(sp));
   const ignored = edited ? [] : (parsed?.ignored ?? []);
   const booleanError = mode === "boolean" ? parseBoolean(q).error : null;
@@ -166,15 +164,17 @@ async function Results({ sp }: { sp: Params }) {
    * behind it and replaces it.
    */
   if (isConvex() && q && mode === "natural") {
-    const held = cachedEngineSearch(text, criteria, ENGINE_LIMIT, edited);
+    // The engine gets the messages one per line, not joined: it reads them as
+    // a conversation, a later message changing an earlier one (9 Oct).
+    const held = cachedEngineSearch(q, criteria, ENGINE_LIMIT, edited);
     if (held) return <ResultsView {...view} engine={held} />;
-    const full = engineSearch(text, criteria, ENGINE_LIMIT, edited);
+    const full = engineSearch(q, criteria, ENGINE_LIMIT, edited);
     // Started above, so an unawaited failure here is not an unhandled one; the
     // streamed half reports it.
     full.catch(() => undefined);
     let quick: EngineSearch | null = null;
     try {
-      quick = await quickEngineSearch(text, criteria, ENGINE_LIMIT, edited);
+      quick = await quickEngineSearch(q, criteria, ENGINE_LIMIT, edited);
     } catch {
       // No quick answer: wait for the full one, as before.
     }
@@ -260,6 +260,7 @@ async function ResultsView({
   let engineHits = new Map<string, EngineHit>();
   let engineRead: string | null = null;
   let engineTerms: string[] | null = null;
+  let engineCompanies: { names: string[]; scope: "current" | "any"; exclude: string[] } | null = null;
 
   if (engine) {
     /*
@@ -278,6 +279,10 @@ async function ResultsView({
     engineHits = new Map(engine.hits.map((h) => [h.candidateId, h]));
     engineRead = engine.interpretation?.interpretation || null;
     engineTerms = engine.interpretation?.keywords?.length ? engine.interpretation.keywords : null;
+    const read = engine.interpretation;
+    if (read?.employers?.length || read?.excludeEmployers?.length) {
+      engineCompanies = { names: read.employers ?? [], scope: read.employerScope ?? "any", exclude: read.excludeEmployers ?? [] };
+    }
     await primeStore({ candidateIds: engine.hits.map((h) => h.candidateId) });
     // Fed in as the ranking signal the existing filter path already accepts,
     // scaled to its 0–1 scale. The floor is 0: the engine has already
@@ -644,6 +649,7 @@ async function ResultsView({
             total={total}
             read={engineRead}
             engineTerms={engineTerms}
+            companies={engineCompanies}
           />
 
           <div className="rounded-xl border border-rule bg-surface p-4">

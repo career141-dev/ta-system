@@ -41,7 +41,12 @@ export const getCandidatesSummaryBatch = internalQuery({
       email: c.email,
       phone: c.phone,
       currentJobTitle: c.currentJobTitle || c.currentTitle,
+      // The scorer reads currentTitle; without it the title went unread (9 Oct).
+      currentTitle: c.currentTitle || c.currentJobTitle,
       currentEmployer: c.currentEmployer,
+      // Every employer, for the company filter and score (lib/employers).
+      employersText: c.employersText,
+      certifications: c.certifications,
       totalExperienceYears: c.totalExperienceYears ?? c.yearsOfExperience,
       yearsOfExperience: c.yearsOfExperience ?? c.totalExperienceYears,
       seniorityLevel: c.seniorityLevel,

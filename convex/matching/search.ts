@@ -3,7 +3,8 @@ import { internalQuery, internalMutation, internalAction } from "../_generated/s
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { logLLMUsage, OPENROUTER_PRIMARY_MODEL } from "../lib/llm";
-import { extractSearchRequirements, buildSearchTerms, type SearchRequirements } from "../lib/jdParser";
+import { extractConversationRequirements, buildSearchTerms, type SearchRequirements } from "../lib/jdParser";
+import { employerMatch, excludedByEmployer } from "../lib/employers";
 import { cvFileMissing } from "../../src/lib/cvMissing";
 import { scoreCandidateAgainstRequirements, selectLlmPool, scoreWithLLM, scoreBatchWithLLM, buildDeterministicTaReason, distinct, type ScoredCandidate } from "../cvs/cvScoring";
 
@@ -118,6 +119,48 @@ export const searchCandidates = internalQuery({
   },
 });
 
+/**
+ * Candidates by company, now or before (9 Oct).
+ *
+ * Two indexes: `search_employers_all` over every employer (employersText) and
+ * `search_employer` over the current one, which also covers rows the backfill
+ * has not reached yet. Every hit is confirmed with lib/employers, so "Bank of
+ * Ceylon" does not keep everyone at any bank, and scored there: 100 for
+ * someone at the company now down to 70 for a looser match on an earlier job.
+ */
+export const searchByEmployer = internalQuery({
+  args: {
+    companies: v.array(v.string()),
+    scope: v.optional(v.union(v.literal("current"), v.literal("any"))),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const companies = [...new Set(args.companies.map((c) => c.trim()).filter((c) => c.length > 1))].slice(0, 5);
+    if (!companies.length) return [];
+    const limit = Math.min(args.limit ?? 200, 400);
+    const scope = args.scope ?? "any";
+    const rows = new Map<Id<"candidates">, Doc<"candidates">>();
+    for (const company of companies) {
+      const lookups = [
+        ctx.db.query("candidates").withSearchIndex("search_employer", (q) => q.search("currentEmployer", company)).take(limit),
+        ...(scope === "any"
+          ? [ctx.db.query("candidates").withSearchIndex("search_employers_all", (q) => q.search("employersText", company)).take(limit)]
+          : []),
+      ];
+      for (const found of await Promise.all(lookups)) for (const c of found) rows.set(c._id, c);
+    }
+    const out: { candidateId: Id<"candidates">; score: number; when: "current" | "past" }[] = [];
+    for (const c of rows.values()) {
+      if (cvFileMissing(c)) continue;
+      // employersText is complete where the row's own jobHistory may not be
+      // (newer extractions write the career to the résumé), so match on it.
+      const hit = employerMatch(companies, { currentEmployer: c.currentEmployer, employersText: c.employersText }, scope);
+      if (hit) out.push({ candidateId: c._id, score: hit.score, when: hit.when });
+    }
+    return out.sort((a, b) => b.score - a.score);
+  },
+});
+
 type SearchInterpretation = {
   searchText: string;
   industry?: string;
@@ -155,6 +198,7 @@ export const aiSearch = internalAction({
         experience: string;
         location: string;
         industry: string;
+        employer?: string;
       };
     }[];
   }> => {
@@ -203,7 +247,9 @@ export const aiSearch = internalAction({
       };
     } else {
       const parseStarted = Date.now();
-      const parseResult = await extractSearchRequirements(args.query, "natural_language");
+      // A search held as a conversation arrives one message per line; the
+      // model reads them as one search, a later message changing an earlier one.
+      const parseResult = await extractConversationRequirements(args.query.split(/\n+/));
       mark("read_query", parseStarted);
       parsedReq = parseResult.requirements;
       tokenLogs.push({
@@ -371,6 +417,22 @@ export const aiSearch = internalAction({
       }
     }
 
+    // The company asked for: everyone who worked there, from the employer
+    // indexes. Vectors and words cannot know an employer, so these come first.
+    const employersAsked = effectiveReq.employers ?? [];
+    let employerHits: { candidateId: Id<"candidates">; score: number }[] = [];
+    if (employersAsked.length) {
+      try {
+        employerHits = await ctx.runQuery(internal.matching.search.searchByEmployer, {
+          companies: employersAsked,
+          scope: effectiveReq.employerScope ?? "any",
+          limit: 200,
+        });
+      } catch (empErr: any) {
+        console.warn("[aiSearch] Employer search notice:", empErr?.message);
+      }
+    }
+
     mark("retrieve", retrieveStarted);
 
     // 5. Merge and deduplicate candidate IDs in memory
@@ -378,12 +440,19 @@ export const aiSearch = internalAction({
     const allCandidateIds: Id<"candidates">[] = [];
     const vectorScoreByCandidateId = new Map<Id<"candidates">, number>();
 
+    for (const eh of employerHits) {
+      if (!seen.has(eh.candidateId)) {
+        seen.add(eh.candidateId);
+        allCandidateIds.push(eh.candidateId);
+      }
+    }
+
     for (const vc of vectorCandidateIds) {
       if (!seen.has(vc.candidateId)) {
         seen.add(vc.candidateId);
         allCandidateIds.push(vc.candidateId);
-        vectorScoreByCandidateId.set(vc.candidateId, vc.vectorScore);
       }
+      vectorScoreByCandidateId.set(vc.candidateId, vc.vectorScore);
     }
 
     for (const batch of searchBatches.flat()) {
@@ -542,6 +611,15 @@ export const aiSearch = internalAction({
             return source === filterSrc;
           });
         });
+      }
+
+      // A named company keeps only people who worked there (owner, 9 Oct);
+      // "not from X" drops people there now.
+      if (employersAsked.length) {
+        list = list.filter((c) => employerMatch(employersAsked, c as any, effectiveReq.employerScope ?? "any") !== null);
+      }
+      if (effectiveReq.excludeEmployers?.length) {
+        list = list.filter((c) => !excludedByEmployer(effectiveReq.excludeEmployers!, c as any));
       }
 
       if (args.customFilters && args.customFilters.length > 0) {
@@ -711,6 +789,7 @@ export const aiSearch = internalAction({
             ) : "not specified",
             location: item.locationStatus === "match" ? "match" : item.locationStatus === "different" ? "different" : "not specified",
             industry: item.industryScore === 100 ? "match" : "different",
+            ...(item.employerHit ? { employer: item.employerHit.when === "current" ? "works there now" : "worked there before" } : {}),
           }
         };
       });
