@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { browserPdfJs } from "@/lib/pdfBrowser";
 
 /**
  * Individual high-DPI canvas renderer for a single PDF page.
@@ -132,9 +133,7 @@ export function CvFrame({
 
     (async () => {
       try {
-        const pdfjs = await import("pdfjs-dist");
-        // Use local public worker with fallback
-        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        const pdfjs = await browserPdfJs();
 
         let doc: any = null;
 
