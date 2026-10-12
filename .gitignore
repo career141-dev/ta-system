@@ -32,3 +32,5 @@ tools/embed/models
 __pycache__/
 *.pyc
 count_tables.py
+# PDF.js workers are copied from the installed dependency by next.config.ts.
+/public/pdfjs/

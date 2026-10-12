@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { savePreparedCvBoxInline } from "@/app/actions";
 import { ActionNote, Spinner, useInline } from "./Submit";
 import { BOX } from "@/lib/career141Box";
+import { browserPdfJs } from "@/lib/pdfBrowser";
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 /**
  * The Prepared CV tab (29 Sep): page 1 of the candidate's own CV with the
@@ -40,71 +42,96 @@ export function PreparedCvEditor({
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const [scale, setScale] = useState(1);
   const [version, setVersion] = useState(0);
-  const [numPages, setNumPages] = useState(1);
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [drawn, setDrawn] = useState(false);
+  const [width, setWidth] = useState(0);
+  const [previewProblem, setPreviewProblem] = useState(false);
+  const numPages = pdfDoc?.numPages ?? 1;
   const frame = useRef<HTMLDivElement | null>(null);
   const canvasMap = useRef<Map<number, HTMLCanvasElement>>(new Map());
   const drag = useRef<{ dx: number; dy: number } | null>(null);
   const save = useInline(savePreparedCvBoxInline, { refreshOnOk: false });
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal: AbortSignal) => {
+    setProblem(null);
     try {
-      const res = await fetch(`/api/prepared-cv/${encodeURIComponent(appId)}?layout=1`, { cache: "no-store" });
+      const res = await fetch(`/api/prepared-cv/${encodeURIComponent(appId)}?layout=1`, { cache: "no-store", signal });
       if (!res.ok) throw new Error(String(res.status));
       const l = (await res.json()) as Layout;
+      if (signal.aborted) return;
       setLayout(l);
       setAt(l.box ? { x: l.box.x, y: l.box.y } : null);
     } catch {
-      setProblem("The Prepared CV could not be loaded. Reload the page to try again.");
+      if (!signal.aborted) setProblem("The Prepared CV could not be loaded. Reload the page to try again.");
     }
   }, [appId]);
 
   useEffect(() => {
-    void load();
+    const abort = new AbortController();
+    void load(abort.signal);
+    return () => abort.abort();
   }, [load, version]);
 
-  // All pages of the CV, drawn to fit the frame's width.
+  // Loading must not depend on the page count: discovering page 2 used to
+  // cancel page 1's render and load the same document again (12 Oct).
   useEffect(() => {
-    if (!layout || layout.generated || !pdfSrc || !frame.current) return;
+    setPdfDoc(null);
+    setDrawn(false);
+    setPreviewProblem(false);
+    if (!layout || layout.generated || !pdfSrc) return;
     let cancelled = false;
-    const tasks: { cancel(): void }[] = [];
+    const abort = new AbortController();
+    let loadingTask: PDFDocumentLoadingTask | null = null;
 
     (async () => {
       try {
-        const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
-        let doc: any = null;
-        try {
-          const res = await fetch(pdfSrc, { credentials: "same-origin" });
-          if (res.ok) {
-            const buffer = await res.arrayBuffer();
-            if (!cancelled) {
-              doc = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
-            }
-          }
-        } catch {}
-        if (!doc && !cancelled) {
-          doc = await pdfjs.getDocument({ url: pdfSrc, withCredentials: true }).promise;
-        }
-        if (cancelled || !doc) return;
-        if (doc.numPages !== numPages) {
-          setNumPages(doc.numPages);
-        }
+        const pdfjs = await browserPdfJs();
+        const res = await fetch(pdfSrc, { credentials: "same-origin", signal: abort.signal });
+        if (!res.ok) throw new Error(`CV request failed (${res.status})`);
+        const buffer = await res.arrayBuffer();
+        if (cancelled) return;
+        loadingTask = pdfjs.getDocument({ data: new Uint8Array(buffer) });
+        const doc = await loadingTask.promise;
+        if (!cancelled) setPdfDoc(doc);
+      } catch {
+        if (!cancelled) setPreviewProblem(true);
+      }
+    })();
 
+    return () => {
+      cancelled = true;
+      abort.abort();
+      void loadingTask?.destroy().catch(() => {});
+    };
+  }, [layout, pdfSrc]);
+
+  useEffect(() => {
+    if (!frame.current) return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(frame.current);
+    return () => observer.disconnect();
+  }, [layout, previewProblem]);
+
+  // Render after React has mounted every page's canvas, and again on resize.
+  useEffect(() => {
+    if (!pdfDoc || width <= 0 || previewProblem) return;
+    let cancelled = false;
+    const tasks: { cancel(): void }[] = [];
+    setDrawn(false);
+
+    (async () => {
+      try {
         // Render each page
-        for (let p = 1; p <= doc.numPages; p++) {
+        for (let p = 1; p <= pdfDoc.numPages; p++) {
           if (cancelled) break;
-          const page = await doc.getPage(p);
+          const page = await pdfDoc.getPage(p);
           if (cancelled || !frame.current) break;
           const base = page.getViewport({ scale: 1 });
-          const s = Math.min(1.6, frame.current.clientWidth / base.width);
+          const s = Math.min(1.6, width / base.width);
           const ratio = window.devicePixelRatio || 1;
           const viewport = page.getViewport({ scale: s * ratio });
 
-          let c = canvasMap.current.get(p);
-          if (!c) {
-            await new Promise((r) => setTimeout(r, 30));
-            c = canvasMap.current.get(p);
-          }
+          const c = canvasMap.current.get(p);
           if (!c || cancelled) continue;
 
           c.width = Math.floor(viewport.width);
@@ -114,11 +141,14 @@ export function PreparedCvEditor({
           const renderTask = page.render({ canvas: c, viewport });
           tasks.push(renderTask);
           await renderTask.promise;
-          if (p === 1 && !cancelled) setScale(s);
+          if (p === 1 && !cancelled) {
+            setScale(s);
+            setDrawn(true);
+          }
         }
       } catch (e) {
         if (!cancelled && (e as Error)?.name !== "RenderingCancelledException") {
-          setProblem("The CV pages could not be drawn here. Open the Prepared CV to see it.");
+          setPreviewProblem(true);
         }
       }
     })();
@@ -131,7 +161,7 @@ export function PreparedCvEditor({
         } catch {}
       });
     };
-  }, [layout, pdfSrc, numPages]);
+  }, [pdfDoc, width, previewProblem]);
 
   const box = layout?.box ?? null;
   const page = layout?.page ?? { width: 595, height: 842 };
@@ -206,7 +236,7 @@ export function PreparedCvEditor({
         <div className="flex flex-wrap items-center gap-2">
           {save.pending && <Spinner tone="dark" />}
           <ActionNote result={save.result} />
-          {canEdit && box && (
+          {canEdit && box && drawn && !previewProblem && (
             <button type="button" onClick={reset} className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft hover:bg-paper">
               Reset position
             </button>
@@ -226,6 +256,16 @@ export function PreparedCvEditor({
         <p className="flex items-center gap-2 text-[12.5px] text-ink-faint">
           <Spinner tone="dark" /> Preparing the CV…
         </p>
+      ) : previewProblem ? (
+        <>
+          <p className="mb-2 text-[12.5px] text-ink-soft">
+            Showing the Prepared CV in the browser viewer. Box movement is unavailable in this view.
+          </p>
+          <button type="button" onClick={() => setVersion((v) => v + 1)} className="mb-3 rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-brand hover:bg-tag">
+            Retry box editor
+          </button>
+          <iframe src={href} title="Prepared CV" className="h-[80vh] w-full rounded-lg border border-rule" />
+        </>
       ) : layout.generated || !pdfSrc ? (
         <>
           <p className="mb-2 text-[12.5px] text-ink-faint">
@@ -235,6 +275,7 @@ export function PreparedCvEditor({
         </>
       ) : (
         <>
+          {!drawn && <p className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-faint"><Spinner tone="dark" /> Loading CV pages…</p>}
           {!box && (
             <p className="mb-2 text-[12.5px] text-ink-faint">
               Nothing is recorded for the box yet. Fill in the details for Director review and it appears here.
@@ -249,7 +290,7 @@ export function PreparedCvEditor({
                     {p === 1 && canEdit && box && <span className="text-brand font-medium">Box placement page</span>}
                   </div>
                 )}
-                <div className="relative">
+                <div className="relative mx-auto w-fit">
                   <canvas
                     ref={(el) => {
                       if (el) canvasMap.current.set(p, el);
@@ -257,7 +298,7 @@ export function PreparedCvEditor({
                     }}
                     className="block mx-auto"
                   />
-                  {p === 1 && box && at && (
+                  {p === 1 && box && at && drawn && (
                     <div
                       role={canEdit ? "button" : undefined}
                       tabIndex={canEdit ? 0 : undefined}

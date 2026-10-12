@@ -1,5 +1,9 @@
 import path from "node:path";
 import type { NextConfig } from "next";
+import { syncPdfWorker } from "./scripts/pdf-worker.mjs";
+
+// Run for both dev and builds, including direct `next build` in the pipeline.
+syncPdfWorker(path.resolve(__dirname));
 
 const nextConfig: NextConfig = {
   // A server that runs from .next/standalone, with only the files it traced —
