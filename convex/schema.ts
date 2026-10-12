@@ -3031,7 +3031,10 @@ export default defineSchema({
     category: v.union(
       v.literal("bug"),
       v.literal("feature"),
+      v.literal("feature_request"),
       v.literal("ui_ux"),
+      v.literal("ui_issue"),
+      v.literal("performance"),
       v.literal("workflow"),
       v.literal("data_quality"),
       v.literal("other")
@@ -3044,7 +3047,7 @@ export default defineSchema({
     ),
     title: v.string(),
     description: v.string(),
-    pageUrl: v.string(),
+    pageUrl: v.optional(v.string()),
     openingId: v.optional(v.string()),
 
     status: v.union(

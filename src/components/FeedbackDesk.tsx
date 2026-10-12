@@ -2,14 +2,21 @@
 
 import { useState, useEffect, useTransition, useMemo, useRef } from "react";
 import Link from "next/link";
-import { leadReviewFeedbackAction, adminUpdateFeedbackAction, submitFeedbackAction, uploadFeedbackScreenshotAction, markFeedbackSeenAction } from "@/app/actions";
+import {
+  leadReviewFeedbackAction,
+  adminUpdateFeedbackAction,
+  submitFeedbackAction,
+  uploadFeedbackScreenshotAction,
+  markFeedbackSeenAction,
+  markFeedbacksReadAction,
+  deleteFeedbacksAction,
+} from "@/app/actions";
 import type { FeedbackCategory, FeedbackPriority, FeedbackStatus, FeedbackItem, User } from "@/data/types";
 import {
-  FEEDBACK_CATEGORY_LABEL,
-  FEEDBACK_PRIORITY_LABEL,
   FEEDBACK_STATUS_LABEL,
 } from "@/data/types";
 import { dateAt } from "@/lib/format";
+import { isTa } from "@/lib/auth";
 
 interface FeedbackDeskProps {
   initialFeedbacks: FeedbackItem[];
@@ -33,8 +40,6 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
   // Lead Review Modal state
@@ -49,9 +54,6 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
 
   // Submit New Feedback Modal
   const [showSubmitModal, setShowSubmitModal] = useState(false);
-  const [newCategory, setNewCategory] = useState<FeedbackCategory>("bug");
-  const [newPriority, setNewPriority] = useState<FeedbackPriority>("medium");
-  const [newTitle, setNewTitle] = useState("");
   const [newDescription, setNewDescription] = useState("");
   const [newScreenshotFile, setNewScreenshotFile] = useState<File | null>(null);
   const [newScreenshotPreview, setNewScreenshotPreview] = useState<string | null>(null);
@@ -67,6 +69,7 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
 
   const isLead = currentUser.role === "ta_lead" || currentUser.role === "director";
   const isAdmin = currentUser.role === "admin" || currentUser.role === "director";
+  const isTaUser = isTa(currentUser);
 
   // Summary counts
   const pendingLeadCount = useMemo(() => feedbacks.filter((f) => f.status === "pending_lead").length, [feedbacks]);
@@ -110,18 +113,86 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
         if (!matchTitle && !matchDesc && !matchSubmitter) return false;
       }
 
-      // Category filter
-      if (categoryFilter !== "all" && item.category !== categoryFilter) return false;
-
-      // Priority filter
-      if (priorityFilter !== "all" && item.priority !== priorityFilter) return false;
-
       // Status filter
       if (statusFilter !== "all" && item.status !== statusFilter) return false;
 
       return true;
     });
-  }, [feedbacks, activeTab, searchQuery, categoryFilter, priorityFilter, statusFilter, currentUser.id]);
+  }, [feedbacks, activeTab, searchQuery, statusFilter, currentUser.id]);
+
+  // Bulk selection state (mark as read, delete)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkPending, setIsBulkPending] = useState(false);
+
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [activeTab]);
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleSelected =
+    filteredFeedbacks.length > 0 &&
+    filteredFeedbacks.every((f) => selectedIds.has(f.id));
+
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const f of filteredFeedbacks) next.delete(f.id);
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const f of filteredFeedbacks) next.add(f.id);
+        return next;
+      });
+    }
+  };
+
+  const handleBulkMarkRead = async () => {
+    if (selectedIds.size === 0) return;
+    setIsBulkPending(true);
+    try {
+      const ids = Array.from(selectedIds);
+      await markFeedbacksReadAction(ids);
+      setSelectedIds(new Set());
+    } catch {
+      setActionError("Failed to mark feedback as read.");
+    } finally {
+      setIsBulkPending(false);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    const count = selectedIds.size;
+    if (!window.confirm(`Are you sure you want to delete ${count} selected feedback ${count === 1 ? "item" : "items"}?`)) {
+      return;
+    }
+    setIsBulkPending(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await deleteFeedbacksAction(ids);
+      if (res.ok) {
+        setFeedbacks((prev) => prev.filter((f) => !selectedIds.has(f.id)));
+        setSelectedIds(new Set());
+      } else {
+        setActionError(res.message || "Failed to delete feedback.");
+      }
+    } catch {
+      setActionError("Failed to delete feedback.");
+    } finally {
+      setIsBulkPending(false);
+    }
+  };
 
   // Image upload handling for new feedback
   const processImageFile = (file: File) => {
@@ -246,10 +317,15 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
   const handleNewSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setActionError(null);
-    if (!newTitle.trim() || !newDescription.trim()) {
-      setActionError("Please provide both a title and description.");
+    const finalDesc = newDescription.trim();
+    if (!finalDesc) {
+      setActionError("Please provide a description of the issue.");
       return;
     }
+    const firstLine = finalDesc.split("\n")[0].trim();
+    const finalTitle = (firstLine.length > 70 ? `${firstLine.slice(0, 67)}...` : firstLine) || "TA Feedback";
+    const finalCategory: FeedbackCategory = "other";
+    const finalPriority: FeedbackPriority = "medium";
 
     startTransition(async () => {
       try {
@@ -266,10 +342,10 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
         }
 
         const res = await submitFeedbackAction({
-          category: newCategory,
-          priority: newPriority,
-          title: newTitle.trim(),
-          description: newDescription.trim(),
+          category: finalCategory,
+          priority: finalPriority,
+          title: finalTitle,
+          description: finalDesc,
           screenshot: uploadedStorageId,
         });
 
@@ -280,17 +356,16 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
             submittedByName: currentUser.name || "Anonymous",
             submittedByRole: currentUser.role,
             createdAt: Date.now(),
-            category: newCategory,
-            priority: newPriority,
-            title: newTitle.trim(),
-            description: newDescription.trim(),
+            category: finalCategory,
+            priority: finalPriority,
+            title: finalTitle,
+            description: finalDesc,
             pageUrl: "",
             screenshot: uploadedStorageId,
             status: "pending_lead",
           };
           setFeedbacks((prev) => [newItem, ...prev]);
           setShowSubmitModal(false);
-          setNewTitle("");
           setNewDescription("");
           if (newScreenshotPreview) URL.revokeObjectURL(newScreenshotPreview);
           setNewScreenshotFile(null);
@@ -456,7 +531,20 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
 
       {/* Filter Bar */}
       <div className="flex flex-wrap items-center gap-2.5 rounded-xl border border-rule bg-surface p-3 shadow-xs">
-        <div className="relative min-w-[220px] flex-1">
+        {filteredFeedbacks.length > 0 && (
+          <label className="flex items-center gap-2 pr-1 text-[12.5px] font-medium text-ink-soft cursor-pointer hover:text-ink select-none">
+            <input
+              type="checkbox"
+              checked={allVisibleSelected}
+              onChange={toggleSelectAll}
+              className="h-4 w-4 rounded border-rule text-brand focus:ring-brand cursor-pointer accent-brand"
+              aria-label="Select all feedback items"
+            />
+            <span className="hidden sm:inline">Select All</span>
+          </label>
+        )}
+
+        <div className="relative w-full sm:w-80">
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint">
             <svg width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6}>
               <circle cx="7" cy="7" r="4.5" />
@@ -471,32 +559,6 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
             className="w-full rounded-lg border border-rule bg-paper py-1.5 pl-8 pr-3 text-[12.5px] text-ink outline-none placeholder:text-ink-faint focus:border-brand focus:bg-surface"
           />
         </div>
-
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="rounded-lg border border-rule bg-paper px-3 py-1.5 text-[12.5px] text-ink outline-none focus:border-brand"
-        >
-          <option value="all">All Categories</option>
-          {(Object.keys(FEEDBACK_CATEGORY_LABEL) as FeedbackCategory[]).map((cat) => (
-            <option key={cat} value={cat}>
-              {FEEDBACK_CATEGORY_LABEL[cat]}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={priorityFilter}
-          onChange={(e) => setPriorityFilter(e.target.value)}
-          className="rounded-lg border border-rule bg-paper px-3 py-1.5 text-[12.5px] text-ink outline-none focus:border-brand"
-        >
-          <option value="all">All Priorities</option>
-          {(["low", "medium", "high", "urgent"] as FeedbackPriority[]).map((p) => (
-            <option key={p} value={p}>
-              {FEEDBACK_PRIORITY_LABEL[p]}
-            </option>
-          ))}
-        </select>
 
         {activeTab === "all" || activeTab === "my_submissions" ? (
           <select
@@ -513,18 +575,48 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
           </select>
         ) : null}
 
-        {(searchQuery || categoryFilter !== "all" || priorityFilter !== "all" || statusFilter !== "all") && (
+        {(searchQuery || statusFilter !== "all") && (
           <button
             onClick={() => {
               setSearchQuery("");
-              setCategoryFilter("all");
-              setPriorityFilter("all");
               setStatusFilter("all");
             }}
             className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:bg-paper hover:text-ink"
           >
             Reset Filters
           </button>
+        )}
+
+        {selectedIds.size > 0 && (
+          <div className="flex flex-wrap items-center gap-2 sm:ml-auto">
+            <span className="text-[12px] font-semibold text-brand">
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={handleBulkMarkRead}
+              disabled={isBulkPending}
+              className="flex items-center gap-1.5 rounded-lg border border-rule bg-paper px-2.5 py-1.5 text-[12px] font-medium text-ink hover:bg-surface hover:border-brand disabled:opacity-50 transition-colors cursor-pointer"
+              title="Mark selected as read"
+            >
+              <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path d="M2.5 8.5l3.5 3.5 7.5-8" />
+              </svg>
+              Mark as Read
+            </button>
+            {(isLead || isAdmin) && (
+              <button
+                onClick={handleBulkDelete}
+                disabled={isBulkPending}
+                className="flex items-center gap-1.5 rounded-lg border border-danger/20 bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/15 disabled:opacity-50 transition-colors cursor-pointer"
+                title="Delete selected feedback"
+              >
+                <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                  <path d="M3 4h10M6 4V2.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5V4M5 4v9a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V4" />
+                </svg>
+                Delete
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -549,12 +641,6 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
         <div className="space-y-3.5">
           {filteredFeedbacks.map((item) => {
             const statusLabel = FEEDBACK_STATUS_LABEL[item.status] || item.status;
-            const priorityBadgeColors: Record<FeedbackPriority, string> = {
-              low: "bg-slate-100 text-slate-700",
-              medium: "bg-blue-50 text-blue-700",
-              high: "bg-amber-50 text-amber-700 font-semibold",
-              urgent: "bg-rose-50 text-rose-700 font-bold animate-pulse",
-            };
             const statusToneColors: Record<FeedbackStatus, string> = {
               pending_lead: "bg-amber-50 text-amber-800 border-amber-200",
               approved_for_admin: "bg-blue-50 text-blue-800 border-blue-200",
@@ -572,15 +658,16 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                 key={item.id}
                 className="overflow-hidden rounded-xl border border-rule bg-surface p-4.5 shadow-xs transition-all hover:border-rule-strong"
               >
-                {/* Top Row: Category, Priority, Status, Date */}
+                {/* Top Row: Checkbox, Status, Date */}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-rule/60 pb-3">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-md bg-paper px-2 py-0.5 text-[11.5px] font-medium text-ink-soft">
-                      {FEEDBACK_CATEGORY_LABEL[item.category] || item.category}
-                    </span>
-                    <span className={`rounded-md px-2 py-0.5 text-[11.5px] ${priorityBadgeColors[item.priority]}`}>
-                      {FEEDBACK_PRIORITY_LABEL[item.priority]} Priority
-                    </span>
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleSelect(item.id)}
+                      className="h-4 w-4 rounded border-rule text-brand focus:ring-brand cursor-pointer accent-brand"
+                      aria-label={`Select feedback ${item.title}`}
+                    />
                     <span
                       className={`rounded-md border px-2 py-0.5 text-[11.5px] font-medium ${
                         statusToneColors[item.status] || "bg-slate-100 text-slate-700 border-slate-200"
@@ -1039,59 +1126,12 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
               )}
 
               <div>
-                <label className="mb-1.5 block text-[12.5px] font-semibold text-ink">Category</label>
-                <select
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value as FeedbackCategory)}
-                  className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-[13px] text-ink outline-none focus:border-brand"
-                >
-                  {(Object.keys(FEEDBACK_CATEGORY_LABEL) as FeedbackCategory[]).map((cat) => (
-                    <option key={cat} value={cat}>
-                      {FEEDBACK_CATEGORY_LABEL[cat]}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-[12.5px] font-semibold text-ink">Priority</label>
-                <div className="grid grid-cols-4 gap-2">
-                  {(["low", "medium", "high", "urgent"] as FeedbackPriority[]).map((p) => (
-                    <button
-                      type="button"
-                      key={p}
-                      onClick={() => setNewPriority(p)}
-                      className={`rounded-lg border py-1.5 text-center text-[12px] capitalize transition-colors ${
-                        newPriority === p
-                          ? "border-brand bg-brand/5 font-semibold text-brand ring-1 ring-brand"
-                          : "border-rule bg-paper text-ink-soft hover:border-rule-strong"
-                      }`}
-                    >
-                      {FEEDBACK_PRIORITY_LABEL[p]}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="mb-1.5 block text-[12.5px] font-semibold text-ink">Title / Summary</label>
-                <input
-                  type="text"
-                  required
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Summary of defect, improvement, or request"
-                  className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-[13px] text-ink outline-none focus:border-brand focus:bg-surface"
-                />
-              </div>
-
-              <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-[12.5px] font-semibold text-ink">Description & Steps</label>
                   <span className="text-[11px] text-ink-faint">Tip: Ctrl+V to paste screenshot</span>
                 </div>
                 <textarea
-                  rows={4}
+                  rows={5}
                   required
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
@@ -1177,7 +1217,7 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                 </button>
                 <button
                   type="submit"
-                  disabled={isPending || !newTitle.trim() || !newDescription.trim()}
+                  disabled={isPending || !newDescription.trim()}
                   className="rounded-lg bg-brand px-4 py-2 text-[13px] font-medium text-white hover:opacity-90 disabled:opacity-40"
                 >
                   {isPending ? "Submitting..." : "Submit Feedback"}

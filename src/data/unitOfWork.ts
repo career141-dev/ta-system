@@ -33,7 +33,7 @@ const KEYS: Record<string, (row: Row) => string> = {
 const keyOf = (table: string, row: Row) => (KEYS[table] ? KEYS[table](row) : String(row.id));
 
 /** Tables that exist only in the JSON store and are never saved to Convex. */
-const LOCAL_ONLY = new Set(["liveMirror", "feedbacks"]);
+const LOCAL_ONLY = new Set(["liveMirror"]);
 
 /** A deep copy of the tables, to compare against after the write. */
 export function snapshotTables(db: Database): Tables {

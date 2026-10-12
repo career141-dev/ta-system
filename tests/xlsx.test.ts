@@ -1,7 +1,8 @@
 /**
  * Tests for Excel (.xlsx) builder and clipboard formatters (lib/xlsx).
  */
-import { buildXlsx, toTsv, toHtmlTable, formatLinkVaultExportRows, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
+import { buildXlsx, formatLinkVaultExportRows, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
+import { toTsv, toHtmlTable } from "@/lib/spreadsheetClipboard";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
