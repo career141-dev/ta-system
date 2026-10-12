@@ -8,6 +8,7 @@ import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
 import { LinkFilters } from "./LinkFilters";
+import { LinkExportMenu } from "./LinkExportMenu";
 import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 
 const PAGE_SIZE = 25;
@@ -146,6 +147,11 @@ export function LinkVaultTable({
             status={status}
             options={INTEREST_TABS.map((t) => ({ key: t.key, label: t.label, count: count({ status: t.key }), href: keep({ status: t.key }) }))}
             addons={{ on: addons, count: count({ addons: true }), href: keep({ addons: !addons }) }}
+          />
+          <LinkExportMenu
+            openingId={openingId}
+            filters={{ q, status, level, addons, by }}
+            matchingCount={matching.length}
           />
         </div>
       </div>
