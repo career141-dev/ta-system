@@ -13,6 +13,7 @@ import { NavigationProgress } from "@/components/NavigationProgress";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { uiOnly } from "@/lib/uiOnly";
+import { isTa } from "@/lib/auth";
 import { cookies } from "next/headers";
 
 // Every page depends on who is signed in and reads the database, so nothing is
@@ -95,7 +96,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             </Suspense>
             {children}
             {user ? <DeskAssistant /> : null}
-            {user ? <FeedbackWidget /> : null}
+            {user ? <FeedbackWidget isTa={isTa(user)} /> : null}
           </>
         ) : (
         <ClerkProvider signInUrl="/signin" signUpUrl="/signup" afterSignOutUrl="/signin">
@@ -108,7 +109,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           </Suspense>
           {children}
           {user ? <DeskAssistant /> : null}
-          {user ? <FeedbackWidget /> : null}
+          {user ? <FeedbackWidget isTa={isTa(user)} /> : null}
         </ClerkProvider>
         )}
       </body>

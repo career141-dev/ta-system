@@ -13,7 +13,7 @@ import { SearchIcon } from "./icons";
 import { searchScopeFor } from "@/lib/searchScope";
 import { NotificationBell } from "./NotificationBell";
 import { ThemeToggle } from "./ThemeToggle";
-import { allows } from "@/lib/auth";
+import { allows, isTa } from "@/lib/auth";
 
 const NAV = [
   { href: "/clients", label: "Clients" },
@@ -71,7 +71,8 @@ export function TopNav({
   const links = NAV.filter(
     (n) =>
       (n.href !== "/voice" || allows(user, "voice.practice")) &&
-      (n.href !== "/strategy" || allows(user, "strategy.assign")),
+      (n.href !== "/strategy" || allows(user, "strategy.assign")) &&
+      (n.href !== "/feedback" || !isTa(user)),
   );
   const badge = alertCount > 0 && (
     <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
@@ -181,13 +182,15 @@ export function TopNav({
               >
                 People and roles
               </Link>
-              <Link
-                href="/feedback"
-                onClick={() => setOpen(false)}
-                className="block px-3 py-2 text-[12.5px] hover:bg-paper"
-              >
-                Feedback & Support
-              </Link>
+              {!isTa(user) && (
+                <Link
+                  href="/feedback"
+                  onClick={() => setOpen(false)}
+                  className="block px-3 py-2 text-[12.5px] hover:bg-paper"
+                >
+                  Feedback & Support
+                </Link>
+              )}
               {user.role === "admin" && (
                 <Link
                   href="/settings"

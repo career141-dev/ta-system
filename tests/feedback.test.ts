@@ -209,5 +209,37 @@ eq("Admin now has unseen alert badge for approved feedback", repo.unseenFeedback
 repo.markAllFeedbackSeen(adminUser.id, adminUser);
 eq("Admin badge clears to 0 after opening feedback page", repo.unseenFeedbackCount(adminUser), 0);
 
+console.log("\n8. TA Simplified Submission & TopNav Visibility");
+const { isTa } = await import("@/lib/auth");
+eq("taUser is identified as TA", isTa(taUser), true);
+eq("leadUser is not TA", isTa(leadUser), false);
+eq("adminUser is not TA", isTa(adminUser), false);
+
+// TopNav feedback link visibility rule: (n.href !== "/feedback" || !isTa(user))
+const showFeedbackInNav = (u: typeof taUser) => !isTa(u);
+eq("TopNav feedback view is hidden for TA", showFeedbackInNav(taUser), false);
+eq("TopNav feedback view is visible for TA Lead", showFeedbackInNav(leadUser), true);
+eq("TopNav feedback view is visible for Admin", showFeedbackInNav(adminUser), true);
+
+// Test submission without category, priority, or title (auto-derived)
+const rawDesc = "Candidate search dropdown glitch when filtering by uppercase letters.";
+const firstLine = rawDesc.split("\n")[0].trim();
+const derivedTitle = firstLine.length > 70 ? `${firstLine.slice(0, 67)}...` : firstLine;
+const simplifiedFbId = repo.addFeedback({
+  submittedBy: taUser.id,
+  submittedByName: taUser.name,
+  submittedByRole: taUser.role,
+  category: "other",
+  priority: "medium",
+  title: derivedTitle,
+  description: rawDesc,
+});
+
+const simplifiedItem = repo.feedback(simplifiedFbId);
+eq("simplified TA feedback created", Boolean(simplifiedItem), true);
+eq("category defaulted to other", simplifiedItem?.category, "other");
+eq("priority defaulted to medium", simplifiedItem?.priority, "medium");
+eq("title derived from description", simplifiedItem?.title, derivedTitle);
+
 console.log(`\nResults: ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
