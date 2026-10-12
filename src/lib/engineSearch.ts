@@ -34,6 +34,7 @@ import { embedQuery } from "@/lib/embed";
 import { searchVectors } from "@/lib/qdrantSearch";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { employerMatch, excludedByEmployer, employersInText, describeEmployerHit } from "../../convex/lib/employers";
+import { intentToEngineHints, readSearchIntent, type SearchIntent } from "@/lib/searchIntent";
 
 export interface EngineHit {
   candidateId: Id;
@@ -66,6 +67,9 @@ export interface EngineSearch {
     employerScope?: "current" | "any";
     excludeEmployers?: string[];
   };
+  /** Conversation memory read from the natural-language turns. It contains no
+   *  candidate contact data or CV text; it is only the recruiter's intent. */
+  intent: SearchIntent;
   hits: EngineHit[];
 }
 
@@ -267,10 +271,12 @@ function intentFor(parser: Awaited<ReturnType<typeof modules>>["parser"], turns:
 async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSearch> {
   const { parser, scoring } = await modules();
   const q = args.query;
+  const searchIntent = readSearchIntent(args.turns);
+  const intentHints = intentToEngineHints(searchIntent);
 
   // 1 and 2 overlap: the words and the vectors are searched on the sentence
   // itself while the model reads it.
-  const intent = withModel ? intentFor(parser, args.turns) : null;
+  const modelIntent = withModel ? intentFor(parser, args.turns) : null;
   // Which routes failed. One down is fine — the other still answers — but an
   // empty answer with a route down is not "nothing matched": it was cached as
   // that for five minutes, and a refresh could not clear it (21 Sep).
@@ -285,7 +291,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     }),
   ]);
 
-  const parsed = intent ? (await intent).requirements : requirementsFromChips(args);
+  const parsed = modelIntent ? (await modelIntent).requirements : requirementsFromChips(args);
   const req: Requirements = {
     ...parsed,
     industry: args.industry ?? parsed.industry,
@@ -293,6 +299,11 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     minYearsExperience: args.minExperience && args.minExperience > 0 ? args.minExperience : parsed.minYearsExperience ?? null,
     employers: args.employers ?? parsed.employers ?? [],
     excludeEmployers: [...new Set([...(args.excludeEmployers ?? []), ...(parsed.excludeEmployers ?? [])])],
+    // Conversational intent is a hint layer over the engine, not a replacement:
+    // explicit "must have" language tightens scoring, while "preferred" remains
+    // a boost. The strict desk chips still own hard filters.
+    requiredSkills: [...new Set([...parsed.requiredSkills, ...intentHints.mustHave])],
+    preferredSkills: [...new Set([...parsed.preferredSkills, ...intentHints.niceToHave])],
   };
   const employersAsked = req.employers ?? [];
 
@@ -308,7 +319,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   // The engine's own search terms, as the action picks them: title, alternative
   // titles, required skills, then its term builder — the first three.
   let secondPass: Promise<{ candidateId: Id }[]> = Promise.resolve([]);
-  if (intent) {
+  if (modelIntent) {
     const terms = new Set<string>();
     terms.add(req.title && req.title.length > 2 ? req.title : q);
     for (const t of req.alternativeTitles.slice(0, 3)) if (t) terms.add(t);
@@ -346,7 +357,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     return d && !d.cvFileMissing ? [{ ...d, vectorScore: similarity }] : [];
   });
   if (pool.length === 0) {
-    return { interpretation: interpretationOf(req, intent !== null), hits: [] };
+    return { interpretation: interpretationOf(req, modelIntent !== null), intent: searchIntent, hits: [] };
   }
 
   // The action's strict filters, with its progressive fallback: if they leave
@@ -381,7 +392,8 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     .sort((a, b) => b.score - a.score || (b.c.cv.vectorScore ?? 0) - (a.c.cv.vectorScore ?? 0) || b.c.overallScore - a.c.overallScore);
 
   return {
-    interpretation: interpretationOf(req, intent !== null),
+    interpretation: interpretationOf(req, modelIntent !== null),
+    intent: searchIntent,
     hits: final
       .filter((f) => f.score > 0)
       .slice(0, args.limit)

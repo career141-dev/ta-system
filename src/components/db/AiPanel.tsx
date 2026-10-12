@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { SearchCriteria } from "@/data/types";
-import { describe, describeBoolean, parseBoolean, toBooleanString, turnsOf, withoutChip, type Chip } from "@/lib/query";
+import { criteriaToParams, describe, describeBoolean, parseBoolean, toBooleanString, turnsOf, withoutChip, type Chip } from "@/lib/query";
+import { appendSearchTurn, type SearchIntent } from "@/lib/searchIntent";
 
 /**
  * The left rail — spec §6D.2, modelled on Recruiter's AI-assisted search panel.
@@ -24,6 +25,7 @@ export function AiPanel({
   read: engineRead = null,
   engineTerms = null,
   companies = null,
+  intent = null,
 }: {
   criteria: SearchCriteria;
   ignored: string[];
@@ -41,6 +43,8 @@ export function AiPanel({
   /** The companies the engine read out of the conversation (9 Oct). The first
    *  name is the one asked for; the rest are its other spellings. */
   companies?: { names: string[]; scope: "current" | "any"; exclude: string[] } | null;
+  /** Recruiter intent memory read from the conversation. */
+  intent?: SearchIntent | null;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const chips: Chip[] = describe(criteria);
@@ -61,6 +65,13 @@ export function AiPanel({
     : engineTerms && engineTerms.length > 0
       ? engineTerms
       : [...criteria.titles, ...criteria.skills, ...criteria.industries, ...criteria.qualifications];
+  const clarificationHref = (turn: string) => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    p.set("q", appendSearchTurn(query, turn));
+    if (mode !== "natural") p.set("mode", mode);
+    return `${base}?${p.toString()}`;
+  };
 
   return (
     <div className="flex flex-col gap-3">
@@ -169,6 +180,34 @@ export function AiPanel({
             <p className="text-[12.5px] leading-relaxed text-ink">
               Leaving out people at <span className="font-semibold">{companies.exclude.join(", ")}</span> now.
             </p>
+          )}
+          {intent && intent.summary && (
+            <p className="rounded-lg bg-brand-soft px-3 py-2.5 text-[12.5px] leading-relaxed text-ink">
+              {intent.summary}
+            </p>
+          )}
+          {intent && intent.clarifyingQuestions.length > 0 && (
+            <div className="w-full rounded-lg border border-rule bg-paper px-3.5 py-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">Clarify while results stay visible</p>
+              <div className="mt-2.5 flex flex-col gap-3">
+                {intent.clarifyingQuestions.slice(0, 2).map((question) => (
+                  <div key={question.id}>
+                    <p className="text-[12.5px] font-medium leading-relaxed text-ink">{question.label}</p>
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {question.options.map((option) => (
+                        <Link
+                          key={option.turn}
+                          href={clarificationHref(option.turn)}
+                          className="rounded-full border border-rule bg-surface px-3 py-1.5 text-[12px] transition-colors hover:border-brand-line hover:text-brand"
+                        >
+                          {option.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
           <p className="text-[12.5px] leading-relaxed text-ink-soft">
             {mode === "boolean"

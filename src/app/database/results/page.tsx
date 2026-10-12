@@ -261,6 +261,7 @@ async function ResultsView({
   let engineRead: string | null = null;
   let engineTerms: string[] | null = null;
   let engineCompanies: { names: string[]; scope: "current" | "any"; exclude: string[] } | null = null;
+  const searchIntent = engine?.intent ?? null;
 
   if (engine) {
     /*
@@ -554,6 +555,27 @@ async function ResultsView({
     return { hits, misses: misses.filter((m) => !hits.includes(m)) };
   };
 
+  const rowIntentEvidence = ({ hits, misses }: { hits: string[]; misses: string[] }) => {
+    if (!searchIntent) return undefined;
+    const hitText = hits.join(" ").toLowerCase();
+    const missText = misses.join(" ").toLowerCase();
+    const asked = [...searchIntent.mustHave, ...searchIntent.niceToHave];
+    const matched = asked.filter((term) => hitText.includes(term.toLowerCase()));
+    const gaps = searchIntent.mustHave.filter((term) => missText.includes(term.toLowerCase()));
+    const verify = searchIntent.unknowns
+      .map((u) =>
+        u === "location_strictness"
+          ? "location flexibility"
+          : u === "domain_priority"
+            ? "industry priority"
+            : u === "overqualification"
+              ? "seniority tolerance"
+              : u.replace(/_/g, " "),
+      )
+      .filter(Boolean);
+    return { matched: [...new Set(matched)], verify: [...new Set(verify)], gaps: [...new Set(gaps)] };
+  };
+
   const candidateHref = (id: string) => {
     const p = criteriaToParams(criteria);
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
@@ -650,6 +672,7 @@ async function ResultsView({
             read={engineRead}
             engineTerms={engineTerms}
             companies={engineCompanies}
+            intent={searchIntent}
           />
 
           <div className="rounded-xl border border-rule bg-surface p-4">
@@ -664,6 +687,8 @@ async function ResultsView({
               <input type="hidden" name="q" value={q} />
               <input type="hidden" name="mode" value={mode} />
               <input type="hidden" name="count" value={total} />
+              <input type="hidden" name="turns" value={JSON.stringify(turnsOf(q))} />
+              {searchIntent && <input type="hidden" name="intent" value={JSON.stringify(searchIntent)} />}
               {forOpening && <input type="hidden" name="openingId" value={forOpening} />}
               <input
                 name="name"
@@ -820,12 +845,16 @@ async function ResultsView({
                 )}
               </div>
             ) : (
-              shown.map((r, i) => (
+              shown.map((r, i) => {
+                const chips = rowChips(r);
+                return (
                 <div key={r.candidate.id}>
                   <ResultRow
                     candidate={r.candidate}
                     fit={fit.get(r.candidate.id) ?? null}
-                    {...rowChips(r)}
+                    hits={chips.hits}
+                    misses={chips.misses}
+                    intentEvidence={rowIntentEvidence(chips)}
                     signals={r.signals}
                     apps={appsFor(r.candidate.id)}
                     openings={openingOptions}
@@ -870,7 +899,8 @@ async function ResultsView({
                     </div>
                   )}
                 </div>
-              ))
+              );
+              })
             )}
           </div>
 
