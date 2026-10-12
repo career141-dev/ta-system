@@ -6272,6 +6272,21 @@ export async function deleteFeedbacksAction(feedbackIds: string[]): Promise<{ ok
   await primeStore();
   const user = await getCurrentUser();
   if (!user) return { ok: false, message: "Authentication required." };
+  if (user.role !== "ta_lead" && user.role !== "admin" && user.role !== "director") {
+    return { ok: false, message: "Only TA Leads, Admins, or Directors can delete feedback." };
+  }
+  if (
+    !Array.isArray(feedbackIds) ||
+    feedbackIds.length === 0 ||
+    feedbackIds.length > 100 ||
+    feedbackIds.some((id) => typeof id !== "string")
+  ) {
+    return { ok: false, message: "Select up to 100 feedback items to delete." };
+  }
+  const visibleIds = new Set(repo.feedbacks(user).map((feedback) => feedback.id));
+  if (feedbackIds.some((id) => !visibleIds.has(id))) {
+    return { ok: false, message: "One or more feedback items are unavailable." };
+  }
   for (const id of feedbackIds) {
     repo.deleteFeedback(id);
   }
