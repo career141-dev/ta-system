@@ -21,9 +21,8 @@ export default async function FeedbackPage() {
     );
   }
 
-  // Mark feedbacks as seen for the current user so the alert badge on TopNav clears
-  repo.markAllFeedbackSeen(user.id, user);
-
+  // FeedbackDesk triggers markFeedbackSeenAction in useEffect on mount,
+  // so the GET render remains a pure read without database mutations.
   const feedbacks = repo.feedbacks(user);
 
   return (
