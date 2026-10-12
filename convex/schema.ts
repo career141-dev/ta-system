@@ -2661,6 +2661,9 @@ export default defineSchema({
     lastRunAt: v.optional(v.union(v.number(), v.null())),
     /** The count when it was last run, so "12 new since Tuesday" is possible. */
     lastResultCount: v.optional(v.union(v.number(), v.null())),
+    /** Recruiter intent memory only — no candidate contact data or raw CV text. */
+    intent: v.optional(v.union(v.any(), v.null())),
+    turns: v.optional(v.array(v.string())),
   }).index("by_owner", ["ownerId"])
     // Deleting an opening clears it from saved searches (ta/openingDelete.ts, 2 Oct).
     .index("by_opening", ["openingId"]),

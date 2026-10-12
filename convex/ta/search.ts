@@ -145,6 +145,8 @@ export const savedSearches = internalQuery({
       createdAt: s.createdAt,
       lastRunAt: s.lastRunAt ?? null,
       lastResultCount: s.lastResultCount ?? null,
+      intent: s.intent ?? null,
+      turns: s.turns ?? [],
     }));
   },
 });
@@ -157,6 +159,8 @@ export const saveSearch = internalMutation({
     mode: v.union(v.literal("natural"), v.literal("boolean"), v.literal("meaning")),
     openingId: v.optional(v.union(v.string(), v.null())),
     count: v.optional(v.number()),
+    intent: v.optional(v.union(v.any(), v.null())),
+    turns: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -169,6 +173,8 @@ export const saveSearch = internalMutation({
       createdAt: Date.now(),
       lastRunAt: Date.now(),
       lastResultCount: args.count ?? null,
+      intent: args.intent ?? null,
+      turns: args.turns ?? [],
     });
     return { id: id as string };
   },

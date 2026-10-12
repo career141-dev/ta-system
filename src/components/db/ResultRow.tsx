@@ -63,6 +63,7 @@ export function ResultRow({
   backHref,
   candidateHref,
   selectForm,
+  intentEvidence,
 }: {
   candidate: Candidate;
   /** The same fit score the lists use. Only present when the search is tied
@@ -80,6 +81,8 @@ export function ResultRow({
   candidateHref?: string;
   /** The results' bulk bar (components/BulkSelect). */
   selectForm?: string;
+  /** Search-intent explanation based only on row evidence already shown. */
+  intentEvidence?: { matched: string[]; verify: string[]; gaps: string[] };
 }) {
   const [allRoles, setAllRoles] = useState(false);
   const [allSkills, setAllSkills] = useState(false);
@@ -211,6 +214,16 @@ export function ResultRow({
             {misses.length > 0 && (
               <Line label="Missing">
                 <span className="text-ink-faint">{misses.slice(0, 5).join(", ")}</span>
+              </Line>
+            )}
+
+            {intentEvidence && (intentEvidence.matched.length > 0 || intentEvidence.verify.length > 0 || intentEvidence.gaps.length > 0) && (
+              <Line label="Intent">
+                <span className="flex flex-col gap-0.5 text-ink-soft">
+                  {intentEvidence.matched.length > 0 && <span><span className="font-medium text-brand">Matched:</span> {intentEvidence.matched.slice(0, 3).join(", ")}</span>}
+                  {intentEvidence.verify.length > 0 && <span><span className="font-medium text-warn">Verify:</span> {intentEvidence.verify.slice(0, 2).join(", ")}</span>}
+                  {intentEvidence.gaps.length > 0 && <span><span className="font-medium text-ink">Possible gap:</span> {intentEvidence.gaps.slice(0, 3).join(", ")}</span>}
+                </span>
               </Line>
             )}
           </dl>

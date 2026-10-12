@@ -27,7 +27,8 @@ export default async function FeedbackPage() {
     redirect("/");
   }
 
-  // Feedbacks are marked as seen client-side in FeedbackDesk via markFeedbackSeenAction()
+  // FeedbackDesk triggers markFeedbackSeenAction in useEffect on mount,
+  // so the GET render remains a pure read without database mutations.
   const feedbacks = repo.feedbacks(user);
 
   return (

@@ -107,9 +107,9 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
       // Query filter
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchTitle = item.title.toLowerCase().includes(q);
-        const matchDesc = item.description.toLowerCase().includes(q);
-        const matchSubmitter = item.submittedByName.toLowerCase().includes(q);
+        const matchTitle = (item.title || "").toLowerCase().includes(q);
+        const matchDesc = (item.description || "").toLowerCase().includes(q);
+        const matchSubmitter = (item.submittedByName || "").toLowerCase().includes(q);
         if (!matchTitle && !matchDesc && !matchSubmitter) return false;
       }
 

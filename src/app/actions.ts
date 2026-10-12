@@ -2952,6 +2952,8 @@ export async function saveSearch(formData: FormData) {
   const mode = String(formData.get("mode") ?? "natural") as "natural" | "boolean" | "meaning";
   const openingId = String(formData.get("openingId") ?? "") || null;
   const count = Number(formData.get("count") ?? 0);
+  const intent = safeSearchIntent(formData.get("intent"));
+  const turns = safeSearchTurns(formData.get("turns"));
   if (!query) return;
 
   const { isConvex } = await import("@/data/mode");
@@ -2967,13 +2969,47 @@ export async function saveSearch(formData: FormData) {
         mode,
         openingId: openingId ?? null,
         count,
+        intent,
+        turns,
       });
     }
   } else {
-    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count });
+    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count, intent, turns });
   }
   revalidatePath("/database", "layout");
   await back(`Search saved as "${name}".`);
+}
+
+function safeSearchTurns(value: FormDataEntryValue | null): string[] {
+  if (typeof value !== "string" || !value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((x) => String(x).trim()).filter(Boolean).slice(-20) : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeSearchIntent(value: FormDataEntryValue | null) {
+  if (typeof value !== "string" || !value) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const list = (key: string) => (Array.isArray(parsed[key]) ? parsed[key].map((x) => String(x).trim()).filter(Boolean).slice(0, 20) : []);
+    const strictness = parsed.strictness === "strict" || parsed.strictness === "flexible" ? parsed.strictness : "balanced";
+    return {
+      targetRole: typeof parsed.targetRole === "string" && parsed.targetRole.trim() ? parsed.targetRole.trim().slice(0, 120) : null,
+      mustHave: list("mustHave"),
+      niceToHave: list("niceToHave"),
+      dealBreakers: list("dealBreakers"),
+      softPreferences: list("softPreferences"),
+      strictness,
+      unknowns: list("unknowns"),
+      clarifyingQuestions: Array.isArray(parsed.clarifyingQuestions) ? parsed.clarifyingQuestions.slice(0, 4) : [],
+      summary: typeof parsed.summary === "string" ? parsed.summary.slice(0, 500) : "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function deleteSearch(formData: FormData) {
