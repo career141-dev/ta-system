@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { toHtmlTable, toTsv } from "@/lib/xlsx";
+import { toHtmlTable, toTsv } from "@/lib/spreadsheetClipboard";
 
 interface LinkExportMenuProps {
   openingId: string;
