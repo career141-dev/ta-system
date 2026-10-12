@@ -728,8 +728,16 @@ const rawRepo = {
   },
 
   markFeedbacksRead(userId: Id, feedbackIds: string[]): void {
+    if (!feedbackIds || feedbackIds.length === 0) return;
     const current = rawRepo.readFeedbackIds(userId);
-    for (const id of feedbackIds) current.add(id);
+    let added = false;
+    for (const id of feedbackIds) {
+      if (!current.has(id)) {
+        current.add(id);
+        added = true;
+      }
+    }
+    if (!added) return;
     rawRepo.setSetting(`read_feedbacks:${userId}`, JSON.stringify([...current]));
   },
 
