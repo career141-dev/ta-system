@@ -6,13 +6,9 @@ import Link from "next/link";
 import Image from "next/image";
 import { submitFeedbackAction, uploadFeedbackScreenshotAction } from "@/app/actions";
 import type { FeedbackCategory, FeedbackPriority } from "@/data/types";
-import { FEEDBACK_CATEGORY_LABEL, FEEDBACK_PRIORITY_LABEL } from "@/data/types";
 
-export function FeedbackWidget() {
+export function FeedbackWidget({ isTa = true }: { isTa?: boolean } = {}) {
   const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState<FeedbackCategory>("bug");
-  const [priority, setPriority] = useState<FeedbackPriority>("medium");
-  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [screenshotFile, setScreenshotFile] = useState<File | null>(null);
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
@@ -70,15 +66,16 @@ export function FeedbackWidget() {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!title.trim()) {
-      setErrorMessage("Please enter a short title for your feedback.");
-      return;
-    }
-
-    if (!description.trim()) {
+    const finalDescription = description.trim();
+    if (!finalDescription) {
       setErrorMessage("Please describe the feedback or issue in detail.");
       return;
     }
+
+    const firstLine = finalDescription.split("\n")[0].trim();
+    const finalTitle = (firstLine.length > 70 ? `${firstLine.slice(0, 67)}...` : firstLine) || "TA Feedback";
+    const finalCategory: FeedbackCategory = "other";
+    const finalPriority: FeedbackPriority = "medium";
 
     // Don't attach page URL if on the feedback desk itself
     const currentUrl =
@@ -103,10 +100,10 @@ export function FeedbackWidget() {
         }
 
         const res = await submitFeedbackAction({
-          category,
-          priority,
-          title: title.trim(),
-          description: description.trim(),
+          category: finalCategory,
+          priority: finalPriority,
+          title: finalTitle,
+          description: finalDescription,
           pageUrl: currentUrl,
           openingId,
           screenshot: uploadedStorageId,
@@ -114,7 +111,6 @@ export function FeedbackWidget() {
 
         if (res.ok) {
           setSubmittedId(res.id);
-          setTitle("");
           setDescription("");
           if (screenshotPreview) URL.revokeObjectURL(screenshotPreview);
           setScreenshotFile(null);
@@ -204,13 +200,15 @@ export function FeedbackWidget() {
                   Your submission has been sent to the <span className="font-semibold text-ink">TA Lead Review Queue</span>. Once reviewed and endorsed, it will be prioritized for Admin action.
                 </p>
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
-                  <Link
-                    href="/feedback"
-                    onClick={handleReset}
-                    className="rounded-lg bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
-                  >
-                    View Feedback Desk
-                  </Link>
+                  {!isTa && (
+                    <Link
+                      href="/feedback"
+                      onClick={handleReset}
+                      className="rounded-lg bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+                    >
+                      View Feedback Desk
+                    </Link>
+                  )}
                   <button
                     onClick={() => {
                       setSubmittedId(null);
@@ -219,6 +217,14 @@ export function FeedbackWidget() {
                   >
                     Submit Another
                   </button>
+                  {isTa && (
+                    <button
+                      onClick={handleReset}
+                      className="rounded-lg bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-90"
+                    >
+                      Done
+                    </button>
+                  )}
                 </div>
               </div>
             ) : (
@@ -228,76 +234,6 @@ export function FeedbackWidget() {
                     {errorMessage}
                   </div>
                 )}
-
-                {/* Categories */}
-                <div className="mb-4">
-                  <label className="mb-1.5 block text-[12.5px] font-semibold text-ink">
-                    Feedback Category
-                  </label>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                    {(Object.keys(FEEDBACK_CATEGORY_LABEL) as FeedbackCategory[]).map((cat) => (
-                      <button
-                        type="button"
-                        key={cat}
-                        onClick={() => setCategory(cat)}
-                        className={`rounded-lg border px-2.5 py-1.5 text-left text-[12px] font-medium transition-colors ${
-                          category === cat
-                            ? "border-brand bg-brand/5 text-brand font-semibold"
-                            : "border-rule bg-paper text-ink-soft hover:border-rule-strong hover:text-ink"
-                        }`}
-                      >
-                        {FEEDBACK_CATEGORY_LABEL[cat]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Priority */}
-                <div className="mb-4">
-                  <label className="mb-1.5 block text-[12.5px] font-semibold text-ink">
-                    Priority Level
-                  </label>
-                  <div className="flex gap-2">
-                    {(["low", "medium", "high", "urgent"] as FeedbackPriority[]).map((p) => {
-                      const colors: Record<FeedbackPriority, string> = {
-                        low: "text-ink-soft",
-                        medium: "text-blue-600",
-                        high: "text-amber-600",
-                        urgent: "text-danger font-semibold",
-                      };
-                      return (
-                        <button
-                          type="button"
-                          key={p}
-                          onClick={() => setPriority(p)}
-                          className={`flex-1 rounded-lg border py-1.5 text-center text-[12px] capitalize transition-colors ${
-                            priority === p
-                              ? "border-brand bg-brand/5 font-semibold text-brand ring-1 ring-brand"
-                              : `border-rule bg-paper ${colors[p]} hover:border-rule-strong`
-                          }`}
-                        >
-                          {FEEDBACK_PRIORITY_LABEL[p]}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Title */}
-                <div className="mb-4">
-                  <label htmlFor="fb-title" className="mb-1.5 block text-[12.5px] font-semibold text-ink">
-                    Summary / Title
-                  </label>
-                  <input
-                    id="fb-title"
-                    type="text"
-                    required
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g., Company reference filter not matching uppercase names"
-                    className="w-full rounded-lg border border-rule bg-paper px-3 py-2 text-[13px] text-ink outline-none transition-colors placeholder:text-ink-faint focus:border-brand focus:bg-surface"
-                  />
-                </div>
 
                 {/* Description */}
                 <div className="mb-4">
@@ -310,7 +246,7 @@ export function FeedbackWidget() {
                   <textarea
                     id="fb-desc"
                     required
-                    rows={4}
+                    rows={5}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     placeholder="Describe what happened, what you expected, candidate or opening names involved..."
@@ -395,7 +331,7 @@ export function FeedbackWidget() {
                   </button>
                   <button
                     type="submit"
-                    disabled={isPending || !title.trim() || !description.trim()}
+                    disabled={isPending || !description.trim()}
                     className="flex items-center gap-2 rounded-lg bg-brand px-4 py-2 text-[13px] font-medium text-white transition-opacity hover:opacity-95 disabled:opacity-40"
                   >
                     {isPending ? (

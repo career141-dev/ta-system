@@ -6035,7 +6035,9 @@ export async function uploadFeedbackScreenshotAction(
   }
 
   if (!isConvex()) {
-    return { ok: true, storageId: `local_${Date.now()}` };
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const base64 = `data:${file.type || "image/png"};base64,${bytes.toString("base64")}`;
+    return { ok: true, storageId: base64 };
   }
 
   try {
@@ -6061,9 +6063,9 @@ export async function uploadFeedbackScreenshotAction(
  * Initial status is always "pending_lead".
  */
 export async function submitFeedbackAction(input: {
-  category: FeedbackCategory;
-  priority: FeedbackPriority;
-  title: string;
+  category?: FeedbackCategory;
+  priority?: FeedbackPriority;
+  title?: string;
   description: string;
   pageUrl?: string;
   openingId?: string;
@@ -6075,11 +6077,16 @@ export async function submitFeedbackAction(input: {
     return { ok: false, message: "You must be logged in to submit feedback." };
   }
 
-  const title = (input.title || "").trim();
   const description = (input.description || "").trim();
-  if (!title || !description) {
-    return { ok: false, message: "Please provide both a title and description." };
+  if (!description) {
+    return { ok: false, message: "Please provide a description of the feedback or issue." };
   }
+
+  const firstLine = description.split("\n")[0].trim();
+  const derivedTitle = firstLine.length > 70 ? `${firstLine.slice(0, 67)}...` : firstLine;
+  const title = (input.title || "").trim() || derivedTitle || "Feedback submission";
+  const category: FeedbackCategory = input.category || "other";
+  const priority: FeedbackPriority = input.priority || "medium";
 
   const pageUrl = input.pageUrl === "/feedback" ? "" : (input.pageUrl || "");
 
@@ -6087,8 +6094,8 @@ export async function submitFeedbackAction(input: {
     submittedBy: user.id,
     submittedByName: user.name || "Anonymous",
     submittedByRole: user.role,
-    category: input.category,
-    priority: input.priority,
+    category,
+    priority,
     title,
     description,
     pageUrl,
@@ -6206,6 +6213,32 @@ export async function markFeedbackSeenAction(): Promise<{ ok: boolean }> {
   const user = await getCurrentUser();
   if (!user) return { ok: false };
   repo.markAllFeedbackSeen(user.id, user);
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Mark specific feedback items as read for current user.
+ */
+export async function markFeedbacksReadAction(feedbackIds: string[]): Promise<{ ok: boolean }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  if (!user) return { ok: false };
+  repo.markFeedbacksRead(user.id, feedbackIds);
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/**
+ * Delete feedback items.
+ */
+export async function deleteFeedbacksAction(feedbackIds: string[]): Promise<{ ok: boolean; message?: string }> {
+  await primeStore();
+  const user = await getCurrentUser();
+  if (!user) return { ok: false, message: "Authentication required." };
+  for (const id of feedbackIds) {
+    repo.deleteFeedback(id);
+  }
   revalidatePath("/", "layout");
   return { ok: true };
 }
