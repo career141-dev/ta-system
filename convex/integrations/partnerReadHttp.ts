@@ -18,6 +18,27 @@ const getCvDownloadRef = makeFunctionReference<"action", { uploadId: string }, {
 } | null>("integrations/partnerRead:getCvDownload") as unknown as FunctionReference<
   "action", "internal", { uploadId: string }, { url: string; fileName: string; fileType: string } | null
 >;
+const createPartnerCvUploadRef = makeFunctionReference<"action", {
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  checksumSha256: string;
+}, { url: string; key: string; expiresInSeconds: number }>(
+  "storage/r2:generatePartnerCvUploadUrl",
+) as unknown as FunctionReference<"action", "internal", {
+  fileName: string; contentType: string; fileSize: number; checksumSha256: string;
+}, { url: string; key: string; expiresInSeconds: number }>;
+const completePartnerCvUploadRef = makeFunctionReference<"action", {
+  key: string;
+  fileName: string;
+  fileType: string;
+  fileSize: number;
+  checksumSha256: string;
+}, unknown>("integrations/partnerUpload:completePartnerCvUpload") as unknown as FunctionReference<
+  "action", "internal", {
+    key: string; fileName: string; fileType: string; fileSize: number; checksumSha256: string;
+  }, unknown
+>;
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
@@ -105,5 +126,69 @@ export const partnerReadCv = httpAction(async (ctx, request) => {
     return new Response(upstream.body, { status: 200, headers });
   } catch {
     return json(502, { error: "CV download is temporarily unavailable" });
+  }
+});
+
+const PARTNER_CV_MAX_BYTES = 10 * 1024 * 1024;
+const PARTNER_CV_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+]);
+const isSha256Base64 = (value: unknown): value is string =>
+  typeof value === "string" && /^[A-Za-z0-9+/]{43}=$/.test(value);
+
+export const partnerCreateCvUpload = httpAction(async (ctx, request) => {
+  const auth = await authenticate(request);
+  if (auth !== "ok") return authError(auth);
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (declared > 8_192) return json(413, { error: "Request is too large" });
+  const input = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!input || typeof input.fileName !== "string" || input.fileName.length < 1 || input.fileName.length > 180 ||
+      typeof input.contentType !== "string" || !PARTNER_CV_TYPES.has(input.contentType) ||
+      typeof input.fileSize !== "number" || !Number.isInteger(input.fileSize) || input.fileSize < 1 || input.fileSize > PARTNER_CV_MAX_BYTES ||
+      !isSha256Base64(input.checksumSha256)) {
+    return json(400, { error: "Provide a valid fileName, supported CV contentType, fileSize (1-10485760), and SHA-256 checksum (base64)" });
+  }
+  try {
+    const upload = await ctx.runAction(createPartnerCvUploadRef, {
+      fileName: input.fileName,
+      contentType: input.contentType,
+      fileSize: input.fileSize,
+      checksumSha256: input.checksumSha256,
+    });
+    return json(201, { ...upload, requiredHeaders: {
+      "content-type": input.contentType,
+      "x-amz-checksum-sha256": input.checksumSha256,
+    } });
+  } catch {
+    return json(503, { error: "CV upload is temporarily unavailable" });
+  }
+});
+
+export const partnerCompleteCvUpload = httpAction(async (ctx, request) => {
+  const auth = await authenticate(request);
+  if (auth !== "ok") return authError(auth);
+  const declared = Number(request.headers.get("content-length") ?? 0);
+  if (declared > 8_192) return json(413, { error: "Request is too large" });
+  const input = await request.json().catch(() => null) as Record<string, unknown> | null;
+  if (!input || typeof input.key !== "string" || !/^partner-uploads\/[A-Za-z0-9-]{36}-[A-Za-z0-9._-]{1,120}$/.test(input.key) ||
+      typeof input.fileName !== "string" || input.fileName.length < 1 || input.fileName.length > 180 ||
+      typeof input.fileType !== "string" || !PARTNER_CV_TYPES.has(input.fileType) ||
+      typeof input.fileSize !== "number" || !Number.isInteger(input.fileSize) || input.fileSize < 1 || input.fileSize > PARTNER_CV_MAX_BYTES ||
+      !isSha256Base64(input.checksumSha256)) {
+    return json(400, { error: "Invalid upload completion details" });
+  }
+  try {
+    const result = await ctx.runAction(completePartnerCvUploadRef, {
+      key: input.key,
+      fileName: input.fileName,
+      fileType: input.fileType,
+      fileSize: input.fileSize,
+      checksumSha256: input.checksumSha256,
+    });
+    return json(200, { uploaded: true, file: result });
+  } catch {
+    return json(400, { error: "Upload is missing, expired, or failed verification" });
   }
 });

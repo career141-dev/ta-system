@@ -3,7 +3,13 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { handleWhatChimpWebhook } from "./communications/whatchimp";
 import { verifyElevenLabsSignature, verifyTokenMatches } from "./lib/webhookSecurity";
-import { partnerReadCv, partnerReadTable, partnerReadTableIndex } from "./integrations/partnerReadHttp";
+import {
+  partnerCompleteCvUpload,
+  partnerCreateCvUpload,
+  partnerReadCv,
+  partnerReadTable,
+  partnerReadTableIndex,
+} from "./integrations/partnerReadHttp";
 import type { Id } from "./_generated/dataModel";
 import {
   isFreshVoiceAgentTimestamp,
@@ -13,11 +19,13 @@ import {
 
 const http = httpRouter();
 
-// Partner integration is read-only. The service token is provisioned on the
-// backend; no database admin credential is given to the Capacity Planner.
+// The partner integration is authenticated and scoped to these explicit routes;
+// no database admin credential is given to the Capacity Planner.
 http.route({ path: "/integrations/v1/tables", method: "GET", handler: partnerReadTableIndex });
 http.route({ path: "/integrations/v1/tables/:table", method: "GET", handler: partnerReadTable });
 http.route({ path: "/integrations/v1/cv/:uploadId", method: "GET", handler: partnerReadCv });
+http.route({ path: "/integrations/v1/cv/uploads", method: "POST", handler: partnerCreateCvUpload });
+http.route({ path: "/integrations/v1/cv/uploads/complete", method: "POST", handler: partnerCompleteCvUpload });
 
 /**
  * Meta's webhook verification handshake.

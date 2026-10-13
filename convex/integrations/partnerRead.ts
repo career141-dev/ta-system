@@ -9,7 +9,7 @@ export const PARTNER_READ_TABLES = [
   "users", "teams", "teamMembers", "jobAssignments", "roleAuditLog",
   "candidateLocks", "candidateInquiries", "jobs", "jobChannels", "job_assets",
   "custom_filters", "saved_filters", "match_scores", "pipeline_health_reports",
-  "cvUploads", "folderImportProgress", "candidateResumes", "referees", "candidates",
+  "cvUploads", "partnerCvFiles", "folderImportProgress", "candidateResumes", "referees", "candidates",
   "applications", "pipelineEvents", "aiCalls", "voiceCallSessions", "voiceAnswers",
   "voiceAgentNonces", "voiceSimulationReservations", "communications", "directorReviews",
   "clientReviews", "interviews", "offers", "placements", "rejectionLoopEvents",
@@ -77,16 +77,23 @@ export const readTablePage = internalQuery({
 export const getCvReference = internalQuery({
   args: { uploadId: v.string() },
   handler: async (ctx, { uploadId }) => {
+    const partnerFileId = ctx.db.normalizeId("partnerCvFiles", uploadId);
+    if (partnerFileId) {
+      const partnerFile = await ctx.db.get(partnerFileId);
+      if (partnerFile) return {
+        s3Key: partnerFile.s3Key,
+        fileName: partnerFile.fileName,
+        fileType: partnerFile.fileType,
+      };
+    }
     const id = ctx.db.normalizeId("cvUploads", uploadId);
-    if (!id) return null;
-    const upload = await ctx.db.get(id);
-    if (!upload) return null;
-    return {
+    const upload = id ? await ctx.db.get(id) : null;
+    return upload ? {
       storageId: upload.storageId,
       s3Key: upload.s3Key,
       fileName: upload.fileName,
       fileType: upload.fileType,
-    };
+    } : null;
   },
 });
 

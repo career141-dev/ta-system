@@ -56,6 +56,30 @@ export const generateUploadUrl = internalAction({
   },
 });
 
+/** Short-lived partner upload URL. The checksum and exact length are signed. */
+export const generatePartnerCvUploadUrl = internalAction({
+  args: {
+    fileName: v.string(),
+    contentType: v.string(),
+    fileSize: v.number(),
+    checksumSha256: v.string(),
+  },
+  handler: async (_ctx, args) => {
+    if (outboundLocked()) throw new Error("Partner uploads are unavailable on this deployment");
+    const safeName = args.fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_").slice(0, 120) || "candidate-cv";
+    const key = `partner-uploads/${crypto.randomUUID()}-${safeName}`;
+    const command = new PutObjectCommand({
+      Bucket: process.env.R2_BUCKET_NAME!,
+      Key: key,
+      ContentType: args.contentType,
+      ContentLength: args.fileSize,
+      ChecksumSHA256: args.checksumSha256,
+    });
+    const url = await getSignedUrl(getS3Client(), command, { expiresIn: 300 });
+    return { url, key, expiresInSeconds: 300 };
+  },
+});
+
 /**
  * Action to generate a pre-signed URL for downloading/viewing a CV.
  */
