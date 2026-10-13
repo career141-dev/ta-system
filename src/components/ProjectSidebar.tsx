@@ -111,6 +111,7 @@ export function ProjectSidebar({
   // page of their own, and Boolean strings is gone — it was the same job as
   // Suggestions under a second name.
   const hhItems = [
+    { href: `${base}/hh#eye-marked`, label: "Eye-marked" },
     { href: `${base}/hh/research`, label: "Research" },
     { href: `${base}/hh/suggestions`, label: "Suggestions" },
     { href: `${base}/hh/links`, label: "Excel Tables" },

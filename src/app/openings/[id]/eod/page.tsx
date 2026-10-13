@@ -15,6 +15,9 @@ import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { extractReplyText } from "@/lib/reviewReply";
 import { isTa } from "@/lib/auth";
+import { eyeMarkedForEmail, primeEyeMarked } from "@/lib/eyeMarkedStore";
+import { EyeMarkedChecks } from "@/components/EyeMarkedChecks";
+import { LiveTableRefresh } from "@/components/LiveTableRefresh";
 
 const PAGE_SIZE = 10;
 
@@ -43,6 +46,7 @@ export default async function EodPage({
   await requireSourcingSeat(id);
   const kind: "director" | "client" = sp.kind === "client" ? "client" : "director";
   const user = await getCurrentUser();
+  await primeEyeMarked(id, user);
   const o = repo.opening(id);
   if (!o) notFound();
 
@@ -53,6 +57,7 @@ export default async function EodPage({
   const lead = repo.user(o.taLeadId);
 
   const rows = shortlistRows(id, isTa(user) ? user.id : null, kind);
+  const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user) : [];
   const effort = effortRow(id, user);
 
   // This TA's own sets — each recruiter numbers their own.
@@ -270,7 +275,10 @@ export default async function EodPage({
       )}
 
       {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
+      <LiveTableRefresh />
+      <EyeMarkedChecks openingId={id} items={eyeMarked} />
       <EodComposer
+        eyeMarked={eyeMarked}
         key={resendCopy?.id ?? "new"}
         openingId={id}
         kind={kind}

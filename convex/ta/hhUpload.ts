@@ -20,6 +20,7 @@ import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK } from "./
 import { claimForTa } from "./applications";
 import { toTaStage } from "./stages";
 import { assertWorkdayScope } from "../lib/workdayScope";
+import { profileSlug } from "../lib/samePerson";
 
 /** The channel the pipeline records; the TA System reads it as HH (src/data/convex/map.ts). */
 export const HEADHUNT_CHANNEL = "headhunting";
@@ -132,8 +133,14 @@ export const fileHeadhunt = internalMutation({
       .query("linkVault")
       .withIndex("by_opening", (q) => q.eq("openingId", jobId))
       .collect();
-    const row = rows.find((r) => r.candidateId === candidate._id);
+    const slug = profileSlug(candidate.linkedinUrl);
+    // A marked row can still hold only a LinkedIn URL when its requested CV arrives (13 Oct).
+    // Match an exact profile on the uploader's sheet, never another TA's or a name alone.
+    const linked = rows.find((r) => r.candidateId === candidate._id);
+    const profiles = slug ? rows.filter((r) => !r.candidateId && r.addedBy === user._id && profileSlug(r.linkedinUrl) === slug) : [];
+    const row = linked ?? (profiles.length === 1 ? profiles[0] : undefined);
     if (row) {
+      if (!row.candidateId) await ctx.db.patch(row._id, { candidateId: candidate._id });
       if (row.outcome !== "shortlisted" && row.outcome !== "cv_received") {
         await ctx.db.patch(row._id, { outcome: "cv_received" });
       }
