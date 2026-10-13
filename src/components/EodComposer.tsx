@@ -365,6 +365,7 @@ function EodNotesEditor({
  * Send goes to resendEod, which marks the subject REVISED.
  */
 export function EodComposer({
+  eyeMarked = [],
   openingId,
   kind,
   subject: initialSubject,
@@ -384,6 +385,7 @@ export function EodComposer({
   needsResearchLink,
   resend,
 }: {
+  eyeMarked?: import("@/lib/eyeMarked").EyeMarkedProgress[];
   openingId: string;
   kind: "director" | "client";
   subject: string;
@@ -434,6 +436,7 @@ export function EodComposer({
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const researchBlocked = needsResearchLink && (!researchCheck.ok || !researchConfirmed);
+  const eyeMarkedBlocked = eyeMarked.some((item) => item.blocked);
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
@@ -1019,9 +1022,11 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked}
+          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || eyeMarkedBlocked}
           title={
-            nobodyOnTo
+            eyeMarkedBlocked
+              ? "Complete the eye-marked checks first"
+              : nobodyOnTo
               ? "Add an address as To first"
               : researchBlocked
                 ? "Add your ChatGPT research link and tick the box first"
