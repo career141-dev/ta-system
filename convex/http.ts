@@ -21,11 +21,14 @@ const http = httpRouter();
 
 // The partner integration is authenticated and scoped to these explicit routes;
 // no database admin credential is given to the Capacity Planner.
+// Note: Convex httpRouter supports exact `path` or `pathPrefix` only — no
+// `:param` placeholders. The handlers extract the table name / upload ID from
+// the URL pathname themselves (2026-10-13: fixed 404 on parameterised routes).
 http.route({ path: "/integrations/v1/tables", method: "GET", handler: partnerReadTableIndex });
-http.route({ path: "/integrations/v1/tables/:table", method: "GET", handler: partnerReadTable });
-http.route({ path: "/integrations/v1/cv/:uploadId", method: "GET", handler: partnerReadCv });
+http.route({ pathPrefix: "/integrations/v1/tables/", method: "GET", handler: partnerReadTable });
 http.route({ path: "/integrations/v1/cv/uploads", method: "POST", handler: partnerCreateCvUpload });
 http.route({ path: "/integrations/v1/cv/uploads/complete", method: "POST", handler: partnerCompleteCvUpload });
+http.route({ pathPrefix: "/integrations/v1/cv/", method: "GET", handler: partnerReadCv });
 
 /**
  * Meta's webhook verification handshake.
