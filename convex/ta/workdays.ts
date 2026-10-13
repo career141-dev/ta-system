@@ -588,6 +588,33 @@ async function jobView(
           .first()
       : null;
     const hasApp = !!linkedApp;
+    if (
+      link.outcome === "shortlisted" &&
+      linkedApp &&
+      ["new_cvs", "matched_candidates"].includes(linkedApp.currentStage)
+    ) {
+      add(
+        `profile:${link._id}`,
+        `${link.name ?? "LinkedIn profile"}: linked CV still needs shortlisting and Director Review`,
+        "profile",
+        `${base}/hh/links`,
+      );
+      continue;
+    }
+    if (
+      link.outcome === "shortlisted" &&
+      linkedApp &&
+      ["rejected", "unresponsive"].includes(linkedApp.currentStage) &&
+      (link.outcomeAt ?? link.createdAt) > linkedApp.lastStageChangedAt
+    ) {
+      add(
+        `profile:${link._id}`,
+        `${link.name ?? "LinkedIn profile"}: newly selected profile is closed in the pipeline; recheck the decision`,
+        "profile",
+        `${base}/hh/links`,
+      );
+      continue;
+    }
     if (["shortlisted", "cv_received"].includes(link.outcome) && !hasApp)
       add(
         `profile:${link._id}`,
@@ -780,8 +807,19 @@ export const dashboard = internalQuery({
         .filter((a) => recruiters.includes(a.assignmentRole))
         .map((a) => a.jobId as string),
     );
+    const assignedJobs = await Promise.all(
+      [...assignedIds].map((id) => ctx.db.get(id as Id<"jobs">)),
+    );
+    const selectableJobs = [
+      ...new Map(
+        [
+          ...listed,
+          ...assignedJobs.filter((job): job is Doc<"jobs"> => !!job),
+        ].map((job) => [job._id, job]),
+      ).values(),
+    ];
     const options = worker
-      ? listed
+      ? selectableJobs
           .filter(
             (j) =>
               !isGone(j) &&
