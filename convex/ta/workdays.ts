@@ -807,8 +807,19 @@ export const dashboard = internalQuery({
         .filter((a) => recruiters.includes(a.assignmentRole))
         .map((a) => a.jobId as string),
     );
+    const assignedJobs = await Promise.all(
+      [...assignedIds].map((id) => ctx.db.get(id as Id<"jobs">)),
+    );
+    const selectableJobs = [
+      ...new Map(
+        [
+          ...listed,
+          ...assignedJobs.filter((job): job is Doc<"jobs"> => !!job),
+        ].map((job) => [job._id, job]),
+      ).values(),
+    ];
     const options = worker
-      ? listed
+      ? selectableJobs
           .filter(
             (j) =>
               !isGone(j) &&
