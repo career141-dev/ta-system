@@ -246,17 +246,40 @@ export default async function CandidateDrawer({
       const { convexQuery } = await import("@/lib/convexServer");
       const backendResults = await convexQuery<{
         candidates: { id: string; fullName: string; currentTitle: string; currentEmployer: string; phone: string | null; email: string | null }[];
+        referees?: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null }[];
       }>("ta/candidates:peopleAtCompany", {
         company: targetCompany,
         excludeCandidateId: c.id,
+        limit: 400,
       }).catch(() => null);
 
-      if (backendResults?.candidates) {
+      if (backendResults) {
         const existingColleagueIds = new Set(companyColleagues.map((cand) => cand.id));
-        for (const cand of backendResults.candidates) {
-          if (!existingColleagueIds.has(cand.id)) {
-            companyColleagues.push(cand as any);
-            existingColleagueIds.add(cand.id);
+        if (backendResults.referees) {
+          for (const ref of backendResults.referees) {
+            if (!existingColleagueIds.has(ref.id)) {
+              companyColleagues.push({
+                id: ref.id,
+                fullName: ref.name,
+                currentTitle: ref.title || "CV Referee",
+                currentEmployer: ref.company || targetCompany,
+                phone: ref.phone,
+                email: ref.email,
+                kind: "referee",
+              } as any);
+              existingColleagueIds.add(ref.id);
+            }
+          }
+        }
+        if (backendResults.candidates) {
+          for (const cand of backendResults.candidates) {
+            if (!existingColleagueIds.has(cand.id)) {
+              companyColleagues.push({
+                ...cand,
+                kind: "candidate",
+              } as any);
+              existingColleagueIds.add(cand.id);
+            }
           }
         }
       }
@@ -264,6 +287,15 @@ export default async function CandidateDrawer({
       console.warn("[candidate page] peopleAtCompany Convex lookup failed:", err);
     }
   }
+
+  // Sort contacts with phone numbers at the top
+  companyColleagues.sort((a: any, b: any) => {
+    const aPhone = Boolean(a.phone && a.phone.trim());
+    const bPhone = Boolean(b.phone && b.phone.trim());
+    if (aPhone && !bPhone) return -1;
+    if (!aPhone && bPhone) return 1;
+    return (a.fullName || "").localeCompare(b.fullName || "");
+  });
 
   // Counted off the real records now, not from the application's shape.
   const COUNTS: Record<(typeof TABS)[number], number | null> = {

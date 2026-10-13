@@ -6008,12 +6008,14 @@ export type CompanyReferenceColleague = {
   currentEmployer: string;
   phone: string | null;
   email: string | null;
+  kind?: "candidate" | "referee";
   latestApp?: { id: string; openingId: string; stage: string } | null;
 };
 
 /**
  * Look up people in our database who work at the same company (Company Reference).
  * Used in Candidate Profile and Excel Tables to find backchannel contacts and phone numbers.
+ * Prioritizes colleagues and referees with direct phone numbers first.
  */
 export async function getCompanyReferences(input: {
   company: string;
@@ -6038,7 +6040,7 @@ export async function getCompanyReferences(input: {
 
   const excludeId = input.excludeCandidateId || undefined;
 
-  // 1. From local memory store
+  // 1. From local memory store (candidates)
   const storeCandidates = repo.peopleAtCompany(company, excludeId);
   for (const c of storeCandidates) {
     if (existingIds.has(c.id)) continue;
@@ -6051,21 +6053,88 @@ export async function getCompanyReferences(input: {
       currentEmployer: c.currentEmployer ?? company,
       phone: c.phone ?? null,
       email: c.email ?? null,
+      kind: "candidate",
       latestApp,
     });
     existingIds.add(c.id);
   }
 
-  // 2. From Convex if enabled
+  // 2. From Convex if enabled (fetches both candidates and CV referees)
   if (isConvex()) {
     try {
       const backendResults = await convexQuery<{
         candidates: { id: string; fullName: string; currentTitle: string; currentEmployer: string; phone: string | null; email: string | null }[];
+        referees: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; relationship: string | null }[];
       }>("ta/candidates:peopleAtCompany", {
         company,
         excludeCandidateId: excludeId,
+        limit: 400,
       }).catch(() => null);
 
+      // Referees from CVs who work at this company (managers, HR, etc.)
+      if (backendResults?.referees) {
+        for (const ref of backendResults.referees) {
+          if (!existingIds.has(ref.id)) {
+            colleagues.push({
+              id: ref.id,
+              fullName: ref.name,
+              currentTitle: ref.title || "CV Referee",
+              currentEmployer: ref.company || company,
+              phone: ref.phone,
+              email: ref.email,
+              kind: "referee",
+            });
+            existingIds.add(ref.id);
+          }
+        }
+      }
+
+      // Query dedicated referee search for company and base company name variants
+      const baseCompany = company.replace(/\b(plc|ltd|limited|pvt|private|inc|corp|corporation|group)\b/gi, "").replace(/\s+/g, " ").trim();
+      const companyVariants = [company];
+      if (baseCompany && baseCompany.toLowerCase() !== company.toLowerCase() && baseCompany.length >= 3) {
+        companyVariants.push(baseCompany);
+      }
+
+      const refSearchRes = await convexQuery<{
+        people: {
+          id: string;
+          name: string;
+          designation: string | null;
+          company: string | null;
+          phone: string | null;
+          email: string | null;
+        }[];
+      }>("ta/referenceSearch:search", {
+        criteria: {
+          designations: [],
+          companies: companyVariants,
+          name: null,
+          loose: null,
+          needsContact: false,
+          industry: null,
+          summary: company,
+        },
+      }).catch(() => null);
+
+      if (refSearchRes?.people) {
+        for (const ref of refSearchRes.people) {
+          if (!existingIds.has(ref.id)) {
+            colleagues.push({
+              id: ref.id,
+              fullName: ref.name,
+              currentTitle: ref.designation || "CV Referee",
+              currentEmployer: ref.company || company,
+              phone: ref.phone,
+              email: ref.email,
+              kind: "referee",
+            });
+            existingIds.add(ref.id);
+          }
+        }
+      }
+
+      // Candidates who work at this company
       if (backendResults?.candidates) {
         for (const cand of backendResults.candidates) {
           if (!existingIds.has(cand.id)) {
@@ -6078,6 +6147,7 @@ export async function getCompanyReferences(input: {
               currentEmployer: cand.currentEmployer || company,
               phone: cand.phone,
               email: cand.email,
+              kind: "candidate",
               latestApp,
             });
             existingIds.add(cand.id);
@@ -6088,6 +6158,27 @@ export async function getCompanyReferences(input: {
       console.warn("[getCompanyReferences] Convex lookup failed:", err);
     }
   }
+
+  // 3. Sort contacts: verified phone numbers at the very top!
+  colleagues.sort((a, b) => {
+    const aPhone = Boolean(a.phone && a.phone.trim());
+    const bPhone = Boolean(b.phone && b.phone.trim());
+    if (aPhone && !bPhone) return -1;
+    if (!aPhone && bPhone) return 1;
+
+    // Referees/managers with phone numbers first
+    if (aPhone && bPhone) {
+      if (a.kind === "referee" && b.kind !== "referee") return -1;
+      if (a.kind !== "referee" && b.kind === "referee") return 1;
+    }
+
+    const aEmail = Boolean(a.email && a.email.trim());
+    const bEmail = Boolean(b.email && b.email.trim());
+    if (aEmail && !bEmail) return -1;
+    if (!aEmail && bEmail) return 1;
+
+    return a.fullName.localeCompare(b.fullName);
+  });
 
   return { ok: true, company, colleagues };
 }

@@ -203,7 +203,13 @@ export const peopleAtCompany = internalQuery({
     await optionalActor(ctx, args.actorId);
     const needle = args.company.trim().toLowerCase();
     if (!needle) return { candidates: [], referees: [] };
-    const limit = Math.min(args.limit ?? 50, 100);
+    const baseNeedle = needle.replace(/\b(plc|ltd|limited|pvt|private|inc|corp|corporation|group)\b/gi, "").replace(/\s+/g, " ").trim();
+    const matchCompany = (text: string) => {
+      const t = text.toLowerCase();
+      return t.includes(needle) || (baseNeedle.length >= 3 && t.includes(baseNeedle));
+    };
+
+    const limit = Math.min(args.limit ?? 400, 400);
 
     const candidates: {
       id: string;
@@ -214,25 +220,22 @@ export const peopleAtCompany = internalQuery({
       email: string | null;
     }[] = [];
 
-    // By the employer search index, across the whole database. The newest 500
-    // alone missed most of 78,000 candidates and said "nobody" when there were
-    // people (review of PR #40, 24 Sep). Past employers are not indexed, so
-    // this finds people who work there now.
+    // By the employer search index, across the whole database.
     const candDocs = await ctx.db
       .query("candidates")
-      .withSearchIndex("search_employer", (q) => q.search("currentEmployer", args.company.trim()))
-      .take(limit * 3);
+      .withSearchIndex("search_employer", (q) => q.search("currentEmployer", baseNeedle || args.company.trim()))
+      .take(limit);
     for (const cand of candDocs) {
       if (cand.mergedInto) continue;
       if (args.excludeCandidateId && cand._id === args.excludeCandidateId) continue;
       // The index matches words; keep only employers that contain the name.
       const emp = (cand.currentEmployer ?? "").toLowerCase();
-      if (emp.includes(needle)) {
+      if (matchCompany(emp)) {
         candidates.push({
           id: cand._id as string,
           fullName: cand.fullName ?? "Unnamed Candidate",
           currentTitle: cand.currentJobTitle ?? cand.currentTitle ?? "",
-          currentEmployer: cand.currentEmployer ?? (cand.jobHistory?.find((h) => (h.company ?? "").toLowerCase().includes(needle))?.company ?? ""),
+          currentEmployer: cand.currentEmployer ?? (cand.jobHistory?.find((h) => matchCompany(h.company ?? ""))?.company ?? ""),
           phone: cand.phone ?? null,
           email: cand.email ?? null,
         });
@@ -251,9 +254,13 @@ export const peopleAtCompany = internalQuery({
       fromCandidateId: string;
     }[] = [];
 
-    const refDocs = await ctx.db.query("referees").take(500);
+    // Query referees using the search_company index across all referees in the database
+    const refDocs = await ctx.db
+      .query("referees")
+      .withSearchIndex("search_company", (q) => q.search("company", baseNeedle || args.company.trim()))
+      .take(limit);
     for (const r of refDocs) {
-      if (r.company && r.company.toLowerCase().includes(needle)) {
+      if (r.company && matchCompany(r.company)) {
         referees.push({
           id: r._id as string,
           name: r.name,
@@ -267,6 +274,10 @@ export const peopleAtCompany = internalQuery({
         if (referees.length >= limit) break;
       }
     }
+
+    // Sort contacts with phone numbers at the top
+    candidates.sort((a, b) => (b.phone ? 1 : 0) - (a.phone ? 1 : 0));
+    referees.sort((a, b) => (b.phone ? 1 : 0) - (a.phone ? 1 : 0));
 
     return { candidates, referees };
   },

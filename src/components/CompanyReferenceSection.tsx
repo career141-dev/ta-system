@@ -84,9 +84,16 @@ export function CompanyReferenceSection({
     };
   }, [company, excludeCandidateId, openingId, initialColleagues]);
 
+  const [onlyPhone, setOnlyPhone] = useState(false);
+
   const targetCompany = (company || "").trim();
-  const total = colleagues?.length ?? 0;
-  const shown = colleagues ? colleagues.slice(0, visibleCount) : [];
+  const phoneCount = colleagues?.filter((c) => Boolean(c.phone && c.phone.trim())).length ?? 0;
+  const filteredList = onlyPhone
+    ? (colleagues?.filter((c) => Boolean(c.phone && c.phone.trim())) ?? [])
+    : (colleagues ?? []);
+
+  const total = filteredList.length;
+  const shown = filteredList.slice(0, visibleCount);
   const hasMore = total > visibleCount;
   const nextChunk = Math.min(PAGE_SIZE, total - visibleCount);
 
@@ -105,9 +112,28 @@ export function CompanyReferenceSection({
 
         <div className="flex items-center gap-2.5">
           {colleagues !== null && !loading && (
-            <span className="rounded-full bg-tag px-3 py-1 text-[12px] font-medium text-ink">
-              {total} {total === 1 ? "person" : "people"} in database
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="rounded-full bg-tag px-3 py-1 text-[12px] font-medium text-ink">
+                {colleagues.length} {colleagues.length === 1 ? "person" : "people"} in database
+                {phoneCount > 0 ? ` · ${phoneCount} with phone` : ""}
+              </span>
+              {phoneCount > 0 && phoneCount < colleagues.length && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOnlyPhone((p) => !p);
+                    setVisibleCount(PAGE_SIZE);
+                  }}
+                  className={`rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+                    onlyPhone
+                      ? "bg-brand text-white"
+                      : "border border-rule bg-paper text-ink-soft hover:text-ink"
+                  }`}
+                >
+                  {onlyPhone ? "Show all" : "Phones only"}
+                </button>
+              )}
+            </div>
           )}
           {onClose && (
             <button
@@ -127,7 +153,7 @@ export function CompanyReferenceSection({
       {loading ? (
         <div className="flex items-center justify-center gap-2.5 py-10 text-[13px] text-ink-soft">
           <Spinner tone="dark" />
-          <span>Searching database for candidates at {targetCompany || "this company"}…</span>
+          <span>Searching database for candidates & referees at {targetCompany || "this company"}…</span>
         </div>
       ) : problem ? (
         <div className="py-8 text-center text-[13px] text-danger">{problem}</div>
@@ -137,7 +163,9 @@ export function CompanyReferenceSection({
         </div>
       ) : colleagues && total === 0 ? (
         <div className="py-8 text-center text-[13px] text-ink-faint">
-          No other candidates from <span className="font-medium text-ink-soft">{targetCompany}</span> found in the database.
+          {onlyPhone
+            ? "No colleagues with verified phone numbers found."
+            : `No other contacts from ${targetCompany} found in the database.`}
         </div>
       ) : colleagues && total > 0 ? (
         <>
@@ -150,7 +178,11 @@ export function CompanyReferenceSection({
                 <div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[14px] font-semibold text-ink">{colleague.fullName}</span>
-                    {colleague.latestApp ? (
+                    {colleague.kind === "referee" ? (
+                      <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-[10.5px] font-medium text-sky-700">
+                        CV Referee
+                      </span>
+                    ) : colleague.latestApp ? (
                       <span className="rounded bg-tag px-1.5 py-0.5 text-[10.5px] text-ink-faint">
                         {STAGE_LABEL[colleague.latestApp.stage as keyof typeof STAGE_LABEL] ?? colleague.latestApp.stage}
                       </span>
@@ -173,16 +205,25 @@ export function CompanyReferenceSection({
                     {colleague.phone ? (
                       <a
                         href={`tel:${colleague.phone}`}
-                        className="tabular mr-2 font-medium text-brand hover:underline"
+                        className="tabular mr-2 inline-flex items-center gap-1.5 font-semibold text-brand hover:underline"
+                        title="Call direct number"
                       >
-                        {colleague.phone}
+                        <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} className="shrink-0 text-brand">
+                          <path d="M2.5 3.5C2.5 8 8 13.5 12.5 13.5L14 11.5L11 9L9.5 10.5C7.5 9.5 6.5 8.5 5.5 6.5L7 5L4.5 2L2.5 3.5Z" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span>{colleague.phone}</span>
                       </a>
                     ) : colleague.email ? (
                       <a
                         href={`mailto:${colleague.email}`}
-                        className="text-ink-soft hover:underline"
+                        className="inline-flex items-center gap-1.5 text-ink-soft hover:underline"
+                        title="Send email"
                       >
-                        {colleague.email}
+                        <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.6} className="shrink-0 text-ink-faint">
+                          <rect x="2" y="3" width="12" height="10" rx="1.5" />
+                          <path d="M2 5L8 9.5L14 5" />
+                        </svg>
+                        <span className="truncate max-w-[170px]">{colleague.email}</span>
                       </a>
                     ) : (
                       <span className="text-ink-faint">No direct contact</span>
@@ -205,7 +246,7 @@ export function CompanyReferenceSection({
           {total > PAGE_SIZE && (
             <div className="mt-2 flex flex-wrap items-center justify-between gap-3 border-t border-rule/60 pt-3">
               <span className="text-[12px] text-ink-faint">
-                Showing {Math.min(visibleCount, total)} of {total} people
+                Showing {Math.min(visibleCount, total)} of {total} contacts {phoneCount > 0 ? `(${phoneCount} with phone)` : ""}
               </span>
               <div className="flex items-center gap-2">
                 {hasMore ? (
