@@ -677,6 +677,20 @@ export default defineSchema({
     .index("by_fileName", ["fileName"])
     .index("by_isHealAttempted", ["isHealAttempted"]),
 
+  // CV files uploaded by the Capacity Planner for storage/retrieval only.
+  // Kept outside cvUploads so TA extraction/recovery never treats them as intake.
+  partnerCvFiles: defineTable({
+    s3Key: v.string(),
+    fileName: v.string(),
+    fileSize: v.float64(),
+    fileType: v.string(),
+    fileHash: v.string(),
+    uploadedBy: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_createdAt", ["createdAt"])
+    .index("by_s3Key", ["s3Key"]),
+
   folderImportProgress: defineTable({
     sourceChannel: v.string(),
     rootFolderName: v.optional(v.string()),
