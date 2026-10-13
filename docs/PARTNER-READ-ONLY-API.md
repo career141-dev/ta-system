@@ -3,7 +3,8 @@
 The Capacity Planner connects to the TA system through this API. It does not
 receive a Convex admin key, database credential, or R2 bucket credential. The
 API responds only to authenticated server-to-server requests. Table access is
-read-only; the only write operation is the explicit new-CV intake flow below.
+read-only; the only write operation stores partner CV files in R2 without
+processing or linking them to candidates.
 
 ## Credentials
 
@@ -63,8 +64,8 @@ only after validating the integration token. The CV response is an attachment
 with `Cache-Control: no-store`. To make a ZIP in the Capacity Planner, its
 backend can download each authorized CV and create the archive there.
 
-Upload a new CV into the same R2 bucket and queue it through the TA ingestion
-pipeline (maximum 10 MB; PDF, DOC, or DOCX only):
+Upload a CV into the same R2 bucket for the Capacity Planner to retrieve later
+(maximum 10 MB; PDF, DOC, or DOCX only):
 
 1. Compute the file's SHA-256 digest and encode the 32 digest bytes as standard
    base64. Request a short-lived upload URL:
@@ -112,8 +113,8 @@ Credential-like fields (including access/refresh tokens, OAuth state, and
 mailbox continuation links) are redacted. This protects service credentials;
 candidate and recruiting records remain readable as authorized by the owner.
 
-There are no general create, update, or delete endpoints. CV intake is limited
-to the presigned upload flow above; table records cannot be changed. The API
+There are no general create, update, or delete endpoints. File storage is
+limited to the presigned upload flow above; table records cannot be changed. The API
 does not enable browser CORS; call it from the Capacity Planner backend, not
 its browser. Maintain HTTPS, keep the token server-side, rotate/revoke it
 through operations, and restrict/monitor traffic at the deployment edge before
@@ -139,7 +140,7 @@ the prompt.
 > byte length and base64 SHA-256, PUT the bytes to the returned short-lived URL
 > with the returned headers, then call
 > `POST /integrations/v1/cv/uploads/complete` with the returned key and same
-> metadata. The response contains a file ID; retrieve it later through
+> metadata. The response contains a partner-file ID; retrieve it later through
 > `GET /integrations/v1/cv/{fileId}`. This stores the file only and does not
 > parse it or change candidate records. Do not use a database/admin credential or
 > work around redacted credential fields. Handle 401/503 responses without retries
