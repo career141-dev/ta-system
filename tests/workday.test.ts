@@ -540,6 +540,27 @@ try {
   assert.equal(finishedStatus.lastFinishedAt, clock);
   assert.equal(finishedStatus.lastFinishedDate, workdayDate(clock));
   assert.equal(completionBlockers(frozen.jobs).length, 0);
+  // Current assignments must not disappear behind an older global job-list limit.
+  for (let i = 0; i < 1005; i++)
+    put("jobs", { _id: `older:${i}`, title: "Older job", assignedTaIds: [] });
+  put("jobs", {
+    _id: "newAssignedJob",
+    title: "New assigned job",
+    taLeadId: "lead",
+    assignedTaIds: ["ta"],
+  });
+  put("jobAssignments", {
+    _id: "newAssignment",
+    jobId: "newAssignedJob",
+    userId: "ta",
+    assignmentRole: "primary_recruiter",
+    isActive: true,
+  });
+  assert.ok(
+    (await run("dashboard", { actorId: "ta", detail: true })).options.some(
+      (job: Row) => job.id === "newAssignedJob",
+    ),
+  );
   console.log(
     "  ok  workday times, approval boundaries, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );
