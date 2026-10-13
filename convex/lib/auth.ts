@@ -37,8 +37,8 @@
 //   - `actorId` must never be taken from a form field or a query parameter
 //     without the server re-deriving it from the session cookie first.
 
-import { QueryCtx, MutationCtx } from "../_generated/server";
-import { Doc, Id } from "../_generated/dataModel";
+import type { QueryCtx, MutationCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
 
 export type UserRole = "admin" | "director" | "ta" | "ops";
 

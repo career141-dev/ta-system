@@ -15,8 +15,8 @@
 // src/lib/auth.ts and src/lib/visibility.ts. Neither is a substitute for the
 // other: the first knows about openings and seats, this one knows the database.
 
-import { MutationCtx, QueryCtx } from "../_generated/server";
-import { Doc, Id } from "../_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { Doc, Id } from "../_generated/dataModel";
 import { resolveActor } from "../lib/auth";
 import { FULL_ACCESS_ROLES } from "../lib/permissions";
 import { mapUser } from "../../src/data/convex/map";

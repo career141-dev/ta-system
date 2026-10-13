@@ -16,6 +16,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { allows, isTa } from "@/lib/auth";
 
 const NAV = [
+  { href: "/workday", label: "Workday" },
   { href: "/clients", label: "Clients" },
   { href: "/openings", label: "Openings" },
   // TA Leads give the TAs strategies per job (8 Oct); shown only to those who may.
@@ -70,6 +71,7 @@ export function TopNav({
 
   const links = NAV.filter(
     (n) =>
+      (n.href !== "/workday" || ["ta", "ta_support", "ta_lead", "admin"].includes(user.role)) &&
       (n.href !== "/voice" || allows(user, "voice.practice")) &&
       (n.href !== "/strategy" || allows(user, "strategy.assign")) &&
       (n.href !== "/feedback" || !isTa(user)),

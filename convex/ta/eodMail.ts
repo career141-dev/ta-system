@@ -17,6 +17,7 @@ import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
 import { getGraphToken } from "../lib/graphClient";
 import { sendFollowUpMail, type MailResult } from "../lib/graphMail";
+import { makeFunctionReference } from "convex/server";
 
 export const send = internalAction({
   args: {
@@ -27,27 +28,59 @@ export const send = internalAction({
     replyTo: v.array(v.string()),
     subject: v.string(),
     html: v.string(),
-    attachments: v.array(v.object({ name: v.string(), contentType: v.string(), base64: v.string() })),
+    attachments: v.array(
+      v.object({
+        name: v.string(),
+        contentType: v.string(),
+        base64: v.string(),
+      }),
+    ),
+    workdayMailId: v.optional(v.id("taWorkdayMail")),
   },
-  handler: async (_ctx, args): Promise<MailResult> => {
-    const systemInbox = process.env.MS_SENDER_EMAIL || process.env.OUTBOUND_EMAIL_SENDER || "job@career141.com";
-    const result = await sendFollowUpMail(
-      {
-        from: args.from,
-        fallbackFrom: systemInbox,
-        to: args.to,
-        alsoTo: args.alsoTo,
-        cc: args.cc,
-        replyTo: args.replyTo,
-        subject: args.subject,
-        html: args.html,
-        attachments: args.attachments,
-        testInbox: "EOD_TEST_EMAIL",
-        // Internal only: in test mode the desk still gets it beside the test inbox.
-        keepInternalInTest: "career141.com",
-      },
-      getGraphToken,
-    );
+  handler: async (ctx, args): Promise<MailResult> => {
+    const systemInbox =
+      process.env.MS_SENDER_EMAIL ||
+      process.env.OUTBOUND_EMAIL_SENDER ||
+      "job@career141.com";
+    let result: MailResult;
+    try {
+      result = await sendFollowUpMail(
+        {
+          from: args.from,
+          fallbackFrom: systemInbox,
+          to: args.to,
+          alsoTo: args.alsoTo,
+          cc: args.cc,
+          replyTo: args.replyTo,
+          subject: args.subject,
+          html: args.html,
+          attachments: args.attachments,
+          testInbox: "EOD_TEST_EMAIL",
+          // Internal only: in test mode the desk still gets it beside the test inbox.
+          keepInternalInTest: "career141.com",
+        },
+        getGraphToken,
+      );
+    } catch (error) {
+      if (args.workdayMailId)
+        await ctx.runMutation(
+          makeFunctionReference<"mutation">("ta/workdays:mailResult"),
+          { id: args.workdayMailId, status: "uncertain" },
+        );
+      throw error;
+    }
+    if (args.workdayMailId)
+      await ctx.runMutation(
+        makeFunctionReference<"mutation">("ta/workdays:mailResult"),
+        {
+          id: args.workdayMailId,
+          status: result.ok
+            ? "accepted"
+            : /could not be reached|returned 5\d\d/i.test(result.error)
+              ? "uncertain"
+              : "failed",
+        },
+      );
     console.log(
       result.ok
         ? `[End of day] Sent via Microsoft Graph from ${result.from} to ${[result.to, ...(result.alsoTo ?? [])].join(", ")}, cc ${result.cc.join(", ") || "nobody"}${result.note}`

@@ -18,6 +18,7 @@
 // the pipeline events and the Meta events all still fire.
 
 import { v } from "convex/values";
+import { assertWorkdayScope } from "../lib/workdayScope";
 import { internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
 import { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
@@ -127,6 +128,7 @@ export const shortlist = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("Application not found");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    await assertWorkdayScope(ctx, user, app.jobId);
     // The Shortlist button is for people still to be taken on. A closed card on a stale page
     // is brought back deliberately (Brought back / Add to pipeline), not by a claim (2 Oct).
     const stage = toTaStage(app.currentStage);
@@ -278,6 +280,7 @@ export const moveStage = internalMutation({
         ? ["director", "primary_recruiter"]
         : WORKS_THE_DESK;
     await assertJobAccess(ctx, user, app.jobId, roles);
+    await assertWorkdayScope(ctx, user, app.jobId);
 
     // Into TA Follow-up with nobody's name on them is a shortlist: whoever
     // moves them claims them. That used to be a second call from the web app

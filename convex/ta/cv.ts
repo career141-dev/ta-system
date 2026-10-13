@@ -12,6 +12,7 @@ import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, WORKS_THE_DESK } from "./guard";
+import { assertWorkdayScope } from "../lib/workdayScope";
 
 /** Where to put the file. The web app uploads it straight to storage. */
 export const uploadUrl = internalMutation({
@@ -38,6 +39,7 @@ export const attach = internalMutation({
     const app = await ctx.db.get(appId);
     if (!app) throw new Error("That application no longer exists.");
     await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    await assertWorkdayScope(ctx, user, app.jobId);
     const candidate = await ctx.db.get(app.candidateId);
     if (!candidate) throw new Error("That candidate no longer exists.");
 

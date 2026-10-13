@@ -11,6 +11,7 @@
 // Director (src/lib/eod.ts), so nothing else changes there.
 
 import { v } from "convex/values";
+import { assertWorkdayScope } from "../lib/workdayScope";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
@@ -38,6 +39,7 @@ export const queue = internalMutation({
     const job = jobId ? await ctx.db.get(jobId) : null;
     if (!job) throw new Error("That opening no longer exists.");
     await assertJobAccess(ctx, user, job._id, WORKS_THE_DESK);
+    await assertWorkdayScope(ctx, user, job._id);
 
     // The lead who sent it is optional, but if named it has to be one of them.
     let fromUserId: Id<"users"> | null = null;

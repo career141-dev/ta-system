@@ -15,6 +15,7 @@ import { repo } from "@/data/store";
 import { uiOnly } from "@/lib/uiOnly";
 import { isTa } from "@/lib/auth";
 import { cookies } from "next/headers";
+import { WorkdayWorkspace } from "@/components/Workday";
 
 // Every page depends on who is signed in and reads the database, so nothing is
 // rendered at build time. Without this, `next build` pre-rendered the 404 page,
@@ -94,7 +95,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Suspense fallback={null}>
               <Flash />
             </Suspense>
-            {children}
+            {user && isTa(user) ? <WorkdayWorkspace>{children}</WorkdayWorkspace> : children}
             {user ? <DeskAssistant /> : null}
             {user ? <FeedbackWidget isTa={isTa(user)} /> : null}
           </>
@@ -107,7 +108,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <Suspense fallback={null}>
             <Flash />
           </Suspense>
-          {children}
+          {user && isTa(user) ? <WorkdayWorkspace>{children}</WorkdayWorkspace> : children}
           {user ? <DeskAssistant /> : null}
           {user ? <FeedbackWidget isTa={isTa(user)} /> : null}
         </ClerkProvider>

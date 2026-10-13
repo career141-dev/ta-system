@@ -19,6 +19,7 @@ import { firstPostFor } from "../lib/firstPost";
 import { SCORE_AFTER_APPROVAL_MS } from "../lib/jdGate";
 import { internal } from "../_generated/api";
 import { workingStageKey } from "../../src/lib/workingStage";
+import { recordActiveMode } from "./workdays";
 import { isGone } from "../../src/lib/bin";
 
 
@@ -396,6 +397,7 @@ export const setWorkingStage = internalMutation({
     if (assignment && assignment.isActive) {
       if (assignment.assignmentRole === "client_contact") throw new Error("A client seat does not work the pipeline.");
       await ctx.db.patch(assignment._id, { workingStage: args.stage });
+      await recordActiveMode(ctx, targetUserId, jobId, args.stage);
       return { ok: true, stage: args.stage };
     }
 
@@ -413,6 +415,7 @@ export const setWorkingStage = internalMutation({
       .first();
     if (held) await ctx.db.patch(held._id, { value: args.stage, updatedAt: Date.now() });
     else await ctx.db.insert("taSettings", { key, value: args.stage, updatedAt: Date.now() });
+    await recordActiveMode(ctx, targetUserId, jobId, args.stage);
     return { ok: true, stage: args.stage };
   },
 });

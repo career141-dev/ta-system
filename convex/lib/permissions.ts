@@ -1,5 +1,5 @@
-import { MutationCtx, QueryCtx } from "../_generated/server";
-import { Id } from "../_generated/dataModel";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
 import { resolveActor } from "./auth";
 
 /**

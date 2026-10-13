@@ -19,6 +19,7 @@ import type { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK } from "./guard";
 import { claimForTa } from "./applications";
 import { toTaStage } from "./stages";
+import { assertWorkdayScope } from "../lib/workdayScope";
 
 /** The channel the pipeline records; the TA System reads it as HH (src/data/convex/map.ts). */
 export const HEADHUNT_CHANNEL = "headhunting";
@@ -39,6 +40,7 @@ export const queue = internalMutation({
     const job = jobId ? await ctx.db.get(jobId) : null;
     if (!job) throw new Error("That opening no longer exists.");
     await assertJobAccess(ctx, user, job._id, WORKS_THE_DESK);
+    await assertWorkdayScope(ctx, user, job._id);
 
     // As cvs/cvUploads.ts saveUpload + queueManualExtraction, in one step.
     const cvUploadId = await ctx.db.insert("cvUploads", {

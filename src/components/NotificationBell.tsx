@@ -161,7 +161,7 @@ export function NotificationBell() {
                 return n.jobId ? (
                   <Link
                     key={n.id}
-                    href={`/openings/${n.jobId}`}
+                    href={n.type.startsWith("workday_") ? "/workday" : `/openings/${n.jobId}`}
                     onClick={() => {
                       setOpen(false);
                       if (!n.read) markRead(n.id);
