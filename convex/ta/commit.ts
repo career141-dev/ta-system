@@ -25,6 +25,8 @@ import { internalMutation } from "../_generated/server";
 import { resolveActor } from "../lib/auth";
 import { TABLES, looselySame, sameValue, type ModelCx, type Row } from "./model/tables";
 import { refreshEmployersText } from "../candidates/candidates";
+import { assertWorkdayScope } from "../lib/workdayScope";
+import type { Doc, Id } from "../_generated/dataModel";
 
 const opValidator = v.object({
   table: v.string(),
@@ -44,7 +46,19 @@ export const apply = internalMutation({
   handler: async (ctx, args): Promise<{ ids: Record<string, string> }> => {
     // Called only by the TA server with the admin key. A named actor is
     // checked to exist and be active; the app has already authorised the action.
-    if (args.actorId) await resolveActor(ctx, args.actorId);
+    let actorUser: Doc<"users"> | null = null;
+    if (args.actorId) {
+      const { user } = await resolveActor(ctx, args.actorId);
+      actorUser = user;
+      const workTables = new Set(["applications", "linkVault", "researchReports", "benchmarks", "reviewRounds"]);
+      const jobs = new Set<string>();
+      for (const op of args.ops) {
+        if (!workTables.has(op.table)) continue;
+        const jobId = op.before?.openingId ?? op.after?.openingId;
+        if (typeof jobId === "string" && ctx.db.normalizeId("jobs", jobId)) jobs.add(jobId);
+      }
+      for (const jobId of jobs) await assertWorkdayScope(ctx, user, jobId as Id<"jobs">);
+    }
 
     const now = Date.now();
     const ids: Record<string, string> = {};
@@ -177,6 +191,15 @@ export const apply = internalMutation({
       else await ctx.db.delete(doc._id as never);
     }
 
+    if (actorUser) {
+      const day = await ctx.db.query("taWorkdays").withIndex("by_user_finished", (q) => q.eq("userId", actorUser!._id).eq("finishedAt", undefined)).first();
+      if (day) for (const op of args.ops) {
+        if (!["researchReports", "benchmarks"].includes(op.table)) continue;
+        const jobId = op.before?.openingId ?? op.after?.openingId;
+        if (!day.jobs.some((j) => j.jobId === jobId)) continue;
+        await ctx.db.insert("taWorkdayActivity", { workdayId: day._id, jobId: jobId as Id<"jobs">, userId: actorUser._id, kind: `${op.table}:${op.kind}`, recordId: ids[op.key] ?? op.key, at: now });
+      }
+    }
     return { ids };
   },
 });

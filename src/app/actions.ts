@@ -175,6 +175,10 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
   const assignment = openingId ? repo.assignmentFor(openingId, user.id) ?? null : null;
   const decision = can(user, capability, { openingId, assignment, ownerTaId });
   if (!decision.ok) await fail(decision.message);
+  if (openingId && isTa(user) && isConvex() && ["opening.act", "opening.sourcing"].includes(capability)) {
+    try { await convexQuery("ta/workdays:checkScope", { actorId: user.id, jobId: openingId }); }
+    catch (error) { await fail(backendMessage(error, "Check your workday before continuing.")); }
+  }
   return user;
 }
 
@@ -4536,6 +4540,11 @@ export async function sendEod(formData: FormData) {
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const ids = String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
+  const activityOnly = kind === "director" && formData.get("activityOnly") === "yes" && ids.length === 0;
+  if (activityOnly) {
+    const { shortlistRows } = await import("@/lib/eod");
+    if (shortlistRows(openingId, isTa(user) ? user.id : null).length) await fail("Candidates are ready for Director Review. Reload and include them in the email.");
+  }
 
   // Anybody already sent to this reviewer is dropped, and so is anybody who is
   // not on this opening — the list came from the browser.
@@ -4549,7 +4558,7 @@ export async function sendEod(formData: FormData) {
   const fresh = ids.filter((id) => mine(id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && repo.application(id)?.openingId === openingId);
   if (notMine.length > 0 && fresh.length === 0)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent("Nothing sent — you can send only the candidates you shortlisted.")}`);
-  if (fresh.length === 0)
+  if (fresh.length === 0 && !activityOnly)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
       ids.length ? "Everyone on that list has already been sent, or is being sent right now." : "Nothing to send.",
     )}`);
@@ -4598,6 +4607,7 @@ export async function sendEod(formData: FormData) {
   // What went, kept a month to read back, correct and send again (8 Oct). Saved
   // once the round is open, since the copy belongs to it.
   let copy: Omit<EodEmailCopy, "id" | "roundId" | "sentAt" | "expiresAt"> | null = null;
+  let workdayMailId: string | null = null;
   if (kind === "director") {
     const { effortFromForm, effortRow, shortlistRowsFromForm, shortlistRows } = await import("@/lib/eod");
     const effort = effortFromForm(formData, effortRow(openingId, user));
@@ -4637,8 +4647,10 @@ export async function sendEod(formData: FormData) {
       introText,
       outroText,
       researchLink: research.url,
+      activityOnly,
     });
     if (!r.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${r.error}`)}`);
+    workdayMailId = r.workdayMailId ?? null;
     sentNote = r.note + (await saveEodEdits(editedRows, baseRows, fresh));
 
     const sentRows = fresh.flatMap((id, i) => {
@@ -4703,6 +4715,7 @@ export async function sendEod(formData: FormData) {
     trackedAt: repo.shortlistInbox(),
     subject: String(formData.get("subject") ?? ""),
     researchLink: research.url,
+    dispatch: kind === "director" ? "sent" : "held",
   });
   if (copy) {
     try {
@@ -4714,11 +4727,13 @@ export async function sendEod(formData: FormData) {
     }
   }
 
+  if (workdayMailId) await convexMutation("ta/workdays:finalizeMail", { actorId: user.id, id: workdayMailId });
+
   revalidatePath(`/openings/${openingId}`, "layout");
   redirect(
     `/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
       kind === "director"
-        ? `${sentNote} ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on the Director's reply.${
+        ? activityOnly ? `${sentNote} Activity summary sent; no candidate submissions.` : `${sentNote} ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on the Director's reply.${
             notMoved.length ? ` Still in Follow-up — move by hand: ${notMoved.join(", ")}.` : ""
           }`
         : `Recorded as sent to the client. ${fresh.length} ${fresh.length === 1 ? "person is" : "people are"} now waiting on a reply. Nothing was emailed from here.`,
@@ -4803,6 +4818,8 @@ export async function resendEod(formData: FormData) {
       effort,
       rows: editedRows,
       baseRows: sentRows,
+      revised: true,
+      activityOnly: ids.length === 0,
       introText,
       outroText,
       researchLink: research.url,
@@ -4902,7 +4919,9 @@ async function emailEod(input: {
   introText?: string;
   outroText?: string;
   researchLink?: string | null;
-}): Promise<{ ok: true; note: string } | { ok: false; error: string }> {
+  activityOnly?: boolean;
+  revised?: boolean;
+}): Promise<{ ok: true; note: string; workdayMailId?: string | null } | { ok: false; error: string }> {
   const { openingId, user } = input;
   const opening = repo.opening(openingId);
   if (!opening) return { ok: false, error: "That opening no longer exists." };
@@ -4934,7 +4953,7 @@ async function emailEod(input: {
     })
     .filter((r): r is NonNullable<typeof r> => !!r);
 
-  if (rows.length === 0) return { ok: false, error: "Nobody on that list is ready to send." };
+  if (rows.length === 0 && !input.activityOnly) return { ok: false, error: "Nobody on that list is ready to send." };
 
   const attachments: { name: string; contentType: string; base64: string }[] = [];
   const left: string[] = [];
@@ -4982,7 +5001,12 @@ async function emailEod(input: {
   let result:
     | { ok: true; from: string; to: string; alsoTo?: string[]; cc: string[]; note: string }
     | { ok: false; error: string };
+  let workdayMailId: string | null = null;
   try {
+    if (!input.revised) {
+      const receipt = await convexMutation<{ id: string | null }>("ta/workdays:beginMail", { actorId: user.id, jobId: openingId, applicationIds: input.applicationIds, subject: input.subject, sentTo: to, researchLink: input.researchLink ?? undefined });
+      workdayMailId = receipt.id;
+    }
     result = await convexAction("ta/eodMail:send", {
       from: user.email,
       to,
@@ -4994,6 +5018,7 @@ async function emailEod(input: {
       subject: input.subject.trim(),
       html,
       attachments,
+      workdayMailId: workdayMailId ?? undefined,
     });
   } catch (e) {
     return { ok: false, error: backendMessage(e, "The email could not be sent.") };
@@ -5004,6 +5029,7 @@ async function emailEod(input: {
   const sentTo = [result.to, ...(result.alsoTo ?? [])].join(", ");
   return {
     ok: true,
+    workdayMailId,
     note: `Sent from ${result.from} to ${sentTo}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ", no cc"}, with ${attachments.length} CV${attachments.length === 1 ? "" : "s"} attached.${result.note ? ` ${result.note.trim()}` : ""}`,
   };
 }

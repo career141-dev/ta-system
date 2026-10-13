@@ -1003,6 +1003,7 @@ export function EodComposer({
       </section>
 
       <form id="eod-send" action={resend ? resendEod : sendEod} className="flex flex-wrap items-center gap-4">
+        {!resend && kind === "director" && initialRows.length === 0 && <input type="hidden" name="activityOnly" value="yes" />}
         <input type="hidden" name="openingId" value={openingId} />
         {resend && <input type="hidden" name="copyId" value={resend.copyId} />}
         <input type="hidden" name="kind" value={kind} />
@@ -1018,7 +1019,7 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={initialRows.length === 0 || nobodyOnTo || researchBlocked}
+          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked}
           title={
             nobodyOnTo
               ? "Add an address as To first"
@@ -1029,7 +1030,7 @@ export function EodComposer({
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
-          {resend ? "Send again as REVISED" : kind === "director" ? "Send email" : "Record that it went to the client"}
+          {resend ? "Send again as REVISED" : kind === "director" ? initialRows.length === 0 ? "Send activity email" : "Send email" : "Record that it went to the client"}
         </SubmitButton>
         {kind === "director" && (
           <span className="text-[11.5px] text-ink-faint">

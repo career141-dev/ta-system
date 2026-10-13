@@ -3,6 +3,72 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  // Explicit workday buttons; browser sessions never create attendance records.
+  taWorkdays: defineTable({
+    userId: v.id("users"),
+    date: v.string(),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    jobs: v.array(v.object({
+      jobId: v.id("jobs"),
+      workType: v.union(v.literal("100%"), v.literal("Add-on"), v.literal("Follow-up")),
+      addedAt: v.number(),
+      leadId: v.optional(v.id("users")),
+      modeHistory: v.array(v.object({ at: v.number(), workType: v.string() })),
+    })),
+    completion: v.optional(v.any()),
+  }).index("by_user", ["userId"]).index("by_user_finished", ["userId", "finishedAt"]).index("by_date", ["date"]).index("by_finished", ["finishedAt"]),
+  taWorkdayLeads: defineTable({
+    workdayId: v.id("taWorkdays"),
+    leadId: v.id("users"),
+    finishedAt: v.optional(v.number()),
+  }).index("by_lead", ["leadId"]).index("by_lead_finished", ["leadId", "finishedAt"]).index("by_workday", ["workdayId"]),
+  taWorkdayRequests: defineTable({
+    workdayId: v.id("taWorkdays"),
+    userId: v.id("users"),
+    jobId: v.id("jobs"),
+    leadId: v.id("users"),
+    workType: v.union(v.literal("100%"), v.literal("Add-on"), v.literal("Follow-up")),
+    status: v.union(v.literal("pending"), v.literal("approved"), v.literal("denied")),
+    requestedAt: v.number(),
+    decidedAt: v.optional(v.number()),
+    decidedBy: v.optional(v.id("users")),
+    reason: v.optional(v.string()),
+  }).index("by_workday", ["workdayId"]).index("by_lead_status", ["leadId", "status"]),
+  taWorkdayCarry: defineTable({
+    userId: v.id("users"),
+    jobId: v.id("jobs"),
+    key: v.string(),
+    reason: v.string(),
+    nextAction: v.string(),
+    dueAt: v.number(),
+    recordedAt: v.number(),
+    evidenceAt: v.number(),
+  }).index("by_user_job", ["userId", "jobId"]),
+  taWorkdayMail: defineTable({
+    workdayId: v.id("taWorkdays"),
+    userId: v.id("users"),
+    jobId: v.id("jobs"),
+    applicationIds: v.array(v.id("applications")),
+    status: v.union(v.literal("sending"), v.literal("accepted"), v.literal("failed"), v.literal("uncertain")),
+    startedAt: v.number(),
+    acceptedAt: v.optional(v.number()),
+    finalizedAt: v.optional(v.number()),
+    subject: v.string(),
+    sentTo: v.string(),
+    researchLink: v.optional(v.string()),
+    reconciledAt: v.optional(v.number()),
+    reconciledBy: v.optional(v.id("users")),
+    reconciliationReason: v.optional(v.string()),
+  }).index("by_workday_job", ["workdayId", "jobId"]),
+  taWorkdayActivity: defineTable({
+    workdayId: v.id("taWorkdays"),
+    jobId: v.id("jobs"),
+    userId: v.id("users"),
+    kind: v.string(),
+    recordId: v.string(),
+    at: v.number(),
+  }).index("by_workday_job", ["workdayId", "jobId"]),
   // ■■ USERS ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
   users: defineTable({
     tokenIdentifier: v.string(),
@@ -667,6 +733,7 @@ export default defineSchema({
     lastHealAt: v.optional(v.number()), // Timestamp of the latest healer dispatch; used to detect stuck "healing"
   })
     .index("by_uploadedBy", ["uploadedBy"])
+    .index("by_assignToJob", ["assignToJob"])
     .index("by_status", ["status"])
     .index("by_fileHash", ["fileHash"])
     .index("by_batchId", ["batchId"])
@@ -972,6 +1039,8 @@ export default defineSchema({
     }),
 
   applications: defineTable({
+    workdayReviewedAt: v.optional(v.number()),
+    workdayReviewedBy: v.optional(v.id("users")),
     candidateId: v.id("candidates"),
     jobId: v.id("jobs"),
     cvFileId: v.optional(v.id("cvUploads")), // Keeping cvUploads instead of cvFiles to match existing table
@@ -1150,6 +1219,10 @@ export default defineSchema({
   })
     .index("by_jobId", ["jobId"])
     .index("by_job_stage", ["jobId", "currentStage"])
+    .index("by_job_stage_reviewed", ["jobId", "currentStage", "workdayReviewedAt"])
+    .index("by_workday_owner", ["jobId", "ownerTaId", "shortlistedAt"])
+    .index("by_workday_review", ["jobId", "workdayReviewedAt"])
+    .index("by_workday_reapply", ["jobId", "reappliedAt"])
     .index("by_candidateId", ["candidateId"])
     .index("by_job_source", ["jobId", "sourceChannel"])
     .index("by_job_score", ["jobId", "aiMatchScore"])
@@ -1988,7 +2061,9 @@ export default defineSchema({
       v.literal("candidate_unresponsive"),
       v.literal("opening_assigned"),
       v.literal("scoop_received"),
-      v.literal("strategy_assigned")
+      v.literal("strategy_assigned"),
+      v.literal("workday_started"), v.literal("workday_finished"),
+      v.literal("workday_request"), v.literal("workday_decision")
     ),
     title: v.string(),
     body: v.string(),
@@ -2572,6 +2647,8 @@ export default defineSchema({
   })
     .index("by_opening", ["openingId"])
     .index("by_addedBy", ["addedBy"])
+    .index("by_workday_added", ["openingId", "addedBy", "createdAt"])
+    .index("by_workday_outcome", ["openingId", "addedBy", "outcome"])
     .index("by_url", ["linkedinUrl"]),
 
   /** Company research for an opening. Cached rather than regenerated per view:
