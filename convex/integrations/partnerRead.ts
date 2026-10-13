@@ -100,7 +100,7 @@ export const getCvReference = internalQuery({
 /** Resolve a CV through its record; callers never choose a bucket key or storage ID. */
 export const getCvDownload = internalAction({
   args: { uploadId: v.string() },
-  handler: async (ctx, { uploadId }) => {
+  handler: async (ctx, { uploadId }): Promise<{ url: string; fileName: string; fileType: string } | null> => {
     const upload = await ctx.runQuery(getCvReferenceRef, { uploadId });
     if (!upload) return null;
 
