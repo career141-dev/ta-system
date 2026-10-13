@@ -379,6 +379,50 @@ try {
   );
   assert.equal(hunted.checks.length, 0);
 
+  // Linking a suitable prospect to an existing New CV is not a shortlist.
+  put("applications", {
+    _id: "linkedProspect",
+    candidateId: "linkedCandidate",
+    jobId: "job3",
+    currentStage: "new_cvs",
+    sourceChannel: "headhunting",
+    createdAt: clock,
+    lastStageChangedAt: clock,
+    workdayReviewedAt: clock,
+    isActive: true,
+  });
+  put("linkVault", {
+    _id: "suitableLink",
+    openingId: "job3",
+    addedBy: "support",
+    linkedinUrl: "https://example.invalid/profile",
+    name: "Suitable prospect",
+    outcome: "shortlisted",
+    candidateId: "linkedCandidate",
+    createdAt: clock,
+    outcomeAt: clock,
+    conversationLog: [],
+  });
+  hunted = (await run("dashboard", { actorId: "support" })).active.jobs.find(
+    (j: Row) => j.jobId === "job3",
+  );
+  assert.ok(
+    hunted.checks.some(
+      (c: Row) => c.key === "profile:suitableLink" && !c.canCarry,
+    ),
+  );
+  await db.patch("linkedProspect", {
+    currentStage: "rejected",
+    lastStageChangedAt: clock,
+  });
+  await db.patch("suitableLink", { outcomeAt: clock + 1 });
+  hunted = (await run("dashboard", { actorId: "support" })).active.jobs.find(
+    (j: Row) => j.jobId === "job3",
+  );
+  assert.ok(
+    hunted.checks.some((c: Row) => c.label.includes("closed in the pipeline")),
+  );
+
   put("applications", {
     _id: "app",
     candidateId: "candidate",

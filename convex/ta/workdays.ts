@@ -588,6 +588,33 @@ async function jobView(
           .first()
       : null;
     const hasApp = !!linkedApp;
+    if (
+      link.outcome === "shortlisted" &&
+      linkedApp &&
+      ["new_cvs", "matched_candidates"].includes(linkedApp.currentStage)
+    ) {
+      add(
+        `profile:${link._id}`,
+        `${link.name ?? "LinkedIn profile"}: linked CV still needs shortlisting and Director Review`,
+        "profile",
+        `${base}/hh/links`,
+      );
+      continue;
+    }
+    if (
+      link.outcome === "shortlisted" &&
+      linkedApp &&
+      ["rejected", "unresponsive"].includes(linkedApp.currentStage) &&
+      (link.outcomeAt ?? link.createdAt) > linkedApp.lastStageChangedAt
+    ) {
+      add(
+        `profile:${link._id}`,
+        `${link.name ?? "LinkedIn profile"}: newly selected profile is closed in the pipeline; recheck the decision`,
+        "profile",
+        `${base}/hh/links`,
+      );
+      continue;
+    }
     if (["shortlisted", "cv_received"].includes(link.outcome) && !hasApp)
       add(
         `profile:${link._id}`,
