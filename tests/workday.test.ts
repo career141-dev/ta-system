@@ -8,6 +8,8 @@ import {
 } from "../src/lib/workday";
 import * as workdays from "../convex/ta/workdays";
 import { assertWorkdayScope } from "../convex/lib/workdayScope";
+import * as openings from "../convex/ta/openings";
+import { recordJdReview } from "../convex/lib/workdayChecks";
 
 // Exercise real mutation handlers with synthetic rows, without a backend or messages.
 type Row = Record<string, any>;
@@ -100,7 +102,7 @@ const db = {
     return query;
   },
 };
-const ctx = { db, auth: { getUserIdentity: async () => null }, scheduler: { runAt: async () => null } } as any;
+const ctx = { db, auth: { getUserIdentity: async () => null }, scheduler: { runAt: async () => null, runAfter: async () => null } } as any;
 const run = (name: keyof typeof workdays, args: Row) =>
   (workdays[name] as any)._handler(ctx, args);
 const user = (id: string, taRole: string) =>
@@ -227,7 +229,11 @@ try {
   const blocked = await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true });
   assert.equal(blocked.ok, false);
   assert.ok(blocked.blockers.some((b: string) => b.includes("Excel")));
+  assert.ok(blocked.blockers.some((b: string) => b.includes("Job description")));
+  await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "jd" }), /approve the job description/);
   for (const [actorId, jobId] of [["ta", "job1"], ["ta", "job2"], ["support", "job1"], ["support", "job3"]]) {
+    await db.patch(jobId, { jobDescription: `Synthetic JD for ${jobId}`, jdStatus: "approved" });
+    await run("saveCheck", { actorId, jobId, kind: "jd" });
     if (!rows("researchReports").some(r => r.openingId === jobId)) put("researchReports", { _id: `research:${jobId}`, openingId: jobId, fields: {}, generatedAt: clock });
     put("jobPosts", { _id: `linkedin:${jobId}:${actorId}`, openingId: jobId, channel: "LinkedIn", externalUrl: "https://www.linkedin.com/jobs/view/123", postedAt: clock });
     for (let i = 0; i < 3; i++) put("linkVault", { _id: `setup:${actorId}:${jobId}:${i}`, openingId: jobId, addedBy: actorId, createdAt: clock + i, linkedinUrl: `https://linkedin.com/in/${actorId}-${jobId}-${i}`, outcome: "contacted", conversationLog: [], isEyeMarked: false });
@@ -246,6 +252,44 @@ try {
   await run("saveCheck", { actorId: "ta", jobId: "job1", kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
   checkedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
   assert.equal(checkedJob.checks.find((c: Row) => c.key.startsWith("chatgpt:")).completedAt, confirmedAt, "Repeated confirmations keep the completion time");
+  const jdAt = checkedJob.checks.find((c: Row) => c.key.startsWith("jd_review:")).completedAt;
+  await run("saveCheck", { actorId: "ta", jobId: "job1", kind: "jd" });
+  assert.equal((await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:")).completedAt, jdAt);
+  put("jobAssignments", { _id: "jdAssignment", jobId: "job1", userId: "ta", assignmentRole: "primary_recruiter", isActive: true });
+  clock += 10;
+  await (openings.saveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1", jdMarkdown: "Changed synthetic JD" });
+  for (const actorId of ["ta", "support"]) {
+    const jdCheck = (await run("dashboard", { actorId })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
+    assert.equal(jdCheck.status, "incomplete", "A shared JD edit reopens every TA's review");
+    assert.ok(jdCheck.events.some((e: Row) => e.status === "incomplete"));
+  }
+  assert.equal((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).ok, false);
+  assert.equal((await run("finish", { actorId: "ta", workdayId: day.id })).ok, false);
+  await (openings.saveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1", jdMarkdown: "Synthetic JD for job1" });
+  assert.equal((await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:")).status, "incomplete", "Restoring old text must not restore an invalidated review");
+  await (openings.approveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1" });
+  const approvedCheck = (await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
+  assert.equal(approvedCheck.status, "complete", "The existing approval action records the approving TA's review");
+  assert.equal(approvedCheck.completedAt, clock);
+  assert.equal(approvedCheck.completedBy, "ta");
+  assert.equal((await run("dashboard", { actorId: "support" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:")).status, "incomplete", "Another TA's approval does not confirm this TA's review");
+  await run("saveCheck", { actorId: "support", jobId: "job1", kind: "jd" });
+  const leadJd = (await run("dashboard", { actorId: "lead", detail: true })).team.find((d: Row) => d.userId === "ta").jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
+  assert.equal(leadJd.completedAt, clock);
+  assert.equal(leadJd.completedBy, "ta");
+  clock += 10;
+  await (openings.approveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1", jdMarkdown: "Revised and reviewed in one approval" });
+  const revisedJd = (await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
+  assert.equal(revisedJd.completedAt, clock, "Editing and approving together records a new review time");
+  assert.deepEqual(revisedJd.events.slice(-2).map((e: Row) => e.status), ["incomplete", "complete"]);
+  await run("saveCheck", { actorId: "support", jobId: "job1", kind: "jd" });
+  // A changed qualifying roster does not shift the time of a continuous completion.
+  const profileAt = (await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("excel_profiles:")).completedAt;
+  put("linkVault", { _id: "fourthProfile", openingId: "job1", addedBy: "ta", createdAt: clock, linkedinUrl: "https://linkedin.com/in/fourth", outcome: "contacted", conversationLog: [] });
+  await db.patch("setup:ta:job1:0", { linkedinUrl: "" });
+  await workdays.refreshWorkdayChecks(ctx, "job1" as any, "ta" as any);
+  assert.equal((await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("excel_profiles:")).completedAt, profileAt);
+  await db.patch("setup:ta:job1:0", { linkedinUrl: "https://linkedin.com/in/ta-job1-0" });
   await db.patch("research:job1", { fields: { country: "Sri Lanka" } });
   await workdays.refreshWorkdayChecks(ctx, "job1" as any, "ta" as any);
   checkedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
@@ -540,6 +584,8 @@ try {
   assert.equal(finishedStatus.lastFinishedAt, clock);
   assert.equal(finishedStatus.lastFinishedDate, workdayDate(clock));
   assert.equal(completionBlockers(frozen.jobs).length, 0);
+  await (openings.saveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1", jdMarkdown: "Later JD after the finished day" });
+  assert.deepEqual((await run("dashboard", { actorId: "ta", detail: true })).history[0].jobs, frozen.jobs, "Finished records keep the original JD review snapshot");
   // Current assignments must not disappear behind an older global job-list limit.
   for (let i = 0; i < 1005; i++)
     put("jobs", { _id: `older:${i}`, title: "Older job", assignedTaIds: [] });
@@ -569,11 +615,18 @@ try {
       taLeadId: "lead",
       assignedTaIds: ["ta2"],
     });
+  await db.patch("multi1", { jobDescription: "Previously reviewed JD", jdStatus: "approved" });
+  await recordJdReview(ctx, "ta2" as any, "multi1" as any, "Previously reviewed JD");
+  const reusedJdAt = clock;
+  clock += 10;
   const multiDay = await run("start", {
     actorId: "ta2",
     jobId: "multi1",
     workType: "100%",
   });
+  const reusedJd = (await run("dashboard", { actorId: "ta2" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
+  assert.equal(reusedJd.status, "complete", "A saved review before starting satisfies setup");
+  assert.equal(reusedJd.completedAt, reusedJdAt);
   for (const jobId of ["multi2", "multi3"])
     assert.equal(
       (await run("addPosition", {
@@ -611,6 +664,29 @@ try {
   }
   put("jobs", { _id: "manual:10", title: "One too many", taLeadId: "lead", assignedTaIds: ["carryTa"] });
   await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId: "manual:10", workType: "100%" }), /at most ten/);
+  // A later Add-on session must not reuse this day's earlier email/explanation.
+  user("addonTa", "ta");
+  put("jobs", { _id: "addonJob", title: "Add-on job", status: "active", taLeadId: "lead", assignedTaIds: ["addonTa"] });
+  put("taWorkdays", { _id: "addonPast", userId: "addonTa", date: workdayDate(clock - 86400000), startedAt: clock - 86400000, finishedAt: clock - 1, jobs: [{ jobId: "addonJob", workType: "100%", addedAt: clock - 86400000, modeHistory: [] }] });
+  const addonDay = await run("start", { actorId: "addonTa", jobId: "addonJob", workType: "Follow-up" });
+  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "noCandidates", reason: "Earlier session found no candidates" });
+  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
+  put("taWorkdayMail", { _id: "earlierEmail", workdayId: addonDay.id, userId: "addonTa", jobId: "addonJob", applicationIds: [], status: "accepted", startedAt: clock, acceptedAt: clock, finalizedAt: clock });
+  clock += 20;
+  await run("setWorkType", { actorId: "addonTa", workdayId: addonDay.id, jobId: "addonJob", workType: "Add-on" });
+  let addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_candidate:")).status, "incomplete");
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
+  assert.equal(addonChecks.some((c: Row) => c.key.startsWith("jd_review:")), false, "Add-on does not repeat JD setup");
+  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "noCandidates", reason: "No additional suitable candidates in this Add-on session" });
+  addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_candidate:")).status, "complete");
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
+  const addonMail = await run("beginMail", { actorId: "addonTa", jobId: "addonJob", applicationIds: [], subject: "Synthetic Add-on update", sentTo: "director@example.invalid", researchLink: "https://chatgpt.com/share/12345678" });
+  await run("mailResult", { id: addonMail.id, status: "accepted" });
+  await run("finalizeMail", { actorId: "addonTa", id: addonMail.id });
+  addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "complete");
   console.log(
     "  ok  workday times, direct assigned positions, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );

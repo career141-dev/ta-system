@@ -6,6 +6,10 @@ export const RESEARCH_FIELDS = ["similarDesignation", "websiteLink", "servicesPr
 export const RESEARCH_LABELS: Record<typeof RESEARCH_FIELDS[number], string> = { similarDesignation: "Similar designation", websiteLink: "Company website", servicesProvider: "Services offered", country: "Country", location: "Location", competitors: "Competitors", socialMedia: "Social media", companyOverview: "Company overview" };
 export const researchVersion = (report: { generatedAt: number; fields: unknown } | null) =>
   report ? JSON.stringify([report.generatedAt, report.fields]) : "";
+/** A later Add-on session must not inherit an earlier session's submission. */
+export function workSessionStart(entry: { workType: WorkType; addedAt: number; modeHistory: { at: number; workType: string }[] }) {
+  return entry.workType === "Add-on" ? entry.modeHistory.filter(h => h.workType === "Add-on").at(-1)?.at ?? entry.addedAt : entry.addedAt;
+}
 export function researchMissing(fields: Record<string, unknown>, reasons: Record<string, string>) {
   return RESEARCH_FIELDS.filter((key) => {
     const value = fields[key];
@@ -23,6 +27,7 @@ export function linkedinPostUrl(value: string | null | undefined) {
 
 export interface SetupEvidence {
   jobId: string; workType: WorkType; userId: string;
+  jd?: { version: string; approved: boolean; reviewedVersion?: string; at?: number; by?: string };
   post?: { id: string; at?: number; by?: string };
   research: { version: string; reviewedVersion?: string; missing: string[]; unavailable?: string[]; at?: number; by?: string };
   suggestions: { successful: boolean; pending: number; count: number; version: string; emptyReason?: string; at?: number; by?: string };
@@ -43,6 +48,10 @@ export function setupChecks(e: SetupEvidence): WorkdayCheck[] {
       completedAt: complete ? at : undefined, completedBy: complete ? by : undefined, progress, evidence, blocksEmail });
   };
   if (e.workType === "100%") {
+    const jdReviewed = !!e.jd?.version.trim() && e.jd.approved && e.jd.version === e.jd.reviewedVersion;
+    add("jd_review", "Job description reviewed", `${base}/jd`, jdReviewed,
+      !e.jd?.version.trim() ? "Create the job description" : !e.jd.approved ? "Review and approve the job description" : jdReviewed ? "Reviewed and confirmed" : "Confirm your review of the approved job description",
+      e.jd?.at, e.jd?.by, `jd:${e.jobId}`);
     add("linkedin_post", "LinkedIn job post", `${base}/linkedin-job`, !!e.post, e.post ? "Connected" : "Add a LinkedIn job or post link", e.post?.at, e.post?.by, e.post?.id);
     const reviewed = !!e.research.version && e.research.version === e.research.reviewedVersion && !e.research.missing.length;
     add("research", "Research fields reviewed", `${base}/hh/research`, reviewed,

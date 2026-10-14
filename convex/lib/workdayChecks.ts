@@ -1,11 +1,11 @@
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS } from "../../src/lib/workdayRequirements";
+import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS, workSessionStart } from "../../src/lib/workdayRequirements";
 import type { WorkdayCheck } from "../../src/lib/workday";
 import { linkKey } from "../../src/lib/url";
 
 export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, entry: Doc<"taWorkdays">["jobs"][number]) {
-  const [notes, research, posts, links, suggestions, runs, apps, receipts, rounds, provenance] = await Promise.all([
+  const [notes, research, posts, links, suggestions, runs, apps, receipts, rounds, provenance, job] = await Promise.all([
     ctx.db.query("taWorkdayCheckNotes").withIndex("by_user_job", q => q.eq("userId", day.userId).eq("jobId", entry.jobId)).first(),
     ctx.db.query("researchReports").withIndex("by_opening", q => q.eq("openingId", entry.jobId)).first(),
     ctx.db.query("jobPosts").withIndex("by_opening", q => q.eq("openingId", entry.jobId)).collect(),
@@ -16,6 +16,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     ctx.db.normalizeId("taWorkdays", day._id) ? ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect() : Promise.resolve([]),
     ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", entry.jobId)).collect(),
     ctx.db.query("taWorkdayEvidence").withIndex("by_job", q => q.eq("jobId", entry.jobId)).collect(),
+    ctx.db.get(entry.jobId),
   ]);
   const applicable = suggestions.filter(s => !s.generatedFor || s.generatedFor === day.userId);
   const latestRun = runs.filter(r => !r.userId || r.userId === day.userId).sort((a,b) => b.at - a.at)[0];
@@ -29,10 +30,12 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const unique = [...new Map(links.filter(l => !!linkKey(l.linkedinUrl)).sort((a,b) => b.createdAt-a.createdAt)
     .map(l => [linkKey(l.linkedinUrl) ?? l.linkedinUrl, l])).values()].sort((a,b) => a.createdAt-b.createdAt);
   const sentIds = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds as string[]));
-  const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt);
-  const ready = apps.filter(a => a.currentStage === "second_shortlist" && !sentIds.has(a._id));
+  const since = workSessionStart(entry);
+  const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt && (entry.workType !== "Add-on" || r.startedAt >= since));
+  const ready = apps.filter(a => a.currentStage === "second_shortlist" && !sentIds.has(a._id) && (entry.workType !== "Add-on" || a.lastStageChangedAt >= since));
   const ownNotes = notes?.workdayId === day._id ? notes : null;
   const checks = setupChecks({ jobId: entry.jobId, workType: entry.workType, userId: day.userId,
+    jd: { version: job?.jobDescription ?? "", approved: job?.jdStatus === "approved", reviewedVersion: notes?.jdVersion, at: notes?.jdReviewedAt, by: day.userId },
     post: post ? { id: post._id, at: postEvidence?.at ?? post.postedAt ?? undefined, by: postEvidence?.by } : undefined,
     research: { version: researchVersion(research), reviewedVersion: notes?.researchVersion,
       missing: researchMissing(research?.fields ?? {}, notes?.unavailableReasons ?? {}),
@@ -43,7 +46,8 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
       at: latest.length ? suggestionEvidence?.at : notes?.emptySuggestionsAt, by: latest.length ? suggestionEvidence?.by : day.userId },
     profiles: { count: unique.length, at: unique[2]?.createdAt }, ready: ready.length,
     submitted: new Set(accepted.flatMap(r => r.applicationIds as string[])).size,
-    noCandidateReason: ownNotes?.noCandidateReason, noCandidateAt: ownNotes?.noCandidateAt,
+    noCandidateReason: entry.workType !== "Add-on" || (ownNotes?.noCandidateAt ?? 0) >= since ? ownNotes?.noCandidateReason : undefined,
+    noCandidateAt: ownNotes?.noCandidateAt,
     chatgptLink: ownNotes?.chatgptLink ?? accepted.at(-1)?.researchLink,
     confirmedAt: ownNotes?.confirmedAt ?? accepted.at(-1)?.acceptedAt,
     emailAt: accepted.length ? Math.min(...accepted.map(r => r.finalizedAt!)) : undefined,
@@ -53,7 +57,20 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     candidateCheck.completedAt = Math.min(...ready.map(a => a.lastStageChangedAt));
     candidateCheck.evidence = ready.map(a => a._id).join(",");
   }
-  return { checks, notes, research, suggestionVersion, latest, latestRun };
+  return { checks, notes, research, suggestionVersion, latest, latestRun, job };
+}
+
+/** Editing shared text invalidates every TA's review, including when old text is restored. */
+export async function invalidateJdReviews(ctx: MutationCtx, jobId: Id<"jobs">) {
+  const notes = await ctx.db.query("taWorkdayCheckNotes").withIndex("by_job", q => q.eq("jobId", jobId)).collect();
+  for (const note of notes) if (note.jdVersion !== undefined) await ctx.db.patch(note._id, { jdVersion: undefined });
+}
+
+export async function recordJdReview(ctx: MutationCtx, userId: Id<"users">, jobId: Id<"jobs">, version: string) {
+  const notes = await ctx.db.query("taWorkdayCheckNotes").withIndex("by_user_job", q => q.eq("userId", userId).eq("jobId", jobId)).first();
+  const patch = { jdVersion: version, jdReviewedAt: notes?.jdVersion === version ? notes.jdReviewedAt ?? Date.now() : Date.now() };
+  if (notes) await ctx.db.patch(notes._id, patch);
+  else await ctx.db.insert("taWorkdayCheckNotes", { userId, jobId, ...patch });
 }
 
 /** Event reads never manufacture a completion time for legacy evidence. */
@@ -75,7 +92,7 @@ export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taW
     const history = events.filter(e => e.key === c.key).sort((a,b) => a.at-b.at);
     const last = history.at(-1);
     const same = last?.status === c.status;
-    return { ...c, completedAt: c.completedAt ?? (same ? last?.completedAt : undefined),
+    return { ...c, completedAt: same && c.status === "complete" ? last?.completedAt ?? c.completedAt : c.completedAt,
       completedBy: names.get(c.completedBy ?? "") ?? c.completedBy ?? (same ? names.get(last?.completedBy ?? "") ?? last?.completedBy : undefined),
       events: history.map(e => ({ status: e.status, at: e.at, by: names.get(e.by ?? ""), evidence: e.evidence, observed: e.observed })) };
   });

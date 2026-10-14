@@ -73,13 +73,14 @@ export default defineSchema({
   // Saved confirmations belong to a TA/job; daily exceptions never carry to another day.
   taWorkdayCheckNotes: defineTable({
     userId: v.id("users"), jobId: v.id("jobs"),
+    jdVersion: v.optional(v.string()), jdReviewedAt: v.optional(v.number()),
     researchVersion: v.optional(v.string()), researchReviewedAt: v.optional(v.number()),
     unavailableReasons: v.optional(v.any()),
     emptySuggestionsVersion: v.optional(v.string()), emptySuggestionsReason: v.optional(v.string()),
     emptySuggestionsAt: v.optional(v.number()),
     workdayId: v.optional(v.id("taWorkdays")), noCandidateReason: v.optional(v.string()),
     noCandidateAt: v.optional(v.number()), chatgptLink: v.optional(v.string()), confirmedAt: v.optional(v.number()),
-  }).index("by_user_job", ["userId", "jobId"]),
+  }).index("by_user_job", ["userId", "jobId"]).index("by_job", ["jobId"]),
   taWorkdayTaskEvents: defineTable({
     workdayId: v.id("taWorkdays"), userId: v.id("users"), jobId: v.id("jobs"),
     key: v.string(), label: v.string(), href: v.string(), kind: v.string(),

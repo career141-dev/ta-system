@@ -10,7 +10,7 @@
 import { mapIndustry } from "../lib/jobRequirements";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
-import { Doc, Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { projectOpening } from "./model/projections";
 import { requireActor, assertJobAccess, optionalActor} from "./guard";
 import { scheduleExtraction } from "./requirements";
@@ -19,7 +19,8 @@ import { firstPostFor } from "../lib/firstPost";
 import { SCORE_AFTER_APPROVAL_MS } from "../lib/jdGate";
 import { internal } from "../_generated/api";
 import { workingStageKey } from "../../src/lib/workingStage";
-import { recordActiveMode } from "./workdays";
+import { recordActiveMode, refreshWorkdayChecks } from "./workdays";
+import { invalidateJdReviews, recordJdReview } from "../lib/workdayChecks";
 import { isGone } from "../../src/lib/bin";
 
 
@@ -172,6 +173,9 @@ export const approveJd = internalMutation({
     if (!job) throw new Error("Opening not found");
     await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
 
+    const approvedText = args.jdMarkdown ?? job.jobDescription;
+    if (!approvedText.trim()) throw new Error("Add the job description before approving it.");
+    if (approvedText !== job.jobDescription) await invalidateJdReviews(ctx, jobId);
     await ctx.db.patch(jobId, {
       ...(args.jdMarkdown !== undefined ? { jobDescription: args.jdMarkdown } : {}),
       jdStatus: "approved" as const,
@@ -179,6 +183,9 @@ export const approveJd = internalMutation({
       jdApprovedAt: Date.now(),
       updatedAt: new Date().toISOString(),
     });
+    if (approvedText !== job.jobDescription) await refreshWorkdayChecks(ctx, jobId, user._id);
+    await recordJdReview(ctx, user._id, jobId, approvedText);
+    await refreshWorkdayChecks(ctx, jobId, user._id);
     // The approved JD is what matching scores against, so its structured
     // requirements are read out of it now — filling blanks, never overwriting
     // what a person corrected (ta/requirements.ts). A JD from the chat
@@ -224,7 +231,9 @@ export const saveJd = internalMutation({
     if (!job) throw new Error("Opening not found");
     await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
     const changed = (job.jobDescription ?? "") !== args.jdMarkdown;
+    if (changed) await invalidateJdReviews(ctx, jobId);
     await ctx.db.patch(jobId, { jobDescription: args.jdMarkdown, updatedAt: new Date().toISOString() });
+    await refreshWorkdayChecks(ctx, jobId, user._id);
     if (changed && job.jdStatus === "approved" && args.jdMarkdown.trim()) {
       if (args.detailsFromJd) await scheduleExtraction(ctx, jobId, "replace", true);
       else await scheduleExtraction(ctx, jobId, "fill");

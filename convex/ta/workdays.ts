@@ -19,7 +19,7 @@ import { workingStageKey } from "../../src/lib/workingStage";
 import { colomboDayStart } from "../../src/lib/calendar";
 import { assertWorkdayScope } from "../lib/workdayScope";
 import { requiredChecks, withTaskHistory } from "../lib/workdayChecks";
-import { researchMissing, researchVersion } from "../../src/lib/workdayRequirements";
+import { researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
 import { validateResearchLink } from "../../src/lib/eod-format";
 import {
   applyCarryForwards,
@@ -820,7 +820,7 @@ export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, 
       const status = check.waiting ? "waiting" : check.status ?? "incomplete";
       const evidence = check.waiting ? JSON.stringify(check.waiting) : check.evidence;
       if (previous?.status === status && previous.evidence === evidence) continue;
-      const completedAt = status === "complete" ? check.completedAt ?? (previous?.status === "incomplete" && actorId ? now : undefined) : undefined;
+      const completedAt = status === "complete" ? previous?.status === "complete" ? previous.completedAt ?? check.completedAt : check.completedAt ?? (previous?.status === "incomplete" && actorId ? now : undefined) : undefined;
       const completedBy = status === "complete" ? previous?.status === "complete" ? previous.completedBy : completedAt ? check.completedBy ?? actorId : undefined : undefined;
       await ctx.db.insert("taWorkdayTaskEvents", { workdayId: day._id, userId: day.userId, jobId,
         key: check.key, label: check.label, href: check.href, kind: check.kind, status, at: now,
@@ -832,7 +832,7 @@ export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, 
 }
 
 export const saveCheck = internalMutation({
-  args: { actorId: v.string(), jobId: v.id("jobs"), kind: v.union(v.literal("research"), v.literal("emptySuggestions"), v.literal("noCandidates"), v.literal("chatgpt")),
+  args: { actorId: v.string(), jobId: v.id("jobs"), kind: v.union(v.literal("jd"), v.literal("research"), v.literal("emptySuggestions"), v.literal("noCandidates"), v.literal("chatgpt")),
     reason: v.optional(v.string()), reasons: v.optional(v.record(v.string(), v.string())), link: v.optional(v.string()), confirmed: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId); requireWorker(user);
@@ -845,7 +845,10 @@ export const saveCheck = internalMutation({
     const patch: Record<string, unknown> = evidence.notes?.workdayId !== day._id
       ? { noCandidateReason: undefined, noCandidateAt: undefined, chatgptLink: undefined, confirmedAt: undefined } : {};
     const reason = args.reason?.trim();
-    if (args.kind === "research") {
+    if (args.kind === "jd") {
+      if (!evidence.job?.jobDescription?.trim() || evidence.job.jdStatus !== "approved") throw new Error("Review and approve the job description first.");
+      Object.assign(patch, { jdVersion: evidence.job.jobDescription, jdReviewedAt: evidence.notes?.jdVersion === evidence.job.jobDescription ? evidence.notes.jdReviewedAt ?? now : now });
+    } else if (args.kind === "research") {
       if (!evidence.research) throw new Error("Run Research first.");
       const reasons = args.reasons ?? evidence.notes?.unavailableReasons ?? {};
       if (Object.values(reasons).some(r => typeof r !== "string" || r.length > 1000)) throw new Error("Keep each unavailable reason under 1,000 characters.");
@@ -1143,7 +1146,7 @@ export const beginMail = internalMutation({
       );
     if (
       !args.applicationIds.length &&
-      previous.some((r) => r.status === "accepted" && !r.applicationIds.length)
+      previous.some((r) => r.status === "accepted" && !r.applicationIds.length && (entry.workType !== "Add-on" || r.startedAt >= workSessionStart(entry)))
     )
       throw new Error(
         "This workday's activity email has already been sent for the job.",

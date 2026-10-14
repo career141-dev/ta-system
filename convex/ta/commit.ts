@@ -27,6 +27,7 @@ import { TABLES, looselySame, sameValue, type ModelCx, type Row } from "./model/
 import { refreshEmployersText } from "../candidates/candidates";
 import { assertWorkdayScope } from "../lib/workdayScope";
 import { refreshWorkdayChecks } from "./workdays";
+import { invalidateJdReviews, recordJdReview } from "../lib/workdayChecks";
 import type { Doc, Id } from "../_generated/dataModel";
 
 const opValidator = v.object({
@@ -203,6 +204,18 @@ export const apply = internalMutation({
     }
     const affectedJobs = new Set<Id<"jobs">>();
     for (const op of args.ops) {
+      if (op.table === "openings") {
+        const jobId = (ids[op.key] ?? op.key) as Id<"jobs">;
+        const job = await ctx.db.get(jobId);
+        if (job) {
+          if (op.kind === "update" && op.changed?.includes("jdMarkdown") && op.before?.jdMarkdown !== op.after?.jdMarkdown) {
+            await invalidateJdReviews(ctx, jobId);
+            await refreshWorkdayChecks(ctx, jobId, actorUser?._id);
+          }
+          if (actorUser && job.jdStatus === "approved" && job.jobDescription.trim() && op.changed?.includes("jdApprovedAt") && job.jdApprovedBy === actorUser._id) await recordJdReview(ctx, actorUser._id, jobId, job.jobDescription);
+          await refreshWorkdayChecks(ctx, jobId, actorUser?._id);
+        }
+      }
       const raw = op.after?.openingId ?? op.before?.openingId;
       if (raw && ctx.db.normalizeId("jobs", raw)) {
         affectedJobs.add(raw as Id<"jobs">);

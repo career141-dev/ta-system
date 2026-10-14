@@ -12,11 +12,20 @@ Changing a carried job to Add-on makes it a deliberately selected job.
 
 ## Requirements
 
-100% requires a LinkedIn job/post link, all eight main research fields filled or
+100% requires the TA's confirmed review of the approved job description, a
+LinkedIn job/post link, all eight main research fields filled or
 explained as unavailable and reviewed, a successful Suggestions run reviewed
 through its latest applicable round, and three distinct profiles added by that
 TA to Excel Tables. Existing saved setup counts. Successful empty suggestion
 searches need an explanation; failed searches do not count.
+
+Approving a JD records the approving TA's review automatically. Other assigned
+TAs confirm their own review from the sidebar. Editing the JD invalidates every
+TA's confirmation, including when an old version is restored. Reconfirmation
+records a new server timestamp; repeated confirmation preserves the original
+time. Existing approvals without a saved reviewed version need confirmation;
+there is no automatic historical backfill. Follow-up and Add-on do not repeat
+the JD setup requirement. Leads see the review's actor, time, and event history.
 
 100% and Add-on require a fresh owned Director Review candidate or a saved reason
 why none were suitable. TA Shortlist may be zero. Follow-up requires due actions
@@ -42,6 +51,10 @@ Daily exceptions and link confirmation are scoped to the workday. Research
 confirmation is tied to the report's generated timestamp and field contents;
 new edits or regeneration invalidate it. Empty-search explanations are tied to
 the applicable run version.
+
+Add-on submission evidence belongs to the current Add-on session: an earlier
+email or no-candidate explanation does not complete a later session. A profile
+roster change that remains above the threshold preserves the completion time.
 
 Relevant commit, stage-transition, headhunted-upload and workday mutations record
 events. Dashboard queries never write completion timestamps. A completed task

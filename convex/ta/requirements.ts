@@ -22,7 +22,7 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { Doc, Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess } from "./guard";
 import {
   EDUCATION_LEVELS, INDUSTRIES, RECRUITMENT_TYPES, REQUIREMENT_FIELDS, SENIORITY_LEVELS,
