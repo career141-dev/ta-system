@@ -50,6 +50,7 @@ export async function GET(
   const level = Math.max(0, Math.floor(Number(sp.get("level"))) || 0);
   const addons = sp.get("addons") === "1" || sp.get("addons") === "true";
   const by = sp.get("by") ?? "";
+  const imark = sp.get("imark") === "1";
   const exportAll = sp.get("all") === "1";
 
   const facts = new Map(
@@ -62,13 +63,14 @@ export async function GET(
     })
   );
 
-  type F = { status: string; level: number; addons: boolean; by: string };
+  type F = { status: string; level: number; addons: boolean; imark: boolean; by: string };
   const pass = (r: (typeof everyRow)[number]["row"], f: F) => {
     const x = facts.get(r.id)!;
     return (
       (!f.status || x.interest === f.status) &&
       (!f.level || r.level === f.level) &&
       (!f.addons || !!r.isAddOn) &&
+      (!f.imark || r.isEyeMarked) &&
       (!f.by || r.addedBy === f.by)
     );
   };
@@ -77,7 +79,7 @@ export async function GET(
     ? everyRow.map((x) => x.row)
     : everyRow
         .filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber))
-        .filter(({ row }) => pass(row, { status, level, addons, by }))
+        .filter(({ row }) => pass(row, { status, level, addons, imark, by }))
         .map((x) => x.row);
 
   const formattedRows = formatLinkVaultExportRows(

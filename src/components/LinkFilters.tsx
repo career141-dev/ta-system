@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, useTransition } from "react";
 
 /**
  * The filter side of Excel Tables' sheet bar (the desk, 29 Sep): which people
- * to show — all, pending, interested, not interested — and add-ons only. The
+ * to show — all, pending, interested, not interested — plus iMark and add-ons. The
  * sheets (All, L1, L2…) are the tabs on the other side; these narrow the
  * sheet that is open. Each choice is a link the server worked out, so the
  * address stays the source of truth.
@@ -24,10 +24,12 @@ export function LinkFilters({
   status,
   options,
   addons,
+  imark,
 }: {
   status: string;
   options: { key: string; label: string; count: number; href: string }[];
   addons: { on: boolean; count: number; href: string };
+  imark: { on: boolean; count: number; href: string };
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -111,6 +113,11 @@ export function LinkFilters({
           </ul>
         )}
       </div>
+      <button type="button" onClick={() => go(imark.href)} aria-pressed={imark.on} className={chip(imark.on)}>
+        {imark.on && <span aria-hidden>✓</span>}
+        iMark
+        <span className="tabular-nums text-ink-faint">{imark.count}</span>
+      </button>
       <button type="button" onClick={() => go(addons.href)} aria-pressed={addons.on} className={chip(addons.on)}>
         {addons.on && <span aria-hidden>✓</span>}
         Add-ons only

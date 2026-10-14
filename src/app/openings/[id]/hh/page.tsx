@@ -2,10 +2,8 @@ import Link from "next/link";
 import { repo } from "@/data/store";
 import { ProjectHeader } from "../ProjectHeader";
 import { primeStore } from "@/data/prime";
-import { EyeMarkedSection } from "@/components/EyeMarkedSection";
 import { LiveTableRefresh } from "@/components/LiveTableRefresh";
 import { requireSourcingSeat } from "../sourcingGate";
-import { primeEyeMarked } from "@/lib/eyeMarkedStore";
 import { after } from "next/server";
 import { matchUnchecked } from "@/lib/cvMatch";
 
@@ -13,7 +11,6 @@ export default async function HeadhuntingOverview({ params }: { params: Promise<
   const { id } = await params;
   await primeStore({ openingId: id });
   const user = await requireSourcingSeat(id);
-  await primeEyeMarked(id, user);
   after(() => matchUnchecked(id, user.id).catch((e) => console.warn(`[cvMatch ${id}]`, (e as Error).message)));
   const vault = repo.linkVault(id);
   const eye = vault.filter((v) => v.isEyeMarked);
@@ -95,7 +92,6 @@ export default async function HeadhuntingOverview({ params }: { params: Promise<
               }%.`}
         </p>
       </section>
-      <EyeMarkedSection openingId={id} user={user} />
     </>
   );
 }

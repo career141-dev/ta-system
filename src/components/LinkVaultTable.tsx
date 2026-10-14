@@ -9,6 +9,8 @@ import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
 import { LinkFilters } from "./LinkFilters";
 import { LinkExportMenu } from "./LinkExportMenu";
+import { visibleEyeMarked } from "@/lib/eyeMarkedStore";
+import { HhUpload } from "./HhUpload";
 import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 
 const PAGE_SIZE = 25;
@@ -29,6 +31,7 @@ export function LinkVaultTable({
   status = "",
   level = 0,
   addons = false,
+  imark = false,
   by = "",
   page = 1,
 }: {
@@ -42,10 +45,13 @@ export function LinkVaultTable({
   level?: number;
   /** Add-ons only. */
   addons?: boolean;
+  /** Only eye-marked profiles. */
+  imark?: boolean;
   /** Only the rows this person added; "" is everyone's. */
   by?: string;
   page?: number;
 }) {
+  const progress = new Map(visibleEyeMarked(openingId, user).items.map((item) => [item.id, item]));
   const users = repo.users();
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
   // A TA's table is their own, plus whatever a lead put in for them. Another
@@ -70,20 +76,21 @@ export function LinkVaultTable({
       return [r.id, { app, interest: interestOf(r, app) }] as const;
     }),
   );
-  type F = { status: string; level: number; addons: boolean; by: string };
+  type F = { status: string; level: number; addons: boolean; imark: boolean; by: string };
   const pass = (r: (typeof everyRow)[number]["row"], f: F) => {
     const x = facts.get(r.id)!;
-    return (!f.status || x.interest === f.status) && (!f.level || r.level === f.level) && (!f.addons || !!r.isAddOn) && (!f.by || r.addedBy === f.by);
+    return (!f.status || x.interest === f.status) && (!f.level || r.level === f.level) && (!f.addons || !!r.isAddOn) && (!f.imark || r.isEyeMarked) && (!f.by || r.addedBy === f.by);
   };
   const searched = everyRow.filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber));
-  const matching = searched.filter(({ row }) => pass(row, { status, level, addons, by }));
+  const matching = searched.filter(({ row }) => pass(row, { status, level, addons, imark, by }));
   const params = (next: Partial<F>) => {
-    const f = { status, level, addons, by, ...next };
+    const f = { status, level, addons, imark, by, ...next };
     const out: Record<string, string> = {};
     if (q) out.q = q;
     if (f.status) out.status = f.status;
     if (f.level) out.level = String(f.level);
     if (f.addons) out.addons = "1";
+    if (f.imark) out.imark = "1";
     if (f.by) out.by = f.by;
     return out;
   };
@@ -93,7 +100,7 @@ export function LinkVaultTable({
   };
   // A tab's count is what pressing it would show, with the other filters kept.
   const count = (next: Partial<F>) =>
-    searched.filter(({ row }) => pass(row, { status, level, addons, by, ...next })).length;
+    searched.filter(({ row }) => pass(row, { status, level, addons, imark, by, ...next })).length;
   // Everyone who added a row here, the viewer first as "Me" (1 Oct).
   const adders = [...new Set(everyRow.map(({ row }) => row.addedBy))].sort((a, b) =>
     a === user.id ? -1 : b === user.id ? 1 : (userNames[a] ?? "").localeCompare(userNames[b] ?? ""),
@@ -114,6 +121,12 @@ export function LinkVaultTable({
   return (
     <>
       <AddLinkForm openingId={openingId} canNote={canNote} />
+      {imark && (
+        <div className="mb-4 text-[13px] text-ink-soft">
+          <p className="mb-3">Call these candidates and request their CVs. Once received, add them to TA Follow-up and prepare them for Director Review.</p>
+          {can(user, "opening.act", { assignment: repo.assignmentFor(openingId, user.id) ?? null }).ok && <HhUpload openingId={openingId} />}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-rule">
         <nav aria-label="Sheets" className="flex min-w-0 flex-wrap items-end gap-0.5">
@@ -146,24 +159,27 @@ export function LinkVaultTable({
           <LinkFilters
             status={status}
             options={INTEREST_TABS.map((t) => ({ key: t.key, label: t.label, count: count({ status: t.key }), href: keep({ status: t.key }) }))}
+            imark={{ on: imark, count: count({ imark: true }), href: keep({ imark: !imark }) }}
             addons={{ on: addons, count: count({ addons: true }), href: keep({ addons: !addons }) }}
           />
           <LinkExportMenu
             openingId={openingId}
-            filters={{ q, status, level, addons, by }}
+            filters={{ q, status, level, addons, imark, by }}
             matchingCount={matching.length}
           />
         </div>
       </div>
 
       <div className="overflow-hidden rounded-b-xl border border-t-0 border-rule bg-surface">
-        {rows.length === 0 && (q || status || level || addons) && everyRow.length > 0 ? (
+        {rows.length === 0 && (q || status || level || addons || imark || by) && everyRow.length > 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
             {q
               ? "Nobody in this table matches that search."
-              : level && !status && !addons
+              : imark && !status && !level && !addons && !by
+                ? "No iMark candidates match this table. Eye-mark a profile to include it here."
+              : level && !status && !addons && !imark
                 ? `Nothing in L${level} yet. Links you add now go into your latest L.`
-                : addons && !status && !level
+                : addons && !status && !level && !imark
                 ? "No add-ons in this table yet. Links added while your stage is Add-on are tagged, or tag one with its Add-on button."
                 : "Nobody here matches those filters."}
           </p>
@@ -175,18 +191,22 @@ export function LinkVaultTable({
         ) : (
           <div className="divide-y divide-rule">
             {rows.map((r) => (
-              <LinkRow
-                key={r.id}
-                entry={r}
-                openingId={openingId}
-                addedByName={userNames[r.addedBy] ?? "—"}
-                onPipeline={facts.get(r.id)!.app}
-                interest={facts.get(r.id)!.interest}
-                userNames={userNames}
-                canNote={canNote}
-                viewerId={user.id}
-                readOnly={seesEveryTaRow(user) && r.addedBy !== user.id && !deskWide.has(r.addedBy)}
-              />
+              <div key={r.id} id={`eye-${r.id}`} className="scroll-mt-24">
+                {imark && progress.has(r.id) && (
+                  <p className={`px-5 pt-4 text-[12.5px] font-medium ${progress.get(r.id)!.blocked ? "text-warn" : "text-ink-soft"}`}>{progress.get(r.id)!.status}</p>
+                )}
+                <LinkRow
+                  entry={r}
+                  openingId={openingId}
+                  addedByName={userNames[r.addedBy] ?? "—"}
+                  onPipeline={facts.get(r.id)!.app}
+                  interest={facts.get(r.id)!.interest}
+                  userNames={userNames}
+                  canNote={canNote}
+                  viewerId={user.id}
+                  readOnly={seesEveryTaRow(user) && r.addedBy !== user.id && !deskWide.has(r.addedBy)}
+                />
+              </div>
             ))}
           </div>
         )}

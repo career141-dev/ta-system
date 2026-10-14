@@ -151,7 +151,9 @@ console.log("\nL1, L2, L3: started with + by each TA");
 }
 
 console.log("\nthe address bar");
-eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, addons: false, by: "" });
+eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, imark: false, addons: false, by: "" });
+eq("iMark filter is read", readLinkFilters({ imark: "1" }).imark, true);
+eq("other iMark values do not enable the filter", readLinkFilters({ imark: "false" }).imark, false);
 eq("a made-up status is All", readLinkFilters({ status: "maybe" }).status, "");
 eq("a bad L is All Ls", readLinkFilters({ level: "x" }).level, 0);
 

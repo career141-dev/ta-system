@@ -10,6 +10,7 @@ interface LinkExportMenuProps {
     status?: string;
     level?: number;
     addons?: boolean;
+    imark?: boolean;
     by?: string;
   };
   matchingCount: number;
@@ -43,6 +44,7 @@ export function LinkExportMenu({ openingId, filters, matchingCount }: LinkExport
     if (filters.status) p.status = filters.status;
     if (filters.level) p.level = String(filters.level);
     if (filters.addons) p.addons = "1";
+    if (filters.imark) p.imark = "1";
     if (filters.by) p.by = filters.by;
     for (const [k, v] of Object.entries(extra)) p[k] = v;
     return new URLSearchParams(p).toString();
