@@ -12,8 +12,13 @@ import { LinkExportMenu } from "./LinkExportMenu";
 import { visibleEyeMarked } from "@/lib/eyeMarkedStore";
 import { HhUpload } from "./HhUpload";
 import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
+import { bulkStages } from "@/lib/bulkStages";
+import { BulkBar, BulkStageControls } from "./BulkSelect";
+import { SubmitButton } from "./Submit";
+import { addLinksToPipeline } from "@/app/actions";
 
 const PAGE_SIZE = 25;
+const BULK_FORM = "bulk-links";
 
 /**
  * Excel Tables — spec §4.5, laid out to the Figma frame.
@@ -112,6 +117,11 @@ export function LinkVaultTable({
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const rows = slicePage(matching, current, PAGE_SIZE).map((x) => x.row);
+  const assignment = repo.assignmentFor(openingId, user.id) ?? null;
+  const stages = bulkStages(rows.flatMap((r) => {
+    const app = facts.get(r.id)?.app;
+    return app && can(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId }).ok ? [app.stage] : [];
+  }), can(user, "decide.director", { openingId, assignment }).ok, can(user, "decide.client", { openingId, assignment }).ok);
   // Sheet tabs, as in a workbook: the open one joins the table below it.
   const tab = (on: boolean) =>
     `-mb-px whitespace-nowrap rounded-t-lg border px-4 py-2 text-[12.5px] transition-colors ${
@@ -190,6 +200,13 @@ export function LinkVaultTable({
           </p>
         ) : (
           <div className="divide-y divide-rule">
+            <div className="px-4 pt-4 sm:px-6">
+              <BulkBar form={BULK_FORM} noun={["candidate", "candidates"]}>
+                <input type="hidden" name="openingId" value={openingId} />
+                <SubmitButton formAction={addLinksToPipeline} pendingLabel="Adding…" className="rounded-full bg-brand px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60">Add selected to pipeline</SubmitButton>
+                <BulkStageControls stages={stages} />
+              </BulkBar>
+            </div>
             {rows.map((r) => (
               <div key={r.id} id={`eye-${r.id}`} className="scroll-mt-24">
                 {imark && progress.has(r.id) && (
@@ -204,6 +221,7 @@ export function LinkVaultTable({
                   userNames={userNames}
                   canNote={canNote}
                   viewerId={user.id}
+                  selectForm={BULK_FORM}
                   readOnly={seesEveryTaRow(user) && r.addedBy !== user.id && !deskWide.has(r.addedBy)}
                 />
               </div>

@@ -10,7 +10,8 @@ import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } f
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import type { FeedbackCategory, FeedbackPriority, FeedbackStatus, FeedbackItem } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
-import { BACK_TO_TABLES_REASON } from "@/lib/pipeline";
+import { BACK_TO_TABLES_REASON, movedBackToTables, awaitingShortlist } from "@/lib/pipeline";
+import { BULK_STAGES } from "@/lib/bulkStages";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
@@ -2390,6 +2391,40 @@ export async function addManyToOpening(formData: FormData) {
   if (!String(formData.get("openingId") ?? "")) await fail("Pick an opening.");
   const r = await eachInline(ids, (candidateId) => addToOpening(one(formData, { candidateId })));
   await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, "added to the opening in TA Follow-up"));
+}
+
+/** Bulk selection never changes iMark; each row keeps its normal permission and pipeline gates. */
+export async function addLinksToPipeline(formData: FormData) {
+  const ids = [...new Set(formData.getAll("entryId").map(String))];
+  if (!ids.length) return fail("Tick at least one candidate.");
+  const r = await eachInline(ids, (entryId) => addLinkToPipeline(one(formData, { entryId })));
+  await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, "added to the pipeline"));
+}
+
+export async function moveSelectedCandidates(formData: FormData) {
+  const stage = String(formData.get("stage") ?? "");
+  // These milestones have dedicated flows for dates, offers and placements.
+  if (!BULK_STAGES.includes(stage as Stage)) {
+    return fail("Pick a stage. Use the candidate's page for interviews, offers and placements.");
+  }
+  const entries = [...new Set(formData.getAll("entryId").map(String))];
+  const apps = [...new Set(formData.getAll("appId").map(String))];
+  if (!entries.length && !apps.length) return fail("Tick at least one candidate.");
+  const openingId = String(formData.get("openingId"));
+  const r = await eachInline(entries.length ? entries : apps, async (id) => {
+    let appId = id;
+    if (entries.length) {
+      const fd = one(formData, { entryId: id });
+      await primeStore({ openingId });
+      await authorize(fd, "opening.sourcing", { link: "entryId", opening: "openingId" });
+      const entry = repo.linkVault(openingId).find((row) => row.id === id);
+      const app = entry?.candidateId ? repo.applicationsForCandidate(entry.candidateId).find((a) => a.openingId === openingId) : null;
+      if (!app || movedBackToTables(app) || awaitingShortlist(app)) return fail("Add this candidate to the pipeline first.");
+      appId = app.id;
+    }
+    return moveStage(one(formData, { appId }));
+  });
+  await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, `moved to ${STAGE_LABEL[stage as Stage]}`));
 }
 
 export async function deleteOpenings(formData: FormData) {
