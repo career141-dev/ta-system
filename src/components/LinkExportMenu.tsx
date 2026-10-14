@@ -219,7 +219,7 @@ export function LinkExportMenu({ openingId, filters, matchingCount }: LinkExport
             </a>
 
             {/* 3. Download All Links .xlsx (if current view is filtered) */}
-            {(filters.level || filters.status || filters.addons || filters.by || filters.q) && (
+            {(filters.level || filters.status || filters.addons || filters.imark || filters.by || filters.q) && (
               <a
                 href={`/api/openings/${openingId}/links/export?${allQs}`}
                 download
