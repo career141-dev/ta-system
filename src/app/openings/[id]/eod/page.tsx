@@ -278,7 +278,6 @@ export default async function EodPage({
       <LiveTableRefresh />
       <EyeMarkedChecks openingId={id} items={eyeMarked} />
       <EodComposer
-        eyeMarked={eyeMarked}
         key={resendCopy?.id ?? "new"}
         openingId={id}
         kind={kind}
