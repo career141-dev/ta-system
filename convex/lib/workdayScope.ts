@@ -18,7 +18,7 @@ export async function assertWorkdayScope(
   if (active) {
     if (!active.jobs.some((j) => j.jobId === jobId))
       throw new Error(
-        "Add this position to your workday first. A regular TA needs TA Lead approval for another position.",
+        "Add this assigned position to your workday first.",
       );
     return;
   }

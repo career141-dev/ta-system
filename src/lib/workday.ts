@@ -89,13 +89,6 @@ export function workdayDate(now: number): string {
   });
 }
 
-export function extraPositionNeedsApproval(
-  role: string,
-  selected: number,
-): boolean {
-  return role === "ta" && selected >= 1;
-}
-
 /** A reply or new action invalidates a previously recorded waiting reason. */
 export function applyCarryForwards(
   checks: WorkdayCheck[],

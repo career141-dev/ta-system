@@ -20,7 +20,6 @@ import { assertWorkdayScope } from "../lib/workdayScope";
 import {
   applyCarryForwards,
   completionBlockers,
-  extraPositionNeedsApproval,
   validateCarry,
   workdayDate,
   type WorkdayCheck,
@@ -1178,37 +1177,6 @@ export const addPosition = internalMutation({
     if (day.jobs.length >= 10)
       throw new Error("A workday supports at most ten positions.");
     const job = await assignedJob(ctx, user, args.jobId);
-    if (extraPositionNeedsApproval(roleOf(user), day.jobs.length)) {
-      if (!job.taLeadId)
-        throw new Error(
-          "This position needs a TA Lead before approval can be requested.",
-        );
-      const requests = await ctx.db
-        .query("taWorkdayRequests")
-        .withIndex("by_workday", (q) => q.eq("workdayId", day._id))
-        .collect();
-      if (requests.some((r) => r.jobId === args.jobId))
-        return { pending: true };
-      await ctx.db.insert("taWorkdayRequests", {
-        userId: user._id,
-        workdayId: day._id,
-        jobId: args.jobId,
-        leadId: job.taLeadId,
-        workType: args.workType,
-        status: "pending",
-        requestedAt: Date.now(),
-      });
-      await attachLead(ctx, day._id, job.taLeadId);
-      await notify(
-        ctx,
-        job.taLeadId,
-        user,
-        job._id,
-        "workday_request",
-        "Second-position approval requested",
-      );
-      return { pending: true };
-    }
     const now = Date.now();
     await ctx.db.patch(day._id, {
       jobs: [
