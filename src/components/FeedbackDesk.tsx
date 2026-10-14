@@ -71,12 +71,22 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
   const isAdmin = currentUser.role === "admin" || currentUser.role === "director";
   const isTaUser = isTa(currentUser);
 
+  const isLeadOrAdminSubmission = (item: FeedbackItem) =>
+    item.submittedByRole === "ta_lead" ||
+    item.submittedByRole === "director" ||
+    item.submittedByRole === "admin";
+
+  const isPendingLead = (item: FeedbackItem) =>
+    item.status === "pending_lead" && !isLeadOrAdminSubmission(item);
+
+  const isAdminQueue = (item: FeedbackItem) =>
+    item.status === "approved_for_admin" ||
+    item.status === "in_progress" ||
+    (item.status === "pending_lead" && isLeadOrAdminSubmission(item));
+
   // Summary counts
-  const pendingLeadCount = useMemo(() => feedbacks.filter((f) => f.status === "pending_lead").length, [feedbacks]);
-  const adminQueueCount = useMemo(
-    () => feedbacks.filter((f) => f.status === "approved_for_admin" || f.status === "in_progress").length,
-    [feedbacks]
-  );
+  const pendingLeadCount = useMemo(() => feedbacks.filter(isPendingLead).length, [feedbacks]);
+  const adminQueueCount = useMemo(() => feedbacks.filter(isAdminQueue).length, [feedbacks]);
   const isMySubmission = (item: FeedbackItem) =>
     item.submittedBy === currentUser.id ||
     (!!currentUser.name && item.submittedByName?.toLowerCase() === currentUser.name.toLowerCase());
@@ -95,9 +105,9 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
     return feedbacks.filter((item) => {
       // Tab filter
       if (activeTab === "lead_queue") {
-        if (item.status !== "pending_lead") return false;
+        if (!isPendingLead(item)) return false;
       } else if (activeTab === "admin_queue") {
-        if (item.status !== "approved_for_admin" && item.status !== "in_progress") return false;
+        if (!isAdminQueue(item)) return false;
       } else if (activeTab === "resolved_closed") {
         if (item.status !== "resolved" && item.status !== "declined_by_admin") return false;
       } else if (activeTab === "my_submissions") {
@@ -350,19 +360,30 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
         });
 
         if (res.ok) {
+          const now = Date.now();
+          const isLeadOrAdmin = currentUser.role === "ta_lead" || currentUser.role === "director" || currentUser.role === "admin";
+          const status: FeedbackStatus = (res as { status?: FeedbackStatus }).status || (isLeadOrAdmin ? "approved_for_admin" : "pending_lead");
           const newItem: FeedbackItem = {
             id: res.id,
             submittedBy: currentUser.id,
             submittedByName: currentUser.name || "Anonymous",
             submittedByRole: currentUser.role,
-            createdAt: Date.now(),
+            createdAt: now,
             category: finalCategory,
             priority: finalPriority,
             title: finalTitle,
             description: finalDesc,
             pageUrl: "",
             screenshot: uploadedStorageId,
-            status: "pending_lead",
+            status,
+            ...(isLeadOrAdmin
+              ? {
+                  leadReviewedBy: currentUser.id,
+                  leadReviewedByName: currentUser.name || (currentUser.role === "admin" ? "Admin" : currentUser.role === "director" ? "Director" : "TA Lead"),
+                  leadReviewedAt: now,
+                  leadNotes: `Submitted directly by ${currentUser.role === "admin" ? "Admin" : currentUser.role === "director" ? "Director" : "TA Lead"}`,
+                }
+              : {}),
           };
           setFeedbacks((prev) => [newItem, ...prev]);
           setShowSubmitModal(false);
@@ -640,7 +661,12 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
       ) : (
         <div className="space-y-3.5">
           {filteredFeedbacks.map((item) => {
-            const statusLabel = FEEDBACK_STATUS_LABEL[item.status] || item.status;
+            const isDirectLeadOrAdmin = isLeadOrAdminSubmission(item);
+            const effectiveStatus: FeedbackStatus =
+              item.status === "pending_lead" && isDirectLeadOrAdmin
+                ? "approved_for_admin"
+                : item.status;
+            const statusLabel = FEEDBACK_STATUS_LABEL[effectiveStatus] || effectiveStatus;
             const statusToneColors: Record<FeedbackStatus, string> = {
               pending_lead: "bg-amber-50 text-amber-800 border-amber-200",
               approved_for_admin: "bg-blue-50 text-blue-800 border-blue-200",
@@ -670,7 +696,7 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                     />
                     <span
                       className={`rounded-md border px-2 py-0.5 text-[11.5px] font-medium ${
-                        statusToneColors[item.status] || "bg-slate-100 text-slate-700 border-slate-200"
+                        statusToneColors[effectiveStatus] || "bg-slate-100 text-slate-700 border-slate-200"
                       }`}
                     >
                       {statusLabel}
@@ -761,9 +787,9 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                   <div className="flex items-start gap-2.5">
                     <span
                       className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold ${
-                        item.leadReviewedAt
+                        item.leadReviewedAt || isDirectLeadOrAdmin
                           ? "bg-ok text-white"
-                          : item.status === "pending_lead"
+                          : effectiveStatus === "pending_lead"
                           ? "bg-amber-500 text-white animate-pulse"
                           : "bg-paper text-ink-faint border border-rule"
                       }`}
@@ -773,19 +799,19 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                     <div className="flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-1">
                         <span className="font-semibold text-ink">TA Lead Review Gate</span>
-                        {item.leadReviewedAt && (
+                        {(item.leadReviewedAt || isDirectLeadOrAdmin) && (
                           <span className="text-[11px] text-ink-faint">
-                            Reviewed {dateAt(item.leadReviewedAt)} by {item.leadReviewedByName}
+                            Reviewed {dateAt(item.leadReviewedAt || item.createdAt)} by {item.leadReviewedByName || item.submittedByName}
                           </span>
                         )}
                       </div>
-                      {item.leadNotes ? (
+                      {item.leadNotes || isDirectLeadOrAdmin ? (
                         <p className="mt-1 rounded bg-surface p-2 text-[12px] italic text-ink-soft border border-rule/50">
-                          &ldquo;{item.leadNotes}&rdquo;
+                          &ldquo;{item.leadNotes || `Submitted directly by ${item.submittedByRole === "admin" ? "Admin" : item.submittedByRole === "director" ? "Director" : "TA Lead"}`}&rdquo;
                         </p>
                       ) : (
                         <p className="mt-0.5 text-[11.5px] text-ink-faint">
-                          {item.status === "pending_lead"
+                          {effectiveStatus === "pending_lead"
                             ? "Waiting for TA Lead endorsement before escalating to Admin..."
                             : "Approved without extra notes."}
                         </p>
@@ -794,16 +820,16 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                   </div>
 
                   {/* Step 2: Admin Resolution Status */}
-                  {(item.status === "approved_for_admin" ||
-                    item.status === "in_progress" ||
-                    item.status === "resolved" ||
-                    item.status === "declined_by_admin") && (
+                  {(effectiveStatus === "approved_for_admin" ||
+                    effectiveStatus === "in_progress" ||
+                    effectiveStatus === "resolved" ||
+                    effectiveStatus === "declined_by_admin") && (
                     <div className="flex items-start gap-2.5 border-t border-rule/50 pt-2.5">
                       <span
                         className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold ${
-                          item.status === "resolved"
+                          effectiveStatus === "resolved"
                             ? "bg-ok text-white"
-                            : item.status === "in_progress"
+                            : effectiveStatus === "in_progress"
                             ? "bg-brand text-white"
                             : "bg-blue-600 text-white"
                         }`}
@@ -825,7 +851,7 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
                           </p>
                         ) : (
                           <p className="mt-0.5 text-[11.5px] text-ink-faint">
-                            {item.status === "approved_for_admin"
+                            {effectiveStatus === "approved_for_admin"
                               ? "Queued in Admin roadmap. Waiting to be picked up."
                               : "Currently in progress with Admin."}
                           </p>
@@ -837,27 +863,30 @@ export function FeedbackDesk({ initialFeedbacks, currentUser }: FeedbackDeskProp
 
                 {/* Action Buttons for Lead and Admin */}
                 <div className="mt-3.5 flex flex-wrap items-center justify-end gap-2 border-t border-rule/60 pt-3">
-                  {isLead && item.status === "pending_lead" && (
-                    <button
-                      onClick={() => {
-                        setActionError(null);
-                        setLeadModalItem(item);
-                        setLeadDecision("approved_for_admin");
-                        setLeadNotes("");
-                      }}
-                      className="rounded-lg bg-amber-600 px-3.5 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-95"
-                    >
-                      Lead Review Action →
-                    </button>
-                  )}
+                  {isLead &&
+                    item.status === "pending_lead" &&
+                    !isMySubmission(item) &&
+                    !isDirectLeadOrAdmin && (
+                      <button
+                        onClick={() => {
+                          setActionError(null);
+                          setLeadModalItem(item);
+                          setLeadDecision("approved_for_admin");
+                          setLeadNotes("");
+                        }}
+                        className="rounded-lg bg-amber-600 px-3.5 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-95"
+                      >
+                        Lead Review Action →
+                      </button>
+                    )}
 
                   {isAdmin &&
-                    (item.status === "approved_for_admin" || item.status === "in_progress") && (
+                    (effectiveStatus === "approved_for_admin" || effectiveStatus === "in_progress") && (
                       <button
                         onClick={() => {
                           setActionError(null);
                           setAdminModalItem(item);
-                          setAdminStatus(item.status === "approved_for_admin" ? "in_progress" : "resolved");
+                          setAdminStatus(effectiveStatus === "approved_for_admin" ? "in_progress" : "resolved");
                           setAdminResolution(item.adminResolution || "");
                         }}
                         className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-[12.5px] font-semibold text-white shadow-xs transition-opacity hover:opacity-95"

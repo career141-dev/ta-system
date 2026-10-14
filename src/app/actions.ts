@@ -6232,7 +6232,7 @@ export async function submitFeedbackAction(input: {
   pageUrl?: string;
   openingId?: string;
   screenshot?: string;
-}): Promise<{ ok: true; id: string } | { ok: false; message: string }> {
+}): Promise<{ ok: true; id: string; status: FeedbackStatus } | { ok: false; message: string }> {
   await primeStore();
   const user = await getCurrentUser();
   if (!user) {
@@ -6252,6 +6252,11 @@ export async function submitFeedbackAction(input: {
 
   const pageUrl = input.pageUrl === "/feedback" ? "" : (input.pageUrl || "");
 
+  const isLeadOrAdmin = user.role === "ta_lead" || user.role === "director" || user.role === "admin";
+  const now = Date.now();
+  const status: FeedbackStatus = isLeadOrAdmin ? "approved_for_admin" : "pending_lead";
+  const roleTitle = user.role === "admin" ? "Admin" : user.role === "director" ? "Director" : "TA Lead";
+
   const id = repo.addFeedback({
     submittedBy: user.id,
     submittedByName: user.name || "Anonymous",
@@ -6263,11 +6268,19 @@ export async function submitFeedbackAction(input: {
     pageUrl,
     openingId: input.openingId,
     screenshot: input.screenshot,
-    status: "pending_lead",
+    status,
+    ...(isLeadOrAdmin
+      ? {
+          leadReviewedBy: user.id,
+          leadReviewedByName: user.name || roleTitle,
+          leadReviewedAt: now,
+          leadNotes: `Submitted directly by ${roleTitle}`,
+        }
+      : {}),
   });
 
   revalidatePath("/feedback");
-  return { ok: true, id };
+  return { ok: true, id, status };
 }
 
 /**

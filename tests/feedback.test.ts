@@ -241,5 +241,50 @@ eq("category defaulted to other", simplifiedItem?.category, "other");
 eq("priority defaulted to medium", simplifiedItem?.priority, "medium");
 eq("title derived from description", simplifiedItem?.title, derivedTitle);
 
+console.log("\n9. TA Lead & Admin Direct Escalation (Skip Lead Review Gate)");
+const leadFbId = repo.addFeedback({
+  submittedBy: leadUser.id,
+  submittedByName: leadUser.name,
+  submittedByRole: leadUser.role,
+  category: "feature_request",
+  priority: "high",
+  title: "Lead direct proposal",
+  description: "Bulk export to CSV for client reporting.",
+});
+
+const leadItem = repo.feedback(leadFbId);
+eq("lead submission initial status is approved_for_admin", leadItem?.status, "approved_for_admin");
+eq("lead reviewer id recorded automatically", leadItem?.leadReviewedBy, leadUser.id);
+eq("lead reviewer note recorded", leadItem?.leadNotes, "Submitted directly by TA Lead");
+eq("lead item is visible to admin immediately", repo.feedbacks(adminUser).some((f) => f.id === leadFbId), true);
+
+const adminFbId = repo.addFeedback({
+  submittedBy: adminUser.id,
+  submittedByName: adminUser.name,
+  submittedByRole: adminUser.role,
+  category: "bug",
+  priority: "high",
+  title: "Admin proposal",
+  description: "Please check this error",
+});
+const adminItem = repo.feedback(adminFbId);
+eq("admin submission initial status is approved_for_admin", adminItem?.status, "approved_for_admin");
+eq("admin feedback does not need TA lead approval", adminItem?.leadNotes, "Submitted directly by Admin");
+eq("admin item is in admin queue immediately", repo.feedbacks(adminUser).some((f) => f.id === adminFbId), true);
+
+const taNewFbId = repo.addFeedback({
+  submittedBy: taUser.id,
+  submittedByName: taUser.name,
+  submittedByRole: taUser.role,
+  category: "bug",
+  priority: "medium",
+  title: "TA bug report",
+  description: "TA reported issue requiring lead review",
+});
+const taNewItem = repo.feedback(taNewFbId);
+eq("TA submission enters pending_lead for TA lead review", taNewItem?.status, "pending_lead");
+eq("TA submission is visible to TA Lead in lead queue", repo.feedbacks(leadUser).some((f) => f.id === taNewFbId), true);
+
 console.log(`\nResults: ${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);
+
