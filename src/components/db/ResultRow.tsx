@@ -13,6 +13,7 @@ import type { Score } from "@/lib/scoring";
 import type { CandidateSignal } from "@/lib/match";
 import type { Candidate } from "@/data/types";
 import { ageHint, ageText } from "@/lib/ageExperience";
+import type { RoleEvidence } from "../../../convex/lib/searchRoleEvidence";
 
 export interface RowApp {
   id: string;
@@ -64,6 +65,7 @@ export function ResultRow({
   candidateHref,
   selectForm,
   intentEvidence,
+  roleEvidence,
 }: {
   candidate: Candidate;
   /** The same fit score the lists use. Only present when the search is tied
@@ -83,6 +85,7 @@ export function ResultRow({
   selectForm?: string;
   /** Search-intent explanation based only on row evidence already shown. */
   intentEvidence?: { matched: string[]; verify: string[]; gaps: string[] };
+  roleEvidence?: RoleEvidence;
 }) {
   const [allRoles, setAllRoles] = useState(false);
   const [allSkills, setAllSkills] = useState(false);
@@ -138,7 +141,7 @@ export function ResultRow({
               </Line>
             )}
             <Line label="Experience">
-              <span className="text-ink-soft">{c.totalExperienceYears} years, currently as a {c.currentTitle}</span>
+              <span className="text-ink-soft">{c.totalExperienceYears} years, {roleEvidence ? "listed role:" : "currently as a"} {c.currentTitle}</span>
               {c.experienceNote && <span className="block text-[11.5px] text-warn">{c.experienceNote}</span>}
               <div className="mt-1 flex flex-col gap-0.5">
                 {roles.map((r, i) => (
@@ -211,8 +214,14 @@ export function ResultRow({
               </div>
             </Line>
 
+            {roleEvidence && (
+              <Line label="Role evidence">
+                <span className="text-ink-soft">{roleEvidence.label}{roleEvidence.title ? `: ${roleEvidence.title}` : ""}{roleEvidence.matchedReportingContext ? ` (supports ${roleEvidence.matchedReportingContext})` : ""}</span>
+              </Line>
+            )}
+
             {misses.length > 0 && (
-              <Line label="Missing">
+              <Line label={roleEvidence ? "Verify" : "Missing"}>
                 <span className="text-ink-faint">{misses.slice(0, 5).join(", ")}</span>
               </Line>
             )}

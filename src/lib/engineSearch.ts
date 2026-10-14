@@ -7,11 +7,9 @@ import "server-only";
  * feedback over months. It reads the sentence with a model rather than against
  * a vocabulary, embeds it, searches Qdrant with payload filters, runs the
  * backend's full-text indexes in parallel, merges the two, applies the filters
- * with a progressive-narrowing fallback, scores every candidate with
- * `scoreCandidateAgainstRequirements`, and then spends one model call
- * re-ranking only the band where the deterministic score is genuinely
- * uncertain — 50 to 84. Above and below that it does not pay for an opinion it
- * already has.
+ * strictly, and scores every candidate with `scoreCandidateAgainstRequirements`.
+ * Database search opts into occupation evidence first and reviews up to twenty
+ * profiles, including relevant careers with sparse skill tags (14 Oct).
  *
  * None of that is reimplemented here. This module runs the engine's own
  * functions — see "the engine, run here" below for why not the action itself —
@@ -35,8 +33,10 @@ import { searchVectors } from "@/lib/qdrantSearch";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { employerMatch, excludedByEmployer, employersInText, describeEmployerHit } from "../../convex/lib/employers";
 import { intentToEngineHints, readSearchIntent, type SearchIntent } from "@/lib/searchIntent";
+import { compareSearchCandidates, mergeSearchPool, quickRolePhrase, readOccupation, searchEvidenceReason, searchReviewPool, type RoleEvidence, type SearchOccupation } from "../../convex/lib/searchRoleEvidence";
 
 export interface EngineHit {
+  roleEvidence?: RoleEvidence;
   candidateId: Id;
   score: number;
   reason: string;
@@ -56,6 +56,7 @@ export interface EngineHit {
 export interface EngineSearch {
   /** How the engine read the sentence — what the chips can show. */
   interpretation: {
+    searchOccupation?: SearchOccupation;
     searchText: string;
     industry?: string;
     seniority?: string;
@@ -211,6 +212,7 @@ function engineArgs(query: string, criteria: SearchCriteria, limit: number, edit
     // "Not from Dialog" is a literal phrase, read exactly, like a place.
     excludeEmployers: criteria.excludeEmployers.length ? criteria.excludeEmployers : undefined,
     limit,
+    edited,
     /** Read by the quick pass only; not part of what the engine is asked. */
     chips: { titles: criteria.titles, skills: criteria.skills, industries: criteria.industries, employers: criteria.employers },
   };
@@ -220,7 +222,6 @@ const NO_ACTOR = { id: null as string | null };
 const MODEL = "deepseek/deepseek-v4-flash";
 const FETCH_LIMIT = 100;
 const POOL_CAP = 200;
-const RERANK_BATCH = 10;
 
 const modules = () =>
   Promise.all([
@@ -249,7 +250,7 @@ const intents = new Map<string, { at: number; value: ReturnType<typeof readSente
 function readSentence(parser: Awaited<ReturnType<typeof modules>>["parser"], turns: string[]) {
   const text = turns.join("\n");
   const settle = reserve("database search: read the query", maxModelCost(MODEL, 7000 + text.length, 1400));
-  const run = parser.extractConversationRequirements(turns);
+  const run = parser.extractConversationRequirements(turns, { roleAware: true });
   run.then(
     (r) => settle(modelCost(MODEL, r.usage.promptTokens, r.usage.completionTokens)),
     () => settle(0),
@@ -291,9 +292,12 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     }),
   ]);
 
-  const parsed = modelIntent ? (await modelIntent).requirements : requirementsFromChips(args);
+  const reading = modelIntent ? await modelIntent.catch(() => null) : null;
+  const parsed = reading && reading.usage.model !== "regex-fallback" ? reading.requirements : requirementsFromChips(args);
+  const occupation = readOccupation(parsed, q, [...(args.customFilters ?? []), ...intentHints.mustHave]);
   const req: Requirements = {
     ...parsed,
+    searchOccupation: occupation,
     industry: args.industry ?? parsed.industry,
     location: args.location ?? parsed.location,
     minYearsExperience: args.minExperience && args.minExperience > 0 ? args.minExperience : parsed.minYearsExperience ?? null,
@@ -302,8 +306,8 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     // Conversational intent is a hint layer over the engine, not a replacement:
     // explicit "must have" language tightens scoring, while "preferred" remains
     // a boost. The strict desk chips still own hard filters.
-    requiredSkills: [...new Set([...parsed.requiredSkills, ...intentHints.mustHave])],
-    preferredSkills: [...new Set([...parsed.preferredSkills, ...intentHints.niceToHave])],
+    requiredSkills: occupation.explicitSkills,
+    preferredSkills: [...new Set([...occupation.inferredSkills, ...intentHints.niceToHave])],
   };
   const employersAsked = req.employers ?? [];
 
@@ -316,16 +320,14 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
       })
     : Promise.resolve([]);
 
-  // The engine's own search terms, as the action picks them: title, alternative
-  // titles, required skills, then its term builder — the first three.
+  // Reserve keyword capacity for occupation queries before broad skill terms.
   let secondPass: Promise<{ candidateId: Id }[]> = Promise.resolve([]);
-  if (modelIntent) {
+  if (occupation.targetOccupation || modelIntent) {
     const terms = new Set<string>();
+    if (occupation.targetOccupation) terms.add(occupation.targetOccupation);
+    for (const t of occupation.equivalentTitles.slice(0, 3)) if (t) terms.add(t);
     terms.add(req.title && req.title.length > 2 ? req.title : q);
-    for (const t of req.alternativeTitles.slice(0, 3)) if (t) terms.add(t);
-    for (const t of req.requiredSkills.slice(0, 4)) if (t) terms.add(t);
-    for (const t of parser.buildSearchTerms(req, q).slice(0, 4)) if (t) terms.add(t);
-    secondPass = backend.keywordSearchMany(NO_ACTOR, [...terms].slice(0, 3), FETCH_LIMIT).catch((e) => {
+    secondPass = backend.keywordSearchMany(NO_ACTOR, [...terms].slice(0, 6), FETCH_LIMIT).catch((e) => {
       down.push(`keyword search (${(e as Error)?.message ?? e})`);
       return [];
     });
@@ -336,12 +338,11 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     throw new Error("The search could not reach part of the database just now, so this is not a real \"nothing found\". Try again in a moment.");
   }
 
-  // 3. Fusion: people at the company asked for first, then vector hits, then
-  // words, no one twice.
+  // Separate allocations: a full vector response must not erase keyword-only
+  // candidates. Company and occupation queries take priority within keywords.
   const vectorScore = new Map<Id, number>();
   for (const v of vectors) if (!vectorScore.has(v.candidateId)) vectorScore.set(v.candidateId, v.score);
-  const employedIds = new Set(employed.map((e) => e.candidateId));
-  const ids = [...new Set([...employed.map((e) => e.candidateId), ...vectorScore.keys(), ...words.map((w) => w.candidateId), ...more.map((w) => w.candidateId)])].slice(0, POOL_CAP);
+  const ids = mergeSearchPool([...employed, ...more, ...words].map(w => w.candidateId), [...vectorScore.keys()]);
 
   // The search shape: summary, past titles and every employer, which the
   // score reads and a plain list leaves out (9 Oct).
@@ -350,36 +351,34 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   const pool: Doc[] = ids.flatMap((id) => {
     const d = byId.get(id);
     // Anyone whose CV file was lost in the Cloud move is left out (src/lib/cvMissing.ts).
-    // Someone found only by company has no similarity to blend in; a zero
-    // would cut a perfect match to "weak" (9 Oct). Words-only hits keep the
-    // zero they always had.
-    const similarity = vectorScore.get(id) ?? (employedIds.has(id) ? undefined : 0);
+    // No vector score means unavailable evidence, not zero similarity.
+    const similarity = vectorScore.get(id);
     return d && !d.cvFileMissing ? [{ ...d, vectorScore: similarity }] : [];
   });
   if (pool.length === 0) {
     return { interpretation: interpretationOf(req, modelIntent !== null), intent: searchIntent, hits: [] };
   }
 
-  // The action's strict filters, with its progressive fallback: if they leave
-  // nobody, score everyone rather than show nothing.
-  const filtered = strictFilters(pool, args, req);
-  const candidates = filtered.length > 0 ? filtered : pool;
+  // Explicit constraints remain enforced even when nobody satisfies them.
+  const candidates = strictFilters(pool, args, req);
 
   // 4. The engine's weighted score.
   const ranked = candidates
-    .map((doc, i) => scoring.scoreCandidateAgainstRequirements(doc as never, req, i))
-    .sort((a, b) => b.overallScore - a.overallScore || b.titleScore - a.titleScore || b.skillScore - a.skillScore || b.experienceScore - a.experienceScore);
+    .map((doc, i) => scoring.scoreCandidateAgainstRequirements(doc as never, req, i, { pastTitles: true, searchOccupation: occupation }))
+    .sort((a, b) => compareSearchCandidates(a, b));
 
-  // 5. The model reads only the band the score is unsure about.
+  // 5. Protect sparse-skill careers as well as high-ranking uncertain profiles.
   const verdicts = new Map<number, { score: number; reason: string }>();
   if (withModel) {
-    const ambiguous = ranked.filter((c) => c.overallScore >= 50 && c.overallScore < 85).slice(0, RERANK_BATCH);
+    const ambiguous = searchReviewPool(ranked);
     if (ambiguous.length > 0) {
-      const settle = reserve("database search: re-rank", maxModelCost(MODEL, 6000, 4000));
+      const settle = reserve("database search: re-rank", maxModelCost(MODEL, 30000, 4000));
       try {
-        const { evaluations, usage } = await scoring.scoreBatchWithLLM(ambiguous, req, "search_ranking");
+        const { evaluations, usage } = await scoring.scoreBatchWithLLM(ambiguous, req, "search_ranking", { roleAware: true });
         settle(modelCost(MODEL, usage.promptTokens ?? 0, usage.completionTokens ?? 0));
-        for (const [index, v] of evaluations) verdicts.set(index, v);
+        for (const [index, v] of evaluations) {
+          if (ambiguous.some(c => c.index === index) && Number.isFinite(v.score)) verdicts.set(index, v);
+        }
       } catch {
         // As the action does: the deterministic score stands.
         settle(0);
@@ -388,19 +387,20 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   }
 
   const final = ranked
-    .map((c) => ({ c, score: verdicts.get(c.index)?.score ?? c.overallScore, reason: verdicts.get(c.index)?.reason ?? scoring.buildDeterministicTaReason(c, req) }))
-    .sort((a, b) => b.score - a.score || (b.c.cv.vectorScore ?? 0) - (a.c.cv.vectorScore ?? 0) || b.c.overallScore - a.c.overallScore);
+    .map((c) => ({ c, score: verdicts.get(c.index)?.score ?? c.overallScore, reason: verdicts.get(c.index)?.reason ?? searchEvidenceReason(c.roleEvidence, c.cv.currentTitle ?? "", [...c.missingRequired, ...req.preferredSkills.filter(s => !c.matchedPreferred.some(m => m.toLowerCase() === s.toLowerCase()))]) }))
+    .sort((a, b) => compareSearchCandidates(a.c, b.c, a.score, b.score));
 
   return {
     interpretation: interpretationOf(req, modelIntent !== null),
     intent: searchIntent,
     hits: final
-      .filter((f) => f.score > 0)
+      .filter((f) => f.score > 0 || !!f.c.roleEvidence)
       .slice(0, args.limit)
       .map((f) => ({
         candidateId: f.c.cv._id,
         score: Math.round(f.score),
         reason: f.reason,
+        roleEvidence: f.c.roleEvidence,
         breakdown: breakdownOf(f.c, req),
         ...(f.c.employerHit ? { employerLine: describeEmployerHit(f.c.employerHit) } : {}),
       })),
@@ -429,8 +429,7 @@ async function vectorPool(q: string, args: EngineArgs, down: string[] = []): Pro
 /** The action's `applyFiltersStrictly`, for the arguments this screen sends. */
 function strictFilters(list: Doc[], args: EngineArgs, req: Requirements): Doc[] {
   let out = list;
-  // A named company keeps only people who worked there, now or before (owner,
-  // 9 Oct). If that leaves nobody, the caller scores everyone, as for place.
+  // A named company keeps only people who worked there, now or before.
   const employers = req.employers ?? [];
   if (employers.length) {
     out = out.filter((c) => employerMatch(employers, c as never, req.employerScope ?? "any") !== null);
@@ -465,6 +464,9 @@ function strictFilters(list: Doc[], args: EngineArgs, req: Requirements): Doc[] 
       });
     });
   }
+  if (args.industry) {
+    out = out.filter(c => (c.industries ?? []).some((i: string) => i.toLowerCase().includes(args.industry!.toLowerCase())));
+  }
   return out;
 }
 
@@ -483,6 +485,7 @@ function breakdownOf(c: Scored, req: Requirements): EngineHit["breakdown"] {
 
 function interpretationOf(req: Requirements, read: boolean): EngineSearch["interpretation"] {
   return {
+    searchOccupation: req.searchOccupation,
     searchText: [req.title, ...req.alternativeTitles, ...req.requiredSkills.slice(0, 4)].filter(Boolean).join(" "),
     industry: req.industry ?? undefined,
     seniority: req.seniority ?? undefined,
@@ -498,11 +501,14 @@ function interpretationOf(req: Requirements, read: boolean): EngineSearch["inter
 
 /** The chips, in the engine's shape — what the quick pass ranks against. */
 function requirementsFromChips(args: EngineArgs): Requirements {
+  const phrase = args.edited && args.chips.titles.length ? args.chips.titles[0] : quickRolePhrase(args.turns.join("\n"));
+  const onlySkills = !args.chips.titles.length && args.chips.skills.some(s => s.toLowerCase() === phrase.toLowerCase());
   return {
-    title: args.chips.titles[0] ?? args.query,
+    title: phrase,
+    ...(onlySkills ? { searchOccupation: { targetOccupation: null, equivalentTitles: [], reportingContext: null, explicitSkills: args.chips.skills, inferredSkills: [] } } : {}),
     alternativeTitles: args.chips.titles.slice(1),
     occupationSynonyms: [],
-    requiredSkills: args.chips.skills,
+    requiredSkills: args.edited ? args.chips.skills : [],
     preferredSkills: [],
     minYearsExperience: args.minExperience ?? null,
     maxYearsExperience: args.maxExperience ?? null,
