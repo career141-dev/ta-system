@@ -148,9 +148,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
       <button className={buttonClass}>
         {!day
           ? "Start workday"
-          : data.role === "ta"
-            ? "Request another position"
-            : "Add position"}
+          : "Add position"}
       </button>
     </WorkForm>
   );
@@ -475,9 +473,7 @@ export function WorkdayDashboard() {
               <DailyReview day={data.active} canFinish />
               <details className="rounded-xl border border-rule p-5">
                 <summary className="cursor-pointer font-medium">
-                  {data.role === "ta"
-                    ? "Request a second position — TA Lead approval required"
-                    : "Work on another position"}
+                  Add another position
                 </summary>
                 <div className="mt-4">
                   <JobPicker data={data} day={data.active} />
