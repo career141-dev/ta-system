@@ -18,6 +18,8 @@ export async function GET(request: Request) {
     const payload = await convexQuery<WorkdayPayload>("ta/workdays:dashboard", {
       actorId: user.id,
       detail: new URL(request.url).searchParams.get("detail") === "1",
+      cursor: new URL(request.url).searchParams.get("cursor") || undefined,
+      date: new URL(request.url).searchParams.get("date") || undefined,
     });
     return NextResponse.json(payload, {
       headers: { "Cache-Control": "private, no-store" },

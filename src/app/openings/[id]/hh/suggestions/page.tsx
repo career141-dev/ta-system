@@ -1,3 +1,4 @@
+import { EmptySuggestionsReason } from "@/components/Workday";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { repo } from "@/data/store";
@@ -102,6 +103,7 @@ export default async function Page({
     <>
       <h1 className="text-[21px] font-semibold tracking-tight">Suggestions</h1>
       <ProjectHeader openingId={id} />
+      {scoped.length === 0 && <div className="mb-5 rounded-lg border border-rule p-4"><EmptySuggestionsReason jobId={id} /></div>}
 
       <Generate
         openingId={id}

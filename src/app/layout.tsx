@@ -95,7 +95,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             <Suspense fallback={null}>
               <Flash />
             </Suspense>
-            {user && isTa(user) ? <WorkdayWorkspace>{children}</WorkdayWorkspace> : children}
+            {user && ["ta", "ta_support", "ta_lead", "admin"].includes(user.role) ? <WorkdayWorkspace>{children}</WorkdayWorkspace> : children}
             {user ? <DeskAssistant /> : null}
             {user ? <FeedbackWidget isTa={isTa(user)} /> : null}
           </>
@@ -108,7 +108,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <Suspense fallback={null}>
             <Flash />
           </Suspense>
-          {user && isTa(user) ? <WorkdayWorkspace>{children}</WorkdayWorkspace> : children}
+          {user && ["ta", "ta_support", "ta_lead", "admin"].includes(user.role) ? <WorkdayWorkspace>{children}</WorkdayWorkspace> : children}
           {user ? <DeskAssistant /> : null}
           {user ? <FeedbackWidget isTa={isTa(user)} /> : null}
         </ClerkProvider>

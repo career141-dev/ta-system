@@ -5,6 +5,8 @@ import { v } from "convex/values";
 import { requireRole, requireUser } from "../lib/permissions";
 import { internal } from "../_generated/api";
 import { adjustGlobalStat } from "../stats/statsHelper";
+import { invalidateJdReviews } from "../lib/workdayChecks";
+import { refreshWorkdayChecks } from "../ta/workdays";
 
 // convex/jobs.ts — generateKeyword helper function
 function generateKeyword(title: string): string {
@@ -333,13 +335,18 @@ export const updateJobDetails = internalMutation({
       }
     }
     
-    if (description !== undefined) updates.jobDescription = description;
+    if (description !== undefined) {
+      updates.jobDescription = description;
+      const job = await ctx.db.get(jobId);
+      if (job && job.jobDescription !== description) await invalidateJdReviews(ctx, jobId);
+    }
     if (salaryRangeMin !== undefined) updates.salaryMin = salaryRangeMin;
     if (salaryRangeMax !== undefined) updates.salaryMax = salaryRangeMax;
     
     updates.updatedAt = new Date().toISOString();
 
     await ctx.db.patch(jobId, updates);
+    if (description !== undefined) await refreshWorkdayChecks(ctx, jobId);
 
     if (args.title !== undefined) {
       await syncJobTitleToCandidates(ctx, jobId, args.title);

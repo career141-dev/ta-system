@@ -26,6 +26,8 @@ import { resolveActor } from "../lib/auth";
 import { TABLES, looselySame, sameValue, type ModelCx, type Row } from "./model/tables";
 import { refreshEmployersText } from "../candidates/candidates";
 import { assertWorkdayScope } from "../lib/workdayScope";
+import { refreshWorkdayChecks } from "./workdays";
+import { invalidateJdReviews, recordJdReview } from "../lib/workdayChecks";
 import type { Doc, Id } from "../_generated/dataModel";
 
 const opValidator = v.object({
@@ -200,6 +202,31 @@ export const apply = internalMutation({
         await ctx.db.insert("taWorkdayActivity", { workdayId: day._id, jobId: jobId as Id<"jobs">, userId: actorUser._id, kind: `${op.table}:${op.kind}`, recordId: ids[op.key] ?? op.key, at: now });
       }
     }
+    const affectedJobs = new Set<Id<"jobs">>();
+    for (const op of args.ops) {
+      if (op.table === "openings") {
+        const jobId = (ids[op.key] ?? op.key) as Id<"jobs">;
+        const job = await ctx.db.get(jobId);
+        if (job) {
+          if (op.kind === "update" && op.changed?.includes("jdMarkdown") && op.before?.jdMarkdown !== op.after?.jdMarkdown) {
+            await invalidateJdReviews(ctx, jobId);
+            await refreshWorkdayChecks(ctx, jobId, actorUser?._id);
+          }
+          if (actorUser && job.jdStatus === "approved" && job.jobDescription.trim() && op.changed?.includes("jdApprovedAt") && job.jdApprovedBy === actorUser._id) await recordJdReview(ctx, actorUser._id, jobId, job.jobDescription);
+          await refreshWorkdayChecks(ctx, jobId, actorUser?._id);
+        }
+      }
+      const raw = op.after?.openingId ?? op.before?.openingId;
+      if (raw && ctx.db.normalizeId("jobs", raw)) {
+        affectedJobs.add(raw as Id<"jobs">);
+        if (["jobPosts", "profileSuggestions"].includes(op.table)) {
+          const relevant = op.table === "jobPosts" ? op.kind === "insert" || op.changed?.includes("externalUrl") : op.kind === "insert" || op.changed?.includes("status");
+          if (relevant) await ctx.db.insert("taWorkdayEvidence", { jobId: raw as Id<"jobs">, recordId: ids[op.key] ?? op.key, table: op.table, at: now,
+            ...(actorUser ? { by: actorUser._id } : {}), version: String(op.table === "jobPosts" ? op.after?.externalUrl ?? "" : op.after?.status ?? "deleted") });
+        }
+      }
+    }
+    for (const jobId of affectedJobs) await refreshWorkdayChecks(ctx, jobId, actorUser?._id);
     return { ids };
   },
 });

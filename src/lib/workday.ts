@@ -16,6 +16,13 @@ export interface WorkdayCheck {
   kind: CheckKind;
   canCarry: boolean;
   evidenceAt: number;
+  status?: "incomplete" | "complete" | "waiting";
+  completedAt?: number;
+  completedBy?: string;
+  evidence?: string;
+  progress?: string;
+  blocksEmail?: boolean;
+  events?: { status: string; at: number; by?: string; evidence?: string; observed?: boolean }[];
   waiting?: { reason: string; nextAction: string; dueAt: number };
 }
 export interface CarryForward {
@@ -80,7 +87,8 @@ export interface WorkdayPayload {
   active: WorkdayView | null;
   history: WorkdayView[];
   team: WorkdayView[];
-  options: { id: string; title: string }[];
+  options: { id: string; title: string; workType?: WorkType; carry?: boolean; preview?: WorkdayJobView }[];
+  nextCursor?: string | null;
 }
 
 export function workdayDate(now: number): string {
@@ -133,7 +141,11 @@ export function validateCarry(
 }
 
 export function completionBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.flatMap((j) => j.checks).filter((c) => !c.waiting);
+  return jobs.flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting);
+}
+
+export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
+  return completionBlockers(jobs).filter((c) => c.blocksEmail);
 }
 
 export function workdayTime(at: number | null): string {
