@@ -21,6 +21,7 @@ export interface WorkdayCheck {
   completedBy?: string;
   evidence?: string;
   progress?: string;
+  needsEmptySuggestionsReason?: boolean;
   blocksEmail?: boolean;
   events?: { status: string; at: number; by?: string; evidence?: string; observed?: boolean }[];
   waiting?: { reason: string; nextAction: string; dueAt: number };

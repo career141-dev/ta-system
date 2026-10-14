@@ -72,6 +72,7 @@ export async function changeWorkday(
         message: `Complete these steps first: ${result.blockers?.slice(0, 5).join("; ") ?? "review the checklist"}.`,
       };
     revalidatePath("/workday");
+    if (op === "saveCheck") revalidatePath(`/openings/${value("jobId")}/hh/suggestions`);
     const message =
       op === "finish"
         ? "Workday finished. Your TA Lead can see the finish time."

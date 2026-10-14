@@ -19,6 +19,9 @@ import { DoneBadge, SubmitButton } from "@/components/SubmitButton";
 import { SubmitButton as Submit } from "@/components/Submit";
 import { BUTTON } from "@/components/buttonStyles";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { convexQuery } from "@/lib/convexServer";
+import { isConvex } from "@/data/mode";
+import type { WorkdayCheck } from "@/lib/workday";
 
 const PAGE_SIZE = 20;
 
@@ -52,6 +55,11 @@ export default async function Page({
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
+  // No visible rows can also mean a failed/unrun search or another TA's run.
+  // Only the workday evidence can say an empty-search explanation is needed.
+  const suggestionsCheck = isConvex() && (user.role === "ta" || user.role === "ta_support")
+    ? await convexQuery<WorkdayCheck | null>("ta/workdays:suggestionsCheck", { actorId: user.id, jobId: id }).catch(() => null)
+    : null;
 
   // A sourcing run belongs to whoever asked for it. What crosses between two
   // TAs on one opening is a profile the other has already kept — see
@@ -103,7 +111,7 @@ export default async function Page({
     <>
       <h1 className="text-[21px] font-semibold tracking-tight">Suggestions</h1>
       <ProjectHeader openingId={id} />
-      {scoped.length === 0 && <div className="mb-5 rounded-lg border border-rule p-4"><EmptySuggestionsReason jobId={id} /></div>}
+      {suggestionsCheck?.needsEmptySuggestionsReason && <div className="mb-5 rounded-lg border border-rule p-4"><EmptySuggestionsReason jobId={id} /></div>}
 
       <Generate
         openingId={id}

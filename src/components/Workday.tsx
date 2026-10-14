@@ -257,7 +257,7 @@ function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId:
           </WorkForm>}
           {check.key.startsWith("research:") && <ResearchConfirmation jobId={check.jobId} />}
           {check.key.startsWith("jd_review:") && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "jd" }}><p className="text-xs text-ink-soft">Read the approved job description before confirming.</p><button className={buttonClass}>I reviewed the job description</button></WorkForm>}
-          {check.key.startsWith("suggestions:") && check.progress?.includes("search returned no profiles") && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "emptySuggestions" }}>
+          {check.needsEmptySuggestionsReason && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "emptySuggestions" }}>
             <label className="block text-xs">Why no profiles were found<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save explanation</button>
           </WorkForm>}
           {check.key.startsWith("chatgpt:") && <ChatgptConfirmation jobId={check.jobId} />}
