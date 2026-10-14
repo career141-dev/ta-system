@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import {
   applyCarryForwards,
   completionBlockers,
-  extraPositionNeedsApproval,
   validateCarry,
   workdayDate,
   type WorkdayCheck,
@@ -133,8 +132,6 @@ try {
   assert.equal((await run("dashboard", { actorId: "ta" })).active, null);
   assert.equal(rows("taWorkdays").length, 0);
   assert.equal(workdayDate(Date.parse("2026-10-12T20:00:00Z")), "2026-10-13");
-  assert.equal(extraPositionNeedsApproval("ta", 1), true);
-  assert.equal(extraPositionNeedsApproval("ta_support", 1), false);
   const check: WorkdayCheck = {
     key: "details:a",
     jobId: "job1",
@@ -188,40 +185,17 @@ try {
   assert.equal(rows("taWorkdays")[0].startedAt, clock);
   await assert.rejects(
     () => assertWorkdayScope(ctx, rows("users")[0] as any, "job2" as any),
-    /approval/,
+    /Add this assigned position to your workday first/,
   );
-  assert.equal(
-    (
-      await run("addPosition", {
-        actorId: "ta",
-        workdayId: day.id,
-        jobId: "job2",
-        workType: "Add-on",
-      })
-    ).pending,
-    true,
-  );
-  assert.equal(rows("taWorkdays")[0].jobs.length, 1);
-  const request = rows("taWorkdayRequests")[0];
-  await assert.rejects(
-    () =>
-      run("decide", {
-        actorId: "otherLead",
-        requestId: request._id,
-        approve: true,
-        reason: "Support needed",
-      }),
-    /TA Lead/,
-  );
-  await run("decide", {
-    actorId: "lead",
-    requestId: request._id,
-    approve: true,
-    reason: "Support needed",
+  const addedSecond = await run("addPosition", {
+    actorId: "ta",
+    workdayId: day.id,
+    jobId: "job2",
+    workType: "Add-on",
   });
+  assert.equal(addedSecond.pending, false);
   assert.equal(rows("taWorkdays")[0].jobs.length, 2);
   await assertWorkdayScope(ctx, rows("users")[0] as any, "job2" as any);
-
   const support = await run("start", {
     actorId: "support",
     jobId: "job1",
@@ -561,8 +535,36 @@ try {
       (job: Row) => job.id === "newAssignedJob",
     ),
   );
+  user("ta2", "ta");
+  for (const id of ["multi1", "multi2", "multi3"])
+    put("jobs", {
+      _id: id,
+      title: id,
+      taLeadId: "lead",
+      assignedTaIds: ["ta2"],
+    });
+  const multiDay = await run("start", {
+    actorId: "ta2",
+    jobId: "multi1",
+    workType: "100%",
+  });
+  for (const jobId of ["multi2", "multi3"])
+    assert.equal(
+      (await run("addPosition", {
+        actorId: "ta2",
+        workdayId: multiDay.id,
+        jobId,
+        workType: "Add-on",
+      })).pending,
+      false,
+      `${jobId} is direct without approval`,
+    );
+  assert.equal(
+    rows("taWorkdays").find((d) => d._id === multiDay.id)?.jobs.length,
+    3,
+  );
   console.log(
-    "  ok  workday times, approval boundaries, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
+    "  ok  workday times, direct assigned positions, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );
 } finally {
   Date.now = realNow;
