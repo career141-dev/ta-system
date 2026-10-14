@@ -1523,6 +1523,7 @@ export async function savePreparedCvBox(formData: FormData) {
     repo.setPreparedCvBox(appId, { x: Math.round(x), y: Math.round(y) });
   }
   revalidatePath(`/openings/${openingId}/candidate/${appId}`);
+  revalidatePath(`/openings/${openingId}/eod`);
   await done(String(formData.get("reset")) === "1" ? "Box back in its automatic place." : "Box position saved.");
 }
 

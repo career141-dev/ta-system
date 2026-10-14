@@ -30,12 +30,14 @@ export function PreparedCvEditor({
   openingId,
   pdfSrc,
   canEdit,
+  queryOverrides,
 }: {
   appId: string;
   openingId: string;
   /** The candidate's own CV as a PDF (a Word CV converted) — what is stamped. */
   pdfSrc: string | null;
   canEdit: boolean;
+  queryOverrides?: string;
 }) {
   const [layout, setLayout] = useState<Layout | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -55,7 +57,8 @@ export function PreparedCvEditor({
   const load = useCallback(async (signal: AbortSignal) => {
     setProblem(null);
     try {
-      const res = await fetch(`/api/prepared-cv/${encodeURIComponent(appId)}?layout=1`, { cache: "no-store", signal });
+      const q = queryOverrides ? `&${queryOverrides}` : "";
+      const res = await fetch(`/api/prepared-cv/${encodeURIComponent(appId)}?layout=1${q}`, { cache: "no-store", signal });
       if (!res.ok) throw new Error(String(res.status));
       const l = (await res.json()) as Layout;
       if (signal.aborted) return;
@@ -64,7 +67,7 @@ export function PreparedCvEditor({
     } catch {
       if (!signal.aborted) setProblem("The Prepared CV could not be loaded. Reload the page to try again.");
     }
-  }, [appId]);
+  }, [appId, queryOverrides]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -223,7 +226,7 @@ export function PreparedCvEditor({
     setTimeout(() => setVersion((v) => v + 1), 800);
   };
 
-  const href = `/api/prepared-cv/${encodeURIComponent(appId)}`;
+  const href = `/api/prepared-cv/${encodeURIComponent(appId)}${queryOverrides ? `?${queryOverrides}` : ""}`;
 
   return (
     <div>
