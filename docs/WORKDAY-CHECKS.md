@@ -5,6 +5,13 @@ does not start the clock, and sign-out does not finish work. Old `/workday` link
 redirect to Openings with the drawer open. TA Leads and admins use Team checks
 in the same sidebar, with date, TA, job and task-status filters.
 
+The TA's workday sidebar groups candidate work into one "Candidates sourced
+and progressed" check per job, with source names and totals in TA Shortlist,
+Director Review and submitted. It omits the individual candidate roster and
+candidate task rows. Completion ratios and the remaining-step count use the
+grouped view; Finish still checks the original candidate requirements. Job
+pages and the lead's team review retain the detailed actions and history.
+
 The first workday for a TA/opening is 100%. Returning jobs default to Follow-up;
 the TA can explicitly select Add-on. Pending assigned jobs carry into the next
 workday as Follow-up and do not consume the ten manually selected job slots.
@@ -14,10 +21,11 @@ Changing a carried job to Add-on makes it a deliberately selected job.
 
 100% requires the TA's confirmed review of the approved job description, a
 LinkedIn job/post link, all eight main research fields filled or
-explained as unavailable and reviewed, a successful Suggestions run reviewed
-through its latest applicable round, and three distinct profiles added by that
-TA to Excel Tables. Existing saved setup counts. Successful empty suggestion
-searches need an explanation; failed searches do not count.
+explained as unavailable and reviewed, and three distinct profiles added by that
+TA to Excel Tables. Existing saved setup counts. The Suggestions review
+requirement is temporarily paused (14 October): it is hidden from workday checks
+and does not block sending or finishing. The Suggestions page, sourcing runs,
+review rules and saved evidence remain available for later work.
 
 Approving a JD records the approving TA's review automatically. Other assigned
 TAs confirm their own review from the sidebar. Editing the JD invalidates every

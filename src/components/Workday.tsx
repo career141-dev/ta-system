@@ -15,6 +15,7 @@ import {
 import { HEADER_H } from "@/lib/chrome";
 import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
 import { validateResearchLink } from "@/lib/eod-format";
+import { sidebarChecks } from "@/lib/workdaySidebar";
 
 function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
@@ -327,6 +328,8 @@ function DailyReview({
   lead?: boolean;
 }) {
   const blockers = completionBlockers(day.jobs);
+  const displayedJobs = lead ? day.jobs : day.jobs.map(job => ({ ...job, checks: sidebarChecks(job) }));
+  const displayedBlockers = completionBlockers(displayedJobs);
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap justify-between gap-2">
@@ -340,7 +343,7 @@ function DailyReview({
             : "Working"}
         </p>
       </div>
-      {day.jobs.map((job) => (
+      {displayedJobs.map((job) => (
         <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType} · {job.checks.filter(c => c.status === "complete").length}/{job.checks.length} complete</>}>
           <div className="flex flex-wrap justify-between gap-2">
             <Link
@@ -382,7 +385,7 @@ function DailyReview({
               ? `Email accepted for sending ${workdayTime(job.activity.emailAt)}.`
               : "End-of-day email not sent."}
           </p>
-          <p className="mt-3 text-sm font-medium">
+          {lead && <><p className="mt-3 text-sm font-medium">
             Shortlisted today and candidates still in progress
           </p>
           {job.shortlist.length ? (
@@ -392,6 +395,7 @@ function DailyReview({
               No candidates shortlisted during this workday.
             </p>
           )}
+          </>}
           <Link
             href={`/openings/${job.jobId}/eod`}
             className="mt-3 inline-block text-sm text-brand underline"
@@ -485,7 +489,7 @@ function DailyReview({
         <WorkForm op="finish" fields={{ workdayId: day.id }}>
           <p className="text-sm">
             {blockers.length
-              ? `${blockers.length} required steps still need action.`
+              ? `${displayedBlockers.length} required steps still need action.`
               : "All required checks are complete. Waiting items will carry forward."}
           </p>
           <button className={buttonClass} disabled={blockers.length > 0}>Finish workday</button>

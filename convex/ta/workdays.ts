@@ -841,7 +841,7 @@ export const suggestionsCheck = internalQuery({
     const entry = day?.jobs.find(j => j.jobId === args.jobId);
     if (!day || !entry || entry.workType !== "100%") return null;
     const evidence = await requiredChecks(ctx, day, entry);
-    return evidence.checks.find(c => c.key.startsWith("suggestions:")) ?? null;
+    return evidence.suggestionsCheck;
   },
 });
 
