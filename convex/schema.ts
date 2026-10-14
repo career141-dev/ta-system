@@ -2092,7 +2092,8 @@ export default defineSchema({
       v.literal("scoop_received"),
       v.literal("strategy_assigned"),
       v.literal("workday_started"), v.literal("workday_finished"),
-      v.literal("workday_request"), v.literal("workday_decision")
+      v.literal("workday_request"), v.literal("workday_decision"),
+      v.literal("job_no_new_candidates"), v.literal("director_no_shortlist")
     ),
     title: v.string(),
     body: v.string(),
@@ -2100,6 +2101,8 @@ export default defineSchema({
     candidateId: v.optional(v.id("candidates")),
     jobId: v.optional(v.id("jobs")),
     read: v.boolean(),
+    href: v.optional(v.string()),
+    alertId: v.optional(v.id("taAlerts")),
     createdAt: v.string(),
   })
     .index("by_user", ["userId"])
@@ -2919,7 +2922,8 @@ export default defineSchema({
   })
     .index("by_opening", ["openingId"])
     .index("by_token", ["token"])
-    .index("by_opening_kind", ["openingId", "kind"]),
+    .index("by_opening_kind", ["openingId", "kind"])
+    .index("by_kind_dispatch_sent", ["kind", "dispatch", "sentAt"]),
 
   /**
    * The end-of-day email as it went, kept for a month so the TA can correct it
@@ -2997,7 +3001,13 @@ export default defineSchema({
     dueAt: v.number(),
     resolvedAt: v.optional(v.union(v.number(), v.null())),
     detail: v.string(),
-  }).index("by_subject", ["subjectId"]),
+    openingId: v.optional(v.id("jobs")),
+    incidentKey: v.optional(v.string()),
+  }).index("by_subject", ["subjectId"])
+    .index("by_incident_recipient", ["incidentKey", "assignedTo"])
+    .index("by_recipient_resolved", ["assignedTo", "resolvedAt"])
+    .index("by_resolved", ["resolvedAt"])
+    .index("by_opening", ["openingId"]),
 
   /** Follow-up messages and calls a recruiter recorded against an application.
    *  Separate from `communications`, which is the engines' own message log. */

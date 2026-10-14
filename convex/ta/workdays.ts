@@ -21,6 +21,7 @@ import { assertWorkdayScope } from "../lib/workdayScope";
 import { requiredChecks, withTaskHistory } from "../lib/workdayChecks";
 import { researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
 import { validateResearchLink } from "../../src/lib/eod-format";
+import { outstandingFor } from "./backgroundAlerts";
 import {
   applyCarryForwards,
   completionBlockers,
@@ -939,6 +940,7 @@ export const dashboard = internalQuery({
         role,
         lastFinishedAt,
         lastFinishedDate,
+        backgroundAlerts: await outstandingFor(ctx, user._id),
         active: active ? await view(ctx, active, now) : null,
         history: [],
         team: [],
@@ -1071,6 +1073,7 @@ export const dashboard = internalQuery({
       role,
       lastFinishedAt,
       lastFinishedDate,
+      backgroundAlerts: await outstandingFor(ctx, user._id),
       active: active ? await view(ctx, active, now) : null,
       history: await Promise.all(
         history

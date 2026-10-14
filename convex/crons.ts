@@ -1,4 +1,4 @@
-import { cronJobs } from "convex/server";
+import { cronJobs, makeFunctionReference } from "convex/server";
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
@@ -942,13 +942,19 @@ function addEodCopies(registry: ReturnType<typeof cronJobs>) {
   registry.interval("ta-purge-eod-copies", { minutes: 41 }, internal.ta.eodCopies.purgeExpired, {});
 }
 
+function addBackgroundAlerts(registry: ReturnType<typeof cronJobs>) {
+  registry.interval("ta-background-alerts", { minutes: 5 }, makeFunctionReference<"mutation">("ta/backgroundAlerts:sweep"), {});
+}
+
 addMailIntake(crons);
 addBin(crons);
 addEodCopies(crons);
+addBackgroundAlerts(crons);
 const quiet = cronJobs();
 addMailIntake(quiet);
 addBin(quiet);
 addEodCopies(quiet);
+addBackgroundAlerts(quiet);
 // Only on the quiet registry: where every cron runs, the CV platform's own
 // queue, healer and SLA jobs above already cover this.
 addMaintenance(quiet);

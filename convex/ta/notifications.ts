@@ -7,7 +7,8 @@
 
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
-import { Id } from "../_generated/dataModel";
+import type { Id } from "../_generated/dataModel";
+import { stillActive } from "./backgroundAlerts";
 
 const NOTIFICATION_TYPE = v.union(
   v.literal("candidate_placed_elsewhere"),
@@ -21,6 +22,8 @@ const NOTIFICATION_TYPE = v.union(
   v.literal("scoop_received"),
   // A TA Lead gave the TA strategies on a job (Strategy Planner, 8 Oct).
   v.literal("strategy_assigned"),
+  v.literal("job_no_new_candidates"),
+  v.literal("director_no_shortlist"),
 );
 
 export const create = internalMutation({
@@ -30,6 +33,7 @@ export const create = internalMutation({
     title: v.string(),
     body: v.string(),
     jobId: v.optional(v.string()),
+    href: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const id = await ctx.db.insert("notifications", {
@@ -40,6 +44,7 @@ export const create = internalMutation({
       jobId: args.jobId ? (args.jobId as Id<"jobs">) : undefined,
       read: false,
       createdAt: new Date().toISOString(),
+      href: args.href,
     });
     return { id: id as string };
   },
@@ -57,9 +62,19 @@ export const listForUser = internalQuery({
       .query("notifications")
       .withIndex("by_user", (q) => q.eq("userId", args.userId as Id<"users">))
       .collect();
-    const filtered = args.unreadOnly ? rows.filter((r) => !r.read) : rows;
+    const visible = [];
+    for (const row of rows) {
+      if (row.alertId) {
+        const alert = await ctx.db.get(row.alertId);
+        if (!alert || !await stillActive(ctx, alert)) continue;
+        visible.push({ ...row, body: alert.detail });
+        continue;
+      }
+      visible.push(row);
+    }
+    const filtered = args.unreadOnly ? visible.filter((r) => !r.read) : visible;
     filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const unreadCount = rows.filter((r) => !r.read).length;
+    const unreadCount = visible.filter((r) => !r.read).length;
     return {
       unreadCount,
       notifications: filtered.slice(0, args.limit ?? 30).map((n) => ({
@@ -68,6 +83,7 @@ export const listForUser = internalQuery({
         title: n.title,
         body: n.body,
         jobId: (n.jobId ?? null) as string | null,
+        href: n.href ?? null,
         read: n.read,
         createdAt: n.createdAt,
       })),

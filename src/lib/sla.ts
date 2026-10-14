@@ -3,15 +3,15 @@ import { colomboDaysBetween, colomboDayStart } from "@/lib/calendar";
 import { ASSIGNMENT_LABEL, PRIORITY_TARGET, URGENT_ALERTS, type AlertKind, type Id } from "@/data/types";
 import { hasWorkingHours, isWorkingDay, workingHoursBetween } from "./calendar";
 import { extractReplyText, readNumbers } from "./reviewReply";
+import { backgroundAlertHref } from "./backgroundAlerts";
 
 export { isWorkingDay, workingHoursBetween, nextWorkingDay, TIMEZONE, DAILY_CUTOFF_HOUR } from "./calendar";
 
 /**
  * The SLA rules — spec §12, from notebook page 9 and the briefing doc.
  *
- * Alerts are computed from live records rather than stored. A stored alert goes
- * stale the moment someone acts, and a dashboard showing yesterday's problems is
- * worse than one showing none.
+ * Most alerts are computed from live records. Background incidents are saved
+ * for logged-out TAs and validated on backend reads before joining this list.
  */
 
 export interface LiveAlert {
@@ -87,37 +87,12 @@ function computeAlertsAt(now: number): LiveAlert[] {
       });
     }
 
-    /*
-     * 1b. A live advert that has gone quiet.
-     *
-     * Different from the low-volume line above, which is about today. This is
-     * about an advert that is up on LinkedIn, pointed at a TA's applications
-     * inbox, and has produced nothing at all for a working week — which
-     * usually means the advert is wrong, the inbox is not wired to it, or it
-     * has quietly expired. Only live adverts qualify, because an advert nobody
-     * can apply to going quiet is not news.
-     */
-    const QUIET_DAYS = 5;
-    for (const p of live) {
-      const onPost = apps.filter((a) => a.jobPostId === p.id);
-      const lastAt = onPost.length ? Math.max(...onPost.map((a) => a.createdAt)) : null;
-      const since = lastAt ?? p.postedAt ?? p.createdAt;
-      const days = Math.floor(workingHoursBetween(since, now) / 24);
-      if (days < QUIET_DAYS) continue;
-      out.push({
-        id: `aq_${p.id}`,
-        kind: "advert_quiet",
-        urgent: false,
-        openingId: o.id,
-        subjectId: p.id,
-        detail:
-          `${p.title} has been up on LinkedIn for ${days} working days with ` +
-          (lastAt ? "nothing new" : "no applications at all"),
-        action: "Check the advert",
-        href: `/openings/${o.id}/linkedin-job`,
-        dueAt: now,
-        assignedTo: p.assignedTaId ? [p.assignedTaId] : o.assignedTaIds,
-      });
+    // Background checks persist these incidents even while nobody is logged in.
+    for (const alert of repo.alerts().filter(a => a.openingId === o.id && a.incidentKey &&
+      (a.kind === "job_no_new_candidates" || a.kind === "director_no_shortlist"))) {
+      out.push({ id: alert.id, kind: alert.kind, urgent: false, openingId: o.id, subjectId: alert.subjectId,
+        detail: alert.detail, action: alert.kind === "director_no_shortlist" ? "View EOD review" : "Check applications",
+        href: backgroundAlertHref(alert.kind, o.id), dueAt: alert.dueAt, assignedTo: [alert.assignedTo] });
     }
 
     // 2. Stale role — measured against the priority tier, not a flat five days.
@@ -176,13 +151,14 @@ function computeAlertsAt(now: number): LiveAlert[] {
      * this fires and a TA goes and asks. The system never asks them to reply
      * in a particular way.
      *
-     * One working day on the Director, two on the client — a client is a
-     * client and has a day job; the Director is down the corridor.
+     * Two working days on the client. Director submissions use the persisted
+     * zero-shortlist check, including replies that reject everyone.
      */
     for (const round of repo.reviewRounds(o.id)) {
+      if (round.kind === "director") continue; // The durable zero-shortlist rule replaces this chase.
       if (round.status === "returned") continue;
       if (round.applicationIds.length === 0) continue;
-      const limitDays = round.kind === "director" ? 1 : 2;
+      const limitDays = 2;
       // `workingHoursBetween` skips weekends and holidays but counts the whole
       // of a working day, so a working day is 24 of these hours, not 8. Getting
       // that wrong reported three calendar days as five working ones.
@@ -190,12 +166,12 @@ function computeAlertsAt(now: number): LiveAlert[] {
       if (waited < limitDays * 24) continue;
 
       const days = Math.floor(waited / 24);
-      const who = round.kind === "director" ? "the Director" : "the client";
+      const who = "the client";
       // Past double the window it stops being a reminder and goes to the lead.
       const escalated = waited >= limitDays * 24 * 2;
       out.push({
         id: `rc_${round.id}`,
-        kind: round.kind === "director" ? "director_review_chase" : "client_review_chase",
+        kind: "client_review_chase",
         urgent: escalated,
         openingId: o.id,
         subjectId: round.id,
@@ -203,7 +179,7 @@ function computeAlertsAt(now: number): LiveAlert[] {
           `${o.title} — ${round.applicationIds.length} ${round.applicationIds.length === 1 ? "CV has" : "CVs have"} been with ` +
           `${who} ${days === 0 ? "since yesterday" : `${days} working ${days === 1 ? "day" : "days"}`} with no reply` +
           (round.status === "partial" ? ", and only part of the set was answered" : ""),
-        action: round.kind === "director" ? "Ask him" : "Chase the client",
+        action: "Chase the client",
         href: `/openings/${o.id}/eod?kind=${round.kind}`,
         dueAt: round.sentAt + limitDays * DAY,
         assignedTo: escalated

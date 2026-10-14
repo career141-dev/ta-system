@@ -80,6 +80,7 @@ const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   // row outliving its opening points at nothing.
   ["whatsappSessions", "by_jobId", "jobId"],
   ["notifications", "by_jobId", "jobId"],
+  ["taAlerts", "by_opening", "openingId"],
   ["match_scores", "by_job_score", "jobId"],
   ["job_assets", "by_jobId", "jobId"],
   ["custom_filters", "by_jobId", "jobId"],
