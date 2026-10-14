@@ -2,7 +2,7 @@
  * How Excel Tables is cut (the desk, 29 Sep): by interest — All, Pending,
  * Interested, Not interested — and, separately, by L: a TA starts L1, L2, …
  * with the + beside Excel Tables in the sidebar, and each row belongs to the
- * L it was added under. Add-ons stay a filter of their own. Every cut is over
+ * L it was added under. iMark and add-ons are separate filters. Every cut is over
  * the same rows: a person changes tab, they are never copied.
  */
 export const INTEREST_TABS = [
@@ -47,11 +47,11 @@ export function levelLabel(l: { n: number; at: number; name?: string }): string 
 }
 
 /** Old links (?view=shortlisted / ?view=addons) keep working. */
-export function readLinkFilters(sp: { status?: string; view?: string; level?: string; addons?: string; by?: string }) {
+export function readLinkFilters(sp: { status?: string; view?: string; level?: string; addons?: string; imark?: string; by?: string }) {
   const status = INTEREST_TABS.some((t) => t.key === sp.status) ? (sp.status ?? "") : sp.view === "shortlisted" ? "interested" : "";
   const level = Math.max(0, Math.floor(Number(sp.level)) || 0);
   // Who added the row (1 Oct): two TAs on one opening could not tell their
   // own headhunted profiles from each other's.
   const by = /^[\w-]{1,64}$/.test(sp.by ?? "") ? (sp.by as string) : "";
-  return { status, level, addons: sp.addons === "1" || sp.view === "addons", by };
+  return { status, level, imark: sp.imark === "1", addons: sp.addons === "1" || sp.view === "addons", by };
 }

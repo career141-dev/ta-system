@@ -28,7 +28,7 @@ export function EyeMarkedChecks({ openingId, items }: { openingId: string; items
             <li key={item.id} className="py-4">
               <p className="text-[13.5px] font-medium">{item.name}</p>
               <p className={`mt-1 text-[12.5px] ${item.blocked ? "text-warn" : "text-ink-soft"}`}>{item.status}{item.blocked ? " — next step" : ""}</p>
-              <a href={`/openings/${openingId}/hh#eye-${item.id}`} className="mt-2 inline-block text-[12.5px] text-brand hover:underline">Open profile and log progress</a>
+              <a href={`/openings/${openingId}/hh/links?imark=1&q=${encodeURIComponent(item.linkedinUrl)}#eye-${item.id}`} className="mt-2 inline-block text-[12.5px] text-brand hover:underline">Open profile and log progress</a>
               {item.applicationId && <a href={`/openings/${openingId}/candidate/${item.applicationId}`} className="ml-4 text-[12.5px] text-brand hover:underline">Open candidate</a>}
             </li>
           ))}

@@ -6,6 +6,7 @@ import { LiveTableRefresh } from "@/components/LiveTableRefresh";
 import { getCurrentUser } from "@/lib/session";
 import { after } from "next/server";
 import { matchUnchecked } from "@/lib/cvMatch";
+import { primeEyeMarked } from "@/lib/eyeMarkedStore";
 import { readLinkFilters } from "@/lib/linkViews";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +16,13 @@ export default async function LinksPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string; view?: string; status?: string; level?: string; addons?: string; by?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; view?: string; status?: string; level?: string; addons?: string; imark?: string; by?: string; page?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
   await primeStore({ openingId: id });
   const user = await getCurrentUser();
+  await primeEyeMarked(id, user);
   // Rows added before matching existed get checked after the page is sent
   // (lib/cvMatch); the table picks the answers up on its next refresh.
   after(() => matchUnchecked(id, user?.id).catch((e) => console.warn(`[cvMatch ${id}]`, (e as Error).message)));
