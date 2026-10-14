@@ -21,6 +21,7 @@ import { requireActor, assertFullAccess, optionalActor} from "./guard";
 import { candidateIdToPointId, candidateVectorPayload } from "../lib/vectorPayload";
 import { isGone } from "../../src/lib/bin";
 import { cvFileMissing } from "../../src/lib/cvMissing";
+import { isPlausibleReferee } from "../lib/refereeCheck";
 
 /**
  * A candidate row with their career attached.
@@ -260,7 +261,17 @@ export const peopleAtCompany = internalQuery({
       .withSearchIndex("search_company", (q) => q.search("company", baseNeedle || args.company.trim()))
       .take(limit);
     for (const r of refDocs) {
-      if (r.company && matchCompany(r.company)) {
+      if (
+        r.company &&
+        matchCompany(r.company) &&
+        isPlausibleReferee({
+          name: r.name,
+          contactNo: r.contactNo,
+          email: r.email,
+          company: r.company,
+          designation: r.designation,
+        })
+      ) {
         referees.push({
           id: r._id as string,
           name: r.name,
