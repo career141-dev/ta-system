@@ -166,6 +166,12 @@ export default async function CandidatePage({
               </a>
             </>
           )}
+          <Link
+            href={`/database/match?candidateId=${encodeURIComponent(c.id)}`}
+            className="rounded-full border border-brand/30 bg-brand-soft/60 px-4 py-1.5 text-[12.5px] font-medium text-brand hover:bg-brand-soft"
+          >
+            Find lookalikes →
+          </Link>
         </div>
       </header>
 
