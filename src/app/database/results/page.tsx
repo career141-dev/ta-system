@@ -39,7 +39,7 @@ import {
 import type { SearchCriteria } from "@/data/types";
 
 const PAGE = 25;
-const ENGINE_LIMIT = 100;
+const ENGINE_LIMIT = 400;
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -356,7 +356,8 @@ async function ResultsView({
   // closest CV in the database: within 0.12 of the best, and never under 0.25.
   const best = similarity ? Math.max(0, ...similarity.values()) : 0;
   const showBelow = (sp as Record<string, string | undefined>).below === "1";
-  const engineRanked = engineHits.size > 0;
+  const engineRanked = !!engine;
+  const engineOrder = new Map([...engineHits.keys()].map((id, index) => [id, index]));
   /*
    * The bar below is a bar on cosine similarity, and the engine's number is not
    * one — it is a fit score out of 100 with its own thresholds, already applied
@@ -421,8 +422,10 @@ async function ResultsView({
     }
   }
 
-  // Ensure results are strictly ordered from highest score to lowest score.
+  // The engine already orders career evidence before broad similarity. Keep
+  // that order through pagination and profile navigation, even with a job fit.
   results.sort((a, b) => {
+    if (engineRanked) return (engineOrder.get(a.candidate.id) ?? Infinity) - (engineOrder.get(b.candidate.id) ?? Infinity);
     const scoreA = fit.get(a.candidate.id)?.overall ?? (a.score > 1 ? a.score : Math.round(a.score * 100));
     const scoreB = fit.get(b.candidate.id)?.overall ?? (b.score > 1 ? b.score : Math.round(b.score * 100));
     return scoreB - scoreA || (b.candidate.totalExperienceYears ?? 0) - (a.candidate.totalExperienceYears ?? 0);
@@ -855,6 +858,7 @@ async function ResultsView({
                     hits={chips.hits}
                     misses={chips.misses}
                     intentEvidence={rowIntentEvidence(chips)}
+                    roleEvidence={engineHits.get(r.candidate.id)?.roleEvidence}
                     signals={r.signals}
                     apps={appsFor(r.candidate.id)}
                     openings={openingOptions}

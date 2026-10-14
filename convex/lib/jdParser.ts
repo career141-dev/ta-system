@@ -2,12 +2,14 @@
 import { getOpenAI, getNvidiaOpenAI, getModelForTask, OPENROUTER_PRIMARY_MODEL } from "./llm";
 import { askClaudeFirst, claudeBudgetMs } from "./claudeFirst";
 import { employersInText } from "./employers";
+import type { SearchOccupation } from "./searchRoleEvidence";
 
 function distinct(values: string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
 }
 
 export type SearchRequirements = {
+  searchOccupation?: SearchOccupation;
   title: string;
   alternativeTitles: string[];
   occupationSynonyms: string[];
@@ -71,6 +73,15 @@ function requirementsIn(content: string, text: string): SearchRequirements | nul
   // "Everyone who worked at Dialog" names no role, and is still a search.
   if (!parsed || !(parsed.title || (parsed.requiredSkills && parsed.requiredSkills.length > 0) || strings(parsed.employers).length > 0)) return null;
   return normalizeRequirements({
+    ...(parsed.searchOccupation && typeof parsed.searchOccupation === "object" && (parsed.searchOccupation.targetOccupation === null || typeof parsed.searchOccupation.targetOccupation === "string") ? {
+      searchOccupation: {
+        targetOccupation: typeof parsed.searchOccupation.targetOccupation === "string" ? parsed.searchOccupation.targetOccupation : null,
+        equivalentTitles: strings(parsed.searchOccupation.equivalentTitles),
+        reportingContext: typeof parsed.searchOccupation.reportingContext === "string" ? parsed.searchOccupation.reportingContext : null,
+        explicitSkills: strings(parsed.searchOccupation.explicitSkills),
+        inferredSkills: strings(parsed.searchOccupation.inferredSkills),
+      },
+    } : {}),
     title: parsed.title && parsed.title !== "Position" ? parsed.title : text.slice(0, 60),
     alternativeTitles: parsed.alternativeTitles ?? [],
     requiredSkills: parsed.requiredSkills ?? [],
@@ -307,15 +318,28 @@ export function conversationReply(reply: string, turns: string[]): SearchRequire
  * One reading of the whole conversation. A single message is read exactly as
  * before. When every model is down, the words of all the messages are used.
  */
-export async function extractConversationRequirements(turns: string[]): Promise<Reading> {
+export async function extractConversationRequirements(turns: string[], opts: { roleAware?: boolean } = {}): Promise<Reading> {
   const said = turns.map((t) => t.trim()).filter(Boolean);
-  if (said.length <= 1) return extractSearchRequirements(said[0] ?? "", "natural_language");
+  if (said.length <= 1 && !opts.roleAware) return extractSearchRequirements(said[0] ?? "", "natural_language");
   const joined = said.map((t) => t.replace(/[.\s]+$/, "")).join(". ");
   return (
-    (await readRequirements(`${NATURAL_LANGUAGE_PROMPT}\n\n${CONVERSATION_RULES}`, conversationMessage(said), joined, true)) ??
+    (await readRequirements(`${NATURAL_LANGUAGE_PROMPT}\n\n${CONVERSATION_RULES}${opts.roleAware ? ROLE_AWARE_SEARCH : ""}`, conversationMessage(said), joined, true)) ??
     fallbackRequirements(joined)
   );
 }
+
+const ROLE_AWARE_SEARCH = `
+For this Database search, these rules override the implicit-skills rules above:
+Add searchOccupation: {targetOccupation: string or null, equivalentTitles: string[], reportingContext: string or null, explicitSkills: string[], inferredSkills: string[]}.
+The occupation is the candidate's work, never the person they support or report to.
+Personal Assistant to CFO / personal assistant cfo means Personal Assistant, supporting CFO, NOT CFO. Executive Assistant to CEO means Executive Assistant, NOT CEO.
+Preserve Assistant Accountant and Assistant Finance Manager as distinct occupations; do not strip assistant.
+equivalentTitles and occupationSynonyms must describe the SAME occupation, not merely a related department or senior role.
+Use targetOccupation null when only skills, employers, or other constraints were requested.
+explicitSkills and requiredSkills contain only skills the recruiter actually requested, excluding preferences. Put inferred or preferred skills into inferredSkills and preferredSkills, never requiredSkills.
+Do not infer executive seniority from a reporting-line CFO/CEO or from the title Executive Assistant.
+Retain the complete role phrase in title. Later explicit role changes replace earlier roles.
+`;
 
 export function buildSearchTerms(req: SearchRequirements, sourceText: string): string[] {
   // Filter required skills to remove filler words or long sentences
