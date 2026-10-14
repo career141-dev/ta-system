@@ -41,7 +41,17 @@ to be completed or valid waiting reasons with next actions and future due times.
 Director replies can remain waiting. Each selected/carried job needs its daily
 email and confirmed ChatGPT research share link before the workday can finish.
 
-The composer displays outstanding send requirements. Server preflight and the
+For now, EOD sending requires only confirmed review of the approved JD,
+completed and reviewed research, three distinct own Excel Tables profiles, and
+a confirmed ChatGPT research share link. These four checks apply to every work
+type and reuse saved setup evidence. Candidate progress, the LinkedIn post,
+Suggestions and the Director Review candidate/explanation requirement do not
+block sending. They can still affect Finish under the rules above. Existing
+candidate validation and duplicate/uncertain-mail safeguards remain enforced.
+The composer fills the ChatGPT link from today's saved confirmation. Editing
+that link clears confirmation, and revised emails require confirmation again.
+
+The composer displays these four outstanding send requirements. Server preflight and the
 mail reservation recheck evidence; Finish rechecks in its transaction. Existing
 CV review, candidate detail, handoff, upload and uncertain-mail safeguards still
 apply. Failed/uncertain email results do not mark the email complete.

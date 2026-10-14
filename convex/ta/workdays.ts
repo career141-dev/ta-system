@@ -24,6 +24,7 @@ import { validateResearchLink } from "../../src/lib/eod-format";
 import {
   applyCarryForwards,
   completionBlockers,
+  emailBlockers,
   validateCarry,
   workdayDate,
   type WorkdayCheck,
@@ -238,7 +239,7 @@ async function jobView(
       evidenceAt,
       evidence: String(evidenceAt),
       status: "incomplete",
-      blocksEmail: key.startsWith("mail:") || (entry.workType === "Follow-up" && ["follow_up", "handoff", "details"].includes(kind)),
+      blocksEmail: key.startsWith("mail:"),
     });
   const since = colomboDayStart(day.startedAt);
   const appQueues = await Promise.all([
@@ -741,6 +742,7 @@ async function jobView(
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
     checks: await withTaskHistory(ctx, day, entry.jobId, resolved),
+    eodChecks: required.eodChecks,
     shortlist,
     activity: {
       cvReviews: reviews,
@@ -879,7 +881,10 @@ export const saveCheck = internalMutation({
     } else {
       const checked = validateResearchLink(args.link);
       if (!checked.ok) throw new Error(checked.reason);
-      Object.assign(patch, { workdayId: day._id, chatgptLink: checked.url, confirmedAt: args.confirmed ? evidence.notes?.workdayId === day._id && evidence.notes.chatgptLink === checked.url ? evidence.notes.confirmedAt ?? now : now : undefined });
+      // Saving this check means confirming it, not saving an unconfirmed draft
+      // that answers "Saved" while leaving the sidebar incomplete (14 Oct).
+      if (!args.confirmed) throw new Error("Confirm you opened this link in a private window and it contains no candidate details before saving.");
+      Object.assign(patch, { workdayId: day._id, chatgptLink: checked.url, confirmedAt: evidence.notes?.workdayId === day._id && evidence.notes.chatgptLink === checked.url ? evidence.notes.confirmedAt ?? now : now });
     }
     if (evidence.notes) await ctx.db.patch(evidence.notes._id, patch);
     else await ctx.db.insert("taWorkdayCheckNotes", { userId: user._id, jobId: args.jobId, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) });
@@ -920,8 +925,7 @@ export const emailPreflight = internalMutation({
     else await ctx.db.insert("taWorkdayCheckNotes", { userId: user._id, jobId: args.jobId, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) });
     await refreshWorkdayChecks(ctx, args.jobId, user._id);
     const result = await jobView(ctx, day, entry, Date.now());
-    const blockers = result.checks.filter(c => c.status !== "complete" && !c.waiting && c.blocksEmail &&
-      !(args.revised && (c.key.startsWith("director_candidate:") || c.kind === "handoff")));
+    const blockers = emailBlockers([result]);
     return { ok: !blockers.length, blockers: blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`) };
   },
 });
@@ -1124,8 +1128,8 @@ export const beginMail = internalMutation({
       return { id: null };
     await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId)!;
-    const checks = (await jobView(ctx, day, entry, Date.now())).checks;
-    const blockers = checks.filter(c => c.status !== "complete" && !c.waiting && c.blocksEmail && !c.key.startsWith("mail:"));
+    const current = await jobView(ctx, day, entry, Date.now());
+    const blockers = emailBlockers([current]).filter(c => !c.key.startsWith("mail:"));
     if (blockers.length) throw new Error(`Complete Today's Checks before sending: ${blockers.map(c => c.label).join("; ")}.`);
     const ready = await ctx.db.query("applications").withIndex("by_workday_owner", q => q.eq("jobId", args.jobId).eq("ownerTaId", user._id)).collect();
     const rounds = await ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", args.jobId)).collect();

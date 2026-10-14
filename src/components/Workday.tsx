@@ -1,11 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useId, useState, useTransition } from "react";
+import { Suspense, useCallback, useEffect, useId, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { changeWorkday } from "@/app/workday/actions";
 import {
   completionBlockers,
+  emailBlockers,
+  confirmedResearchLink,
   workdayDate,
   workdayTime,
   type WorkdayCheck,
@@ -20,19 +22,28 @@ import { sidebarChecks } from "@/lib/workdaySidebar";
 function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
   const [error, setError] = useState("");
+  const request = useRef<AbortController | null>(null);
   const load = useCallback(async () => {
     if (!enabled) return;
+    // A poll started before Save must not overwrite the refreshed checks.
+    request.current?.abort();
+    const current = new AbortController();
+    request.current = current;
     try {
       const response = await fetch(`/api/workday?detail=${detail ? "1" : "0"}${query}`, {
         cache: "no-store",
+        signal: current.signal,
       });
       if (!response.ok)
         throw new Error(
           "Could not load workday checks. Retry before finishing work.",
         );
-      setData(await response.json());
+      const next: WorkdayPayload = await response.json();
+      if (current.signal.aborted || request.current !== current) return;
+      setData(next);
       setError("");
     } catch (error) {
+      if (current.signal.aborted || request.current !== current) return;
       setError(
         error instanceof Error ? error.message : "Could not load workday.",
       );
@@ -50,6 +61,7 @@ function useWorkday(detail: boolean, enabled = true, query = "") {
     window.addEventListener("workday-changed", changed);
     window.addEventListener("focus", changed);
     return () => {
+      request.current?.abort();
       clearInterval(poll);
       window.removeEventListener("workday-changed", changed);
       window.removeEventListener("focus", changed);
@@ -186,6 +198,7 @@ function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId:
         {check.status === "complete" ? "✓ " : check.waiting ? "◷ " : "○ "}{check.label}
       </Link>
       {check.progress && <p className="break-words text-xs text-ink-soft">{check.progress}</p>}
+      {check.key.startsWith("candidate_progress:") && <p className="text-xs text-ink-soft">This progress check does not block sending your end-of-day email.</p>}
       {check.status === "complete" && <p className="text-xs text-brand">{check.completedAt ? `Completed ${workdayTime(check.completedAt)}` : "Completion time not recorded"}{check.completedBy ? ` · ${check.completedBy}` : ""}</p>}
       {!!check.events?.length && <details><summary className="cursor-pointer text-xs text-ink-soft">Task history</summary><ul className="mt-2 space-y-1 text-xs">{check.events.map((event, i) => <li key={i}>{event.observed ? "Existing completion recorded" : event.status === "incomplete" ? i ? "Reopened" : "Incomplete" : event.status === "complete" ? "Completed" : "Waiting"} · {workdayTime(event.at)}{event.by ? ` · ${event.by}` : ""}</li>)}</ul></details>}
       {check.waiting ? (
@@ -282,7 +295,7 @@ export function ChatgptConfirmation({ jobId, link = "", confirmed = false }: { j
   const helpId = useId();
   const checked = validateResearchLink(link || typedLink);
   const ready = checked.ok && (link ? confirmed : opened);
-  return <WorkForm op="saveCheck" fields={{ jobId, kind: "chatgpt", ...(link ? { link } : {}), ...(confirmed ? { confirmed: "on" } : {}) }}>
+  return <WorkForm op="saveCheck" fields={{ jobId, kind: "chatgpt", confirmed: ready ? "on" : "", ...(link ? { link } : {}) }}>
     {!link && <>
       <p className="text-xs text-ink-soft">In ChatGPT, choose Share, then Create link or Copy link. Paste the shared link here; copying the browser address gives your private chat link.</p>
       <label className="block text-xs">ChatGPT share link<input required name="link" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://chatgpt.com/share/…" value={typedLink} onChange={e => {
@@ -293,7 +306,7 @@ export function ChatgptConfirmation({ jobId, link = "", confirmed = false }: { j
       <p id={helpId} aria-live="polite" className="break-words text-xs text-ink-soft">
         {checked.ok ? "Share link accepted. Open it in a private window, then confirm below." : typedLink.trim() ? checked.reason : "Use a link beginning with https://chatgpt.com/share/."}
       </p>
-      <label className="block text-xs"><input required type="checkbox" name="confirmed" checked={opened} disabled={!checked.ok} onChange={e => setOpened(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
+      <label className="block text-xs"><input required type="checkbox" checked={opened} disabled={!checked.ok} onChange={e => setOpened(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
     </>}
     <button disabled={!ready} className={buttonClass}>Save research link</button>
   </WorkForm>;
@@ -307,11 +320,12 @@ export function EmptySuggestionsReason({ jobId }: { jobId: string }) {
   return <WorkForm op="saveCheck" fields={{ jobId, kind: "emptySuggestions" }}><label className="block text-xs">Why this search found no profiles<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save empty-search explanation</button></WorkForm>;
 }
 
-export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked }: { jobId: string; linkConfirmed: boolean; revised: boolean; onBlocked: (blocked: boolean) => void }) {
+export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResearchSaved }: { jobId: string; linkConfirmed: boolean; revised: boolean; onBlocked: (blocked: boolean) => void; onResearchSaved?: (link: string) => void }) {
   const { data, error } = useWorkday(false);
   const job = data?.active?.jobs.find(j => j.jobId === jobId);
-  const blockers = job?.checks.filter(c => c.status !== "complete" && !c.waiting && c.blocksEmail &&
-    !(linkConfirmed && c.key.startsWith("chatgpt:")) && !(revised && (c.key.startsWith("director_candidate:") || c.kind === "handoff"))) ?? [];
+  const savedLink = confirmedResearchLink(job?.eodChecks ?? job?.checks ?? []);
+  useEffect(() => { if (savedLink) onResearchSaved?.(savedLink); }, [savedLink, onResearchSaved]);
+  const blockers = job ? emailBlockers([job]).filter(c => !(linkConfirmed && c.key.startsWith("chatgpt:"))) : [];
   const blocked = !!error || !data || (data.canWork && (!job || blockers.length > 0));
   useEffect(() => { onBlocked(blocked); }, [blocked, onBlocked]);
   if (data && !data.canWork) return null;

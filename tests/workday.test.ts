@@ -233,6 +233,9 @@ try {
   assert.ok(blocked.blockers.some((b: string) => b.includes("Job description")));
   await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "jd" }), /approve the job description/);
   const suggestionsCheck = () => run("suggestionsCheck", { actorId: "ta", jobId: "job1" });
+  for (const confirmed of [undefined, false]) {
+    await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "chatgpt", link: "https://chatgpt.com/share/12345678", ...(confirmed === undefined ? {} : { confirmed }) }), /Confirm you opened this link/, "Saving cannot report success for an unconfirmed link");
+  }
   put("taWorkdayTaskEvents", { _id: "paused:suggestions", workdayId: day.id, jobId: "job1", userId: "ta", key: "suggestions:job1", label: "Suggestions reviewed", href: "/openings/job1/hh/suggestions", kind: "details", status: "incomplete", at: clock });
   assert.ok(!(await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.some((c: Row) => c.key.startsWith("suggestions:")), "Historical events cannot restore the paused Suggestions check");
   assert.ok(!(await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("Suggestions")), "Suggestions no longer blocks email");
@@ -267,8 +270,42 @@ try {
     await run("saveCheck", { actorId, jobId, kind: "noCandidates", reason: "No suitable synthetic candidates" });
     await run("saveCheck", { actorId, jobId, kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
   }
+  // The temporary send gate depends only on the four setup requirements.
+  const savedPosts = [...rows("jobPosts")];
+  tables.set("jobPosts", savedPosts.filter(p => p.openingId !== "job1"));
+  const savedNotes = rows("taWorkdayCheckNotes").find(n => n.userId === "ta" && n.jobId === "job1")!;
+  const savedReason = savedNotes.noCandidateReason;
+  await db.patch(savedNotes._id, { noCandidateReason: undefined });
+  put("applications", { _id: "temporary:unreviewed", jobId: "job1", candidateId: "temporary:candidate", currentStage: "new_cvs", sourceChannel: "SCOOP", createdAt: clock, lastStageChangedAt: clock });
+  assert.equal((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).ok, true, "Reviewed JD/research, three profiles and a confirmed share link allow EOD despite missing LinkedIn post, no director candidate and pending CV reviews");
+  const activityMail = await run("beginMail", { actorId: "ta", jobId: "job1", applicationIds: [], subject: "Synthetic progress update", sentTo: "director@example.invalid", researchLink: "https://chatgpt.com/share/12345678" });
+  assert.ok(activityMail.id, "Reservation uses the same simplified gate as preflight");
+  await run("mailResult", { id: activityMail.id, status: "failed" });
+  // Match the reported sidebar: incomplete candidate progress, a ready Director
+  // Review candidate, no LinkedIn post, and all four required setup checks ticked.
+  put("candidates", { _id: "temporary:readyCandidate", fullName: "Synthetic ready candidate" });
+  put("applications", { _id: "temporary:followup", jobId: "job1", candidateId: "temporary:missingDetails", ownerTaId: "ta", currentStage: "follow_up", sourceChannel: "L", shortlistedAt: clock, lastStageChangedAt: clock });
+  put("applications", { _id: "temporary:ready", jobId: "job1", candidateId: "temporary:readyCandidate", ownerTaId: "ta", currentStage: "second_shortlist", sourceChannel: "SCOOP", shortlistedAt: clock, lastStageChangedAt: clock });
+  const reportedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
+  assert.ok(reportedJob.checks.some((c: Row) => c.key.startsWith("candidate:") && c.status !== "complete"));
+  assert.ok(reportedJob.checks.some((c: Row) => c.key.startsWith("linkedin_post:") && c.status !== "complete"));
+  assert.ok(reportedJob.eodChecks.every((c: Row) => c.status === "complete"));
+  assert.equal((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).ok, true, "The four ticked checks permit sending with outstanding candidate progress");
+  const candidateMail = await run("beginMail", { actorId: "ta", jobId: "job1", applicationIds: ["temporary:ready"], subject: "Synthetic Director Review update", sentTo: "director@example.invalid", researchLink: "https://chatgpt.com/share/12345678" });
+  assert.ok(candidateMail.id);
+  await run("mailResult", { id: candidateMail.id, status: "failed" });
+  tables.set("applications", rows("applications").filter(a => !["temporary:followup", "temporary:ready"].includes(a._id)));
+  tables.set("candidates", rows("candidates").filter(c => c._id !== "temporary:readyCandidate"));
+  tables.set("applications", rows("applications").filter(a => a._id !== "temporary:unreviewed"));
+  tables.set("jobPosts", savedPosts);
+  await db.patch(savedNotes._id, { noCandidateReason: savedReason });
+  await workdays.refreshWorkdayChecks(ctx, "job1" as any, "ta" as any);
   let checkedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
   const confirmedAt = checkedJob.checks.find((c: Row) => c.key.startsWith("chatgpt:")).completedAt;
+  assert.equal(checkedJob.checks.find((c: Row) => c.key.startsWith("chatgpt:")).status, "complete", "Confirmed saves immediately complete the same check the sidebar reads");
+  assert.ok(confirmedAt);
+  await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: false }), /Confirm you opened this link/);
+  assert.equal((await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("chatgpt:")).completedAt, confirmedAt, "A refused unconfirmed save must not erase an existing confirmation");
   const eventsBefore = rows("taWorkdayTaskEvents").length;
   await workdays.refreshWorkdayChecks(ctx, "job1" as any);
   assert.equal(rows("taWorkdayTaskEvents").length, eventsBefore, "Repeated evaluation does not duplicate events");
@@ -706,6 +743,12 @@ try {
   addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
   assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_candidate:")).status, "complete");
   assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
+  await assert.rejects(() => run("beginMail", { actorId: "addonTa", jobId: "addonJob", applicationIds: [], subject: "Synthetic Add-on update", sentTo: "director@example.invalid" }), /Job description reviewed; Research fields reviewed; Own Excel Tables profiles/, "All four send prerequisites apply to Add-on too");
+  await db.patch("addonJob", { jobDescription: "Synthetic Add-on JD", jdStatus: "approved" });
+  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "jd" });
+  put("researchReports", { _id: "addonResearch", openingId: "addonJob", generatedAt: clock, fields: {} });
+  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "research", reasons: Object.fromEntries(["similarDesignation", "websiteLink", "servicesProvider", "country", "location", "competitors", "socialMedia", "companyOverview"].map(k => [k, "Unavailable in synthetic fixture"])) });
+  for (let i = 0; i < 3; i++) put("linkVault", { _id: `addonProfile:${i}`, openingId: "addonJob", addedBy: "addonTa", createdAt: clock, linkedinUrl: `https://linkedin.com/in/addon-${i}`, outcome: "contacted", conversationLog: [], isEyeMarked: false });
   const addonMail = await run("beginMail", { actorId: "addonTa", jobId: "addonJob", applicationIds: [], subject: "Synthetic Add-on update", sentTo: "director@example.invalid", researchLink: "https://chatgpt.com/share/12345678" });
   await run("mailResult", { id: addonMail.id, status: "accepted" });
   await run("finalizeMail", { actorId: "addonTa", id: addonMail.id });

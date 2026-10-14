@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_FIELDS, type SetupEvidence } from "../src/lib/workdayRequirements";
-import { completionBlockers, emailBlockers } from "../src/lib/workday";
+import { completionBlockers, emailBlockers, confirmedResearchLink } from "../src/lib/workday";
 
 const base: SetupEvidence = { jobId: "job", workType: "100%", userId: "ta", research: { version: "v1", missing: [...RESEARCH_FIELDS] },
   suggestions: { successful: false, pending: 0, count: 0, version: "r1" }, profiles: { count: 2 }, ready: 0, submitted: 0 };
@@ -45,6 +45,12 @@ assert.equal(linkedinPostUrl("https://linkedin.com.evil.test/jobs/view/123"), fa
 assert.equal(linkedinPostUrl("https://linkedin.com/in/person"), false);
 const jobs = [{ checks: evaluate() }] as any;
 assert.equal(completionBlockers(jobs).length, 7);
-assert.equal(emailBlockers(jobs).length, 6);
+assert.equal(emailBlockers(jobs).length, 4);
+assert.equal(confirmedResearchLink([{ ...find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678", confirmedAt: 123 }) }]), "https://chatgpt.com/share/12345678", "The composer can reuse a saved, completed share-link check");
+assert.equal(confirmedResearchLink([find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678" })]), null, "An unconfirmed saved link must not be reused as confirmed");
+assert.equal(confirmedResearchLink([{ ...find("chatgpt"), status: "complete", evidence: "https://chatgpt.com/c/private123" }]), null);
+assert.deepEqual(emailBlockers(jobs).map(c => c.key.split(":")[0]), ["jd_review", "research", "excel_profiles", "chatgpt"]);
+assert.equal(emailBlockers([{ checks: [{ key: "details:candidate", status: "incomplete", blocksEmail: true }] }] as any).length, 0, "Candidate queues do not block the temporary EOD setup gate");
+assert.equal(emailBlockers([{ checks: [{ key: "mail:receipt", status: "incomplete" }] }] as any).length, 1, "Uncertain mail still blocks another send");
 assert.equal(completionBlockers([{ checks: [{ ...find("excel_profiles"), status: "complete" }] }] as any).length, 0);
 console.log("Workday setup evidence, thresholds, exceptions, invalidation and email gates passed.");
