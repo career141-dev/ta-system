@@ -61,11 +61,15 @@ export const submit = internalMutation({
     const actor = await requireActor(ctx, args.actorId);
     const now = Date.now();
 
+    const role = deskRole(actor);
+    const isLeadOrAdmin = isLeadRole(role) || isAdminRole(role);
+    const status = isLeadOrAdmin ? "approved_for_admin" : "pending_lead";
+
     const db = ctx.db as any;
     const id = await db.insert("feedbacks", {
       submittedBy: actor._id as string,
       submittedByName: actorName(actor as { fullName?: string; name?: string }),
-      submittedByRole: deskRole(actor),
+      submittedByRole: role,
       createdAt: now,
       category: args.category,
       priority: args.priority,
@@ -74,10 +78,18 @@ export const submit = internalMutation({
       pageUrl: args.pageUrl,
       openingId: args.openingId,
       screenshot: args.screenshot,
-      status: "pending_lead",
+      status,
+      ...(isLeadOrAdmin
+        ? {
+            leadReviewedBy: actor._id as string,
+            leadReviewedByName: actorName(actor as { fullName?: string; name?: string }),
+            leadReviewedAt: now,
+            leadNotes: `Submitted directly by ${role === "admin" ? "Admin" : role === "director" ? "Director" : "TA Lead"}`,
+          }
+        : {}),
     });
 
-    return { id: id as string };
+    return { id: id as string, status };
   },
 });
 

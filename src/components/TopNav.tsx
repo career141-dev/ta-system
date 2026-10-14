@@ -99,14 +99,14 @@ export function TopNav({
         defaultValue={current}
         aria-label={scope.placeholder}
         placeholder={scope.placeholder}
-        className={`${width} rounded-full border border-rule bg-paper py-2 pl-9 pr-4 text-[13px] outline-none transition-colors placeholder:text-ink-faint focus:border-brand-line focus:bg-surface`}
+        className={`${width} rounded-full border border-rule bg-paper py-2 pl-9 pr-4 text-[13px] outline-none transition-all placeholder:truncate placeholder:text-ink-faint focus:border-brand-line focus:bg-surface`}
       />
     </form>
   );
 
   return (
     <header
-      className="sticky top-0 z-40 flex items-center border-b border-rule bg-surface px-4 sm:px-6 xl:px-8"
+      className="sticky top-0 z-40 flex w-full max-w-full items-center border-b border-rule bg-surface px-3 sm:px-5 xl:px-4 2xl:px-8"
       style={{ height: HEADER_H }}
     >
       {/*
@@ -137,16 +137,16 @@ export function TopNav({
           height={152}
           priority
           unoptimized
-          className="h-[40px] w-auto xl:h-[54px]"
+          className="h-[36px] w-auto xl:h-[40px] 2xl:h-[48px]"
         />
       </Link>
 
-      <nav className="ml-[56px] hidden items-center gap-1 xl:flex">
+      <nav className="ml-2 hidden items-center gap-0.5 xl:ml-3 xl:flex 2xl:ml-6 2xl:gap-1">
         {links.map((n) => (
           <Link
             key={n.href}
             href={n.href}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-[14px] transition-colors ${
+            className={`flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1.5 text-[12.5px] transition-colors 2xl:gap-1.5 2xl:px-3 2xl:py-2 2xl:text-[13.5px] ${
               path.startsWith(n.href) ? "bg-paper font-semibold text-ink" : "text-ink-soft hover:bg-paper hover:text-ink"
             }`}
           >
@@ -157,21 +157,26 @@ export function TopNav({
         ))}
       </nav>
 
-      <div className="ml-auto flex items-center gap-1 sm:gap-3 xl:gap-4">
-        {searchBox("hidden xl:block", "w-[300px]")}
+      <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2 xl:gap-2.5 2xl:gap-3.5">
+        {searchBox(
+          "hidden xl:block",
+          "w-[140px] xl:w-[155px] 2xl:w-[250px] focus:w-[210px] focus:2xl:w-[290px] transition-all duration-200"
+        )}
 
         <NotificationBell />
 
-        <div className="relative">
+        <div className="relative shrink-0">
           <button
             onClick={() => setOpen((v) => !v)}
-            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-paper"
+            className="flex items-center gap-1.5 rounded-lg px-1.5 py-1.5 hover:bg-paper 2xl:gap-2.5 2xl:px-2"
           >
-            <span className="grid h-8 w-8 place-items-center rounded-full bg-brand text-[10.5px] font-bold text-white">
+            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand text-[10.5px] font-bold text-white">
               {user.initials}
             </span>
             <span className="hidden text-left leading-tight sm:block">
-              <span className="block text-[12.5px] font-semibold">{user.name}</span>
+              <span className="block max-w-[95px] truncate text-[12px] font-semibold 2xl:max-w-[130px] 2xl:text-[12.5px]">
+                {user.name}
+              </span>
               <span className="block text-[10.5px] text-ink-faint">{ROLE_LABEL[user.role]}</span>
             </span>
           </button>

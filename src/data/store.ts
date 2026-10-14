@@ -688,11 +688,32 @@ const rawRepo = {
     item: Omit<FeedbackItem, "id" | "createdAt" | "status"> & { id?: Id; status?: FeedbackStatus }
   ): Id => {
     const id = item.id ?? `fb_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const now = Date.now();
+    const isLeadOrAdmin =
+      item.submittedByRole === "ta_lead" ||
+      item.submittedByRole === "director" ||
+      item.submittedByRole === "admin";
+    const status: FeedbackStatus = item.status ?? (isLeadOrAdmin ? "approved_for_admin" : "pending_lead");
+    const roleTitle =
+      item.submittedByRole === "admin"
+        ? "Admin"
+        : item.submittedByRole === "director"
+        ? "Director"
+        : "TA Lead";
+
     const full: FeedbackItem = {
       id,
-      createdAt: Date.now(),
-      status: item.status ?? "pending_lead",
+      createdAt: now,
+      ...(isLeadOrAdmin
+        ? {
+            leadReviewedBy: item.leadReviewedBy ?? item.submittedBy,
+            leadReviewedByName: item.leadReviewedByName ?? item.submittedByName,
+            leadReviewedAt: item.leadReviewedAt ?? now,
+            leadNotes: item.leadNotes ?? `Submitted directly by ${roleTitle}`,
+          }
+        : {}),
       ...item,
+      status,
     };
     mutate((db) => {
       if (!db.feedbacks) db.feedbacks = [];
@@ -752,7 +773,12 @@ const rawRepo = {
     const readIds = rawRepo.readFeedbackIds(user.id);
     const all = (load().feedbacks ?? []) as FeedbackItem[];
     if (user.role === "ta_lead" || user.role === "director") {
-      return all.filter((f) => f.status === "pending_lead" && !readIds.has(f.id)).length;
+      return all.filter(
+        (f) =>
+          f.status === "pending_lead" &&
+          f.submittedBy !== user.id &&
+          !readIds.has(f.id)
+      ).length;
     }
     if (user.role === "admin") {
       return all.filter((f) => f.status === "approved_for_admin" && !readIds.has(f.id)).length;

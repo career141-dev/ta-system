@@ -197,7 +197,15 @@ export function FeedbackWidget({ isTa = true }: { isTa?: boolean } = {}) {
                 </div>
                 <h3 className="text-[16px] font-semibold text-ink">Feedback Submitted!</h3>
                 <p className="mt-1.5 max-w-sm text-[13px] text-ink-soft">
-                  Your submission has been sent to the <span className="font-semibold text-ink">TA Lead Review Queue</span>. Once reviewed and endorsed, it will be prioritized for Admin action.
+                  {isTa ? (
+                    <>
+                      Your submission has been sent to the <span className="font-semibold text-ink">TA Lead Review Queue</span>. Once reviewed and endorsed, it will be prioritized for Admin action.
+                    </>
+                  ) : (
+                    <>
+                      Your submission has been escalated directly to the <span className="font-semibold text-ink">Admin Queue</span> for prioritization and action.
+                    </>
+                  )}
                 </p>
                 <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
                   {!isTa && (
