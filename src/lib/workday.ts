@@ -1,4 +1,5 @@
 /** Workday rules shared by the transactional backend and the daily review. */
+import type { BackgroundAlertView } from "./backgroundAlerts";
 export type WorkType = "100%" | "Add-on" | "Follow-up";
 export type CheckKind =
   | "cv_review"
@@ -79,6 +80,7 @@ export interface WorkdayView {
   }[];
 }
 export interface WorkdayPayload {
+  backgroundAlerts?: BackgroundAlertView[];
   canWork: boolean;
   canLead: boolean;
   role: string;

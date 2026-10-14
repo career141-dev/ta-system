@@ -16,6 +16,8 @@ const PAGE_SIZE = 25;
 const KIND_LABEL: Record<string, string> = {
   low_volume: "Low volume",
   advert_quiet: "Advert quiet",
+  job_no_new_candidates: "No new candidates",
+  director_no_shortlist: "No director shortlist",
   cv_waiting: "CV waiting",
   followup_due: "Follow-up",
   stale_role: "Stale role",

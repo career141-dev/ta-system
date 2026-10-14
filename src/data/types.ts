@@ -893,6 +893,8 @@ export type AlertKind =
   | "joining_date"
   | "director_review_chase"
   | "advert_quiet"
+  | "job_no_new_candidates"
+  | "director_no_shortlist"
   | "cv_waiting"
   | "followup_due"
   | "review_reply_received"
@@ -910,13 +912,15 @@ export const URGENT_ALERTS: AlertKind[] = [
 export interface Alert {
   id: Id;
   kind: AlertKind;
-  subjectType: "opening" | "job_post" | "application";
+  subjectType: "opening" | "job_post" | "application" | "review_round";
   subjectId: Id;
   assignedTo: Id;
   raisedAt: number;
   dueAt: number;
   resolvedAt: number | null;
   detail: string;
+  openingId?: Id | null;
+  incidentKey?: string | null;
 }
 
 // ─── Database search (spec §6D) ──────────────────────────────────────────────

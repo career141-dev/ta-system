@@ -502,6 +502,15 @@ export function WorkdayDashboard() {
         </p>
       )}
       {!data && !error && <p role="status">Loading workday…</p>}
+      {!!data?.backgroundAlerts?.length && (
+        <section aria-label="Outstanding job alerts" className="rounded-xl border border-rule bg-surface p-4">
+          <h2 className="mb-2 font-semibold">Outstanding job alerts</h2>
+          <p className="mb-3 text-sm text-ink-soft">These reminders do not prevent you from starting or finishing work.</p>
+          <ul className="space-y-3">
+            {data.backgroundAlerts.map(alert => <li key={alert.id} className="text-sm"><Link className="text-brand underline" href={alert.href}>{alert.detail}</Link></li>)}
+          </ul>
+        </section>
+      )}
       {data?.canWork && (
         <>
           {data.active ? (

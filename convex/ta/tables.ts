@@ -12,6 +12,7 @@ import { v } from "convex/values";
 import { internalQuery } from "../_generated/server";
 import { optionalActor } from "./guard";
 import { TABLES } from "./model/tables";
+import { stillActive } from "./backgroundAlerts";
 
 /** Tables the store loads whole. The large shared ones have their own scoped reads. */
 const WHOLE = new Set([
@@ -32,12 +33,21 @@ export const page = internalQuery({
     await optionalActor(ctx, args.actorId);
     if (!WHOLE.has(args.table)) throw new Error(`"${args.table}" is not loaded whole; use its scoped read.`);
     const model = TABLES[args.table];
-    const res = await ctx.db
-      .query(model.backend as never)
-      .paginate({ cursor: args.cursor ?? null, numItems: Math.min(args.numItems ?? 500, 1000) });
+    // Resolved incidents accumulate as history; they need not load on every page.
+    // The index range includes legacy null as well as absent resolvedAt values.
+    const query = args.table === "alerts"
+      ? ctx.db.query("taAlerts").withIndex("by_resolved", q => q.lte("resolvedAt", null))
+      : ctx.db.query(model.backend as never);
+    const res = await query.paginate({ cursor: args.cursor ?? null,
+      numItems: args.table === "alerts" ? 30 : Math.min(args.numItems ?? 500, 1000) });
     const docs = res.page as Record<string, unknown>[];
     // A revoked assignment is history, not a current assignment.
-    const live = args.table === "assignments" ? docs.filter((d) => d.isActive !== false) : docs;
+    let live = args.table === "assignments" ? docs.filter((d) => d.isActive !== false) : docs;
+    if (args.table === "alerts") {
+      const active = [];
+      for (const d of live) if (!d.incidentKey || await stillActive(ctx, d as never)) active.push(d);
+      live = active;
+    }
     return {
       rows: live.map((d) => model.fromDoc(d as never)),
       isDone: res.isDone,

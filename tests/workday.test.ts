@@ -57,6 +57,10 @@ const db = {
             predicates.push((row) => row[field] >= value);
             return builder;
           },
+          lte: (field: string, value: unknown) => {
+            predicates.push((row) => row[field] === undefined || row[field] <= (value as any));
+            return builder;
+          },
         };
         callback(builder);
         return query;
