@@ -136,6 +136,7 @@ put("jobPosts", {
 
 try {
   assert.equal((await run("dashboard", { actorId: "ta" })).active, null);
+  assert.equal(await run("suggestionsCheck", { actorId: "ta", jobId: "job1" }), null, "No explanation form before starting work");
   assert.equal(rows("taWorkdays").length, 0);
   assert.equal(workdayDate(Date.parse("2026-10-12T20:00:00Z")), "2026-10-13");
   const check: WorkdayCheck = {
@@ -231,6 +232,26 @@ try {
   assert.ok(blocked.blockers.some((b: string) => b.includes("Excel")));
   assert.ok(blocked.blockers.some((b: string) => b.includes("Job description")));
   await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "jd" }), /approve the job description/);
+  const suggestionsCheck = () => run("suggestionsCheck", { actorId: "ta", jobId: "job1" });
+  assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, false, "An empty page without a successful run must not offer the form");
+  await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "emptySuggestions", reason: "No results" }), /Only a successful empty search/);
+  await run("recordSourcingRun", { jobId: "job1", userId: "support", round: 1, count: 0 });
+  assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, false, "Another TA's empty run does not qualify");
+  assert.equal(await run("suggestionsCheck", { actorId: "ta", jobId: "job3" }), null, "An opening outside the active workday does not offer the form");
+  put("profileSuggestions", { _id: "explanation:profile", openingId: "job1", generatedFor: "ta", round: 1, generatedAt: clock, status: "dismissed" });
+  await run("recordSourcingRun", { jobId: "job1", userId: "ta", round: 1, count: 1 });
+  assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, false, "A fully dismissed round is not an empty search");
+  await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "emptySuggestions", reason: "No results" }), /Only a successful empty search/);
+  clock++;
+  await run("recordSourcingRun", { jobId: "job1", userId: "ta", round: 2, count: 0 });
+  assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, true, "An empty later round qualifies even when older profiles remain visible");
+  await run("saveCheck", { actorId: "ta", jobId: "job1", kind: "emptySuggestions", reason: "No new profiles in round two" });
+  assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, false, "Saving hides the form for the applicable run");
+  clock++;
+  await run("recordSourcingRun", { jobId: "job1", userId: "ta", round: 3, count: 0 });
+  assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, true, "A new empty round requires its own explanation");
+  tables.set("profileSuggestions", []);
+  tables.set("taSourcingRuns", []);
   for (const [actorId, jobId] of [["ta", "job1"], ["ta", "job2"], ["support", "job1"], ["support", "job3"]]) {
     await db.patch(jobId, { jobDescription: `Synthetic JD for ${jobId}`, jdStatus: "approved" });
     await run("saveCheck", { actorId, jobId, kind: "jd" });

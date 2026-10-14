@@ -23,6 +23,11 @@ assert.equal(find("suggestions", { suggestions: { successful: false, pending: 0,
 assert.equal(find("suggestions", { suggestions: { successful: true, pending: 0, count: 0, version: "r1", emptyReason: "No profiles" } }).status, "complete");
 assert.equal(find("suggestions", { suggestions: { successful: true, pending: 1, count: 2, version: "r1" } }).status, "incomplete");
 assert.equal(find("suggestions", { suggestions: { successful: true, pending: 0, count: 2, version: "r1" } }).status, "complete");
+assert.equal(find("suggestions").needsEmptySuggestionsReason, false, "Never-run or failed searches do not ask for an explanation");
+assert.equal(find("suggestions", { suggestions: { successful: true, pending: 0, count: 0, version: "r1" } }).needsEmptySuggestionsReason, true);
+assert.equal(find("suggestions", { suggestions: { successful: true, pending: 0, count: 0, version: "r1", emptyReason: "No profiles" } }).needsEmptySuggestionsReason, false);
+assert.equal(find("suggestions", { suggestions: { successful: true, pending: 1, count: 2, version: "r1" } }).needsEmptySuggestionsReason, false, "Unreviewed results require review, not an empty-search explanation");
+assert.equal(find("suggestions", { suggestions: { successful: true, pending: 0, count: 2, version: "r1" } }).needsEmptySuggestionsReason, false, "Reviewing all results does not turn the search into an empty one");
 assert.equal(find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678" }).status, "incomplete");
 assert.equal(find("chatgpt", { chatgptLink: "https://chatgpt.com/c/12345678", confirmedAt: 1 }).status, "incomplete");
 assert.equal(find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678", confirmedAt: 123 }).completedAt, 123);

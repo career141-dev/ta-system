@@ -831,6 +831,20 @@ export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, 
   }
 }
 
+/** The Suggestions page uses the same scoped evidence as the sidebar and saveCheck. */
+export const suggestionsCheck = internalQuery({
+  args: { actorId: v.string(), jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId); requireWorker(user);
+    await assignedJob(ctx, user, args.jobId);
+    const day = await activeFor(ctx, user._id);
+    const entry = day?.jobs.find(j => j.jobId === args.jobId);
+    if (!day || !entry || entry.workType !== "100%") return null;
+    const evidence = await requiredChecks(ctx, day, entry);
+    return evidence.checks.find(c => c.key.startsWith("suggestions:")) ?? null;
+  },
+});
+
 export const saveCheck = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), kind: v.union(v.literal("jd"), v.literal("research"), v.literal("emptySuggestions"), v.literal("noCandidates"), v.literal("chatgpt")),
     reason: v.optional(v.string()), reasons: v.optional(v.record(v.string(), v.string())), link: v.optional(v.string()), confirmed: v.optional(v.boolean()) },

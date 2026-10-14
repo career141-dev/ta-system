@@ -6,6 +6,7 @@ import { primeStore } from "@/data/prime";
 import { getCurrentUser } from "@/lib/session";
 import { convexMutation } from "@/lib/convexServer";
 import { colomboLocalToInstant } from "@/lib/calendar";
+import { checkResearchSubmission } from "@/lib/eod-format";
 
 export async function changeWorkday(
   form: FormData,
@@ -57,6 +58,11 @@ export async function changeWorkday(
       reason: value("reason"),
     });
   } else if (op === "saveCheck") {
+    if (value("kind") === "chatgpt") {
+      const checked = checkResearchSubmission({ role: user.role, kind: "director", link: value("link"), confirmed: value("confirmed") === "on" });
+      if (!checked.ok) return { ok: false, message: checked.reason };
+      if (checked.url) form.set("link", checked.url);
+    }
     const reasons = Object.fromEntries([...form.entries()].filter(([key]) => key.startsWith("unavailable:")).map(([key, val]) => [key.slice(12), String(val).trim()]));
     Object.assign(args, { jobId: value("jobId"), kind: value("kind"), reason: value("reason"), reasons, link: value("link"), confirmed: value("confirmed") === "on" });
   } else return { ok: false, message: "Unknown workday action." };
@@ -72,6 +78,7 @@ export async function changeWorkday(
         message: `Complete these steps first: ${result.blockers?.slice(0, 5).join("; ") ?? "review the checklist"}.`,
       };
     revalidatePath("/workday");
+    if (op === "saveCheck") revalidatePath(`/openings/${value("jobId")}/hh/suggestions`);
     const message =
       op === "finish"
         ? "Workday finished. Your TA Lead can see the finish time."

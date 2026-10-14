@@ -60,6 +60,8 @@ export function setupChecks(e: SetupEvidence): WorkdayCheck[] {
     add("suggestions", "Suggestions reviewed", `${base}/hh/suggestions`, suggestionsDone,
       !e.suggestions.successful ? "Run Suggestions successfully" : e.suggestions.pending ? `${e.suggestions.pending} to review` : !e.suggestions.count ? e.suggestions.emptyReason || "Record why the search returned no profiles" : "All reviewed",
       e.suggestions.at, e.suggestions.by, e.suggestions.version);
+    rows[rows.length - 1].needsEmptySuggestionsReason = e.suggestions.successful &&
+      e.suggestions.count === 0 && !e.suggestions.emptyReason?.trim();
     add("excel_profiles", "Own Excel Tables profiles", `${base}/hh/links`, e.profiles.count >= 3, `${e.profiles.count}/3`, e.profiles.at, e.userId, String(e.profiles.count));
   }
   if (e.workType !== "Follow-up") {
