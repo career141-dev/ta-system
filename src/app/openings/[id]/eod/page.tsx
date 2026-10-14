@@ -18,6 +18,10 @@ import { isTa } from "@/lib/auth";
 import { eyeMarkedForEmail, primeEyeMarked } from "@/lib/eyeMarkedStore";
 import { EyeMarkedChecks } from "@/components/EyeMarkedChecks";
 import { LiveTableRefresh } from "@/components/LiveTableRefresh";
+import { isConvex } from "@/data/mode";
+import * as backend from "@/data/convex/backend";
+import { isWordFile } from "@/lib/wordToPdf";
+import type { ShortlistRow } from "@/lib/eod-format";
 
 const PAGE_SIZE = 10;
 
@@ -109,6 +113,46 @@ export default async function EodPage({
     : sp.view && !viewCopy
       ? "That email is more than a month old, so its copy has been cleared."
       : null;
+
+  const rawRows = resendCopy ? resendCopy.rows : rows;
+  const candidateIds = rawRows
+    .map((r) => r.candidateId ?? repo.application(r.applicationId)?.candidateId)
+    .filter(Boolean) as string[];
+  if (candidateIds.length > 0) {
+    await primeStore({ candidateIds });
+  }
+  const composerRows: ShortlistRow[] = await Promise.all(
+    rawRows.map(async (r) => {
+      const app = repo.application(r.applicationId);
+      const c = app ? repo.candidate(app.candidateId) : null;
+      let pdfSrc = r.pdfSrc ?? null;
+      if (!pdfSrc && c && isConvex()) {
+        try {
+          const cvFile = await backend.cvFile(c.id).catch(() => null);
+          if (cvFile?.ok) {
+            const cvVersion = cvFile.fileName || c.cvFileName || "1";
+            const cvHref = `/api/cv/${encodeURIComponent(c.id)}?app=${encodeURIComponent(r.applicationId)}&v=${encodeURIComponent(cvVersion)}`;
+            const isPdf =
+              /pdf/i.test(cvFile.fileType ?? "") ||
+              /\.pdf$/i.test(cvFile.fileName ?? "") ||
+              /\.pdf$/i.test(c.cvFileName ?? "") ||
+              !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(cvFile.fileName ?? c.cvFileName ?? "");
+            const isWord = !isPdf && isWordFile(cvFile.fileName ?? c.cvFileName);
+            if (isPdf || isWord) {
+              pdfSrc = isWord ? `${cvHref}&view=pdf` : cvHref;
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
+      return {
+        ...r,
+        candidateId: c?.id ?? r.candidateId,
+        pdfSrc,
+      };
+    })
+  );
 
   return (
     <div className="mx-auto max-w-[1100px] py-1 sm:px-8 sm:py-9">
@@ -290,7 +334,7 @@ export default async function EodPage({
         eodCc={null}
         fixedCc={kind === "director" ? [...EOD_CC_DEFAULTS] : []}
         canAddRecipients={kind === "director"}
-        rows={resendCopy ? resendCopy.rows : rows}
+        rows={composerRows}
         effort={resendCopy ? resendCopy.effort : effort}
         senderName={user.name}
         alreadyOut={!!awaiting}

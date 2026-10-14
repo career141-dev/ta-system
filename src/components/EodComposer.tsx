@@ -15,6 +15,7 @@ import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { resendEod, sendEod } from "@/app/actions";
 import { SubmitButton } from "./Submit";
+import { PreparedCvEditor } from "./PreparedCvEditor";
 
 function noteLineToHtml(line: string): string {
   let l = line
@@ -559,8 +560,10 @@ export function EodComposer({
   };
 
   const effectiveRows = initialRows.map(getCandidateRow);
-  /** The attachment's preview: the record, plus only what was changed on this page. */
-  const previewHref = (r: ShortlistRow) => {
+  const [editingBoxAppId, setEditingBoxAppId] = useState<string | null>(null);
+  const [boxVersion, setBoxVersion] = useState(0);
+
+  const getQueryOverrides = (r: ShortlistRow) => {
     const base = initialRows.find((b) => b.applicationId === r.applicationId);
     const over = base ? boxOverrides(eodDetailChanges(base, r)) : {};
     const q = new URLSearchParams();
@@ -570,9 +573,21 @@ export function EodComposer({
     if ("expectedSalary" in over) q.set("expected", over.expectedSalary ?? "");
     if ("noticePeriod" in over) q.set("notice", over.noticePeriod ?? "");
     if (over.notes) q.set("notes", over.notes.join("\n"));
-    const s = q.toString();
-    return `/api/prepared-cv/${r.applicationId}${s ? `?${s}` : ""}`;
+    return q.toString();
   };
+
+  /** The attachment's preview: the record, plus only what was changed on this page. */
+  const previewHref = (r: ShortlistRow) => {
+    const s = getQueryOverrides(r);
+    const params = new URLSearchParams(s);
+    if (boxVersion > 0) params.set("_v", String(boxVersion));
+    const str = params.toString();
+    return `/api/prepared-cv/${r.applicationId}${str ? `?${str}` : ""}`;
+  };
+
+  const editingRow = editingBoxAppId
+    ? effectiveRows.find((r) => r.applicationId === editingBoxAppId) ?? null
+    : null;
 
   const th =
     "whitespace-nowrap border border-rule bg-tag px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-[0.04em] text-ink-soft";
@@ -866,6 +881,17 @@ export function EodComposer({
                               onChange={(e) => updateCandidateField(r.applicationId, "name", e.target.value)}
                               className={`${cellInput} font-semibold`}
                             />
+                            <div className="mt-1 flex items-center gap-1.5 px-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setEditingBoxAppId(r.applicationId)}
+                                className="inline-flex items-center gap-1 rounded bg-brand/10 hover:bg-brand/20 border border-brand/25 px-1.5 py-0.5 text-[10.5px] font-semibold text-brand transition-colors cursor-pointer shadow-2xs"
+                                title="Move green Career141 box on page 1 of the CV"
+                              >
+                                <span className="inline-block h-2 w-2 rounded-xs bg-brand" />
+                                <span>Move Green Box</span>
+                              </button>
+                            </div>
                           </td>
                           <td className={`${td} w-[65px]`}>
                             <input
@@ -981,22 +1007,27 @@ export function EodComposer({
         {effectiveRows.length === 0 ? (
           <p className="mt-2 text-[12.5px] text-ink-faint">Nothing to attach.</p>
         ) : (
-          <div className="mt-3 flex flex-col gap-1.5">
+          <div className="mt-3 flex flex-col gap-2">
             {effectiveRows.map((r) => {
               return (
-                <a
+                <button
                   key={r.applicationId}
-                  // The file that is attached: the Prepared CV as the desk holds
-                  // it, with only what the TA changed on this email laid over it
-                  // (lib/eod-format boxOverrides, 29 Sep).
-                  href={previewHref(r)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center gap-2.5 text-[12.5px] text-brand hover:underline"
+                  type="button"
+                  onClick={() => setEditingBoxAppId(r.applicationId)}
+                  className="group flex w-full items-center justify-between gap-3 rounded-xl border border-rule/70 bg-paper/40 px-3.5 py-2.5 hover:border-brand/40 hover:bg-brand/5 transition-all text-left cursor-pointer"
                 >
-                  <span className="text-ink-faint">PDF</span>
-                  {r.name} - Career141.pdf
-                </a>
+                  <div className="flex items-center gap-2.5">
+                    <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-faint border border-rule group-hover:border-brand/30 group-hover:text-brand transition-colors">
+                      PDF
+                    </span>
+                    <span className="text-[12.5px] font-medium text-brand group-hover:underline">
+                      {r.name} - Career141.pdf
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-ink-faint group-hover:text-brand transition-colors">
+                    Click to view &amp; position box →
+                  </span>
+                </button>
               );
             })}
           </div>
@@ -1044,6 +1075,64 @@ export function EodComposer({
           </span>
         )}
       </form>
+
+      {/* ── Modal Dialog for Positioning Green Box on Prepared CV ── */}
+      {editingRow && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3 sm:p-6 backdrop-blur-xs animate-in fade-in duration-150"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setEditingBoxAppId(null);
+              setBoxVersion((v) => v + 1);
+            }
+          }}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-[1020px] flex-col overflow-hidden rounded-2xl border border-rule bg-surface shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="eod-box-editor-title"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-rule bg-surface px-5 py-3.5">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-brand/10 text-[12px] font-bold text-brand">
+                  CV
+                </span>
+                <div>
+                  <h3 id="eod-box-editor-title" className="text-[14px] font-semibold text-ink">
+                    Position Green Box — {editingRow.name}
+                  </h3>
+                  <p className="text-[11.5px] text-ink-faint">
+                    Drag the green box or use arrow keys to position it. Dropping it saves automatically for the EOD email attachment.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingBoxAppId(null);
+                  setBoxVersion((v) => v + 1);
+                }}
+                className="rounded-lg bg-brand px-4 py-1.5 text-[12.5px] font-medium text-white transition-opacity hover:opacity-90 cursor-pointer shadow-xs"
+              >
+                Done
+              </button>
+            </div>
+
+            {/* Modal Body with PreparedCvEditor */}
+            <div className="flex-1 overflow-y-auto p-5 bg-paper/40">
+              <PreparedCvEditor
+                appId={editingRow.applicationId}
+                openingId={openingId}
+                pdfSrc={editingRow.pdfSrc ?? null}
+                queryOverrides={getQueryOverrides(editingRow)}
+                canEdit={true}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
