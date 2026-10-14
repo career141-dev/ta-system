@@ -1,6 +1,6 @@
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS, workSessionStart } from "../../src/lib/workdayRequirements";
+import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS, workSessionStart, SUGGESTIONS_WORKDAY_REQUIRED } from "../../src/lib/workdayRequirements";
 import type { WorkdayCheck } from "../../src/lib/workday";
 import { linkKey } from "../../src/lib/url";
 
@@ -51,13 +51,15 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     chatgptLink: ownNotes?.chatgptLink ?? accepted.at(-1)?.researchLink,
     confirmedAt: ownNotes?.confirmedAt ?? accepted.at(-1)?.acceptedAt,
     emailAt: accepted.length ? Math.min(...accepted.map(r => r.finalizedAt!)) : undefined,
-  });
+  }, true);
+  const suggestionsCheck = checks.find(c => c.key.startsWith("suggestions:")) ?? null;
   const candidateCheck = checks.find(c => c.key.startsWith("director_candidate:"));
   if (candidateCheck?.status === "complete" && ready.length && !accepted.length) {
     candidateCheck.completedAt = Math.min(...ready.map(a => a.lastStageChangedAt));
     candidateCheck.evidence = ready.map(a => a._id).join(",");
   }
-  return { checks, notes, research, suggestionVersion, latest, latestRun, job };
+  return { checks: SUGGESTIONS_WORKDAY_REQUIRED ? checks : checks.filter(c => !c.key.startsWith("suggestions:")),
+    suggestionsCheck, notes, research, suggestionVersion, latest, latestRun, job };
 }
 
 /** Editing shared text invalidates every TA's review, including when old text is restored. */
@@ -84,6 +86,8 @@ export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taW
   }
   const current = new Set(checks.map(c => c.key));
   for (const event of events) if (!current.has(event.key) && event.key.includes(":")) {
+    // Historical events must not put the paused requirement back in the sidebar.
+    if (!SUGGESTIONS_WORKDAY_REQUIRED && event.key.startsWith("suggestions:")) continue;
     current.add(event.key);
     checks.push({ key: event.key, jobId, label: event.label, href: event.href, kind: event.kind as WorkdayCheck["kind"],
       canCarry: false, evidenceAt: 0, status: "complete" });

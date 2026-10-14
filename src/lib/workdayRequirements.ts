@@ -3,6 +3,9 @@ import { validateResearchLink } from "./eod-format";
 import { externalUrl } from "./url";
 
 export const RESEARCH_FIELDS = ["similarDesignation", "websiteLink", "servicesProvider", "country", "location", "competitors", "socialMedia", "companyOverview"] as const;
+// 14 Oct: pause the workday requirement while Suggestions is being revisited.
+// The sourcing feature and its saved review evidence remain available.
+export const SUGGESTIONS_WORKDAY_REQUIRED: boolean = false;
 export const RESEARCH_LABELS: Record<typeof RESEARCH_FIELDS[number], string> = { similarDesignation: "Similar designation", websiteLink: "Company website", servicesProvider: "Services offered", country: "Country", location: "Location", competitors: "Competitors", socialMedia: "Social media", companyOverview: "Company overview" };
 export const researchVersion = (report: { generatedAt: number; fields: unknown } | null) =>
   report ? JSON.stringify([report.generatedAt, report.fields]) : "";
@@ -38,7 +41,7 @@ export interface SetupEvidence {
 }
 
 /** The same saved evidence drives sidebar ticks, send preflight and Finish. */
-export function setupChecks(e: SetupEvidence): WorkdayCheck[] {
+export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_WORKDAY_REQUIRED): WorkdayCheck[] {
   const base = `/openings/${e.jobId}`;
   const rows: WorkdayCheck[] = [];
   const add = (key: string, label: string, href: string, complete: boolean, progress: string,
@@ -76,5 +79,5 @@ export function setupChecks(e: SetupEvidence): WorkdayCheck[] {
     e.confirmedAt, e.userId, validLink.ok ? validLink.url : undefined);
   add("daily_email", "End-of-day email", `${base}/eod`, !!e.emailAt,
     e.emailAt ? "Sent and recorded" : "Send the daily email", e.emailAt, e.userId, undefined, false);
-  return rows;
+  return includeSuggestions ? rows : rows.filter(c => !c.key.startsWith("suggestions:"));
 }

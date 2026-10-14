@@ -233,6 +233,9 @@ try {
   assert.ok(blocked.blockers.some((b: string) => b.includes("Job description")));
   await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "jd" }), /approve the job description/);
   const suggestionsCheck = () => run("suggestionsCheck", { actorId: "ta", jobId: "job1" });
+  put("taWorkdayTaskEvents", { _id: "paused:suggestions", workdayId: day.id, jobId: "job1", userId: "ta", key: "suggestions:job1", label: "Suggestions reviewed", href: "/openings/job1/hh/suggestions", kind: "details", status: "incomplete", at: clock });
+  assert.ok(!(await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.some((c: Row) => c.key.startsWith("suggestions:")), "Historical events cannot restore the paused Suggestions check");
+  assert.ok(!(await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("Suggestions")), "Suggestions no longer blocks email");
   assert.equal((await suggestionsCheck()).needsEmptySuggestionsReason, false, "An empty page without a successful run must not offer the form");
   await assert.rejects(() => run("saveCheck", { actorId: "ta", jobId: "job1", kind: "emptySuggestions", reason: "No results" }), /Only a successful empty search/);
   await run("recordSourcingRun", { jobId: "job1", userId: "support", round: 1, count: 0 });
