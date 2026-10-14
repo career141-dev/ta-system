@@ -19,6 +19,8 @@ export interface ShortlistRow {
   currentRemuneration: string;
   expectedRemuneration: string;
   applicationId: Id;
+  candidateId?: Id;
+  pdfSrc?: string | null;
 }
 
 export interface EffortRow {
