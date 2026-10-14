@@ -5,6 +5,13 @@ does not start the clock, and sign-out does not finish work. Old `/workday` link
 redirect to Openings with the drawer open. TA Leads and admins use Team checks
 in the same sidebar, with date, TA, job and task-status filters.
 
+The TA's workday sidebar groups candidate work into one "Candidates sourced
+and progressed" check per job, with source names and totals in TA Shortlist,
+Director Review and submitted. It omits the individual candidate roster and
+candidate task rows. Completion ratios and the remaining-step count use the
+grouped view; Finish still checks the original candidate requirements. Job
+pages and the lead's team review retain the detailed actions and history.
+
 The first workday for a TA/opening is 100%. Returning jobs default to Follow-up;
 the TA can explicitly select Add-on. Pending assigned jobs carry into the next
 workday as Follow-up and do not consume the ten manually selected job slots.
