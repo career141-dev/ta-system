@@ -4543,22 +4543,11 @@ export async function finishCall(formData: FormData) {
  */
 const eodInFlight = new Set<string>();
 
-async function assertEyeMarkedEmailReady(openingId: string, user: User) {
-  const { eyeMarkedForEmail, primeEyeMarked } = await import("@/lib/eyeMarkedStore");
-  await primeEyeMarked(openingId, user);
-  const outstanding = eyeMarkedForEmail(openingId, user).filter((item) => item.blocked);
-  if (outstanding.length)
-    redirect(`/openings/${openingId}/eod?kind=director&msg=${encodeURIComponent(
-      `Not sent: ${outstanding.length} eye-marked profiles need action. Open the eye-marked checks to see what is missing.`,
-    )}`);
-}
-
 export async function sendEod(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
-  if (kind === "director") await assertEyeMarkedEmailReady(openingId, user);
   const ids = String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
   const activityOnly = kind === "director" && formData.get("activityOnly") === "yes" && ids.length === 0;
   if (activityOnly) {
@@ -4779,7 +4768,6 @@ export async function resendEod(formData: FormData) {
   const copyId = String(formData.get("copyId") ?? "");
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
-  await assertEyeMarkedEmailReady(openingId, user);
   const done = (message: string): never =>
     redirect(`/openings/${openingId}/eod?kind=director&msg=${encodeURIComponent(message)}`);
 
@@ -5024,8 +5012,6 @@ async function emailEod(input: {
     | { ok: false; error: string };
   let workdayMailId: string | null = null;
   try {
-    const eyeCheck = await convexQuery<{ ok: boolean; outstanding: number }>("ta/eyeMarked:checkEmail", { actorId: user.id, openingId });
-    if (!eyeCheck.ok) return { ok: false, error: `${eyeCheck.outstanding} eye-marked profiles need action before sending. Review the eye-marked checks.` };
     if (!input.revised) {
       const receipt = await convexMutation<{ id: string | null }>("ta/workdays:beginMail", { actorId: user.id, jobId: openingId, applicationIds: input.applicationIds, subject: input.subject, sentTo: to, researchLink: input.researchLink ?? undefined });
       workdayMailId = receipt.id;
