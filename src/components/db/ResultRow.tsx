@@ -141,7 +141,7 @@ export function ResultRow({
               </Line>
             )}
             <Line label="Experience">
-              <span className="text-ink-soft">{c.totalExperienceYears} years, currently as a {c.currentTitle}</span>
+              <span className="text-ink-soft">{c.totalExperienceYears} years, {roleEvidence ? "listed role:" : "currently as a"} {c.currentTitle}</span>
               {c.experienceNote && <span className="block text-[11.5px] text-warn">{c.experienceNote}</span>}
               <div className="mt-1 flex flex-col gap-0.5">
                 {roles.map((r, i) => (
@@ -216,7 +216,7 @@ export function ResultRow({
 
             {roleEvidence && (
               <Line label="Role evidence">
-                <span className="text-ink-soft">{roleEvidence.label}{roleEvidence.title ? `: ${roleEvidence.title}` : ""}</span>
+                <span className="text-ink-soft">{roleEvidence.label}{roleEvidence.title ? `: ${roleEvidence.title}` : ""}{roleEvidence.matchedReportingContext ? ` (supports ${roleEvidence.matchedReportingContext})` : ""}</span>
               </Line>
             )}
 
