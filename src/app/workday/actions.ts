@@ -84,6 +84,8 @@ export async function changeWorkday(
         ? "Workday finished. Your TA Lead can see the finish time."
         : op === "start"
           ? "Workday started. Your TA Lead can see the start time."
+          : op === "saveCheck" && value("kind") === "chatgpt"
+            ? "Research link confirmed."
           : result.pending
             ? "Sent to the TA Lead for approval."
             : "Saved.";

@@ -1,4 +1,5 @@
 import type { WorkdayCheck, WorkType } from "./workday";
+import { isEodSendCheck } from "./workday";
 import { validateResearchLink } from "./eod-format";
 import { externalUrl } from "./url";
 
@@ -79,5 +80,6 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
     e.confirmedAt, e.userId, validLink.ok ? validLink.url : undefined);
   add("daily_email", "End-of-day email", `${base}/eod`, !!e.emailAt,
     e.emailAt ? "Sent and recorded" : "Send the daily email", e.emailAt, e.userId, undefined, false);
-  return includeSuggestions ? rows : rows.filter(c => !c.key.startsWith("suggestions:"));
+  return (includeSuggestions ? rows : rows.filter(c => !c.key.startsWith("suggestions:")))
+    .map(c => ({ ...c, blocksEmail: isEodSendCheck(c) }));
 }

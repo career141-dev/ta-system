@@ -1,4 +1,5 @@
 /** Workday rules shared by the transactional backend and the daily review. */
+import { validateResearchLink } from "./eod-format";
 export type WorkType = "100%" | "Add-on" | "Follow-up";
 export type CheckKind =
   | "cv_review"
@@ -47,6 +48,8 @@ export interface WorkdayJobView {
   title: string;
   workType: WorkType;
   checks: WorkdayCheck[];
+  /** Temporary EOD setup gate, independent of candidate queues and Finish. */
+  eodChecks?: WorkdayCheck[];
   shortlist: WorkdayCandidate[];
   activity: {
     cvReviews: number;
@@ -146,7 +149,19 @@ export function completionBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
 }
 
 export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return completionBlockers(jobs).filter((c) => c.blocksEmail);
+  return jobs.flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
+    .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting);
+}
+
+/** 14 Oct: temporarily send once these four setup checks are complete. */
+export function isEodSendCheck(check: Pick<WorkdayCheck, "key">): boolean {
+  return ["jd_review", "research", "excel_profiles", "chatgpt", "mail"].includes(check.key.split(":")[0]);
+}
+
+export function confirmedResearchLink(checks: WorkdayCheck[]): string | null {
+  const saved = checks.find(c => c.key.startsWith("chatgpt:") && c.status === "complete");
+  const checked = validateResearchLink(saved?.evidence);
+  return checked.ok ? checked.url : null;
 }
 
 export function workdayTime(at: number | null): string {

@@ -1,7 +1,7 @@
 "use client";
 import { ChatgptConfirmation, EodJobChecks } from "./Workday";
 
-import { useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import {
   SHORTLIST_COLUMNS,
   boxOverrides,
@@ -430,7 +430,8 @@ export function EodComposer({
   const [subject, setSubject] = useState(initialSubject);
   const [introText, setIntroText] = useState(resend ? resend.introText : defaultIntro);
   const [outroText, setOutroText] = useState(resend ? resend.outroText : defaultOutro);
-  // The link is kept with the draft; the tick is not, so it is given afresh each send.
+  // Reuse today's saved workday confirmation. Editing the link or resending
+  // requires confirmation again; an older draft cannot confer confirmation.
   const [researchLink, setResearchLink] = useState(resend?.researchLink ?? "");
   const [researchConfirmed, setResearchConfirmed] = useState(false);
   const [jobBlocked, setJobBlocked] = useState(needsResearchLink);
@@ -478,6 +479,14 @@ export function EodComposer({
   // Restore draft from localStorage on mount. Nothing is saved until this has
   // run: the save below used to write the page's defaults over the draft first.
   const [restored, setRestored] = useState(false);
+  const researchEdited = useRef(false);
+  const useSavedResearch = useCallback((link: string) => {
+    if (!restored || resend || researchEdited.current) return;
+    // Today's saved confirmation is authoritative over an older local draft.
+    // Editing here clears confirmation and keeps the TA's new input intact.
+    setResearchLink(link);
+    setResearchConfirmed(true);
+  }, [restored, resend]);
   useEffect(() => {
     setRestored(true);
     try {
@@ -629,7 +638,7 @@ export function EodComposer({
             spellCheck={false}
             required={needsResearchLink}
             value={researchLink}
-            onChange={(e) => { setResearchLink(e.target.value); setResearchConfirmed(false); }}
+            onChange={(e) => { researchEdited.current = true; setResearchLink(e.target.value); setResearchConfirmed(false); }}
             onBlur={() => setResearchTouched(true)}
             placeholder="https://chatgpt.com/share/…"
             aria-invalid={researchTouched && !researchCheck.ok}
@@ -661,7 +670,7 @@ export function EodComposer({
           {researchCheck.ok && <ChatgptConfirmation jobId={openingId} link={researchLink} confirmed={researchConfirmed} />}
         </section>
       )}
-      {needsResearchLink && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} />}
+      {needsResearchLink && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} />}
 
       <section className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex flex-col gap-3 border-b border-rule px-7 py-5">
