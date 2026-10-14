@@ -92,11 +92,15 @@ const db = {
       },
       first: async () => (await query.collect())[0] ?? null,
       take: async (limit: number) => (await query.collect()).slice(0, limit),
+      paginate: async ({ cursor, numItems }: { cursor: string | null; numItems: number }) => {
+        const all = await query.collect(); const start = Number(cursor) || 0;
+        return { page: all.slice(start, start + numItems), isDone: start + numItems >= all.length, continueCursor: String(start + numItems) };
+      },
     };
     return query;
   },
 };
-const ctx = { db, auth: { getUserIdentity: async () => null } } as any;
+const ctx = { db, auth: { getUserIdentity: async () => null }, scheduler: { runAt: async () => null } } as any;
 const run = (name: keyof typeof workdays, args: Row) =>
   (workdays[name] as any)._handler(ctx, args);
 const user = (id: string, taRole: string) =>
@@ -219,19 +223,39 @@ try {
     supportView.jobs.map((j: Row) => j.jobId),
     ["job1"],
   );
-  await workdays.recordActiveMode(
-    ctx,
-    "support" as any,
-    "job3" as any,
-    "Add-on",
-  );
-  await workdays.recordActiveMode(
-    ctx,
-    "support" as any,
-    "job3" as any,
-    "Add-on",
-  );
-  assert.equal(rows("taWorkdays")[1].jobs[1].modeHistory.length, 2);
+  // New mandatory setup is evaluated from saved evidence, not a browser tick.
+  const blocked = await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true });
+  assert.equal(blocked.ok, false);
+  assert.ok(blocked.blockers.some((b: string) => b.includes("Excel")));
+  for (const [actorId, jobId] of [["ta", "job1"], ["ta", "job2"], ["support", "job1"], ["support", "job3"]]) {
+    if (!rows("researchReports").some(r => r.openingId === jobId)) put("researchReports", { _id: `research:${jobId}`, openingId: jobId, fields: {}, generatedAt: clock });
+    put("jobPosts", { _id: `linkedin:${jobId}:${actorId}`, openingId: jobId, channel: "LinkedIn", externalUrl: "https://www.linkedin.com/jobs/view/123", postedAt: clock });
+    for (let i = 0; i < 3; i++) put("linkVault", { _id: `setup:${actorId}:${jobId}:${i}`, openingId: jobId, addedBy: actorId, createdAt: clock + i, linkedinUrl: `https://linkedin.com/in/${actorId}-${jobId}-${i}`, outcome: "contacted", conversationLog: [], isEyeMarked: false });
+    await run("recordSourcingRun", { jobId, userId: actorId, round: 1, count: 0 });
+    await run("saveCheck", { actorId, jobId, kind: "research", reasons: Object.fromEntries(["similarDesignation", "websiteLink", "servicesProvider", "country", "location", "competitors", "socialMedia", "companyOverview"].map(k => [k, "Not available in synthetic fixture"])) });
+    await run("saveCheck", { actorId, jobId, kind: "emptySuggestions", reason: "No synthetic results" });
+    await run("saveCheck", { actorId, jobId, kind: "noCandidates", reason: "No suitable synthetic candidates" });
+    await run("saveCheck", { actorId, jobId, kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
+  }
+  let checkedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
+  const confirmedAt = checkedJob.checks.find((c: Row) => c.key.startsWith("chatgpt:")).completedAt;
+  const eventsBefore = rows("taWorkdayTaskEvents").length;
+  await workdays.refreshWorkdayChecks(ctx, "job1" as any);
+  assert.equal(rows("taWorkdayTaskEvents").length, eventsBefore, "Repeated evaluation does not duplicate events");
+  clock += 5;
+  await run("saveCheck", { actorId: "ta", jobId: "job1", kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
+  checkedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
+  assert.equal(checkedJob.checks.find((c: Row) => c.key.startsWith("chatgpt:")).completedAt, confirmedAt, "Repeated confirmations keep the completion time");
+  await db.patch("research:job1", { fields: { country: "Sri Lanka" } });
+  await workdays.refreshWorkdayChecks(ctx, "job1" as any, "ta" as any);
+  checkedJob = (await run("dashboard", { actorId: "ta" })).active.jobs[0];
+  assert.equal(checkedJob.checks.find((c: Row) => c.key.startsWith("research:")).status, "incomplete");
+  assert.ok(checkedJob.checks.find((c: Row) => c.key.startsWith("research:")).events.some((e: Row) => e.status === "complete"));
+  await run("saveCheck", { actorId: "ta", jobId: "job1", kind: "research" });
+  await run("saveCheck", { actorId: "support", jobId: "job1", kind: "research" });
+  await assert.rejects(() => workdays.recordActiveMode(ctx, "support" as any, "job3" as any, "Add-on"), /first workday/);
+  await workdays.recordActiveMode(ctx, "support" as any, "job3" as any, "100%");
+  assert.equal(rows("taWorkdays")[1].jobs[1].modeHistory.length, 1);
 
   put("candidates", {
     _id: "huntedCandidate",
@@ -351,7 +375,9 @@ try {
   hunted = (await run("dashboard", { actorId: "support" })).active.jobs.find(
     (j: Row) => j.jobId === "job3",
   );
-  assert.equal(hunted.checks.length, 0);
+  assert.ok(hunted.checks.some((c: Row) => c.status === "complete" && c.key.startsWith("daily_email:")));
+  assert.ok(hunted.checks.some((c: Row) => c.key.startsWith("director_wait:")));
+  assert.equal(hunted.checks.some((c: Row) => c.key.startsWith("mail:") && c.status !== "complete"), false);
 
   // Linking a suitable prospect to an existing New CV is not a shortlist.
   put("applications", {
@@ -563,6 +589,28 @@ try {
     rows("taWorkdays").find((d) => d._id === multiDay.id)?.jobs.length,
     3,
   );
+  // Carryover includes every pending assigned job and does not use the ten manual slots.
+  user("carryTa", "ta");
+  const pastJobs = [];
+  for (let i = 0; i < 12; i++) {
+    const jobId = `carry:${i}`; pastJobs.push({ jobId, workType: "100%", addedAt: clock - 86400000, modeHistory: [] });
+    put("jobs", { _id: jobId, title: jobId, status: "active", taLeadId: "lead", assignedTaIds: ["carryTa"] });
+    put("applications", { _id: `carryApp:${i}`, jobId, ownerTaId: "carryTa", candidateId: `carryCandidate:${i}`, currentStage: "follow_up", lastStageChangedAt: clock - 86400000 });
+  }
+  put("taWorkdays", { _id: "pastCarryDay", userId: "carryTa", date: workdayDate(clock - 86400000), startedAt: clock - 86400000, finishedAt: clock - 1, jobs: pastJobs });
+  put("jobs", { _id: "newPrimary", title: "New primary", status: "active", taLeadId: "lead", assignedTaIds: ["carryTa"] });
+  const carryDay = await run("start", { actorId: "carryTa", jobId: "newPrimary", workType: "Follow-up" });
+  const carried = await db.get(carryDay.id);
+  assert.equal(carried?.jobs.length, 13);
+  assert.equal(carried?.jobs[0].workType, "100%", "The browser cannot skip first-day setup by requesting Follow-up");
+  assert.equal(carried?.jobs.filter((j: Row) => j.carried && j.workType === "Follow-up").length, 12);
+  for (let i = 0; i < 9; i++) {
+    const jobId = `manual:${i}`;
+    put("jobs", { _id: jobId, title: jobId, taLeadId: "lead", assignedTaIds: ["carryTa"] });
+    await run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId, workType: "100%" });
+  }
+  put("jobs", { _id: "manual:10", title: "One too many", taLeadId: "lead", assignedTaIds: ["carryTa"] });
+  await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId: "manual:10", workType: "100%" }), /at most ten/);
   console.log(
     "  ok  workday times, direct assigned positions, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );

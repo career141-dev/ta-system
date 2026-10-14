@@ -3298,6 +3298,7 @@ async function sourceForNow(openingId: string, forUserId?: string, extraRound = 
     openingId,
     run.suggestions.map((s) => ({ ...s, openingId, generatedFor: forUserId ?? null, keptBy: null })),
   );
+  if (isConvex()) await freshAfter(convexMutation)("ta/workdays:recordSourcingRun", { jobId: openingId, ...(forUserId ? { userId: forUserId } : {}), round, count: run.suggestions.length });
   return {
     found: run.suggestions.length, scanned: run.scanned,
     queries: run.queries.length, cost: run.cost,
@@ -4606,6 +4607,10 @@ export async function sendEod(formData: FormData) {
   });
   if (!research.ok)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${research.reason}`)}`);
+  if (kind === "director" && isConvex()) {
+    const check = await convexMutation<{ ok: boolean; blockers: string[] }>("ta/workdays:emailPreflight", { actorId: user.id, jobId: openingId, link: research.url ?? "", confirmed: formData.get("researchConfirmed") === "on" });
+    if (!check.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${check.blockers.join("; ")}`)}`);
+  }
   const sentTo = kind === "director" ? recipients.to[0] : String(formData.get("to") ?? "");
 
   // The Director's copy is really sent now, through Microsoft Graph from the
@@ -4797,6 +4802,10 @@ export async function resendEod(formData: FormData) {
       confirmed: formData.get("researchConfirmed") === "on",
     });
     if (!research.ok) return done(`Not sent: ${research.reason}`);
+    if (isConvex()) {
+      const check = await convexMutation<{ ok: boolean; blockers: string[] }>("ta/workdays:emailPreflight", { actorId: user.id, jobId: openingId, link: research.url ?? "", confirmed: formData.get("researchConfirmed") === "on", revised: true });
+      if (!check.ok) return done(`Not sent: ${check.blockers.join("; ")}`);
+    }
     const typed = String(formData.get("subject") ?? "").trim();
     if (!typed) return done("Not sent: the email needs a subject.");
 

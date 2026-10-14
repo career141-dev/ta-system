@@ -1,4 +1,5 @@
 "use client";
+import { ChatgptConfirmation, EodJobChecks } from "./Workday";
 
 import { useEffect, useState, useRef } from "react";
 import {
@@ -431,6 +432,7 @@ export function EodComposer({
   // The link is kept with the draft; the tick is not, so it is given afresh each send.
   const [researchLink, setResearchLink] = useState(resend?.researchLink ?? "");
   const [researchConfirmed, setResearchConfirmed] = useState(false);
+  const [jobBlocked, setJobBlocked] = useState(needsResearchLink);
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const researchBlocked = needsResearchLink && (!researchCheck.ok || !researchConfirmed);
@@ -612,7 +614,7 @@ export function EodComposer({
             spellCheck={false}
             required={needsResearchLink}
             value={researchLink}
-            onChange={(e) => setResearchLink(e.target.value)}
+            onChange={(e) => { setResearchLink(e.target.value); setResearchConfirmed(false); }}
             onBlur={() => setResearchTouched(true)}
             placeholder="https://chatgpt.com/share/…"
             aria-invalid={researchTouched && !researchCheck.ok}
@@ -641,8 +643,10 @@ export function EodComposer({
               emails or CV text, because anyone with the link can read it.
             </span>
           </label>
+          {researchCheck.ok && <ChatgptConfirmation jobId={openingId} link={researchLink} confirmed={researchConfirmed} />}
         </section>
       )}
+      {needsResearchLink && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} />}
 
       <section className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex flex-col gap-3 border-b border-rule px-7 py-5">
@@ -1019,7 +1023,7 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked}
+          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || jobBlocked}
           title={
             nobodyOnTo
               ? "Add an address as To first"

@@ -17,7 +17,7 @@ export async function changeWorkday(
   const args: Record<string, unknown> = { actorId: user.id };
   if (op === "start")
     Object.assign(args, { jobId: value("jobId"), workType: value("workType") });
-  else if (op === "addPosition")
+  else if (op === "addPosition" || op === "setWorkType")
     Object.assign(args, {
       workdayId: value("workdayId"),
       jobId: value("jobId"),
@@ -56,6 +56,9 @@ export async function changeWorkday(
       accepted: value("accepted") === "yes",
       reason: value("reason"),
     });
+  } else if (op === "saveCheck") {
+    const reasons = Object.fromEntries([...form.entries()].filter(([key]) => key.startsWith("unavailable:")).map(([key, val]) => [key.slice(12), String(val).trim()]));
+    Object.assign(args, { jobId: value("jobId"), kind: value("kind"), reason: value("reason"), reasons, link: value("link"), confirmed: value("confirmed") === "on" });
   } else return { ok: false, message: "Unknown workday action." };
   try {
     const result = await convexMutation<{
