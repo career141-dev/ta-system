@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useState, useTransition } from "react";
+import { Suspense, useCallback, useEffect, useId, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { changeWorkday } from "@/app/workday/actions";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@/lib/workday";
 import { HEADER_H } from "@/lib/chrome";
 import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
+import { validateResearchLink } from "@/lib/eod-format";
 
 function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
@@ -275,9 +276,25 @@ export function ResearchConfirmation({ jobId }: { jobId: string }) {
 }
 
 export function ChatgptConfirmation({ jobId, link = "", confirmed = false }: { jobId: string; link?: string; confirmed?: boolean }) {
+  const [typedLink, setTypedLink] = useState("");
+  const [opened, setOpened] = useState(false);
+  const helpId = useId();
+  const checked = validateResearchLink(link || typedLink);
+  const ready = checked.ok && (link ? confirmed : opened);
   return <WorkForm op="saveCheck" fields={{ jobId, kind: "chatgpt", ...(link ? { link } : {}), ...(confirmed ? { confirmed: "on" } : {}) }}>
-    {!link && <><label className="block text-xs">ChatGPT share link<input required name="link" className={inputClass} /></label><label className="block text-xs"><input type="checkbox" name="confirmed" /> I opened this link in a private window and it contains no candidate details.</label></>}
-    <button className={buttonClass}>Save research link</button>
+    {!link && <>
+      <p className="text-xs text-ink-soft">In ChatGPT, choose Share, then Create link or Copy link. Paste the shared link here; copying the browser address gives your private chat link.</p>
+      <label className="block text-xs">ChatGPT share link<input required name="link" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://chatgpt.com/share/…" value={typedLink} onChange={e => {
+        setTypedLink(e.target.value);
+        // Confirmation belongs to this exact link, as on the email composer.
+        setOpened(false);
+      }} aria-invalid={!!typedLink.trim() && !checked.ok} aria-describedby={helpId} className={inputClass} /></label>
+      <p id={helpId} aria-live="polite" className="break-words text-xs text-ink-soft">
+        {checked.ok ? "Share link accepted. Open it in a private window, then confirm below." : typedLink.trim() ? checked.reason : "Use a link beginning with https://chatgpt.com/share/."}
+      </p>
+      <label className="block text-xs"><input required type="checkbox" name="confirmed" checked={opened} disabled={!checked.ok} onChange={e => setOpened(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
+    </>}
+    <button disabled={!ready} className={buttonClass}>Save research link</button>
   </WorkForm>;
 }
 
