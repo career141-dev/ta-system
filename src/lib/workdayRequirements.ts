@@ -7,6 +7,8 @@ export const RESEARCH_FIELDS = ["similarDesignation", "websiteLink", "servicesPr
 // 14 Oct: pause the workday requirement while Suggestions is being revisited.
 // The sourcing feature and its saved review evidence remain available.
 export const SUGGESTIONS_WORKDAY_REQUIRED: boolean = false;
+// 14 Oct: temporarily require one own Excel profile instead of three.
+export const MIN_OWN_EXCEL_PROFILES = 1;
 export const RESEARCH_LABELS: Record<typeof RESEARCH_FIELDS[number], string> = { similarDesignation: "Similar designation", websiteLink: "Company website", servicesProvider: "Services offered", country: "Country", location: "Location", competitors: "Competitors", socialMedia: "Social media", companyOverview: "Company overview" };
 export const researchVersion = (report: { generatedAt: number; fields: unknown } | null) =>
   report ? JSON.stringify([report.generatedAt, report.fields]) : "";
@@ -66,7 +68,7 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
       e.suggestions.at, e.suggestions.by, e.suggestions.version);
     rows[rows.length - 1].needsEmptySuggestionsReason = e.suggestions.successful &&
       e.suggestions.count === 0 && !e.suggestions.emptyReason?.trim();
-    add("excel_profiles", "Own Excel Tables profiles", `${base}/hh/links`, e.profiles.count >= 3, `${e.profiles.count}/3`, e.profiles.at, e.userId, String(e.profiles.count));
+    add("excel_profiles", "Own Excel Tables profiles", `${base}/hh/links`, e.profiles.count >= MIN_OWN_EXCEL_PROFILES, `${e.profiles.count}/${MIN_OWN_EXCEL_PROFILES}`, e.profiles.at, e.userId, String(e.profiles.count));
   }
   if (e.workType !== "Follow-up") {
     const complete = e.ready > 0 || e.submitted > 0 || !!e.noCandidateReason?.trim();

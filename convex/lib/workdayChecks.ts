@@ -1,6 +1,6 @@
 import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
-import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS, workSessionStart, SUGGESTIONS_WORKDAY_REQUIRED } from "../../src/lib/workdayRequirements";
+import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS, workSessionStart, SUGGESTIONS_WORKDAY_REQUIRED, MIN_OWN_EXCEL_PROFILES } from "../../src/lib/workdayRequirements";
 import type { WorkdayCheck } from "../../src/lib/workday";
 import { isEodSendCheck } from "../../src/lib/workday";
 import { linkKey } from "../../src/lib/url";
@@ -45,7 +45,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     suggestions: { successful: !!latestRun || latest.length > 0, pending: latest.filter(s => s.status === "new").length,
       count: latest.length, version: suggestionVersion, emptyReason: notes?.emptySuggestionsVersion === suggestionVersion ? notes.emptySuggestionsReason : undefined,
       at: latest.length ? suggestionEvidence?.at : notes?.emptySuggestionsAt, by: latest.length ? suggestionEvidence?.by : day.userId },
-    profiles: { count: unique.length, at: unique[2]?.createdAt }, ready: ready.length,
+    profiles: { count: unique.length, at: unique[MIN_OWN_EXCEL_PROFILES - 1]?.createdAt }, ready: ready.length,
     submitted: new Set(accepted.flatMap(r => r.applicationIds as string[])).size,
     noCandidateReason: entry.workType !== "Add-on" || (ownNotes?.noCandidateAt ?? 0) >= since ? ownNotes?.noCandidateReason : undefined,
     noCandidateAt: ownNotes?.noCandidateAt,
