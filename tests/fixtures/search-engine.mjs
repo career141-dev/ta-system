@@ -40,7 +40,7 @@ mock.module(here("../../convex/cvs/cvScoring.ts"), { namedExports: {
     assert.equal(opts.roleAware, true);
     review = candidates;
     if (modelFails) throw new Error("model unavailable");
-    return { evaluations: new Map(candidates.map(c => [c.index, { score: c.roleEvidence.kind === "broader" ? 100 : c.overallScore, reason: "Verify skills" }])), usage: {} };
+    return { evaluations: new Map(candidates.map(c => [c.index, { score: c.cv._id === "exact" ? 1 : 100, reason: "Verify skills" }])), usage: {} };
   },
 } });
 const { quickEngineSearch, engineSearch, cachedEngineSearch } = await import("../../src/lib/engineSearch.ts");
@@ -53,6 +53,7 @@ assert.equal(quick.hits.find(h => h.candidateId === "exact").roleEvidence.kind, 
 const full = await engineSearch("personal assistant cfo", criteria, 400);
 for (const results of [quick, full]) {
   assert.equal(results.hits.length, 400);
+  assert.equal(results.hits[0].candidateId, "exact", "CFO-support context must survive AI scoring and the 200 generic competitors");
   const firstBroad = results.hits.findIndex(h => h.roleEvidence.kind === "broader");
   assert.equal(firstBroad, 200, "all supported roles precede CFO-only profiles");
   const pages = Array.from({ length: 16 }, (_, i) => results.hits.slice(i * 25, (i + 1) * 25));

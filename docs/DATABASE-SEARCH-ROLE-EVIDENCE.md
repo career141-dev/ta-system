@@ -32,8 +32,11 @@ underlying title, skill and retrieval defects without copying candidate data.
    constraints. The results page still enforces desk constraints.
 4. Classify current relevant role, previous relevant role, or broader match.
    Summary-only evidence must explicitly describe work in the occupation.
-5. Put supported careers before broader profiles. Within that grouping, use
-   scores, current/past title evidence and recency, with stable ID tie-breaking.
+5. Put supported careers before broader profiles. Within supported careers,
+   prioritize evidenced reporting-context matches (for example, assistant to
+   CFO) before generic assistants. Then use scores, current/past title evidence
+   and recency, with stable ID tie-breaking. Dated history overrides a stale
+   current-title field when it identifies the same job as ended.
 6. Review up to 20 profiles with a 10/10 protected-career/uncertain allocation;
    refill unused places. AI cannot override the occupation grouping. Missing or
    unusable model results leave deterministic scores intact.
@@ -54,6 +57,9 @@ Candidate names are omitted from the new review payload.
   CFO, Assistant Accountant, Assistant Finance Manager, equivalent titles,
   previous roles, sparse skills, explicit requirements, no occupation, pool
   quotas, protected AI review, bounded payloads and opt-in legacy scoring.
+- `tests/searchContextDates.test.ts`: exact reporting context, previous CFO
+  support, stale headlines, CV date formats, future jobs, rejoining employers,
+  edited quick-search context and misleading AI scores. Synthetic fixtures only.
 - `tests/searchEngineRoleRanking.test.ts`: real orchestration with mocked IO;
   400 synthetic records exercise quick/full retrieval, role ordering, strict
   filters, employer constraints, caching and model failure. No network calls.

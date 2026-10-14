@@ -1,4 +1,6 @@
 /** Database search only. Occupation evidence must not be confused with a reporting line. */
+import { parseCvDate } from "./experience";
+
 export type SearchOccupation = {
   targetOccupation: string | null;
   equivalentTitles: string[];
@@ -12,19 +14,41 @@ export type RoleEvidence = {
   label: "Relevant current role" | "Relevant previous role" | "Broader match";
   title?: string;
   recency: number;
+  matchedReportingContext?: string;
 };
 
 type Career = {
   currentTitle?: string | null;
   currentJobTitle?: string | null;
+  currentEmployer?: string | null;
   summary?: string | null;
   pastJobTitles?: string[];
-  jobHistory?: { title?: string; startDate?: string; endDate?: string }[];
+  jobHistory?: { title?: string; company?: string; startDate?: string; endDate?: string }[];
 };
 
 const clean = (s: string) => s.toLowerCase().replace(/[^a-z0-9+#]+/g, " ").trim();
 const distinct = (xs: string[]) => [...new Map(xs.filter(Boolean).map(x => [clean(x), x.trim()])).values()];
 const SUPPORT = /\b(?:personal assistant|executive assistant|executive pa|executive secretary|confidential secretary|pa|ea)\b/i;
+
+const contextKey = (text: string) => clean(text)
+  .replace(/\bchief financial officer\b/g, "cfo")
+  .replace(/\bchief executive officer\b/g, "ceo")
+  .replace(/\bchief operating officer\b/g, "coo")
+  .replace(/^(?:the|a|an)\s+/, "");
+
+function reportingContext(title: string): string | null {
+  const explicit = title.match(/\b(?:reporting to|reports to|supporting|to|for)\s+(.+)$/i)?.[1];
+  if (explicit) return explicit.trim();
+  return SUPPORT.test(title) ? title.match(/\b(cfo|ceo|coo|chief financial officer|chief executive officer|chief operating officer)\b/i)?.[0] ?? null : null;
+}
+
+function contextMatch(title: string, intent: SearchOccupation): string | undefined {
+  const context = reportingContext(title);
+  if (!context || !intent.reportingContext || !roleMatches(title, intent)) return undefined;
+  // Context must belong to a supported occupation, not just occur in a CV or employer name.
+  const wanted = contextKey(intent.reportingContext);
+  return wanted && ` ${contextKey(context)} `.includes(` ${wanted} `) ? intent.reportingContext : undefined;
+}
 
 export function occupationTitle(title: string): string {
   const role = clean(title)
@@ -71,7 +95,7 @@ export function readOccupation(
   return {
     targetOccupation: target || null,
     equivalentTitles: distinct(equivalents.filter(compatible)),
-    reportingContext: supplied?.reportingContext ?? phrase.match(/\b(?:to|supporting|reporting to)\s+(.+)$/i)?.[1] ?? (supportTarget ? phrase.match(/\b(cfo|ceo)\b/i)?.[1] ?? null : null),
+    reportingContext: supplied ? supplied.reportingContext : reportingContext(req.title) ?? (supportTarget ? reportingContext(quickRolePhrase(query)) : null),
     explicitSkills: explicit,
     inferredSkills: inferred,
   };
@@ -85,35 +109,51 @@ export function roleMatches(title: string, intent: SearchOccupation): boolean {
   return variants.some(v => candidate === v || withoutLevel(candidate) === withoutLevel(v));
 }
 
-const dateValue = (s?: string) => {
-  if (!s) return 0;
-  const n = Date.parse(s);
-  return Number.isFinite(n) ? n : 0;
+const dateValue = (s?: string, end = false) => {
+  const date = parseCvDate(s);
+  if (!date || date.present) return 0;
+  return end ? Date.UTC(date.y, date.m ?? 12, 1) - 1 : Date.UTC(date.y, (date.m ?? 1) - 1, 1);
 };
 
-export function roleEvidence(cv: Career, intent: SearchOccupation): RoleEvidence | undefined {
+export function roleEvidence(cv: Career, intent: SearchOccupation, asOf = new Date()): RoleEvidence | undefined {
   if (!intent.targetOccupation) return undefined;
   const current = cv.currentTitle || cv.currentJobTitle || "";
-  if (roleMatches(current, intent)) return { kind: "current", label: "Relevant current role", title: current, recency: 0 };
-  const jobs = [...(cv.jobHistory ?? [])].sort((a, b) => dateValue(b.endDate || b.startDate) - dateValue(a.endDate || a.startDate));
+  const evidence: RoleEvidence[] = [];
+  const add = (title: string, ongoing: boolean, recency = 0) => evidence.push({
+    kind: ongoing ? "current" : "previous",
+    label: ongoing ? "Relevant current role" : "Relevant previous role",
+    title, recency, matchedReportingContext: contextMatch(title, intent),
+  });
+  const history = cv.jobHistory ?? [];
+  const jobs = history.filter(j => dateValue(j.startDate) <= asOf.getTime());
+  const sameCurrentJob = (j: NonNullable<Career["jobHistory"]>[number]) =>
+    contextKey(j.title ?? "") === contextKey(current) && (!cv.currentEmployer || !j.company || clean(j.company) === clean(cv.currentEmployer));
+  const currentJobs = history.filter(sameCurrentJob);
+  const ended = (end?: string) => dateValue(end, true) > 0 && dateValue(end, true) < asOf.getTime();
+  // A stored headline can outlive its job. Dated history takes precedence;
+  // a different employer with the same title does not invalidate today's role.
+  if (roleMatches(current, intent) && !currentJobs.length) add(current, true);
   for (const job of jobs) {
     if (!roleMatches(job.title ?? "", intent)) continue;
-    const ongoing = /^(?:present|current|now|ongoing)$/i.test(job.endDate ?? "");
-    return { kind: ongoing ? "current" : "previous", label: ongoing ? "Relevant current role" : "Relevant previous role", title: job.title, recency: dateValue(job.endDate || job.startDate) };
+    const ongoing = !!parseCvDate(job.endDate)?.present || (!ended(job.endDate) && sameCurrentJob(job));
+    add(job.title!, ongoing, dateValue(job.endDate, true) || dateValue(job.startDate));
   }
-  const past = cv.pastJobTitles?.find(t => roleMatches(t, intent));
-  if (past) return { kind: "previous", label: "Relevant previous role", title: past, recency: 0 };
+  for (const past of cv.pastJobTitles ?? []) if (roleMatches(past, intent)) add(past, false);
   // Summaries count only when they explicitly describe work in a role, not a mention of a boss.
   const summaryRoles = (cv.summary ?? "").slice(0, 500).matchAll(/\b(?:worked|served|employed)\s+as\s+(?:an?\s+)?([^.;,]+)/gi);
   for (const match of summaryRoles) {
-    if (roleMatches(match[1], intent)) return { kind: "previous", label: "Relevant previous role", title: match[1].trim(), recency: 0 };
+    if (roleMatches(match[1], intent)) add(match[1].trim(), false);
   }
+  // Do not stop at the first general PA job: earlier CFO-support work may be
+  // the strongest evidence for this particular search.
+  evidence.sort((a, b) => Number(!!b.matchedReportingContext) - Number(!!a.matchedReportingContext) || Number(b.kind === "current") - Number(a.kind === "current") || b.recency - a.recency);
+  if (evidence.length) return evidence[0];
   return { kind: "broader", label: "Broader match", recency: 0 };
 }
 
 export function compareRoleEvidence(a?: RoleEvidence, b?: RoleEvidence): number {
   const priority = (e?: RoleEvidence) => !e ? 0 : e.kind === "broader" ? 1 : 0;
-  return priority(a) - priority(b);
+  return priority(a) - priority(b) || Number(!!b?.matchedReportingContext) - Number(!!a?.matchedReportingContext);
 }
 
 type SearchRank = { roleEvidence?: RoleEvidence; overallScore: number; titleScore: number; cv: { _id: string } };
@@ -141,5 +181,5 @@ export function searchReviewPool<T extends Ranked>(ranked: T[]): T[] {
 
 export function searchEvidenceReason(evidence: RoleEvidence | undefined, title: string, verify: string[]): string {
   const label = evidence ? `${evidence.label}${evidence.title ? `: ${evidence.title}` : ""}.` : `Profile: ${title || "role not stated"}.`;
-  return `${label}${verify.length ? ` Verify: ${verify.slice(0, 3).join(", ")}.` : ""}`;
+  return `${label}${evidence?.matchedReportingContext ? ` Matches requested reporting context: ${evidence.matchedReportingContext}.` : ""}${verify.length ? ` Verify: ${verify.slice(0, 3).join(", ")}.` : ""}`;
 }
