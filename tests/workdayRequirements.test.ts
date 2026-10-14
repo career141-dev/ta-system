@@ -3,7 +3,7 @@ import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARC
 import { completionBlockers, emailBlockers, confirmedResearchLink } from "../src/lib/workday";
 
 const base: SetupEvidence = { jobId: "job", workType: "100%", userId: "ta", research: { version: "v1", missing: [...RESEARCH_FIELDS] },
-  suggestions: { successful: false, pending: 0, count: 0, version: "r1" }, profiles: { count: 2 }, ready: 0, submitted: 0 };
+  suggestions: { successful: false, pending: 0, count: 0, version: "r1" }, profiles: { count: 0 }, ready: 0, submitted: 0 };
 const evaluate = (patch: Partial<SetupEvidence> = {}) => setupChecks({ ...base, ...patch });
 const find = (key: string, patch: Partial<SetupEvidence> = {}) => setupChecks({ ...base, ...patch }, key === "suggestions").find(c => c.key.startsWith(key + ":"))!;
 assert.equal(evaluate().length, 7);
@@ -15,7 +15,9 @@ assert.equal(find("jd_review", { jd: { version: " ", approved: true, reviewedVer
 assert.equal(find("jd_review", { jd: { version: "JD", approved: true, reviewedVersion: "JD", at: 123, by: "ta" } }).completedAt, 123);
 assert.equal(find("jd_review", { jd: { version: "Changed JD", approved: true, reviewedVersion: "JD" } }).status, "incomplete");
 assert.equal(find("excel_profiles").status, "incomplete");
-assert.equal(find("excel_profiles", { profiles: { count: 3, at: 123 } }).completedAt, 123);
+assert.equal(find("excel_profiles", { profiles: { count: 1, at: 123 } }).completedAt, 123);
+assert.equal(find("excel_profiles", { profiles: { count: 1 } }).status, "complete");
+assert.equal(find("excel_profiles", { profiles: { count: 1 } }).progress, "1/1");
 assert.equal(find("director_candidate", { noCandidateReason: "No suitable candidates", noCandidateAt: 42 }).status, "complete");
 assert.equal(find("director_candidate", { ready: 1 }).status, "complete");
 assert.equal(find("director_candidate", { submitted: 1 }).status, "complete");

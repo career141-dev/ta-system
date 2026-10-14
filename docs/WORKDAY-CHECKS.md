@@ -21,7 +21,7 @@ Changing a carried job to Add-on makes it a deliberately selected job.
 
 100% requires the TA's confirmed review of the approved job description, a
 LinkedIn job/post link, all eight main research fields filled or
-explained as unavailable and reviewed, and three distinct profiles added by that
+explained as unavailable and reviewed, and one distinct profile added by that
 TA to Excel Tables. Existing saved setup counts. The Suggestions review
 requirement is temporarily paused (14 October): it is hidden from workday checks
 and does not block sending or finishing. The Suggestions page, sourcing runs,
@@ -42,7 +42,7 @@ Director replies can remain waiting. Each selected/carried job needs its daily
 email and confirmed ChatGPT research share link before the workday can finish.
 
 For now, EOD sending requires only confirmed review of the approved JD,
-completed and reviewed research, three distinct own Excel Tables profiles, and
+completed and reviewed research, one distinct own Excel Tables profile, and
 a confirmed ChatGPT research share link. These four checks apply to every work
 type and reuse saved setup evidence. Candidate progress, the LinkedIn post,
 Suggestions and the Director Review candidate/explanation requirement do not
@@ -50,6 +50,8 @@ block sending. They can still affect Finish under the rules above. Existing
 candidate validation and duplicate/uncertain-mail safeguards remain enforced.
 The composer fills the ChatGPT link from today's saved confirmation. Editing
 that link clears confirmation, and revised emails require confirmation again.
+The Excel minimum is temporarily one (14 October). It still counts only valid,
+distinct LinkedIn profiles added by the TA; visible lead-added rows do not count.
 
 The composer displays these four outstanding send requirements. Server preflight and the
 mail reservation recheck evidence; Finish rechecks in its transaction. Existing

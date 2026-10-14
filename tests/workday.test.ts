@@ -271,6 +271,18 @@ try {
     await run("saveCheck", { actorId, jobId, kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
   }
   // The temporary send gate depends only on the four setup requirements.
+  const originalProfiles = [...rows("linkVault")];
+  tables.set("linkVault", originalProfiles.filter(l => l.openingId !== "job1" || l.addedBy !== "ta" || l._id === "setup:ta:job1:0"));
+  put("linkVault", { _id: "count:duplicate", openingId: "job1", addedBy: "ta", createdAt: clock, linkedinUrl: "https://www.linkedin.com/in/ta-job1-0?tracking=1", outcome: "contacted", conversationLog: [] });
+  put("linkVault", { _id: "count:invalid", openingId: "job1", addedBy: "ta", createdAt: clock, linkedinUrl: "https://example.invalid/person", outcome: "contacted", conversationLog: [] });
+  put("linkVault", { _id: "count:lead", openingId: "job1", addedBy: "lead", createdAt: clock, linkedinUrl: "https://linkedin.com/in/lead-profile", outcome: "contacted", conversationLog: [] });
+  let countedProfiles = (await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("excel_profiles:"));
+  assert.equal(countedProfiles.progress, "1/1", "Only distinct recognised profiles added by the TA count; duplicates, non-profile links and lead-added rows are excluded");
+  assert.equal(countedProfiles.status, "complete");
+  assert.equal((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).ok, true, "One own profile is enough for the temporary EOD requirement");
+  tables.set("linkVault", rows("linkVault").filter(l => l._id !== "setup:ta:job1:0" && l._id !== "count:duplicate"));
+  assert.ok((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("Excel")), "Zero eligible own profiles still prevents sending");
+  tables.set("linkVault", originalProfiles);
   const savedPosts = [...rows("jobPosts")];
   tables.set("jobPosts", savedPosts.filter(p => p.openingId !== "job1"));
   const savedNotes = rows("taWorkdayCheckNotes").find(n => n.userId === "ta" && n.jobId === "job1")!;
