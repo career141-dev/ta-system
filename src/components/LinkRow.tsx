@@ -24,6 +24,7 @@ import { newestFirst, noteByline } from "@/lib/leadNotes";
 import { STAGE_LABEL } from "@/data/types";
 import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
 import { INTEREST_LABEL, type Interest } from "@/lib/linkViews";
+import { RowCheck } from "./BulkSelect";
 
 const OUTCOMES: { value: LinkOutcome; label: string }[] = [
   { value: "no_contact", label: "Not contacted" },
@@ -71,6 +72,7 @@ export function LinkRow({
   canNote = false,
   viewerId = "",
   readOnly = false,
+  selectForm,
 }: {
   entry: LinkVaultEntry;
   openingId: string;
@@ -90,6 +92,7 @@ export function LinkRow({
    * buttons that would only be refused.
    */
   readOnly?: boolean;
+  selectForm?: string;
 }) {
   const [removed, setRemoved] = useState(false);
   const [isEyeMarked, setIsEyeMarked] = useState(r.isEyeMarked);
@@ -157,36 +160,10 @@ export function LinkRow({
   return (
     <article className="px-4 py-4 sm:px-6 sm:py-5">
       <div className="flex gap-3.5">
-        {readOnly ? (
-          <span
-            title={isEyeMarked ? "Eye-marked — a high-conviction profile" : undefined}
-            className={`mt-1 grid h-[15px] w-[15px] shrink-0 place-items-center rounded-[3px] border text-[10px] leading-none ${
-              isEyeMarked ? "border-brand bg-brand text-white" : "border-rule text-transparent"
-            }`}
-          >
-            ✓
+        {!readOnly && selectForm && (
+          <span className="pt-1">
+            <RowCheck form={selectForm} name="entryId" value={r.id} label={r.name || guessedName || "profile"} />
           </span>
-        ) : (
-        <form
-          onSubmit={(e) => {
-            setIsEyeMarked((prev) => !prev);
-            eye.run(submitted(e).formData);
-          }}
-          className="pt-1"
-        >
-          <input type="hidden" name="openingId" value={openingId} />
-          <input type="hidden" name="entryId" value={r.id} />
-          <button
-            disabled={busy}
-            aria-busy={eye.pending}
-            title={isEyeMarked ? "Eye-marked — a high-conviction profile" : "Eye-mark this profile"}
-            className={`grid h-[15px] w-[15px] place-items-center rounded-[3px] border text-[10px] leading-none transition-colors ${
-              isEyeMarked ? "border-brand bg-brand text-white" : "border-rule-strong text-transparent hover:border-brand"
-            }`}
-          >
-            ✓
-          </button>
-        </form>
         )}
 
         <div className="min-w-0 flex-1">
@@ -205,6 +182,25 @@ export function LinkRow({
                   <span className="text-[11px] italic text-ink-faint">name read from the link</span>
                 )}
                 <span className="text-[11px] text-ink-faint">in · 2nd</span>
+                {readOnly ? (
+                  isEyeMarked && <span className="rounded-full bg-brand-soft px-3 py-1 text-[12px] font-medium text-brand">iMarked</span>
+                ) : (
+                  <form onSubmit={(e) => eye.run(submitted(e).formData)}>
+                    <input type="hidden" name="openingId" value={openingId} />
+                    <input type="hidden" name="entryId" value={r.id} />
+                    <button
+                      type="submit"
+                      disabled={busy}
+                      aria-busy={eye.pending}
+                      aria-pressed={isEyeMarked}
+                      aria-label={`${isEyeMarked ? "Remove iMark from" : "iMark"} ${r.name || guessedName || "profile"}`}
+                      title={isEyeMarked ? "Remove from the iMark list" : "Show this candidate in the Excel Tables iMark list"}
+                      className={`rounded-full border px-3 py-1 text-[12px] font-medium transition-colors disabled:opacity-60 ${isEyeMarked ? "border-brand bg-brand-soft text-brand" : "border-rule-strong text-ink-soft hover:border-brand hover:text-brand"}`}
+                    >
+                      {eye.pending ? "Saving…" : isEyeMarked ? "iMarked ✓" : "iMark"}
+                    </button>
+                  </form>
+                )}
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}
                 </span>
