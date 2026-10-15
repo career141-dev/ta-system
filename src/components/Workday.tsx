@@ -701,8 +701,8 @@ export function WorkdayRailLeadAdmin() {
         onClick={() => setOpen(true)}
         aria-expanded={false}
         aria-controls="workday-rail-lead"
-        className="fixed z-40 flex items-center gap-1.5 rounded-l-lg border border-r-0 border-rule-strong bg-surface py-2 pl-3 pr-2.5 text-xs font-semibold text-fg shadow-md transition-all hover:bg-paper hover:shadow-lg hover:pr-3.5"
-        style={{ top: "calc(var(--header-h) + 16px)", right: 0 }}
+        className="fixed z-40 flex items-center gap-1.5 rounded-l-lg border border-r-0 border-rule-strong bg-surface py-2.5 pl-3 pr-2.5 text-xs font-semibold text-fg shadow-md transition-all hover:bg-paper hover:shadow-lg hover:pr-3.5"
+        style={{ top: "45%", transform: "translateY(-50%)", right: 0 }}
         title="Today's Checks"
       >
         <span className="text-sm font-bold text-brand">‹</span>
