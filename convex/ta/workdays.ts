@@ -841,7 +841,7 @@ export const suggestionsCheck = internalQuery({
     await assignedJob(ctx, user, args.jobId);
     const day = await activeFor(ctx, user._id);
     const entry = day?.jobs.find(j => j.jobId === args.jobId);
-    if (!day || !entry || entry.workType !== "100%") return null;
+    if (!day || !entry) return null;
     const evidence = await requiredChecks(ctx, day, entry);
     return evidence.suggestionsCheck;
   },
@@ -1123,6 +1123,7 @@ export const beginMail = internalMutation({
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
+    if (!args.applicationIds.length) throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
     const day = await activeFor(ctx, user._id);
     if (!day || !day.jobs.some((j) => j.jobId === args.jobId))
       return { id: null };
@@ -1131,11 +1132,6 @@ export const beginMail = internalMutation({
     const current = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([current]).filter(c => !c.key.startsWith("mail:"));
     if (blockers.length) throw new Error(`Complete Today's Checks before sending: ${blockers.map(c => c.label).join("; ")}.`);
-    const ready = await ctx.db.query("applications").withIndex("by_workday_owner", q => q.eq("jobId", args.jobId).eq("ownerTaId", user._id)).collect();
-    const rounds = await ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", args.jobId)).collect();
-    const sent = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds as string[]));
-    if (!args.applicationIds.length && ready.some(a => a.currentStage === "second_shortlist" && !sent.has(a._id)))
-      throw new Error("Candidates are ready for Director Review. Include them in the email.");
     const previous = await ctx.db
       .query("taWorkdayMail")
       .withIndex("by_workday_job", (q) =>
@@ -1161,13 +1157,6 @@ export const beginMail = internalMutation({
     if (args.applicationIds.some((id) => sentToday.has(id)))
       throw new Error(
         "These candidates have already been sent in this workday.",
-      );
-    if (
-      !args.applicationIds.length &&
-      previous.some((r) => r.status === "accepted" && !r.applicationIds.length && (entry.workType !== "Add-on" || r.startedAt >= workSessionStart(entry)))
-    )
-      throw new Error(
-        "This workday's activity email has already been sent for the job.",
       );
     for (const id of args.applicationIds) {
       const app = await ctx.db.get(id);

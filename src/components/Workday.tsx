@@ -267,10 +267,6 @@ function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId:
               </div>
             </details>
           )}
-          {check.key.startsWith("director_candidate:") && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "noCandidates" }}>
-            <label className="block text-xs">Why no suitable candidates were found<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save explanation</button>
-          </WorkForm>}
-          {check.key.startsWith("research:") && <ResearchConfirmation jobId={check.jobId} />}
           {check.key.startsWith("jd_review:") && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "jd" }}><p className="text-xs text-ink-soft">Read the approved job description before confirming.</p><button className={buttonClass}>I reviewed the job description</button></WorkForm>}
           {check.needsEmptySuggestionsReason && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "emptySuggestions" }}>
             <label className="block text-xs">Why no profiles were found<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save explanation</button>
@@ -329,7 +325,7 @@ export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResea
   const blocked = !!error || !data || (data.canWork && (!job || blockers.length > 0));
   useEffect(() => { onBlocked(blocked); }, [blocked, onBlocked]);
   if (data && !data.canWork) return null;
-  return <section className="rounded-lg border border-rule p-4 text-sm"><h3 className="font-medium">Today's Checks</h3>{error ? <p>{error}</p> : !data ? <p>Loading checks…</p> : !job ? <p>Start work on this opening in the sidebar before sending.</p> : blockers.length ? <ul className="mt-2 space-y-1">{blockers.map(c => <li key={c.key}><Link href={c.href} className="text-brand underline">{c.label}</Link>: {c.progress ?? "needs action"}</li>)}</ul> : <p className="text-brand">Required checks complete.</p>}{!revised && blockers.some(c => c.key.startsWith("director_candidate:")) && <div className="mt-3"><NoCandidateReason jobId={jobId} /></div>}</section>;
+  return <section className="rounded-lg border border-rule p-4 text-sm"><h3 className="font-medium">Today's Checks</h3>{error ? <p>{error}</p> : !data ? <p>Loading checks…</p> : !job ? <p>Start work on this opening in the sidebar before sending.</p> : blockers.length ? <ul className="mt-2 space-y-1">{blockers.map(c => <li key={c.key}><Link href={c.href} className="text-brand underline">{c.label}</Link>: {c.progress ?? "needs action"}</li>)}</ul> : <p className="text-brand">Required checks complete.</p>}</section>;
 }
 
 function DailyReview({

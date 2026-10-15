@@ -20,12 +20,16 @@ Changing a carried job to Add-on makes it a deliberately selected job.
 ## Requirements
 
 100% requires the TA's confirmed review of the approved job description, a
-LinkedIn job/post link, all eight main research fields filled or
-explained as unavailable and reviewed, and one distinct profile added by that
-TA to Excel Tables. Existing saved setup counts. The Suggestions review
-requirement is temporarily paused (14 October): it is hidden from workday checks
-and does not block sending or finishing. The Suggestions page, sourcing runs,
-review rules and saved evidence remain available for later work.
+valid LinkedIn job/post or Recruiter project link, review decisions on the
+latest applicable Suggestions round, and one distinct own Excel Tables profile.
+Successful empty searches need a saved explanation; failed searches do not count.
+Suggestions decisions are labelled Select / Not selected. Selecting adds a
+profile to Excel Tables; it does not contact the candidate or put them on the
+pipeline. All results in the applicable round must have a decision.
+
+The eight research fields are optional. They are absent from the workday sidebar
+and do not block email or Finish, including when older research task events exist.
+The Research page and saved reports remain available.
 
 Approving a JD records the approving TA's review automatically. Other assigned
 TAs confirm their own review from the sidebar. Editing the JD invalidates every
@@ -35,25 +39,28 @@ time. Existing approvals without a saved reviewed version need confirmation;
 there is no automatic historical backfill. Follow-up and Add-on do not repeat
 the JD setup requirement. Leads see the review's actor, time, and event history.
 
-100% and Add-on require a fresh owned Director Review candidate or a saved reason
-why none were suitable. TA Shortlist may be zero. Follow-up requires due actions
+Every work type requires a Director Review CV or a CV already submitted during
+that work session. A no-candidate explanation cannot replace the CV. General
+candidate work remains grouped; Director Review CV readiness is a separate
+sidebar check. TA Shortlist may be zero. Follow-up requires due actions
 to be completed or valid waiting reasons with next actions and future due times.
 Director replies can remain waiting. Each selected/carried job needs its daily
 email and confirmed ChatGPT research share link before the workday can finish.
 
-For now, EOD sending requires only confirmed review of the approved JD,
-completed and reviewed research, one distinct own Excel Tables profile, and
-a confirmed ChatGPT research share link. These four checks apply to every work
-type and reuse saved setup evidence. Candidate progress, the LinkedIn post,
-Suggestions and the Director Review candidate/explanation requirement do not
-block sending. They can still affect Finish under the rules above. Existing
-candidate validation and duplicate/uncertain-mail safeguards remain enforced.
+EOD sending requires confirmed review of the approved JD, a valid LinkedIn job,
+post or Recruiter project link, completed human Suggestions review, one own Excel
+profile, a Director Review CV, and a confirmed ChatGPT research share link.
+These checks apply to every work type and reuse saved setup evidence. The LinkedIn
+link is compulsory; a reason-only exception is not accepted. General candidate
+work does not block sending, while selected candidate validation and duplicate/
+uncertain-mail safeguards remain enforced. Empty activity-only emails are disabled,
+and at least one CV must be successfully prepared and attached before sending.
 The composer fills the ChatGPT link from today's saved confirmation. Editing
 that link clears confirmation, and revised emails require confirmation again.
 The Excel minimum is temporarily one (14 October). It still counts only valid,
 distinct LinkedIn profiles added by the TA; visible lead-added rows do not count.
 
-The composer displays these four outstanding send requirements. Server preflight and the
+The composer displays outstanding send requirements. Server preflight and the
 mail reservation recheck evidence; Finish rechecks in its transaction. Existing
 CV review, candidate detail, handoff, upload and uncertain-mail safeguards still
 apply. Failed/uncertain email results do not mark the email complete.

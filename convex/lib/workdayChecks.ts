@@ -33,7 +33,11 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const sentIds = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds as string[]));
   const since = workSessionStart(entry);
   const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt && (entry.workType !== "Add-on" || r.startedAt >= since));
-  const ready = apps.filter(a => a.currentStage === "second_shortlist" && !sentIds.has(a._id) && (entry.workType !== "Add-on" || a.lastStageChangedAt >= since));
+  const inDirectorReview = apps.filter(a => a.currentStage === "second_shortlist" && !sentIds.has(a._id) && (entry.workType !== "Add-on" || a.lastStageChangedAt >= since));
+  const ready = (await Promise.all(inDirectorReview.map(async app => {
+    const candidate = await ctx.db.get(app.candidateId);
+    return app.cvFileId || app.cvFileName || candidate?.cvUploadId || candidate?.cvFileName ? app : null;
+  }))).filter((app): app is NonNullable<typeof app> => app !== null);
   const ownNotes = notes?.workdayId === day._id ? notes : null;
   const setup = { jobId: entry.jobId, workType: entry.workType, userId: day.userId,
     jd: { version: job?.jobDescription ?? "", approved: job?.jdStatus === "approved", reviewedVersion: notes?.jdVersion, at: notes?.jdReviewedAt, by: day.userId },
@@ -54,10 +58,10 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     emailAt: accepted.length ? Math.min(...accepted.map(r => r.finalizedAt!)) : undefined,
   };
   const checks = setupChecks(setup, true);
-  // Saved setup can be reused, but all four send checks apply in every work type.
+  // Saved setup can be reused; the same send requirements apply in every work type.
   const eodChecks = setupChecks({ ...setup, workType: "100%" }).filter(isEodSendCheck);
-  const suggestionsCheck = checks.find(c => c.key.startsWith("suggestions:")) ?? null;
-  const candidateCheck = checks.find(c => c.key.startsWith("director_candidate:"));
+  const suggestionsCheck = eodChecks.find(c => c.key.startsWith("suggestions:")) ?? null;
+  const candidateCheck = checks.find(c => c.key.startsWith("director_cv:"));
   if (candidateCheck?.status === "complete" && ready.length && !accepted.length) {
     candidateCheck.completedAt = Math.min(...ready.map(a => a.lastStageChangedAt));
     candidateCheck.evidence = ready.map(a => a._id).join(",");
@@ -92,6 +96,7 @@ export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taW
   for (const event of events) if (!current.has(event.key) && event.key.includes(":")) {
     // Historical events must not put the paused requirement back in the sidebar.
     if (!SUGGESTIONS_WORKDAY_REQUIRED && event.key.startsWith("suggestions:")) continue;
+    if (event.key.startsWith("research:") || event.key.startsWith("director_candidate:")) continue;
     current.add(event.key);
     checks.push({ key: event.key, jobId, label: event.label, href: event.href, kind: event.kind as WorkdayCheck["kind"],
       canCarry: false, evidenceAt: 0, status: "complete" });

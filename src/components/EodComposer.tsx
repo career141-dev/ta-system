@@ -1063,9 +1063,11 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || jobBlocked}
+          disabled={initialRows.length === 0 || nobodyOnTo || researchBlocked || jobBlocked}
           title={
-            nobodyOnTo
+            initialRows.length === 0
+              ? "Add at least one CV in Director Review before sending"
+              : nobodyOnTo
               ? "Add an address as To first"
               : researchBlocked
                 ? "Add your ChatGPT research link and tick the box first"
@@ -1074,7 +1076,7 @@ export function EodComposer({
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
-          {resend ? "Send again as REVISED" : kind === "director" ? initialRows.length === 0 ? "Send activity email" : "Send email" : "Record that it went to the client"}
+          {resend ? "Send again as REVISED" : kind === "director" ? "Send email" : "Record that it went to the client"}
         </SubmitButton>
         {kind === "director" && (
           <span className="text-[11.5px] text-ink-faint">

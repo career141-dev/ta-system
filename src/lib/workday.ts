@@ -153,9 +153,9 @@ export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
     .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting);
 }
 
-/** 14 Oct: temporarily send once these four setup checks are complete. */
+/** 15 Oct: require the post link, Suggestions decisions and a Director Review CV; research fields are optional. */
 export function isEodSendCheck(check: Pick<WorkdayCheck, "key">): boolean {
-  return ["jd_review", "research", "excel_profiles", "chatgpt", "mail"].includes(check.key.split(":")[0]);
+  return ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "director_cv", "chatgpt", "mail"].includes(check.key.split(":")[0]);
 }
 
 export function confirmedResearchLink(checks: WorkdayCheck[]): string | null {
