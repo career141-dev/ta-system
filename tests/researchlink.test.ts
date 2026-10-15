@@ -66,6 +66,12 @@ eq("over 300 characters", bad(`https://chatgpt.com/share/${"a".repeat(300)}`), t
 
 console.log("\nWho must give one");
 eq("a TA, the email to the directors", needsResearchLink("ta", "director"), true);
+for (const workType of ["Follow-up", "Add-on"]) {
+  eq(`${workType} needs no research link`, needsResearchLink("ta", "director", workType), false);
+  for (const role of ["ta", "ta_support"] as const) {
+    eq(`${role} can send ${workType} without research or confirmation`, checkResearchSubmission({ role, kind: "director", workType, link: "", confirmed: false }), { ok: true, url: null });
+  }
+}
 eq("a TA, the client copy (no email)", needsResearchLink("ta", "client"), false);
 for (const r of ["ta_lead", "director", "admin", "ops"] as const) eq(`${r} is exempt`, needsResearchLink(r, "director"), false);
 
@@ -90,6 +96,12 @@ const row: ShortlistRow = {
 };
 const effort = { date: "2026-10-08", assignee: "Binath", hundredOrFollowUp: "100%", lEffort: 1, sets: 1 } as unknown as EffortRow;
 const base = { rows: [row], effort, senderName: "Binath" };
+for (const workType of ["Follow-up", "Add-on"]) {
+  const html = eodEmailHtml({ ...base, rows: [], effort: { ...effort, hundredOrFollowUp: workType } });
+  eq(`${workType} activity email contains only the effort table`, (html.match(/<table /g) ?? []).length, 1);
+  eq(`${workType} activity email does not claim CVs are attached`, html.includes("attached Shortlisted CV"), false);
+  eq(`${workType} activity email needs no research block`, html.includes("View ChatGPT Research"), false);
+}
 {
   const html = eodEmailHtml({ ...base, researchLink: good });
   eq("a clickable anchor", html.includes(`<a href="${good}"`), true);

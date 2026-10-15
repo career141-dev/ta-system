@@ -63,6 +63,7 @@ export default async function EodPage({
   const rows = shortlistRows(id, isTa(user) ? user.id : null, kind);
   const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user) : [];
   const effort = effortRow(id, user);
+  const workType = repo.workingStage(id, user.id);
 
   // This TA's own sets — each recruiter numbers their own.
   const sets = setsForOpening(id, user.id);
@@ -94,7 +95,9 @@ export default async function EodPage({
 
   // The set tonight's CVs went into — the same figure as the SETS column.
   const nextSetNumber = latestSet?.setNumber ?? 1;
-  const formattedSubject = subjectLine(client.name, o.title, nextSetNumber, rows.length || 1);
+  const formattedSubject = rows.length
+    ? subjectLine(client.name, o.title, nextSetNumber, rows.length)
+    : `${client.name.toUpperCase()} - ${o.title.toUpperCase()} - DAILY ACTIVITY`;
 
   // The Director's emails sent in the last month, kept to read back and to
   // correct and send again (8 Oct). A TA sees their own; a lead or director
@@ -320,7 +323,7 @@ export default async function EodPage({
 
       {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
       <LiveTableRefresh />
-      <EyeMarkedChecks openingId={id} items={eyeMarked} />
+      {workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
       <EodComposer
         key={resendCopy?.id ?? "new"}
         openingId={id}
@@ -339,6 +342,7 @@ export default async function EodPage({
         senderName={user.name}
         alreadyOut={!!awaiting}
         needsResearchLink={needsResearchLink(user.role, kind)}
+        workType={workType}
         resend={
           resendCopy
             ? {
