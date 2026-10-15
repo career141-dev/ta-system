@@ -658,7 +658,7 @@ export function WorkdayRail() {
     {/* Small-screen toggle button — hidden once open, hidden on xl (always visible there) */}
     <button
       className={`${open ? "hidden" : ""} fixed right-3 z-30 rounded-lg border border-rule bg-surface p-2 text-sm shadow-sm xl:hidden`}
-      style={{ top: HEADER_H + 10 }}
+      style={{ top: "calc(var(--header-h) + 10px)" }}
       onClick={() => setOpen(true)}
       aria-expanded={open}
       aria-controls="workday-rail"
@@ -682,8 +682,8 @@ export function WorkdayRail() {
 
 /**
  * Pull-tab rail — closed by default on every screen size, including xl.
- * Used by ta_lead and admin: no floating button, just a slim vertical
- * tab fixed to the right edge. Clicking the tab slides the drawer in.
+ * Used by ta_lead and admin: closed by default with an expand tab on the right edge.
+ * Clicking the tab slides the drawer in.
  */
 export function WorkdayRailLeadAdmin() {
   const [open, setOpen] = useState(false);
@@ -691,42 +691,37 @@ export function WorkdayRailLeadAdmin() {
   const requestedOpen = params.get("checks") === "open";
   useEffect(() => { if (requestedOpen) setOpen(true); }, [requestedOpen]);
   return <>
-    {/* Pull-tab — always on right edge, hidden when drawer is open */}
+    {/* Expand button on the right edge — visible only when closed */}
     {!open && (
       <button
         onClick={() => setOpen(true)}
         aria-expanded={false}
         aria-controls="workday-rail-lead"
-        className="fixed z-30 flex flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 border-rule bg-surface px-1 shadow-sm"
-        style={{ top: HEADER_H + 48, right: 0, width: 22, paddingTop: 12, paddingBottom: 12 }}
+        className="fixed z-40 flex items-center gap-1.5 rounded-l-lg border border-r-0 border-rule-strong bg-surface py-2 pl-3 pr-2.5 text-xs font-semibold text-fg shadow-md transition-all hover:bg-paper hover:shadow-lg hover:pr-3.5"
+        style={{ top: "calc(var(--header-h) + 16px)", right: 0 }}
         title="Today's Checks"
       >
-        {/* Rotated label */}
-        <span
-          className="select-none text-xs font-medium leading-none text-fg-muted"
-          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", letterSpacing: "0.04em" }}
-        >
-          Today&apos;s Checks
-        </span>
+        <span className="text-sm font-bold text-brand">‹</span>
+        <span>Today&apos;s Checks</span>
       </button>
     )}
     {/* Drawer — slides in from right, closed by default */}
     <aside
       id="workday-rail-lead"
       aria-label="Today's workday checks"
-      className={`fixed right-0 z-20 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-sm transition-transform duration-200 ${
+      className={`fixed right-0 z-40 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-xl transition-transform duration-200 ${
         open ? "translate-x-0" : "translate-x-full"
       }`}
       style={{ top: HEADER_H, bottom: 0 }}
     >
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-semibold">Today&apos;s Checks</h2>
+      <div className="mb-4 flex items-center justify-between border-b border-rule pb-2">
+        <h2 className="font-semibold text-sm">Today&apos;s Checks</h2>
         <button
           onClick={() => setOpen(false)}
-          className="rounded p-1 text-sm text-fg-muted hover:text-fg"
+          className="rounded px-2 py-1 text-xs font-medium text-brand hover:bg-tag"
           aria-label="Close Today's Checks"
         >
-          ✕
+          ✕ Close
         </button>
       </div>
       <WorkdayDashboard />
