@@ -649,20 +649,105 @@ export function WorkdayDashboard() {
   );
 }
 
+/**
+ * Standard rail — always visible on xl, toggle button on smaller screens.
+ * Used by ta and ta_support roles.
+ */
 export function WorkdayRail() {
   const [open, setOpen] = useState(false);
   const params = useSearchParams();
   const requestedOpen = params.get("checks") === "open";
   useEffect(() => { if (requestedOpen) setOpen(true); }, [requestedOpen]);
   return <>
-    <button className={`${open ? "hidden" : ""} fixed right-3 z-30 rounded-lg border border-rule bg-surface p-2 text-sm shadow-sm xl:hidden`} style={{ top: HEADER_H + 10 }} onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="workday-rail">Today's checks</button>
-    <aside id="workday-rail" aria-label="Today's workday checks" className={`${open ? "block" : "hidden"} fixed right-0 z-20 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-sm xl:block`} style={{ top: HEADER_H, bottom: 0 }}>
-      <div className="mb-4 flex items-center justify-between"><h2 className="font-semibold">Today's Checks</h2><button onClick={() => setOpen(false)} className="text-sm text-brand xl:hidden">Close</button></div>
+    {/* Small-screen toggle button — hidden once open, hidden on xl (always visible there) */}
+    <button
+      className={`${open ? "hidden" : ""} fixed right-3 z-30 rounded-lg border border-rule bg-surface p-2 text-sm shadow-sm xl:hidden`}
+      style={{ top: HEADER_H + 10 }}
+      onClick={() => setOpen(true)}
+      aria-expanded={open}
+      aria-controls="workday-rail"
+    >
+      Today&apos;s checks
+    </button>
+    <aside
+      id="workday-rail"
+      aria-label="Today's workday checks"
+      className={`${open ? "block" : "hidden"} fixed right-0 z-20 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-sm xl:block`}
+      style={{ top: HEADER_H, bottom: 0 }}
+    >
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-semibold">Today&apos;s Checks</h2>
+        <button onClick={() => setOpen(false)} className="text-sm text-brand xl:hidden">Close</button>
+      </div>
       <WorkdayDashboard />
     </aside>
   </>;
 }
 
-export function WorkdayWorkspace({ children }: { children: React.ReactNode }) {
-  return <div className="xl:pr-96">{children}<Suspense fallback={null}><WorkdayRail /></Suspense></div>;
+/**
+ * Pull-tab rail — closed by default on every screen size, including xl.
+ * Used by ta_lead and admin: no floating button, just a slim vertical
+ * tab fixed to the right edge. Clicking the tab slides the drawer in.
+ */
+export function WorkdayRailLeadAdmin() {
+  const [open, setOpen] = useState(false);
+  const params = useSearchParams();
+  const requestedOpen = params.get("checks") === "open";
+  useEffect(() => { if (requestedOpen) setOpen(true); }, [requestedOpen]);
+  return <>
+    {/* Pull-tab — always on right edge, hidden when drawer is open */}
+    {!open && (
+      <button
+        onClick={() => setOpen(true)}
+        aria-expanded={false}
+        aria-controls="workday-rail-lead"
+        className="fixed z-30 flex flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 border-rule bg-surface px-1 shadow-sm"
+        style={{ top: HEADER_H + 48, right: 0, width: 22, paddingTop: 12, paddingBottom: 12 }}
+        title="Today's Checks"
+      >
+        {/* Rotated label */}
+        <span
+          className="select-none text-xs font-medium leading-none text-fg-muted"
+          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", letterSpacing: "0.04em" }}
+        >
+          Today&apos;s Checks
+        </span>
+      </button>
+    )}
+    {/* Drawer — slides in from right, closed by default */}
+    <aside
+      id="workday-rail-lead"
+      aria-label="Today's workday checks"
+      className={`fixed right-0 z-20 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-sm transition-transform duration-200 ${
+        open ? "translate-x-0" : "translate-x-full"
+      }`}
+      style={{ top: HEADER_H, bottom: 0 }}
+    >
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-semibold">Today&apos;s Checks</h2>
+        <button
+          onClick={() => setOpen(false)}
+          className="rounded p-1 text-sm text-fg-muted hover:text-fg"
+          aria-label="Close Today's Checks"
+        >
+          ✕
+        </button>
+      </div>
+      <WorkdayDashboard />
+    </aside>
+  </>;
+}
+
+export function WorkdayWorkspace({ children, role }: { children: React.ReactNode; role: string }) {
+  const isLeadOrAdmin = role === "ta_lead" || role === "admin";
+  // Lead/admin: no right padding reserved by default (drawer overlays on demand).
+  // ta/ta_support: 96-unit right padding reserved for the always-visible xl rail.
+  return (
+    <div className={isLeadOrAdmin ? "" : "xl:pr-96"}>
+      {children}
+      <Suspense fallback={null}>
+        {isLeadOrAdmin ? <WorkdayRailLeadAdmin /> : <WorkdayRail />}
+      </Suspense>
+    </div>
+  );
 }
