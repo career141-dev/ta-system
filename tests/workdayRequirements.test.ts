@@ -36,8 +36,8 @@ assert.equal(find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678"
 assert.equal(find("chatgpt", { chatgptLink: "https://chatgpt.com/c/12345678", confirmedAt: 1 }).status, "incomplete");
 assert.equal(find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678", confirmedAt: 123 }).completedAt, 123);
 assert.equal(find("daily_email", { emailAt: 42 }).completedAt, 42);
-assert.equal(evaluate({ workType: "Follow-up" }).length, 2);
-assert.equal(evaluate({ workType: "Add-on" }).length, 3);
+assert.deepEqual(evaluate({ workType: "Follow-up" }), []);
+assert.deepEqual(evaluate({ workType: "Add-on" }), []);
 assert.equal(researchMissing({}, {}).length, 8);
 assert.equal(researchMissing({}, Object.fromEntries(RESEARCH_FIELDS.map(k => [k, "Cannot source"]))).length, 0);
 assert.equal(researchMissing({ servicesProvider: [" "] }, {}).length, 8);
@@ -55,4 +55,11 @@ assert.deepEqual(emailBlockers(jobs).map(c => c.key.split(":")[0]), ["jd_review"
 assert.equal(emailBlockers([{ checks: [{ key: "details:candidate", status: "incomplete", blocksEmail: true }] }] as any).length, 0, "Candidate queues do not block the temporary EOD setup gate");
 assert.equal(emailBlockers([{ checks: [{ key: "mail:receipt", status: "incomplete" }] }] as any).length, 1, "Uncertain mail still blocks another send");
 assert.equal(completionBlockers([{ checks: [{ ...find("excel_profiles"), status: "complete" }] }] as any).length, 0);
+const mixed = [
+  { workType: "100%", checks: evaluate() },
+  { workType: "Follow-up", checks: evaluate(), eodChecks: evaluate() },
+  { workType: "Add-on", checks: evaluate(), eodChecks: evaluate() },
+] as any;
+assert.equal(completionBlockers(mixed).length, 7, "Only the 100% position blocks finishing, even with stale returning tasks");
+assert.equal(emailBlockers(mixed).length, 4, "Only the 100% position blocks sending");
 console.log("Workday setup evidence, thresholds, exceptions, invalidation and email gates passed.");

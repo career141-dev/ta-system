@@ -145,11 +145,13 @@ export function validateCarry(
 }
 
 export function completionBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting);
+  return jobs.filter(j => j.workType !== "Follow-up" && j.workType !== "Add-on")
+    .flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting);
 }
 
 export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
+  return jobs.filter(j => j.workType !== "Follow-up" && j.workType !== "Add-on")
+    .flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
     .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting);
 }
 

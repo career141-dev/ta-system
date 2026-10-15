@@ -54,8 +54,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     emailAt: accepted.length ? Math.min(...accepted.map(r => r.finalizedAt!)) : undefined,
   };
   const checks = setupChecks(setup, true);
-  // Saved setup can be reused, but all four send checks apply in every work type.
-  const eodChecks = setupChecks({ ...setup, workType: "100%" }).filter(isEodSendCheck);
+  const eodChecks = checks.filter(isEodSendCheck);
   const suggestionsCheck = checks.find(c => c.key.startsWith("suggestions:")) ?? null;
   const candidateCheck = checks.find(c => c.key.startsWith("director_candidate:"));
   if (candidateCheck?.status === "complete" && ready.length && !accepted.length) {
@@ -81,6 +80,8 @@ export async function recordJdReview(ctx: MutationCtx, userId: Id<"users">, jobI
 
 /** Event reads never manufacture a completion time for legacy evidence. */
 export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, jobId: Id<"jobs">, checks: WorkdayCheck[]) {
+  // Returning positions have no tasks, including tasks saved before this policy.
+  if (day.jobs.find(j => j.jobId === jobId)?.workType !== "100%") return [];
   const events = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   const names = new Map<string, string>();
   for (const id of new Set([...events.flatMap(e => [e.by, e.completedBy].filter(Boolean)), ...checks.map(c => c.completedBy).filter(Boolean)])) {

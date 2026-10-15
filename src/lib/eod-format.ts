@@ -281,8 +281,8 @@ export function validateResearchLink(raw: string | null | undefined): ResearchLi
 }
 
 /** Who must attach one: a TA sending the email that goes to the directors. Leads, directors and admins are exempt; the client copy sends no email. */
-export function needsResearchLink(role: Role, kind: "director" | "client"): boolean {
-  return (role === "ta" || role === "ta_support") && kind === "director";
+export function needsResearchLink(role: Role, kind: "director" | "client", workType: string = "100%"): boolean {
+  return (role === "ta" || role === "ta_support") && kind === "director" && workType !== "Follow-up" && workType !== "Add-on";
 }
 
 /**
@@ -295,9 +295,10 @@ export function checkResearchSubmission(input: {
   kind: "director" | "client";
   link: string | null | undefined;
   confirmed: boolean;
+  workType?: string;
 }): { ok: true; url: string | null } | { ok: false; reason: string } {
   const checked = validateResearchLink(input.link);
-  if (!needsResearchLink(input.role, input.kind)) return { ok: true, url: checked.ok && input.kind === "director" ? checked.url : null };
+  if (!needsResearchLink(input.role, input.kind, input.workType)) return { ok: true, url: checked.ok && input.kind === "director" ? checked.url : null };
   if (!checked.ok) return { ok: false, reason: checked.reason };
   if (!input.confirmed) {
     return { ok: false, reason: "Tick the box to confirm you opened the link in a private window and it holds no candidate details." };
@@ -370,7 +371,9 @@ export function eodEmailHtml(input: {
   const intro =
     input.introText && input.introText.trim()
       ? formatParagraph(input.introText.trim())
-      : `<p>Dear Sir,<br><br>Please find the attached Shortlisted CV for the above-mentioned position</p>`;
+      : input.rows.length
+        ? `<p>Dear Sir,<br><br>Please find the attached Shortlisted CV for the above-mentioned position</p>`
+        : `<p>Dear Sir,<br><br>Please find today's activity for the above-mentioned position.</p>`;
 
   const outro =
     input.outroText && input.outroText.trim()
@@ -379,7 +382,7 @@ export function eodEmailHtml(input: {
 
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;line-height:1.7;color:#171c18">
 ${intro}
-${shortlist}
+${input.rows.length ? shortlist : ""}
 ${effort}
 ${research}
 ${input.attachmentNote ? `<p style="color:#6b736d">${esc(input.attachmentNote)}</p>` : ""}

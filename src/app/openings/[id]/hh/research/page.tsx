@@ -1,4 +1,5 @@
 import { ResearchConfirmation } from "@/components/Workday";
+import { getCurrentUser } from "@/lib/session";
 import { externalUrl } from "@/lib/url";
 import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
@@ -40,6 +41,7 @@ export default async function Page({
   const { id } = await params;
   const { err, found, searches } = await searchParams;
   await primeStore({ openingId: id });
+  const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
   const client = repo.client(o.clientId);
@@ -55,7 +57,7 @@ export default async function Page({
     <>
       <h1 className="text-[21px] font-semibold tracking-tight">Research</h1>
       <ProjectHeader openingId={id} />
-      <div className="mb-5 rounded-lg border border-rule p-4"><ResearchConfirmation jobId={id} /></div>
+      {repo.workingStage(id, user.id) === "100%" && <div className="mb-5 rounded-lg border border-rule p-4"><ResearchConfirmation jobId={id} /></div>}
 
       <Generate
         openingId={id}

@@ -19,7 +19,7 @@ import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
 import { validateResearchLink } from "@/lib/eod-format";
 import { sidebarChecks } from "@/lib/workdaySidebar";
 
-function useWorkday(detail: boolean, enabled = true, query = "") {
+export function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
   const [error, setError] = useState("");
   const request = useRef<AbortController | null>(null);
@@ -181,7 +181,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
         You can work on multiple new positions at 100% in the same workday.
       </p>
       {!day && data.options.some(o => o.carry) && <p className="text-xs text-ink-soft">Follow-up jobs carried forward: {data.options.filter(o => o.carry && o.id !== chosen?.id).map(o => o.title).join(", ")}</p>}
-      {!day && chosen?.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.filter(c => !addon || !["linkedin_post", "research", "suggestions", "excel_profiles"].some(k => c.key.startsWith(k + ":"))).map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
+      {!day && !addon && chosen?.workType === "100%" && chosen.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
       <button className={buttonClass}>
         {!day
           ? "Start workday"
@@ -332,6 +332,7 @@ export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResea
   const blocked = !!error || !data || (data.canWork && (!job || blockers.length > 0));
   useEffect(() => { onBlocked(blocked); }, [blocked, onBlocked]);
   if (data && !data.canWork) return null;
+  if (job && job.workType !== "100%") return null;
   return <section className="rounded-lg border border-rule p-4 text-sm"><h3 className="font-medium">Today's Checks</h3>{error ? <p>{error}</p> : !data ? <p>Loading checks…</p> : !job ? <p>Start work on this opening in the sidebar before sending.</p> : blockers.length ? <ul className="mt-2 space-y-1">{blockers.map(c => <li key={c.key}><Link href={c.href} className="text-brand underline">{c.label}</Link>: {c.progress ?? "needs action"}</li>)}</ul> : <p className="text-brand">Required checks complete.</p>}{!revised && blockers.some(c => c.key.startsWith("director_candidate:")) && <div className="mt-3"><NoCandidateReason jobId={jobId} /></div>}</section>;
 }
 
@@ -345,7 +346,7 @@ function DailyReview({
   lead?: boolean;
 }) {
   const blockers = completionBlockers(day.jobs);
-  const displayedJobs = lead ? day.jobs : day.jobs.map(job => ({ ...job, checks: sidebarChecks(job) }));
+  const displayedJobs = day.jobs.map(job => ({ ...job, checks: job.workType !== "100%" ? [] : lead ? job.checks : sidebarChecks(job) }));
   const displayedBlockers = completionBlockers(displayedJobs);
   return (
     <section className="space-y-3">
@@ -361,7 +362,7 @@ function DailyReview({
         </p>
       </div>
       {displayedJobs.map((job) => (
-        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType} · {job.checks.filter(c => c.status === "complete").length}/{job.checks.length} complete</>}>
+        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType}{job.workType === "100%" && <> · {job.checks.filter(c => c.status === "complete").length}/{job.checks.length} complete</>}</>}>
           <div className="flex flex-wrap justify-between gap-2">
             <Link
               className="font-semibold text-brand"
@@ -372,7 +373,7 @@ function DailyReview({
             <span className="text-sm">{job.workType}</span>
           </div>
           {canFinish && job.workType !== "100%" && <WorkForm op="setWorkType" fields={{ workdayId: day.id, jobId: job.jobId }}><label className="block text-xs">Work type<select name="workType" defaultValue={job.workType} className={inputClass}><option>Follow-up</option><option>Add-on</option></select></label><button className={buttonClass}>Set work type</button></WorkForm>}
-          <p className="mt-2 text-sm text-ink-soft">
+          {job.workType === "100%" && <><p className="mt-2 text-sm text-ink-soft">
             {job.activity.cvReviews} CV reviews · {job.activity.profilesAdded}{" "}
             LinkedIn profiles added · {job.activity.profilesWorked} profiles
             worked · {job.activity.sent} candidates submitted
@@ -402,7 +403,8 @@ function DailyReview({
               ? `Email accepted for sending ${workdayTime(job.activity.emailAt)}.`
               : "End-of-day email not sent."}
           </p>
-          {lead && <><p className="mt-3 text-sm font-medium">
+          </>}
+          {lead && job.workType === "100%" && <><p className="mt-3 text-sm font-medium">
             Shortlisted today and candidates still in progress
           </p>
           {job.shortlist.length ? (

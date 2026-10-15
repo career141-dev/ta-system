@@ -45,6 +45,7 @@ export interface SetupEvidence {
 
 /** The same saved evidence drives sidebar ticks, send preflight and Finish. */
 export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_WORKDAY_REQUIRED): WorkdayCheck[] {
+  if (e.workType !== "100%") return [];
   const base = `/openings/${e.jobId}`;
   const rows: WorkdayCheck[] = [];
   const add = (key: string, label: string, href: string, complete: boolean, progress: string,
@@ -70,12 +71,10 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
       e.suggestions.count === 0 && !e.suggestions.emptyReason?.trim();
     add("excel_profiles", "Own Excel Tables profiles", `${base}/hh/links`, e.profiles.count >= MIN_OWN_EXCEL_PROFILES, `${e.profiles.count}/${MIN_OWN_EXCEL_PROFILES}`, e.profiles.at, e.userId, String(e.profiles.count));
   }
-  if (e.workType !== "Follow-up") {
-    const complete = e.ready > 0 || e.submitted > 0 || !!e.noCandidateReason?.trim();
-    add("director_candidate", "Director Review candidate or explanation", `${base}/eod`, complete,
-      e.submitted ? `${e.submitted} submitted` : e.ready ? `${e.ready} ready` : e.noCandidateReason || "Move a suitable candidate to Director Review, or record why none were found",
-      e.noCandidateAt, e.userId, e.noCandidateReason);
-  }
+  const complete = e.ready > 0 || e.submitted > 0 || !!e.noCandidateReason?.trim();
+  add("director_candidate", "Director Review candidate or explanation", `${base}/eod`, complete,
+    e.submitted ? `${e.submitted} submitted` : e.ready ? `${e.ready} ready` : e.noCandidateReason || "Move a suitable candidate to Director Review, or record why none were found",
+    e.noCandidateAt, e.userId, e.noCandidateReason);
   const validLink = validateResearchLink(e.chatgptLink);
   add("chatgpt", "ChatGPT research link", `${base}/eod`, validLink.ok && !!e.confirmedAt,
     validLink.ok ? e.confirmedAt ? "Link confirmed" : "Confirm the link" : validLink.reason,

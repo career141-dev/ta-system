@@ -34,4 +34,7 @@ assert.equal(sidebarChecks(job([waiting, check("details:two")]))[0].status, "inc
 assert.equal(sidebarChecks(job([check("upload:one"), check("mail:one", { kind: "system" })])).length, 2, "Email reconciliation remains a separate system task");
 const empty = { ...job([]), shortlist: [] };
 assert.deepEqual(sidebarChecks(empty), []);
+for (const workType of ["Follow-up", "Add-on"] as const) {
+  assert.deepEqual(sidebarChecks({ ...original, workType }), [], "Returning positions do not synthesize candidate progress from their shortlist");
+}
 console.log("Workday sidebar candidate grouping, stage totals, waiting states and preserved Finish gates passed.");

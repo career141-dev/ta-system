@@ -741,7 +741,7 @@ async function jobView(
     jobId: entry.jobId,
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
-    checks: await withTaskHistory(ctx, day, entry.jobId, resolved),
+    checks: entry.workType === "100%" ? await withTaskHistory(ctx, day, entry.jobId, resolved) : [],
     eodChecks: required.eodChecks,
     shortlist,
     activity: {
@@ -782,7 +782,7 @@ async function view(
   now: number,
 ): Promise<WorkdayView> {
   if (day.finishedAt !== undefined && day.completion)
-    return day.completion as WorkdayView;
+    return withoutReturningTasks(day.completion as WorkdayView);
   const user = await ctx.db.get(day.userId);
   const requests = await ctx.db
     .query("taWorkdayRequests")
@@ -806,6 +806,10 @@ async function view(
       })),
     ),
   };
+}
+
+function withoutReturningTasks(day: WorkdayView): WorkdayView {
+  return { ...day, jobs: day.jobs.map(job => job.workType === "100%" ? job : { ...job, checks: [], eodChecks: [] }) };
 }
 
 /** Run in the write transaction, never in a dashboard query. */
@@ -910,12 +914,18 @@ export const emailPreflight = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), link: v.string(), confirmed: v.boolean(), revised: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
-    if (!["ta", "ta_support"].includes(roleOf(user))) return { ok: true, blockers: [] };
+    if (!["ta", "ta_support"].includes(roleOf(user))) return { ok: true, blockers: [], workType: "100%" as const };
     const day = await activeFor(ctx, user._id);
     if (!day) throw new Error("Start your workday in Today's Checks before sending.");
     const entry = day.jobs.find(j => j.jobId === args.jobId);
     if (!entry) throw new Error("Add this opening to Today's Checks first.");
     await assignedJob(ctx, user, args.jobId);
+    if (entry.workType !== "100%") {
+      // Mail safety is independent of the task list, including revised sends.
+      const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
+      const pending = receipts.some(r => r.status === "sending" || r.status === "uncertain" || (r.status === "accepted" && !r.finalizedAt));
+      return { ok: !pending, blockers: pending ? ["This job has a send in progress or an uncertain result. Ask the lead to reconcile it before retrying."] : [], workType: entry.workType };
+    }
     const link = validateResearchLink(args.link);
     if (!link.ok || !args.confirmed) throw new Error(link.ok ? "Confirm your ChatGPT link before sending." : link.reason);
     const notes = await ctx.db.query("taWorkdayCheckNotes").withIndex("by_user_job", q => q.eq("userId", user._id).eq("jobId", args.jobId)).first();
@@ -926,7 +936,7 @@ export const emailPreflight = internalMutation({
     await refreshWorkdayChecks(ctx, args.jobId, user._id);
     const result = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([result]);
-    return { ok: !blockers.length, blockers: blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`) };
+    return { ok: !blockers.length, blockers: blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`), workType: entry.workType };
   },
 });
 
@@ -1081,7 +1091,7 @@ export const dashboard = internalQuery({
       result.requests = result.requests.filter((r) =>
         visibleRequests.some((v) => v._id === r.id),
       );
-      team.push(result);
+      team.push(withoutReturningTasks(result));
     }
     return {
       canWork: worker,
