@@ -8,6 +8,7 @@ import { Pager } from "./Pager";
 import { matchesQuery, pageLink, slicePage } from "@/lib/paging";
 import { INTEREST_TABS, interestOf, levelLabel } from "@/lib/linkViews";
 import { LinkFilters } from "./LinkFilters";
+import { LinkSearch } from "./LinkSearch";
 import { LinkExportMenu } from "./LinkExportMenu";
 import { visibleEyeMarked } from "@/lib/eyeMarkedStore";
 import { HhUpload } from "./HhUpload";
@@ -166,6 +167,11 @@ export function LinkVaultTable({
               ))}
             </nav>
           )}
+          <LinkSearch
+            openingId={openingId}
+            q={q}
+            baseParams={params({})}
+          />
           <LinkFilters
             status={status}
             options={INTEREST_TABS.map((t) => ({ key: t.key, label: t.label, count: count({ status: t.key }), href: keep({ status: t.key }) }))}

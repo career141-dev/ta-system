@@ -367,19 +367,6 @@ export function LinkRow({
                     Add note
                   </button>
                 )}
-                <button
-                  type="button"
-                  onClick={() => setCompanyRefOpen((v) => !v)}
-                  aria-expanded={companyRefOpen}
-                  title="View people in our database from the same company"
-                  className={`whitespace-nowrap rounded-full border px-4 py-1.5 text-[12.5px] font-medium transition-colors ${
-                    companyRefOpen
-                      ? "border-brand bg-brand text-white shadow-sm"
-                      : "border-brand-line text-brand hover:bg-brand-soft"
-                  }`}
-                >
-                  Company Reference
-                </button>
                 {!readOnly && (
                 <>
                 <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
