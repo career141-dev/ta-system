@@ -87,6 +87,7 @@ export interface WorkdayView {
 export interface WorkdayPayload {
   canWork: boolean;
   canLead: boolean;
+  canReview: boolean;
   role: string;
   lastFinishedAt: number | null;
   lastFinishedDate: string | null;

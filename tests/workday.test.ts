@@ -814,7 +814,7 @@ try {
   // Setup exceptions are scoped, audited and immediately usable, without sending mail.
   user("exceptionTa", "ta");
   user("exceptionOther", "ta");
-  put("users", { _id: "exceptionAdmin", fullName: "Admin", email: "admin@example.invalid", role: "admin", isActive: true });
+  put("users", { _id: "exceptionAdmin", fullName: "Admin", email: "admin@example.invalid", role: "admin", isActive: true, isOnboarded: true });
   put("users", { _id: "inactiveAdmin", fullName: "Inactive", email: "inactive@example.invalid", role: "admin", isActive: false });
   put("jobs", { _id: "exceptionJob", title: "Exception job", status: "active", taLeadId: "lead", assignedTaIds: ["exceptionTa", "exceptionOther"] });
   const exceptionDay = await run("start", { actorId: "exceptionTa", jobId: "exceptionJob", workType: "100%" });
@@ -869,6 +869,26 @@ try {
   await assert.rejects(() => run("taskException", reasonArgs), /finished/);
   const focused = await run("dashboard", { actorId: "lead", detail: true, focusWorkday: exceptionDay.id });
   assert.equal(focused.team[0].id, exceptionDay.id);
+  // Directors use the same panel as reviewers, without gaining lead/TA writes.
+  put("users", { _id: "directorSeat", fullName: "Director", email: "director@example.invalid", role: "director", isActive: true, isOnboarded: true });
+  const directorView = await run("dashboard", { actorId: "directorSeat", detail: true, focusWorkday: exceptionDay.id });
+  assert.equal(directorView.canReview, true);
+  assert.equal(directorView.canLead, false);
+  assert.equal(directorView.canWork, false);
+  assert.equal(directorView.team[0].id, exceptionDay.id);
+  assert.ok(directorView.team[0].jobs[0].checks.some((c: Row) => c.exception), "Director sees recorded reasons in the same workday view");
+  await assert.rejects(() => run("start", { actorId: "directorSeat", jobId: "exceptionJob", workType: "100%" }), /Workdays are for TAs/);
+  await assert.rejects(() => run("markReviewed", { actorId: "directorSeat", workdayId: exceptionDay.id, applicationId: "exceptionApp" }), /Workdays are for TAs/);
+  await assert.rejects(() => run("taskException", { ...reasonArgs, actorId: "directorSeat" }), /Workdays are for TAs/);
+  const supportCapabilities = await run("dashboard", { actorId: "support" });
+  assert.equal(supportCapabilities.canWork, true);
+  assert.equal(supportCapabilities.canReview, false);
+  const adminView = await run("dashboard", { actorId: "exceptionAdmin", detail: true, focusWorkday: exceptionDay.id });
+  assert.equal(adminView.canReview, true);
+  assert.equal(adminView.canLead, true);
+  assert.equal(adminView.team[0].id, exceptionDay.id);
+  user("viewerSeat", "viewer");
+  await assert.rejects(() => run("dashboard", { actorId: "viewerSeat", detail: true }), /cannot access/);
   const unauthorizedFocus = await run("dashboard", { actorId: "otherLead", detail: true, focusWorkday: exceptionDay.id });
   assert.equal(unauthorizedFocus.team.length, 0, "Notification deep links cannot bypass lead scope");
   // The same job on a later workday must not inherit any exception.

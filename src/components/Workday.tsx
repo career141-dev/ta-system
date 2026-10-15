@@ -19,6 +19,7 @@ import { HEADER_H } from "@/lib/chrome";
 import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
 import { validateResearchLink } from "@/lib/eod-format";
 import { sidebarChecks } from "@/lib/workdaySidebar";
+import { canReviewWorkdays } from "@/lib/workdayRoles";
 import { useChatgptResearch } from "./useChatgptResearch";
 
 function useWorkday(detail: boolean, enabled = true, query = "") {
@@ -84,15 +85,16 @@ function useSavedChoice(key: string, initial = "") {
   return [value, save] as const;
 }
 
-function SavedDetails({ id, title, children }: { id: string; title: React.ReactNode; children: React.ReactNode }) {
-  const [open, save] = useSavedChoice(`workday-open:${id}`, "yes");
+function SavedDetails({ id, title, children, initiallyOpen = true }: { id: string; title: React.ReactNode; children: React.ReactNode; initiallyOpen?: boolean }) {
+  const [open, save] = useSavedChoice(`workday-open:${id}`, initiallyOpen ? "yes" : "no");
   const params = useSearchParams();
   const requestedJob = `${params.get("checkDay")}:${params.get("checkJob")}`;
+  const requestedTask = params.get("checkTask");
   useEffect(() => {
-    if (id === requestedJob) save("yes");
+    if (id === requestedJob || id === `team:${params.get("checkDay")}`) save("yes");
     // Open the targeted job once, without overriding later user toggles.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, requestedJob]);
+  }, [id, requestedJob, requestedTask]);
   return <details open={open === "yes"} onToggle={e => { const value = e.currentTarget.open ? "yes" : "no"; if (value !== open) save(value); }} className="min-w-0 rounded-lg border border-rule p-3">
     <summary className="cursor-pointer text-sm font-semibold">{title}</summary><div className="mt-3 space-y-3">{children}</div>
   </details>;
@@ -373,25 +375,27 @@ export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResea
 function DailyReview({
   day,
   canFinish = false,
-  lead = false,
+  reviewer = false,
+  canManage = false,
 }: {
   day: WorkdayView;
   canFinish?: boolean;
-  lead?: boolean;
+  reviewer?: boolean;
+  canManage?: boolean;
 }) {
   const blockers = completionBlockers(day.jobs);
   const displayedJobs = day.jobs.map(job => {
     // Follow-up jobs still have EOD setup requirements; expose their reason actions too.
     const checks = [...job.checks, ...(job.eodChecks ?? []).filter(c => !job.checks.some(existing => existing.key === c.key))];
     const expanded = { ...job, checks };
-    return lead ? expanded : { ...expanded, checks: sidebarChecks(expanded) };
+    return { ...expanded, detailChecks: checks, checks: sidebarChecks(expanded) };
   });
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap justify-between gap-2">
-        <h2 className="font-semibold">
+        {!reviewer && <h2 className="font-semibold">
           {day.name} · {day.date}
-        </h2>
+        </h2>}
         <p className="text-sm">
           Started {workdayTime(day.startedAt)} ·{" "}
           {day.finishedAt
@@ -442,7 +446,7 @@ function DailyReview({
               ? `Email accepted for sending ${workdayTime(job.activity.emailAt)}.`
               : "End-of-day email not sent."}
           </p>
-          {lead && <><p className="mt-3 text-sm font-medium">
+          {reviewer && <><p className="mt-3 text-sm font-medium">
             Shortlisted today and candidates still in progress
           </p>
           {job.shortlist.length ? (
@@ -465,9 +469,15 @@ function DailyReview({
               {job.checks.map((check) => <Check key={check.key} check={check} dayId={day.id} readOnly={!canFinish} />)}
             </ul>
           )}
-          {lead &&
+          {reviewer && job.detailChecks.some(c => !job.checks.some(summary => summary.key === c.key)) && <details>
+            <summary className="cursor-pointer text-xs text-ink-soft">Candidate task details</summary>
+            <ul>{job.detailChecks.filter(c => !job.checks.some(summary => summary.key === c.key)).map(check => <Check key={check.key} check={check} dayId={day.id} readOnly />)}</ul>
+          </details>}
+          {canManage && day.finishedAt === null && job.detailChecks.some(c => (c.kind === "cv_review" && c.status !== "complete") || c.key.startsWith("mail:")) && <details>
+            <summary className="cursor-pointer text-xs text-brand">Review actions</summary>
+          {canManage &&
             day.finishedAt === null &&
-            job.checks
+            job.detailChecks
               .filter(
                 (c) => c.status !== "complete" && c.kind === "cv_review" && c.key.startsWith("review:"),
               )
@@ -480,14 +490,15 @@ function DailyReview({
                     applicationId: check.key.slice(7),
                   }}
                 >
+                  <p className="text-xs text-ink-soft">{check.label}</p>
                   <button className="text-sm text-brand underline">
                     I reviewed this CV as TA Lead — record review
                   </button>
                 </WorkForm>
               ))}
-          {lead &&
+          {canManage &&
             day.finishedAt === null &&
-            job.checks
+            job.detailChecks
               .filter((c) => c.key.startsWith("mail:"))
               .map((check) => (
                 <details key={check.key} className="mt-3 text-sm">
@@ -535,6 +546,7 @@ function DailyReview({
                   </div>
                 </details>
               ))}
+          </details>}
         </SavedDetails>
       ))}
       {day.requests.map((request) => (
@@ -633,13 +645,15 @@ export function WorkdayDashboard() {
           )}
         </>
       )}
-      {data?.canLead && (
+      {(data?.canReview ?? data?.canLead) && data && (
         <>
           <h2 className="text-lg font-semibold">Team checks</h2>{focus && <button className="text-xs text-brand underline" onClick={() => setDismissedFocus(requestedFocus)}>Show all workdays</button>}
+          <details><summary className="cursor-pointer text-sm text-brand">Filter team checks</summary><div className="mt-3 space-y-3">
           <label className="block text-xs">Day<input type="date" value={date} onChange={e => { setDate(e.target.value); setCursor(""); }} className={inputClass} /></label>
           <label className="block text-xs">TA<select value={ta} onChange={e => setTa(e.target.value)} className={inputClass}><option value="">All TAs</option>{[...new Map(data.team.map(d => [d.userId, d.name])).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
           <label className="block text-xs">Job<select value={jobFilter} onChange={e => setJobFilter(e.target.value)} className={inputClass}><option value="">All jobs</option>{[...new Map(data.team.flatMap(d => d.jobs.map(j => [j.jobId, j.title] as const))).entries()].map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
           <label className="block text-xs">Task status<select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option value="">All tasks</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option><option value="waiting">Waiting</option><option value="excused">Reason submitted</option></select></label>
+          </div></details>
           <p className="text-sm text-ink-soft">
             Start and finish times update every 20 seconds. Records show elapsed
             workday time; breaks are not measured.
@@ -650,19 +664,19 @@ export function WorkdayDashboard() {
             </p>
           )}
           {team.map((day) => (
-            <div key={day.id} className="space-y-3">
-              <DailyReview day={day} lead />
-              {day.finishedAt === null &&
+            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={false} title={<>{day.name} · {day.date} · {day.finishedAt ? "Finished" : "Working"}</>}>
+              <DailyReview day={day} reviewer canManage={data.canLead} />
+              {data.canLead && day.finishedAt === null &&
                 day.requests
                   .filter((r) => r.status === "pending")
                   .map((request) => (
-                    <section
+                    <details
                       key={request.id}
                       className="rounded-xl border border-rule p-5"
                     >
-                      <h3 className="mb-3 font-medium">
+                      <summary className="cursor-pointer text-sm font-medium">
                         {day.name}: approval to work on {request.title}
-                      </h3>
+                      </summary><div className="mt-3">
                       <WorkForm op="decide" fields={{ requestId: request.id }}>
                         <label className="block text-sm">
                           Decision reason
@@ -688,9 +702,9 @@ export function WorkdayDashboard() {
                           Decline
                         </button>
                       </WorkForm>
-                    </section>
+                    </div></details>
                   ))}
-            </div>
+            </SavedDetails>
           ))}
           <div className="flex gap-3 text-xs">{cursor && <button className="text-brand underline" onClick={() => setCursor("")}>Latest records</button>}{data.nextCursor && <button className="text-brand underline" onClick={() => setCursor(data.nextCursor!)}>Older records</button>}</div>
         </>
@@ -736,7 +750,7 @@ export function WorkdayRail() {
 
 /**
  * Pull-tab rail — closed by default on every screen size, including xl.
- * Used by ta_lead and admin: closed by default with an expand tab on the right edge.
+ * Used by TA leads, admins and directors; closed by default with an expand tab.
  * Clicking the tab slides the drawer in.
  */
 export function WorkdayRailLeadAdmin() {
@@ -749,6 +763,7 @@ export function WorkdayRailLeadAdmin() {
     {!open && (
       <button
         onClick={() => setOpen(true)}
+        aria-label="Open Today's Checks"
         aria-expanded={false}
         aria-controls="workday-rail-lead"
         className="fixed z-40 flex items-center gap-1.5 rounded-l-lg border border-r-0 border-rule-strong bg-surface py-2.5 pl-3 pr-2.5 text-xs font-semibold text-fg shadow-md transition-all hover:bg-paper hover:shadow-lg hover:pr-3.5"
@@ -762,6 +777,8 @@ export function WorkdayRailLeadAdmin() {
     {/* Drawer — slides in from right, closed by default */}
     <aside
       id="workday-rail-lead"
+      aria-hidden={!open}
+      inert={!open}
       aria-label="Today's workday checks"
       className={`fixed right-0 z-40 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-xl transition-transform duration-200 ${
         open ? "translate-x-0" : "translate-x-full"
@@ -784,14 +801,14 @@ export function WorkdayRailLeadAdmin() {
 }
 
 export function WorkdayWorkspace({ children, role }: { children: React.ReactNode; role: string }) {
-  const isLeadOrAdmin = role === "ta_lead" || role === "admin";
-  // Lead/admin: no right padding reserved by default (drawer overlays on demand).
+  const isReviewer = canReviewWorkdays(role);
+  // Team reviewers use the same compact drawer; TAs and support keep their worker rail.
   // ta/ta_support: 96-unit right padding reserved for the always-visible xl rail.
   return (
-    <div className={isLeadOrAdmin ? "" : "xl:pr-96"}>
+    <div className={isReviewer ? "" : "xl:pr-96"}>
       {children}
       <Suspense fallback={null}>
-        {isLeadOrAdmin ? <WorkdayRailLeadAdmin /> : <WorkdayRail />}
+        {isReviewer ? <WorkdayRailLeadAdmin /> : <WorkdayRail />}
       </Suspense>
     </div>
   );

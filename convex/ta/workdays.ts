@@ -21,6 +21,7 @@ import { assertWorkdayScope } from "../lib/workdayScope";
 import { requiredChecks, withTaskHistory } from "../lib/workdayChecks";
 import { researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
 import { validateResearchLink } from "../../src/lib/eod-format";
+import { canReviewWorkdays } from "../../src/lib/workdayRoles";
 import {
   applyCarryForwards,
   canExcuseCheck,
@@ -941,7 +942,9 @@ export const dashboard = internalQuery({
     const role = roleOf(user);
     const worker = ["ta", "ta_support"].includes(role);
     const lead = canLead(user);
-    if (!worker && !lead) throw new Error("You cannot access workdays.");
+    const review = canReviewWorkdays(role);
+    const deskWide = role === "admin" || role === "director";
+    if (!worker && !review) throw new Error("You cannot access workdays.");
     const now = Date.now();
     const active = worker ? await activeFor(ctx, user._id) : null;
     const latest = worker
@@ -958,6 +961,7 @@ export const dashboard = internalQuery({
       return {
         canWork: worker,
         canLead: lead,
+        canReview: review,
         role,
         lastFinishedAt,
         lastFinishedDate,
@@ -1019,8 +1023,8 @@ export const dashboard = internalQuery({
       : [];
     let recent: Doc<"taWorkdays">[] = [];
     let nextCursor: string | null = null;
-    if (lead) {
-      if (role === "admin") {
+    if (review) {
+      if (deskWide) {
         const [working, page] = await Promise.all([
           ctx.db
             .query("taWorkdays")
@@ -1058,7 +1062,7 @@ export const dashboard = internalQuery({
     const team: WorkdayView[] = [];
     // Notification links can target older workdays outside the current page.
     // The normal per-job visibility checks below still apply.
-    if (lead && args.focusWorkday) {
+    if (review && args.focusWorkday) {
       const id = ctx.db.normalizeId("taWorkdays", args.focusWorkday);
       const focused = id ? await ctx.db.get(id) : null;
       recent = focused ? [focused] : [];
@@ -1066,7 +1070,7 @@ export const dashboard = internalQuery({
     for (const day of recent) {
       if (args.date && day.date !== args.date) continue;
       const visibleJobs =
-        role === "admin"
+        deskWide
           ? day.jobs
           : day.jobs.filter((j) => j.leadId === user._id);
       const requests = await ctx.db
@@ -1074,7 +1078,7 @@ export const dashboard = internalQuery({
         .withIndex("by_workday", (q) => q.eq("workdayId", day._id))
         .collect();
       const visibleRequests =
-        role === "admin"
+        deskWide
           ? requests
           : requests.filter((r) => r.leadId === user._id);
       if (!visibleJobs.length && !visibleRequests.length) continue;
@@ -1097,6 +1101,7 @@ export const dashboard = internalQuery({
     return {
       canWork: worker,
       canLead: lead,
+      canReview: review,
       role,
       lastFinishedAt,
       lastFinishedDate,

@@ -3,13 +3,14 @@ import { primeStore } from "@/data/prime";
 import { currentUser } from "@/lib/session";
 import { convexQuery } from "@/lib/convexServer";
 import type { WorkdayPayload } from "@/lib/workday";
+import { canViewWorkday } from "@/lib/workdayRoles";
 
 export async function GET(request: Request) {
   await primeStore({});
   const user = await currentUser();
   if (!user)
     return NextResponse.json({ error: "Please sign in." }, { status: 401 });
-  if (!["ta", "ta_support", "ta_lead", "admin"].includes(user.role))
+  if (!canViewWorkday(user.role))
     return NextResponse.json(
       { error: "Workdays are not available for your role." },
       { status: 403 },
