@@ -1,3 +1,4 @@
+import { EmptySuggestionsReason } from "@/components/Workday";
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { repo } from "@/data/store";
@@ -18,6 +19,9 @@ import { DoneBadge, SubmitButton } from "@/components/SubmitButton";
 import { SubmitButton as Submit } from "@/components/Submit";
 import { BUTTON } from "@/components/buttonStyles";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { convexQuery } from "@/lib/convexServer";
+import { isConvex } from "@/data/mode";
+import type { WorkdayCheck } from "@/lib/workday";
 
 const PAGE_SIZE = 20;
 
@@ -51,6 +55,11 @@ export default async function Page({
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
+  // No visible rows can also mean a failed/unrun search or another TA's run.
+  // Only the workday evidence can say an empty-search explanation is needed.
+  const suggestionsCheck = isConvex() && (user.role === "ta" || user.role === "ta_support")
+    ? await convexQuery<WorkdayCheck | null>("ta/workdays:suggestionsCheck", { actorId: user.id, jobId: id }).catch(() => null)
+    : null;
 
   // A sourcing run belongs to whoever asked for it. What crosses between two
   // TAs on one opening is a profile the other has already kept — see
@@ -102,6 +111,7 @@ export default async function Page({
     <>
       <h1 className="text-[21px] font-semibold tracking-tight">Suggestions</h1>
       <ProjectHeader openingId={id} />
+      {suggestionsCheck?.needsEmptySuggestionsReason && <div className="mb-5 rounded-lg border border-rule p-4"><EmptySuggestionsReason jobId={id} /></div>}
 
       <Generate
         openingId={id}
@@ -119,7 +129,7 @@ export default async function Page({
             : roundsLeft === 0
               ? "Three rounds is the budget for an opening. Work the list, or widen the brief and start again."
               : steered === 0
-                ? "Keep or reject a few below first — a round with no feedback runs the same search again."
+                ? "Select or mark a few as not selected below first — a round with no decisions runs the same search again."
                 : `Steered by ${steered} you have judged. Profiles already seen will not come back.`
         }
         err={sp.err}
@@ -161,9 +171,9 @@ export default async function Page({
 
       <div className="overflow-hidden rounded-xl border border-rule bg-surface">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-rule px-6 py-3.5">
-          {tab("new", "To review", open.length)}
-          {tab("kept", "Kept", kept.length)}
-          {tab("dismissed", "Rejected", dismissed.length)}
+          {tab("new", "Pending review", open.length)}
+          {tab("kept", "Selected", kept.length)}
+          {tab("dismissed", "Not selected", dismissed.length)}
           <Link
             href={`/openings/${id}/hh/links`}
             className="ml-auto text-[12.5px] font-medium text-accent hover:underline"
@@ -233,12 +243,12 @@ export default async function Page({
                         <input type="hidden" name="openingId" value={id} />
                         <input type="hidden" name="suggestionId" value={s.id} />
                         {s.linkedinUrl ? (
-                          <SubmitButton pendingLabel="Adding…" title="Adds them to Excel Tables as Shortlisted">
-                            Add to list
+                            <SubmitButton pendingLabel="Selecting…" title="Selects this profile and adds it to Excel Tables">
+                            Select
                           </SubmitButton>
                         ) : (
                           <button type="button" disabled title="No profile URL to add" className={BUTTON.primary}>
-                            Add to list
+                            Select
                           </button>
                         )}
                       </form>
@@ -247,20 +257,20 @@ export default async function Page({
                         <input type="hidden" name="suggestionId" value={s.id} />
                         <Submit
                           tone="dark"
-                          pendingLabel="Rejecting…"
+                            pendingLabel="Saving decision…"
                           className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink disabled:opacity-60"
                         >
-                          Reject
+                            Not selected
                         </Submit>
                       </form>
                     </div>
                   ) : (
                     s.status === "kept" ? (
                       <span className="shrink-0">
-                        <DoneBadge title={`Kept ${dateAt(s.generatedAt)}`}>Added to Excel Tables</DoneBadge>
+                        <DoneBadge title={`Selected ${dateAt(s.generatedAt)}`}>Selected · added to Excel Tables</DoneBadge>
                       </span>
                     ) : (
-                      <span className="shrink-0 text-[11.5px] text-ink-faint">Rejected · {dateAt(s.generatedAt)}</span>
+                        <span className="shrink-0 text-[11.5px] text-ink-faint">Not selected · {dateAt(s.generatedAt)}</span>
                     )
                   )}
                 </div>

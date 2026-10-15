@@ -11,6 +11,7 @@ interface NotificationsPayload {
     title: string;
     body: string;
     jobId: string | null;
+    href?: string | null;
     read: boolean;
     createdAt: string;
   }[];

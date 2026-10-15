@@ -16,7 +16,6 @@ import { ThemeToggle } from "./ThemeToggle";
 import { allows, isTa } from "@/lib/auth";
 
 const NAV = [
-  { href: "/workday", label: "Workday" },
   { href: "/clients", label: "Clients" },
   { href: "/openings", label: "Openings" },
   // TA Leads give the TAs strategies per job (8 Oct); shown only to those who may.

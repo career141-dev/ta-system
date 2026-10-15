@@ -10,7 +10,9 @@ import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } f
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import type { FeedbackCategory, FeedbackPriority, FeedbackStatus, FeedbackItem } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
-import { BACK_TO_TABLES_REASON } from "@/lib/pipeline";
+import { BACK_TO_TABLES_REASON, movedBackToTables, awaitingShortlist } from "@/lib/pipeline";
+import { BULK_STAGES } from "@/lib/bulkStages";
+import { linkedinPostUrl } from "@/lib/workdayRequirements";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
@@ -21,6 +23,8 @@ import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult"
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
 import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from "@/lib/eod-format";
 import { noticePeriodToDays } from "@/lib/answered";
+import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
+import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -1341,13 +1345,11 @@ export async function addJobPost(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
   const externalUrl = String(formData.get("externalUrl") ?? formData.get("jobLink") ?? "").trim() || null;
-  // The same check as editing a post (updatePost): a link without a job or
-  // project number is saved but never routes a CV (review of PR #31, 24 Sep).
+  // Creation, editing and EOD readiness accept the same LinkedIn link formats.
   if (externalUrl) {
-    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
-    if (!linkedinJobId(externalUrl) && !linkedinProjectId(externalUrl)) {
+    if (!linkedinPostUrl(externalUrl)) {
       await fail(
-        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
+        "Paste a valid LinkedIn job, Recruiter project, or job post link.",
       );
     }
   }
@@ -1406,10 +1408,9 @@ export async function updatePost(formData: FormData) {
   const linkBefore = repo.jobPosts().find((p) => p.id === postId)?.externalUrl ?? null;
   if (formData.has("externalUrl")) {
     const url = String(formData.get("externalUrl") ?? "").trim();
-    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
-    if (url && !linkedinJobId(url) && !linkedinProjectId(url)) {
+    if (url && !linkedinPostUrl(url)) {
       await fail(
-        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
+        "Paste a valid LinkedIn job, Recruiter project, or job post link.",
       );
     }
     patch.externalUrl = url || null;
@@ -2393,6 +2394,40 @@ export async function addManyToOpening(formData: FormData) {
   await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, "added to the opening in TA Follow-up"));
 }
 
+/** Bulk selection never changes iMark; each row keeps its normal permission and pipeline gates. */
+export async function addLinksToPipeline(formData: FormData) {
+  const ids = [...new Set(formData.getAll("entryId").map(String))];
+  if (!ids.length) return fail("Tick at least one candidate.");
+  const r = await eachInline(ids, (entryId) => addLinkToPipeline(one(formData, { entryId })));
+  await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, "added to the pipeline"));
+}
+
+export async function moveSelectedCandidates(formData: FormData) {
+  const stage = String(formData.get("stage") ?? "");
+  // These milestones have dedicated flows for dates, offers and placements.
+  if (!BULK_STAGES.includes(stage as Stage)) {
+    return fail("Pick a stage. Use the candidate's page for interviews, offers and placements.");
+  }
+  const entries = [...new Set(formData.getAll("entryId").map(String))];
+  const apps = [...new Set(formData.getAll("appId").map(String))];
+  if (!entries.length && !apps.length) return fail("Tick at least one candidate.");
+  const openingId = String(formData.get("openingId"));
+  const r = await eachInline(entries.length ? entries : apps, async (id) => {
+    let appId = id;
+    if (entries.length) {
+      const fd = one(formData, { entryId: id });
+      await primeStore({ openingId });
+      await authorize(fd, "opening.sourcing", { link: "entryId", opening: "openingId" });
+      const entry = repo.linkVault(openingId).find((row) => row.id === id);
+      const app = entry?.candidateId ? repo.applicationsForCandidate(entry.candidateId).find((a) => a.openingId === openingId) : null;
+      if (!app || movedBackToTables(app) || awaitingShortlist(app)) return fail("Add this candidate to the pipeline first.");
+      appId = app.id;
+    }
+    return moveStage(one(formData, { appId }));
+  });
+  await (r.ok ? (r.notOk ? note : done) : fail)(bulkSummary(r, `moved to ${STAGE_LABEL[stage as Stage]}`));
+}
+
 export async function deleteOpenings(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
@@ -2940,9 +2975,30 @@ export async function setUserActive(formData: FormData) {
 export async function runDatabaseSearch(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
-  const said = String(formData.get("q") ?? "").trim();
+  let said = String(formData.get("q") ?? "").trim();
   const mode = String(formData.get("mode") ?? "natural");
   const openingId = String(formData.get("openingId") ?? "");
+  const cvFile = formData.get("cvFile");
+  let referenceParam = "";
+  const carriedReference = parseReferenceProfile(formData.get("ref"));
+  if (carriedReference) referenceParam = serializeReferenceProfile(carriedReference);
+
+  if (cvFile && typeof cvFile === "object" && "arrayBuffer" in cvFile && (cvFile as File).size > 0) {
+    const file = cvFile as File;
+    const fileProblem = referenceCvFileProblem(file.name, file.size);
+    if (fileProblem) await back(fileProblem, "error");
+    try {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const { extractBlueprintFromFile } = await import("@/lib/referenceCv");
+      const { blueprint: bp } = await extractBlueprintFromFile(buffer, file.name);
+      referenceParam = serializeReferenceProfile(referenceProfileFromBlueprint(bp));
+      if (!said) said = "Find candidates similar to this reference CV.";
+    } catch (err) {
+      console.warn("[runDatabaseSearch] CV document extraction fallback:", err);
+      await back((err as Error).message || "Could not read that CV. Try a PDF, DOCX or TXT file.", "error");
+    }
+  }
+
   // A reply under the results carries on the conversation (5 Oct): the new
   // message is added to the search so far, one message per line (lib/query
   // turnsOf). Boolean is a literal string and always stands alone.
@@ -2953,6 +3009,7 @@ export async function runDatabaseSearch(formData: FormData) {
   while (turns.length > 2 && turns.join("\n").length > 4000) turns.splice(1, 1);
   const q = turns.join("\n").slice(0, 4000);
   const params = new URLSearchParams({ q });
+  if (referenceParam) params.set("ref", referenceParam);
   if (mode === "boolean" || mode === "meaning") params.set("mode", mode);
   if (openingId) params.set("for", openingId);
   redirect(`/database/results?${params.toString()}`);
@@ -2968,6 +3025,8 @@ export async function saveSearch(formData: FormData) {
   const count = Number(formData.get("count") ?? 0);
   const intent = safeSearchIntent(formData.get("intent"));
   const turns = safeSearchTurns(formData.get("turns"));
+  const savedReference = parseReferenceProfile(formData.get("ref"));
+  const referenceProfile = savedReference ? serializeReferenceProfile(savedReference) : null;
   if (!query) return;
 
   const { isConvex } = await import("@/data/mode");
@@ -2985,10 +3044,11 @@ export async function saveSearch(formData: FormData) {
         count,
         intent,
         turns,
+        referenceProfile,
       });
     }
   } else {
-    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count, intent, turns });
+    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count, intent, turns, referenceProfile });
   }
   revalidatePath("/database", "layout");
   await back(`Search saved as "${name}".`);
@@ -3299,6 +3359,7 @@ async function sourceForNow(openingId: string, forUserId?: string, extraRound = 
     openingId,
     run.suggestions.map((s) => ({ ...s, openingId, generatedFor: forUserId ?? null, keptBy: null })),
   );
+  if (isConvex()) await freshAfter(convexMutation)("ta/workdays:recordSourcingRun", { jobId: openingId, ...(forUserId ? { userId: forUserId } : {}), round, count: run.suggestions.length });
   return {
     found: run.suggestions.length, scanned: run.scanned,
     queries: run.queries.length, cost: run.cost,
@@ -3399,7 +3460,7 @@ export async function keepSuggestion(formData: FormData) {
     held = await matchLink(entryId, user.id);
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
-  await back(`${heldLine(held)}${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
+  await back(`${heldLine(held)}${s!.name ?? "They"} selected and added to Excel Tables.`);
 }
 
 /** The Excel Tables row a suggestion already has on this opening — by its address, or name and company (1 Oct). */
@@ -4600,6 +4661,7 @@ export async function sendEod(formData: FormData) {
   // here, not only on the button: the form can arrive from a stale page. Leads and
   // directors are not held to it, and the client copy sends no email.
   const research = checkResearchSubmission({
+    excused: isConvex() && kind === "director" && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
     role: user.role,
     kind,
     link: String(formData.get("chatgptLink") ?? ""),
@@ -4607,6 +4669,10 @@ export async function sendEod(formData: FormData) {
   });
   if (!research.ok)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${research.reason}`)}`);
+  if (kind === "director" && isConvex()) {
+    const check = await convexMutation<{ ok: boolean; blockers: string[] }>("ta/workdays:emailPreflight", { actorId: user.id, jobId: openingId, link: research.url ?? "", confirmed: formData.get("researchConfirmed") === "on" });
+    if (!check.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${check.blockers.join("; ")}`)}`);
+  }
   const sentTo = kind === "director" ? recipients.to[0] : String(formData.get("to") ?? "");
 
   // The Director's copy is really sent now, through Microsoft Graph from the
@@ -4792,12 +4858,17 @@ export async function resendEod(formData: FormData) {
     const recipients = eodRecipients({ removed, extraTo: toList.ok, extraCc: ccList.ok, shortlistInbox: repo.shortlistInbox() });
     if (recipients.to.length === 0) return done("Not sent: nobody is on the To line. Add an address as To.");
     const research = checkResearchSubmission({
+      excused: isConvex() && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
       role: user.role,
       kind: "director",
       link: String(formData.get("chatgptLink") ?? ""),
       confirmed: formData.get("researchConfirmed") === "on",
     });
     if (!research.ok) return done(`Not sent: ${research.reason}`);
+    if (isConvex()) {
+      const check = await convexMutation<{ ok: boolean; blockers: string[] }>("ta/workdays:emailPreflight", { actorId: user.id, jobId: openingId, link: research.url ?? "", confirmed: formData.get("researchConfirmed") === "on", revised: true });
+      if (!check.ok) return done(`Not sent: ${check.blockers.join("; ")}`);
+    }
     const typed = String(formData.get("subject") ?? "").trim();
     if (!typed) return done("Not sent: the email needs a subject.");
 
@@ -4933,6 +5004,7 @@ async function emailEod(input: {
   revised?: boolean;
 }): Promise<{ ok: true; note: string; workdayMailId?: string | null } | { ok: false; error: string }> {
   const { openingId, user } = input;
+  if (!input.applicationIds.length) return { ok: false, error: "Include at least one CV from Director Review before sending the end-of-day email." };
   const opening = repo.opening(openingId);
   if (!opening) return { ok: false, error: "That opening no longer exists." };
   const to = input.to.trim() || EOD_TO;
@@ -4997,6 +5069,8 @@ async function emailEod(input: {
       left.push(c.fullName);
     }
   }
+
+  if (!attachments.length) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the end-of-day email." };
 
   const html = eodEmailHtml({
     rows,

@@ -69,6 +69,24 @@ assert.equal(impossibleSkill.hits.length, 0);
 const employer = await quickEngineSearch("personal assistant cfo", { ...criteria, titles: ["Personal Assistant"], employers: ["Example"] }, 400, true);
 assert.ok(employer.hits.length > 0);
 assert.ok(employer.hits.every(h => !h.candidateId.startsWith("vector-")), "employer constraints remain enforced");
+const referenceProfile = {
+  version: 1,
+  role: "Personal Assistant",
+  alternativeTitles: ["Executive Assistant"],
+  seniority: "mid",
+  totalExperienceYears: 8,
+  minYears: 6,
+  maxYears: 11,
+  coreSkills: ["calendar management"],
+  supportingSkills: ["stakeholder coordination"],
+  industries: ["Manufacturing"],
+  education: [],
+  sourceCandidateId: "exact",
+};
+const reference = await quickEngineSearch("Find candidates similar to this reference profile.", criteria, 400, false, referenceProfile);
+assert.ok(!reference.hits.some(h => h.candidateId === "exact"), "the reference person is excluded from their own results");
+assert.ok(reference.hits.some(h => h.candidateId.startsWith("word-")), "reference skills are preferences and do not exclude a comparable career");
+assert.ok(reference.hits[0].roleEvidence.kind !== "broader", "comparable role evidence ranks before broad keyword similarity");
 const salaryFields = ["salary", "notice", "availability", "nationality", "languages"];
 // No new desk filtering: the existing desk criteria remain passed through.
 const { deskCriteria } = await import("../../src/lib/engineSearch.ts");

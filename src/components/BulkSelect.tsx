@@ -2,8 +2,10 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ActionResult } from "@/lib/inlineResult";
-import { ActionNote, Spinner } from "./Submit";
+import { ActionNote, Spinner, SubmitButton } from "./Submit";
 import { Confirm } from "./Confirm";
+import { STAGE_LABEL, type Stage } from "@/data/types";
+import { moveSelectedCandidates } from "@/app/actions";
 
 /**
  * Tick several rows, then act on all of them at once (25 Sep).
@@ -138,6 +140,31 @@ export function BulkConfirm({
 }) {
   const n = useContext(Selected);
   return <Confirm label={label} question={`${label} ${n} ${n === 1 ? noun[0] : noun[1]}? ${warning}`} confirmLabel={`${label.split(" ")[0]} ${n}`} />;
+}
+
+/** Shares the bar's form; no nested form and no bypass of the individual stage action. */
+export function BulkStageControls({ stages }: { stages: Stage[] }) {
+  const [stage, setStage] = useState("");
+  if (!stages.length) return null;
+  return (
+    <>
+      <select name="stage" aria-label="Stage for selected candidates" value={stage} onChange={(e) => setStage(e.target.value)} className="rounded-full border border-rule bg-surface px-3 py-1.5 text-[12.5px]">
+        <option value="">Choose stage</option>
+        {stages.map((s) => <option key={s} value={s}>{STAGE_LABEL[s]}</option>)}
+      </select>
+      {(stage === "rejected" || stage === "dropped_out") && (
+        <input name="reason" aria-label="Reason for moving selected candidates" placeholder="Reason (required)" onKeyDown={(e) => {
+          // The bar also has shortlist/remove buttons. Enter in a reason must
+          // not implicitly submit whichever action happens to come first.
+          if (e.key === "Enter") e.preventDefault();
+        }} className="rounded-full border border-rule px-3 py-1.5 text-[12.5px]" />
+      )}
+      <SubmitButton formAction={moveSelectedCandidates} disabled={!stages.includes(stage as Stage)} pendingLabel="Moving…" tone="dark" className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12.5px] font-medium text-brand disabled:opacity-60">
+        Move selected
+      </SubmitButton>
+      <span className="text-[11.5px] text-ink-faint">Each candidate must meet the stage requirements.</span>
+    </>
+  );
 }
 
 /**

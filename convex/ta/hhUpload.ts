@@ -21,6 +21,7 @@ import { claimForTa } from "./applications";
 import { toTaStage } from "./stages";
 import { assertWorkdayScope } from "../lib/workdayScope";
 import { profileSlug } from "../lib/samePerson";
+import { refreshWorkdayChecks } from "./workdays";
 
 /** The channel the pipeline records; the TA System reads it as HH (src/data/convex/map.ts). */
 export const HEADHUNT_CHANNEL = "headhunting";
@@ -162,6 +163,7 @@ export const fileHeadhunt = internalMutation({
         createdAt: Date.now(),
       } as never);
     }
+    await refreshWorkdayChecks(ctx, jobId, user._id);
     return { handled: true, claimed: claimed.ok };
   },
 });

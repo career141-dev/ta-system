@@ -12,7 +12,8 @@ import { allows } from "@/lib/auth";
 import { Pager } from "./Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { passesFilters } from "@/lib/listFilters";
-import { BulkBar, BulkConfirm, DownloadCvsButton } from "./BulkSelect";
+import { BulkBar, BulkConfirm, BulkStageControls, DownloadCvsButton } from "./BulkSelect";
+import { bulkStages } from "@/lib/bulkStages";
 import { SubmitButton } from "./Submit";
 import { confirmShortlist, removeApplications } from "@/app/actions";
 import { inLevelOrder } from "@/lib/levels";
@@ -367,6 +368,7 @@ export function CandidateList({
                 </SubmitButton>
               )}
               <DownloadCvsButton field="appId" />
+              <BulkStageControls stages={bulkStages(onPage.filter((a) => allows(currentUser, "opening.act", { openingId, assignment, ownerTaId: a.ownerTaId })).map((a) => a.stage), canDecideDirector, canDecideClient)} />
               {canManage && (
                 <BulkConfirm
                   label="Remove from this job"

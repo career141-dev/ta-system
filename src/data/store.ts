@@ -3166,7 +3166,7 @@ const rawRepo = {
     return userId ? all.filter((s) => s.ownerId === userId) : all;
   },
 
-  saveSearch(input: { name: string; query: string; mode: "natural" | "boolean" | "meaning"; ownerId: Id; openingId: Id | null; count: number; intent?: unknown | null; turns?: string[] }): Id {
+  saveSearch(input: { name: string; query: string; mode: "natural" | "boolean" | "meaning"; ownerId: Id; openingId: Id | null; count: number; intent?: unknown | null; turns?: string[]; referenceProfile?: string | null }): Id {
     const id = `ss_${Math.random().toString(36).slice(2, 10)}`;
     mutate((db) => {
       db.savedSearches.push({
@@ -3181,6 +3181,7 @@ const rawRepo = {
         lastResultCount: input.count,
         intent: input.intent ?? null,
         turns: input.turns ?? [],
+        referenceProfile: input.referenceProfile ?? null,
       });
     });
     return id;

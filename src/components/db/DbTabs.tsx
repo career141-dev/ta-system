@@ -20,3 +20,4 @@ export function DbTabs({ active }: { active: "candidates" | "referral" }) {
     </nav>
   );
 }
+

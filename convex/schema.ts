@@ -15,6 +15,7 @@ export default defineSchema({
       addedAt: v.number(),
       leadId: v.optional(v.id("users")),
       modeHistory: v.array(v.object({ at: v.number(), workType: v.string() })),
+      carried: v.optional(v.boolean()),
     })),
     completion: v.optional(v.any()),
   }).index("by_user", ["userId"]).index("by_user_finished", ["userId", "finishedAt"]).index("by_date", ["date"]).index("by_finished", ["finishedAt"]),
@@ -69,6 +70,39 @@ export default defineSchema({
     recordId: v.string(),
     at: v.number(),
   }).index("by_workday_job", ["workdayId", "jobId"]),
+  // Saved confirmations belong to a TA/job; daily exceptions never carry to another day.
+  taWorkdayCheckNotes: defineTable({
+    userId: v.id("users"), jobId: v.id("jobs"),
+    jdVersion: v.optional(v.string()), jdReviewedAt: v.optional(v.number()),
+    researchVersion: v.optional(v.string()), researchReviewedAt: v.optional(v.number()),
+    unavailableReasons: v.optional(v.any()),
+    emptySuggestionsVersion: v.optional(v.string()), emptySuggestionsReason: v.optional(v.string()),
+    emptySuggestionsAt: v.optional(v.number()),
+    workdayId: v.optional(v.id("taWorkdays")), noCandidateReason: v.optional(v.string()),
+    noCandidateAt: v.optional(v.number()), chatgptLink: v.optional(v.string()), confirmedAt: v.optional(v.number()),
+  }).index("by_user_job", ["userId", "jobId"]).index("by_job", ["jobId"]),
+  taWorkdayExceptions: defineTable({
+    workdayId: v.id("taWorkdays"), userId: v.id("users"), jobId: v.id("jobs"),
+    key: v.string(), reason: v.string(), version: v.string(), at: v.number(), by: v.id("users"),
+    action: v.union(v.literal("submit"), v.literal("withdraw")),
+  }).index("by_workday_job", ["workdayId", "jobId"]),
+  taWorkdayTaskEvents: defineTable({
+    workdayId: v.id("taWorkdays"), userId: v.id("users"), jobId: v.id("jobs"),
+    key: v.string(), label: v.string(), href: v.string(), kind: v.string(),
+    status: v.union(v.literal("incomplete"), v.literal("complete"), v.literal("waiting")),
+    at: v.number(), by: v.optional(v.id("users")), evidence: v.optional(v.string()),
+    completedAt: v.optional(v.number()), completedBy: v.optional(v.string()),
+    observed: v.optional(v.boolean()),
+  }).index("by_workday_job", ["workdayId", "jobId"]),
+  taSourcingRuns: defineTable({
+    jobId: v.id("jobs"), userId: v.optional(v.id("users")), round: v.number(),
+    count: v.number(), at: v.number(),
+  }).index("by_job", ["jobId"]),
+  // Provenance survives starting a later workday; shared setup is never credited to its viewer.
+  taWorkdayEvidence: defineTable({
+    jobId: v.id("jobs"), recordId: v.string(), table: v.string(),
+    at: v.number(), by: v.optional(v.id("users")), version: v.string(),
+  }).index("by_job", ["jobId"]),
   // ■■ USERS ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
   users: defineTable({
     tokenIdentifier: v.string(),
@@ -2063,10 +2097,12 @@ export default defineSchema({
       v.literal("scoop_received"),
       v.literal("strategy_assigned"),
       v.literal("workday_started"), v.literal("workday_finished"),
-      v.literal("workday_request"), v.literal("workday_decision")
+      v.literal("workday_request"), v.literal("workday_decision"), v.literal("workday_exception")
     ),
     title: v.string(),
     body: v.string(),
+    workdayId: v.optional(v.id("taWorkdays")),
+    taskKey: v.optional(v.string()),
     cvId: v.optional(v.id("cvs")),
     candidateId: v.optional(v.id("candidates")),
     jobId: v.optional(v.id("jobs")),
@@ -2755,6 +2791,8 @@ export default defineSchema({
     /** Recruiter intent memory only — no candidate contact data or raw CV text. */
     intent: v.optional(v.union(v.any(), v.null())),
     turns: v.optional(v.array(v.string())),
+    /** Encoded role/skill profile only; never raw CV text or contact data. */
+    referenceProfile: v.optional(v.union(v.string(), v.null())),
   }).index("by_owner", ["ownerId"])
     // Deleting an opening clears it from saved searches (ta/openingDelete.ts, 2 Oct).
     .index("by_opening", ["openingId"]),

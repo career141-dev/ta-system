@@ -295,9 +295,12 @@ export function checkResearchSubmission(input: {
   kind: "director" | "client";
   link: string | null | undefined;
   confirmed: boolean;
+  /** Trusted backend evidence only; never accept this flag from a send form. */
+  excused?: boolean;
 }): { ok: true; url: string | null } | { ok: false; reason: string } {
   const checked = validateResearchLink(input.link);
   if (!needsResearchLink(input.role, input.kind)) return { ok: true, url: checked.ok && input.kind === "director" ? checked.url : null };
+  if (input.excused && !input.link?.trim()) return { ok: true, url: null };
   if (!checked.ok) return { ok: false, reason: checked.reason };
   if (!input.confirmed) {
     return { ok: false, reason: "Tick the box to confirm you opened the link in a private window and it holds no candidate details." };

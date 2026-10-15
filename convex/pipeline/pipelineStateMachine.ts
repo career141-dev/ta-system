@@ -8,6 +8,7 @@ import { adjustJobStageStat } from "../jobs/stats";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { expectedSalaryOnFile, noticePeriodOnFile, needsReviewDetails } from "../ta/stages";
 import { isDeskWideUser } from "../ta/guard";
+import { refreshWorkdayChecks } from "../ta/workdays";
 
 export const PIPELINE_STAGES = [
   "new_cvs",
@@ -260,5 +261,6 @@ export async function executeStageTransition(
   // 8. Sync Candidate Global Overall Status
   await syncCandidateOverallStatus(ctx, app.candidateId);
 
+  await refreshWorkdayChecks(ctx, app.jobId, !actorId || actorId === "system" ? undefined : ctx.db.normalizeId("users", actorId) ?? undefined);
   return { success: true, previousStage: currentStage, newStage: targetStage };
 }

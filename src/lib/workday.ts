@@ -1,4 +1,5 @@
 /** Workday rules shared by the transactional backend and the daily review. */
+import { validateResearchLink } from "./eod-format";
 export type WorkType = "100%" | "Add-on" | "Follow-up";
 export type CheckKind =
   | "cv_review"
@@ -16,6 +17,16 @@ export interface WorkdayCheck {
   kind: CheckKind;
   canCarry: boolean;
   evidenceAt: number;
+  status?: "incomplete" | "complete" | "waiting";
+  completedAt?: number;
+  completedBy?: string;
+  evidence?: string;
+  progress?: string;
+  needsEmptySuggestionsReason?: boolean;
+  blocksEmail?: boolean;
+  exceptionVersion?: string;
+  exception?: { reason: string; at: number; by: string };
+  events?: { status: string; at: number; by?: string; evidence?: string; observed?: boolean }[];
   waiting?: { reason: string; nextAction: string; dueAt: number };
 }
 export interface CarryForward {
@@ -39,6 +50,8 @@ export interface WorkdayJobView {
   title: string;
   workType: WorkType;
   checks: WorkdayCheck[];
+  /** Temporary EOD setup gate, independent of candidate queues and Finish. */
+  eodChecks?: WorkdayCheck[];
   shortlist: WorkdayCandidate[];
   activity: {
     cvReviews: number;
@@ -74,13 +87,15 @@ export interface WorkdayView {
 export interface WorkdayPayload {
   canWork: boolean;
   canLead: boolean;
+  canReview: boolean;
   role: string;
   lastFinishedAt: number | null;
   lastFinishedDate: string | null;
   active: WorkdayView | null;
   history: WorkdayView[];
   team: WorkdayView[];
-  options: { id: string; title: string }[];
+  options: { id: string; title: string; workType?: WorkType; carry?: boolean; preview?: WorkdayJobView }[];
+  nextCursor?: string | null;
 }
 
 export function workdayDate(now: number): string {
@@ -133,7 +148,42 @@ export function validateCarry(
 }
 
 export function completionBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.flatMap((j) => j.checks).filter((c) => !c.waiting);
+  return jobs.flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting && !c.exception);
+}
+
+export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
+  return jobs.flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
+    .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting && !c.exception);
+}
+
+/** Only setup/review work can be excused; CVs and mail safety stay mandatory. */
+export function canExcuseCheck(check: Pick<WorkdayCheck, "key">): boolean {
+  return ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "chatgpt"].includes(check.key.split(":")[0]);
+}
+
+export interface TaskException {
+  key: string; reason: string; version: string; at: number; by: string;
+  action: "submit" | "withdraw";
+}
+
+export function applyTaskExceptions(checks: WorkdayCheck[], events: TaskException[], currentDay: boolean): WorkdayCheck[] {
+  return checks.map(check => {
+    const event = events.filter(e => e.key === check.key).at(-1);
+    return currentDay && canExcuseCheck(check) && check.status !== "complete" && event?.action === "submit" && event.version === check.exceptionVersion
+      ? { ...check, exception: { reason: event.reason, at: event.at, by: event.by } }
+      : check;
+  });
+}
+
+/** 15 Oct: require the post link, Suggestions decisions and a Director Review CV; research fields are optional. */
+export function isEodSendCheck(check: Pick<WorkdayCheck, "key">): boolean {
+  return ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "director_cv", "chatgpt", "mail"].includes(check.key.split(":")[0]);
+}
+
+export function confirmedResearchLink(checks: WorkdayCheck[]): string | null {
+  const saved = checks.find(c => c.key.startsWith("chatgpt:") && c.status === "complete");
+  const checked = validateResearchLink(saved?.evidence);
+  return checked.ok ? checked.url : null;
 }
 
 export function workdayTime(at: number | null): string {
