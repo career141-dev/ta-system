@@ -19,6 +19,7 @@ import { HEADER_H } from "@/lib/chrome";
 import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
 import { validateResearchLink } from "@/lib/eod-format";
 import { sidebarChecks } from "@/lib/workdaySidebar";
+import { useChatgptResearch } from "./useChatgptResearch";
 
 function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
@@ -239,6 +240,7 @@ function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId:
         </WorkForm>
       </details>}
       {!readOnly && check.exception && <WorkForm op="taskException" fields={{ workdayId: dayId, jobId: check.jobId, key: check.key, withdraw: "yes" }}><button className="text-xs text-brand underline">Withdraw reason</button></WorkForm>}
+      {!readOnly && check.key.startsWith("chatgpt:") && <ChatgptConfirmation jobId={check.jobId} link={check.status === "complete" ? check.evidence : undefined} />}
       {check.waiting ? (
         <p className="text-ink-soft">
           Waiting: {check.waiting.reason}
@@ -309,7 +311,7 @@ function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId:
           {check.needsEmptySuggestionsReason && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "emptySuggestions" }}>
             <label className="block text-xs">Why no profiles were found<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save explanation</button>
           </WorkForm>}
-          {check.key.startsWith("chatgpt:") && <ChatgptConfirmation jobId={check.jobId} />}
+
         </>
       ) : null}
         </div>
@@ -325,27 +327,18 @@ export function ResearchConfirmation({ jobId }: { jobId: string }) {
   </WorkForm>;
 }
 
-export function ChatgptConfirmation({ jobId, link = "", confirmed = false }: { jobId: string; link?: string; confirmed?: boolean }) {
-  const [typedLink, setTypedLink] = useState("");
-  const [opened, setOpened] = useState(false);
+export function ChatgptConfirmation({ jobId, link = "" }: { jobId: string; link?: string }) {
+  const research = useChatgptResearch(jobId);
   const helpId = useId();
-  const checked = validateResearchLink(link || typedLink);
-  const ready = checked.ok && (link ? confirmed : opened);
-  return <WorkForm op="saveCheck" fields={{ jobId, kind: "chatgpt", confirmed: ready ? "on" : "", ...(link ? { link } : {}) }}>
-    {!link && <>
-      <p className="text-xs text-ink-soft">In ChatGPT, choose Share, then Create link or Copy link. Paste the shared link here; copying the browser address gives your private chat link.</p>
-      <label className="block text-xs">ChatGPT share link<input required name="link" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://chatgpt.com/share/…" value={typedLink} onChange={e => {
-        setTypedLink(e.target.value);
-        // Confirmation belongs to this exact link, as on the email composer.
-        setOpened(false);
-      }} aria-invalid={!!typedLink.trim() && !checked.ok} aria-describedby={helpId} className={inputClass} /></label>
-      <p id={helpId} aria-live="polite" className="break-words text-xs text-ink-soft">
-        {checked.ok ? "Share link accepted. Open it in a private window, then confirm below." : typedLink.trim() ? checked.reason : "Use a link beginning with https://chatgpt.com/share/."}
-      </p>
-      <label className="block text-xs"><input required type="checkbox" checked={opened} disabled={!checked.ok} onChange={e => setOpened(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
-    </>}
-    <button disabled={!ready} className={buttonClass}>Save research link</button>
-  </WorkForm>;
+  const checked = validateResearchLink(research.link);
+  useEffect(() => { if (link) research.adoptSaved(link); }, [link, research.adoptSaved]);
+  return <div className="space-y-3">
+    <p className="text-xs text-ink-soft">In ChatGPT, choose Share, then Create link or Copy link. Paste the shared link here or in the EOD email. Confirming saves it in both places.</p>
+    <label className="block text-xs">ChatGPT share link<input name="sidebarChatgptLink" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://chatgpt.com/share/…" value={research.link} disabled={research.saving} onChange={e => research.edit(e.target.value)} aria-invalid={!!research.link.trim() && !checked.ok} aria-describedby={helpId} className={inputClass} /></label>
+    <p id={helpId} className="break-words text-xs text-ink-soft">{checked.ok ? "Open the share link in a private window, then confirm below." : research.link.trim() ? checked.reason : "Use a link beginning with https://chatgpt.com/share/."}</p>
+    <label className="block text-xs"><input type="checkbox" checked={research.confirmed || research.saving} disabled={research.saving || !checked.ok} onChange={e => research.confirm(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
+    <p className={`text-xs ${research.confirmed ? "text-brand" : "text-ink-soft"}`} role="status">{research.message}</p>
+  </div>;
 }
 
 export function NoCandidateReason({ jobId }: { jobId: string }) {

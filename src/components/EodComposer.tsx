@@ -1,5 +1,6 @@
 "use client";
-import { ChatgptConfirmation, EodJobChecks } from "./Workday";
+import { EodJobChecks } from "./Workday";
+import { useChatgptResearch } from "./useChatgptResearch";
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import {
@@ -430,16 +431,17 @@ export function EodComposer({
   const [subject, setSubject] = useState(initialSubject);
   const [introText, setIntroText] = useState(resend ? resend.introText : defaultIntro);
   const [outroText, setOutroText] = useState(resend ? resend.outroText : defaultOutro);
-  // Reuse today's saved workday confirmation. Editing the link or resending
-  // requires confirmation again; an older draft cannot confer confirmation.
-  const [researchLink, setResearchLink] = useState(resend?.researchLink ?? "");
-  const [researchConfirmed, setResearchConfirmed] = useState(false);
+  // Reuse today's shared workday confirmation. Editing the link clears it;
+  // an older local draft cannot confer confirmation.
+  const research = useChatgptResearch(openingId, resend?.researchLink ?? "", needsResearchLink);
+  const researchLink = research.link;
+  const researchConfirmed = research.confirmed;
   const [jobBlocked, setJobBlocked] = useState(needsResearchLink);
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const [researchExcused, setResearchExcused] = useState(false);
   const researchRequired = needsResearchLink && !(researchExcused && !researchLink.trim());
-  const researchBlocked = researchRequired && (!researchCheck.ok || !researchConfirmed);
+  const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
@@ -481,14 +483,9 @@ export function EodComposer({
   // Restore draft from localStorage on mount. Nothing is saved until this has
   // run: the save below used to write the page's defaults over the draft first.
   const [restored, setRestored] = useState(false);
-  const researchEdited = useRef(false);
   const useSavedResearch = useCallback((link: string) => {
-    if (!restored || resend || researchEdited.current) return;
-    // Today's saved confirmation is authoritative over an older local draft.
-    // Editing here clears confirmation and keeps the TA's new input intact.
-    setResearchLink(link);
-    setResearchConfirmed(true);
-  }, [restored, resend]);
+    if (restored) research.adoptSaved(link);
+  }, [restored, research.adoptSaved]);
   useEffect(() => {
     setRestored(true);
     try {
@@ -502,7 +499,7 @@ export function EodComposer({
         }
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
-        if (typeof saved.researchLink === "string") setResearchLink(saved.researchLink);
+        if (typeof saved.researchLink === "string") research.restoreDraft(saved.researchLink);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
         // Saved as the comma text the server reads, before and after the chips.
         if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
@@ -641,7 +638,8 @@ export function EodComposer({
             spellCheck={false}
             required={researchRequired}
             value={researchLink}
-            onChange={(e) => { researchEdited.current = true; setResearchLink(e.target.value); setResearchConfirmed(false); }}
+            disabled={research.saving}
+            onChange={(e) => research.edit(e.target.value)}
             onBlur={() => setResearchTouched(true)}
             placeholder="https://chatgpt.com/share/…"
             aria-invalid={researchTouched && !researchCheck.ok}
@@ -661,8 +659,9 @@ export function EodComposer({
               type="checkbox"
               name="researchConfirmed"
               required={researchRequired}
-              checked={researchConfirmed}
-              onChange={(e) => setResearchConfirmed(e.target.checked)}
+              checked={researchConfirmed || research.saving}
+              disabled={research.saving || !researchCheck.ok}
+              onChange={(e) => research.confirm(e.target.checked)}
               className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--brand,#165b42)]"
             />
             <span>
@@ -670,7 +669,7 @@ export function EodComposer({
               emails or CV text, because anyone with the link can read it.
             </span>
           </label>
-          {researchCheck.ok && <ChatgptConfirmation jobId={openingId} link={researchLink} confirmed={researchConfirmed} />}
+          <p className={`mt-2 text-xs ${researchConfirmed ? "text-brand" : "text-ink-soft"}`} role="status">{research.message || "Confirming saves this link to Today’s Checks and the EOD email."}</p>
         </section>
       )}
 
