@@ -177,6 +177,9 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
           ))}
         </select>
       </label>
+      <p className="text-xs text-ink-soft">
+        You can work on multiple new positions at 100% in the same workday.
+      </p>
       {!day && data.options.some(o => o.carry) && <p className="text-xs text-ink-soft">Follow-up jobs carried forward: {data.options.filter(o => o.carry && o.id !== chosen?.id).map(o => o.title).join(", ")}</p>}
       {!day && chosen?.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.filter(c => !addon || !["linkedin_post", "research", "suggestions", "excel_profiles"].some(k => c.key.startsWith(k + ":"))).map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
       <button className={buttonClass}>

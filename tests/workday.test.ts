@@ -681,13 +681,21 @@ try {
     ),
   );
   user("ta2", "ta");
-  for (const id of ["multi1", "multi2", "multi3"])
+  for (const id of ["multi1", "multi2", "multi3"]) {
     put("jobs", {
       _id: id,
       title: id,
       taLeadId: "lead",
       assignedTaIds: ["ta2"],
     });
+    put("jobAssignments", {
+      _id: `assignment:${id}`,
+      jobId: id,
+      userId: "ta2",
+      assignmentRole: "primary_recruiter",
+      isActive: true,
+    });
+  }
   await db.patch("multi1", { jobDescription: "Previously reviewed JD", jdStatus: "approved" });
   await recordJdReview(ctx, "ta2" as any, "multi1" as any, "Previously reviewed JD");
   const reusedJdAt = clock;
@@ -700,21 +708,35 @@ try {
   const reusedJd = (await run("dashboard", { actorId: "ta2" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
   assert.equal(reusedJd.status, "complete", "A saved review before starting satisfies setup");
   assert.equal(reusedJd.completedAt, reusedJdAt);
-  for (const jobId of ["multi2", "multi3"])
+  // New full hunts can be added while earlier positions still have required checks.
+  for (const jobId of ["multi2", "multi3"]) {
+    const before = (await run("dashboard", { actorId: "ta2" })).active;
+    const entriesBefore = (await db.get(multiDay.id))!.jobs;
+    assert.ok(completionBlockers(before.jobs).length > 0);
     assert.equal(
       (await run("addPosition", {
         actorId: "ta2",
         workdayId: multiDay.id,
         jobId,
-        workType: "Add-on",
+        workType: "100%",
       })).pending,
       false,
       `${jobId} is direct without approval`,
     );
-  assert.equal(
-    rows("taWorkdays").find((d) => d._id === multiDay.id)?.jobs.length,
-    3,
-  );
+    const after = (await run("dashboard", { actorId: "ta2" })).active;
+    assert.deepEqual(after.jobs.slice(0, before.jobs.length), before.jobs,
+      "Adding a full hunt preserves earlier checklists and end-of-day checks");
+    assert.deepEqual((await db.get(multiDay.id))!.jobs.slice(0, entriesBefore.length), entriesBefore,
+      "Adding a full hunt preserves earlier work types and mode histories");
+  }
+  const fullHunts = (await db.get(multiDay.id))!.jobs;
+  assert.deepEqual(fullHunts.map((j: Row) => j.jobId), ["multi1", "multi2", "multi3"]);
+  for (const entry of fullHunts) {
+    assert.equal(entry.workType, "100%");
+    assert.deepEqual(entry.modeHistory, [{ at: entry.addedAt, workType: "100%" }]);
+    assert.equal(rows("jobAssignments").find(a => a.jobId === entry.jobId && a.userId === "ta2")?.workingStage, "100%");
+  }
+  assert.equal(rows("taWorkdayRequests").filter(r => r.workdayId === multiDay.id).length, 0);
   // Carryover includes every pending assigned job and does not use the ten manual slots.
   user("carryTa", "ta");
   const pastJobs = [];
