@@ -33,6 +33,7 @@ import { searchVectors } from "@/lib/qdrantSearch";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { employerMatch, excludedByEmployer, employersInText, describeEmployerHit } from "../../convex/lib/employers";
 import { intentToEngineHints, readSearchIntent, type SearchIntent } from "@/lib/searchIntent";
+import { referenceProfileSearchText, type ReferenceSearchProfile } from "@/lib/referenceSearchProfile";
 import { compareSearchCandidates, mergeSearchPool, quickRolePhrase, readOccupation, searchEvidenceReason, searchReviewPool, type RoleEvidence, type SearchOccupation } from "../../convex/lib/searchRoleEvidence";
 
 export interface EngineHit {
@@ -104,8 +105,9 @@ export function engineSearch(
   /** True when the criteria came from the recruiter editing chips rather than
    *  from parsing the sentence. */
   edited = false,
+  referenceProfile: ReferenceSearchProfile | null = null,
 ): Promise<EngineSearch> {
-  const args = engineArgs(query, criteria, limit, edited);
+  const args = engineArgs(query, criteria, limit, edited, referenceProfile);
 
   /*
    * The same search, answered once.
@@ -145,8 +147,8 @@ export function engineSearch(
  * The finished answer to exactly this search, if one is held — without waiting.
  * What lets a page that already has it skip the quick pass entirely.
  */
-export function cachedEngineSearch(query: string, criteria: SearchCriteria, limit = 60, edited = false): EngineSearch | null {
-  const held = engineCache.get(JSON.stringify(engineArgs(query, criteria, limit, edited)));
+export function cachedEngineSearch(query: string, criteria: SearchCriteria, limit = 60, edited = false, referenceProfile: ReferenceSearchProfile | null = null): EngineSearch | null {
+  const held = engineCache.get(JSON.stringify(engineArgs(query, criteria, limit, edited, referenceProfile)));
   return held && Date.now() - held.at < ENGINE_CACHE_MS ? held.done : null;
 }
 
@@ -156,8 +158,8 @@ export function cachedEngineSearch(query: string, criteria: SearchCriteria, limi
  * read from the chips. About a second, where the full run is ten or more — so
  * the page shows this first and replaces it when `engineSearch` answers.
  */
-export function quickEngineSearch(query: string, criteria: SearchCriteria, limit = 60, edited = false): Promise<EngineSearch> {
-  return runEngine(engineArgs(query, criteria, limit, edited), false);
+export function quickEngineSearch(query: string, criteria: SearchCriteria, limit = 60, edited = false, referenceProfile: ReferenceSearchProfile | null = null): Promise<EngineSearch> {
+  return runEngine(engineArgs(query, criteria, limit, edited, referenceProfile), false);
 }
 
 const ENGINE_CACHE_MS = 5 * 60_000;
@@ -186,7 +188,7 @@ const engineCache = new Map<string, CacheEntry>();
 
 type EngineArgs = ReturnType<typeof engineArgs>;
 
-function engineArgs(query: string, criteria: SearchCriteria, limit: number, edited: boolean) {
+function engineArgs(query: string, criteria: SearchCriteria, limit: number, edited: boolean, referenceProfile: ReferenceSearchProfile | null) {
   /*
    * The search as a conversation (9 Oct): the messages arrive one per line,
    * and the model reads them in order, so a later "in Colombo instead"
@@ -194,9 +196,11 @@ function engineArgs(query: string, criteria: SearchCriteria, limit: number, edit
    * vectors still search the messages joined into one request.
    */
   const turns = query.split(/\n+/).map((t) => t.trim().replace(/\s+/g, " ")).filter(Boolean);
+  const referenceText = referenceProfile ? referenceProfileSearchText(referenceProfile) : "";
   return {
-    query: turns.map((t) => t.replace(/[.\s]+$/, "")).join(". "),
+    query: [referenceText, turns.map((t) => t.replace(/[.\s]+$/, "")).join(". ")].filter(Boolean).join(". "),
     turns,
+    referenceProfile,
     location: criteria.locations[0] ?? undefined,
     minExperience: criteria.minExperience ?? undefined,
     maxExperience: criteria.maxExperience ?? undefined,
@@ -294,20 +298,42 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
 
   const reading = modelIntent ? await modelIntent.catch(() => null) : null;
   const parsed = reading && reading.usage.model !== "regex-fallback" ? reading.requirements : requirementsFromChips(args);
-  const occupation = readOccupation(parsed, q, [...(args.customFilters ?? []), ...intentHints.mustHave]);
+  const reference = args.referenceProfile;
+  const occupation = reference
+    ? {
+        targetOccupation: reference.role,
+        equivalentTitles: reference.alternativeTitles,
+        reportingContext: null,
+        explicitSkills: intentHints.mustHave,
+        inferredSkills: [...reference.coreSkills, ...reference.supportingSkills],
+      }
+    : readOccupation(parsed, q, [...(args.customFilters ?? []), ...intentHints.mustHave]);
   const req: Requirements = {
     ...parsed,
+    title: reference?.role ?? parsed.title,
+    alternativeTitles: reference ? [...new Set([...reference.alternativeTitles, ...(parsed.alternativeTitles ?? [])])].slice(0, 8) : parsed.alternativeTitles,
     searchOccupation: occupation,
-    industry: args.industry ?? parsed.industry,
+    industry: args.industry ?? reference?.industries[0] ?? parsed.industry,
     location: args.location ?? parsed.location,
-    minYearsExperience: args.minExperience && args.minExperience > 0 ? args.minExperience : parsed.minYearsExperience ?? null,
+    minYearsExperience: args.minExperience && args.minExperience > 0 ? args.minExperience : reference?.minYears ?? reference?.totalExperienceYears ?? parsed.minYearsExperience ?? null,
+    maxYearsExperience: args.maxExperience ?? reference?.maxYears ?? parsed.maxYearsExperience ?? null,
+    seniority: reference?.seniority ?? parsed.seniority,
+    education: reference?.education[0] ?? parsed.education,
+    summary: reference
+      ? `${reference.role}; comparable career level and experience; core skills ${reference.coreSkills.join(", ") || "not stated"}.`
+      : parsed.summary,
     employers: args.employers ?? parsed.employers ?? [],
     excludeEmployers: [...new Set([...(args.excludeEmployers ?? []), ...(parsed.excludeEmployers ?? [])])],
     // Conversational intent is a hint layer over the engine, not a replacement:
     // explicit "must have" language tightens scoring, while "preferred" remains
     // a boost. The strict desk chips still own hard filters.
-    requiredSkills: occupation.explicitSkills,
-    preferredSkills: [...new Set([...occupation.inferredSkills, ...intentHints.niceToHave])],
+    requiredSkills: reference ? intentHints.mustHave : occupation.explicitSkills,
+    preferredSkills: [...new Set([
+      ...occupation.inferredSkills,
+      ...(reference ? parsed.requiredSkills ?? [] : []),
+      ...(reference ? parsed.preferredSkills ?? [] : []),
+      ...intentHints.niceToHave,
+    ])],
   };
   const employersAsked = req.employers ?? [];
 
@@ -349,6 +375,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   const docs = await backend.candidateDocsByIds(NO_ACTOR, ids, "search");
   const byId = new Map(docs.map((d) => [d._id, d]));
   const pool: Doc[] = ids.flatMap((id) => {
+    if (reference?.sourceCandidateId === id) return [];
     const d = byId.get(id);
     // Anyone whose CV file was lost in the Cloud move is left out (src/lib/cvMissing.ts).
     // No vector score means unavailable evidence, not zero similarity.

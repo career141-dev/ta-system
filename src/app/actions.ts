@@ -22,6 +22,8 @@ import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult"
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
 import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from "@/lib/eod-format";
 import { noticePeriodToDays } from "@/lib/answered";
+import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
+import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -2979,38 +2981,23 @@ export async function runDatabaseSearch(formData: FormData) {
   const mode = String(formData.get("mode") ?? "natural");
   const openingId = String(formData.get("openingId") ?? "");
   const cvFile = formData.get("cvFile");
+  let referenceParam = "";
+  const carriedReference = parseReferenceProfile(formData.get("ref"));
+  if (carriedReference) referenceParam = serializeReferenceProfile(carriedReference);
 
   if (cvFile && typeof cvFile === "object" && "arrayBuffer" in cvFile && (cvFile as File).size > 0) {
     const file = cvFile as File;
+    const fileProblem = referenceCvFileProblem(file.name, file.size);
+    if (fileProblem) await back(fileProblem, "error");
     try {
       const buffer = Buffer.from(await file.arrayBuffer());
       const { extractBlueprintFromFile } = await import("@/lib/referenceCv");
       const { blueprint: bp } = await extractBlueprintFromFile(buffer, file.name);
-
-      const parts: string[] = [];
-      if (bp.targetTitle) {
-        parts.push(bp.targetTitle);
-      }
-      if (bp.skills && bp.skills.length > 0) {
-        parts.push(`skills: ${bp.skills.slice(0, 5).join(", ")}`);
-      }
-      if (bp.totalExperienceYears) {
-        parts.push(`${bp.totalExperienceYears} years experience`);
-      } else if (bp.minYears) {
-        parts.push(`at least ${bp.minYears} years experience`);
-      }
-      if (bp.industries && bp.industries.length > 0) {
-        parts.push(`industry: ${bp.industries.slice(0, 2).join(", ")}`);
-      }
-
-      const cvSummary = parts.join(" · ") || bp.suggestedQuery || "Candidate match";
-      if (said) {
-        said = `Candidates like reference CV (${cvSummary}) · ${said}`;
-      } else {
-        said = `Candidates matching reference CV: ${cvSummary}`;
-      }
+      referenceParam = serializeReferenceProfile(referenceProfileFromBlueprint(bp));
+      if (!said) said = "Find candidates similar to this reference CV.";
     } catch (err) {
       console.warn("[runDatabaseSearch] CV document extraction fallback:", err);
+      await back((err as Error).message || "Could not read that CV. Try a PDF, DOCX or TXT file.", "error");
     }
   }
 
@@ -3024,6 +3011,7 @@ export async function runDatabaseSearch(formData: FormData) {
   while (turns.length > 2 && turns.join("\n").length > 4000) turns.splice(1, 1);
   const q = turns.join("\n").slice(0, 4000);
   const params = new URLSearchParams({ q });
+  if (referenceParam) params.set("ref", referenceParam);
   if (mode === "boolean" || mode === "meaning") params.set("mode", mode);
   if (openingId) params.set("for", openingId);
   redirect(`/database/results?${params.toString()}`);
@@ -3039,6 +3027,8 @@ export async function saveSearch(formData: FormData) {
   const count = Number(formData.get("count") ?? 0);
   const intent = safeSearchIntent(formData.get("intent"));
   const turns = safeSearchTurns(formData.get("turns"));
+  const savedReference = parseReferenceProfile(formData.get("ref"));
+  const referenceProfile = savedReference ? serializeReferenceProfile(savedReference) : null;
   if (!query) return;
 
   const { isConvex } = await import("@/data/mode");
@@ -3056,10 +3046,11 @@ export async function saveSearch(formData: FormData) {
         count,
         intent,
         turns,
+        referenceProfile,
       });
     }
   } else {
-    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count, intent, turns });
+    repo.saveSearch({ name, query, mode, ownerId: user.id, openingId, count, intent, turns, referenceProfile });
   }
   revalidatePath("/database", "layout");
   await back(`Search saved as "${name}".`);

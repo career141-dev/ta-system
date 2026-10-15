@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Pager } from "@/components/Pager";
 import { repo } from "@/data/store";
 import { assess } from "@/lib/assessment";
-import type { Score } from "@/lib/scoring";
+import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
 import { conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, turnsOf, withoutChip, withValue } from "@/lib/query";
@@ -37,6 +37,7 @@ import {
   type EngineSearch,
 } from "@/lib/engineSearch";
 import type { SearchCriteria } from "@/data/types";
+import { parseReferenceProfile, type ReferenceSearchProfile } from "@/lib/referenceSearchProfile";
 
 const PAGE = 25;
 const ENGINE_LIMIT = 400;
@@ -64,6 +65,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
   const q = typeof sp.q === "string" ? sp.q : "";
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
   const forOpening = typeof sp.for === "string" ? sp.for : null;
+  const referenceParam = typeof sp.ref === "string" && parseReferenceProfile(sp.ref) ? sp.ref : "";
   const searchKey = (() => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
@@ -83,7 +85,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
           </span>
         )}
       </div>
-      <Suspense key={searchKey} fallback={<Searching q={q} mode={mode} forOpening={forOpening} />}>
+      <Suspense key={searchKey} fallback={<Searching q={q} mode={mode} forOpening={forOpening} referenceParam={referenceParam} />}>
         <Results sp={sp} />
       </Suspense>
     </main>
@@ -91,7 +93,7 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
 }
 
 /** What is on screen while a new search runs: the same frame, the box still usable. */
-function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "boolean" | "meaning"; forOpening: string | null }) {
+function Searching({ q, mode, forOpening, referenceParam }: { q: string; mode: "natural" | "boolean" | "meaning"; forOpening: string | null; referenceParam: string }) {
   const vocab = repo.vocabulary();
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[400px_1fr]">
@@ -102,6 +104,7 @@ function Searching({ q, mode, forOpening }: { q: string; mode: "natural" | "bool
             prior={q}
             initialMode={mode}
             openingId={forOpening}
+            referenceProfile={referenceParam}
             compact
           />
         </div>
@@ -130,6 +133,8 @@ async function Results({ sp }: { sp: Params }) {
   const forOpening = typeof sp.for === "string" ? sp.for : null;
   const page = Math.max(1, Number(sp.page ?? 1) || 1);
   const candidateId = typeof sp.candidate === "string" ? sp.candidate : null;
+  const referenceParam = typeof sp.ref === "string" ? sp.ref : "";
+  const referenceProfile = parseReferenceProfile(referenceParam);
   if (candidateId && isConvex()) {
     await primeStore({ candidateIds: [candidateId] });
   }
@@ -147,7 +152,7 @@ async function Results({ sp }: { sp: Params }) {
   const criteria = edited ? criteriaFromParams(sp) : (parsed?.criteria ?? criteriaFromParams(sp));
   const ignored = edited ? [] : (parsed?.ignored ?? []);
   const booleanError = mode === "boolean" ? parseBoolean(q).error : null;
-  const view: ViewProps = { sp, q, mode, forOpening, page, candidateId, vocab, edited, criteria, ignored, booleanError };
+  const view: ViewProps = { sp, q, mode, forOpening, page, candidateId, vocab, edited, criteria, ignored, booleanError, referenceParam, referenceProfile };
 
   /*
    * How the engine's answer reaches the screen.
@@ -166,15 +171,15 @@ async function Results({ sp }: { sp: Params }) {
   if (isConvex() && q && mode === "natural") {
     // The engine gets the messages one per line, not joined: it reads them as
     // a conversation, a later message changing an earlier one (9 Oct).
-    const held = cachedEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+    const held = cachedEngineSearch(q, criteria, ENGINE_LIMIT, edited, referenceProfile);
     if (held) return <ResultsView {...view} engine={held} />;
-    const full = engineSearch(q, criteria, ENGINE_LIMIT, edited);
+    const full = engineSearch(q, criteria, ENGINE_LIMIT, edited, referenceProfile);
     // Started above, so an unawaited failure here is not an unhandled one; the
     // streamed half reports it.
     full.catch(() => undefined);
     let quick: EngineSearch | null = null;
     try {
-      quick = await quickEngineSearch(q, criteria, ENGINE_LIMIT, edited);
+      quick = await quickEngineSearch(q, criteria, ENGINE_LIMIT, edited, referenceProfile);
     } catch {
       // No quick answer: wait for the full one, as before.
     }
@@ -200,6 +205,8 @@ interface ViewProps {
   criteria: SearchCriteria;
   ignored: string[];
   booleanError: string | null;
+  referenceParam: string;
+  referenceProfile: ReferenceSearchProfile | null;
 }
 
 /** The streamed half: the engine's full answer, or the words when it cannot run. */
@@ -223,6 +230,8 @@ async function ResultsView({
   criteria,
   ignored,
   booleanError,
+  referenceParam,
+  referenceProfile,
   engine,
   engineError,
   refining = false,
@@ -357,6 +366,7 @@ async function ResultsView({
   const best = similarity ? Math.max(0, ...similarity.values()) : 0;
   const showBelow = (sp as Record<string, string | undefined>).below === "1";
   const engineRanked = !!engine;
+  const referenceRanked = engineRanked && !!referenceProfile;
   const engineOrder = new Map([...engineHits.keys()].map((id, index) => [id, index]));
   /*
    * The bar below is a bar on cosine similarity, and the engine's number is not
@@ -366,8 +376,8 @@ async function ResultsView({
    * engine ranked the list the bar is zero: everyone it sent back is shown, in
    * its order, and the criteria below still narrow them.
    */
-  const bar = engineRanked ? 0 : isMeaningBased() ? RELEVANT_SIMILARITY : Math.max(0.08, best * 0.6);
-  const floor = engineRanked ? 0 : showBelow ? bar - (isMeaningBased() ? BELOW_BAR : 0.04) : bar;
+  const bar = referenceRanked ? FIT_BANDS.worth / 100 : engineRanked ? 0 : isMeaningBased() ? RELEVANT_SIMILARITY : Math.max(0.08, best * 0.6);
+  const floor = referenceRanked ? (showBelow ? 0 : bar) : engineRanked ? 0 : showBelow ? bar - (isMeaningBased() ? BELOW_BAR : 0.04) : bar;
   // What is still ours to enforce. Where the engine ran it has already applied
   // place and years against its own fields; see `deskCriteria`.
   const narrowing = engineRanked ? deskCriteria(criteria) : criteria;
@@ -376,7 +386,7 @@ async function ResultsView({
     limit: Number.MAX_SAFE_INTEGER,
     similarity,
     floor,
-    belowFloor: showBelow ? undefined : bar - (isMeaningBased() ? BELOW_BAR : 0.04),
+    belowFloor: showBelow ? undefined : referenceRanked ? 0 : bar - (isMeaningBased() ? BELOW_BAR : 0.04),
   });
   /*
    * One score, not two.
@@ -444,6 +454,12 @@ async function ResultsView({
     results.splice(0, results.length, ...results.filter((r) => inSelectedLevels(r.candidate, pickedLevels)));
   }
   const total = pickedLevels.size ? results.length : foundTotal;
+  const strongReferenceMatches = referenceProfile
+    ? results.filter((r) => (engineHits.get(r.candidate.id)?.score ?? 0) >= FIT_BANDS.strong).length
+    : 0;
+  const broaderReferenceMatches = referenceProfile
+    ? (engine?.hits ?? []).filter((hit) => hit.score < FIT_BANDS.worth).length
+    : 0;
 
   const shown = results.slice((page - 1) * PAGE, page * PAGE);
 
@@ -465,6 +481,7 @@ async function ResultsView({
     q,
     ...(mode !== "natural" ? { mode } : {}),
     ...(forOpening ? { for: forOpening } : {}),
+    ...(referenceProfile ? { ref: referenceParam } : {}),
   };
 
 
@@ -538,6 +555,14 @@ async function ResultsView({
     for (const k of next) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
+  const broaderHref = (include: boolean) => {
+    const p = criteriaToParams(criteria);
+    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    if (edited) p.set("edited", "1");
+    if (include) p.set("below", "1");
+    for (const k of pickedLevels) p.append("lvl", k);
+    return `${base}?${p.toString()}`;
+  };
 
   /*
    * What a row says this person met and missed.
@@ -551,10 +576,13 @@ async function ResultsView({
     const hit = engineHits.get(r.candidate.id);
     if (!hit) return { hits: r.hits, misses: r.misses };
     const e = hitsAndMisses(hit, r.candidate, criteria, edited);
-    const misses = [...new Set([...e.misses, ...r.misses])];
+    const candidateSkills = (r.candidate.skills ?? []).map((skill) => skill.toLowerCase());
+    const sharedReferenceSkills = referenceProfile?.coreSkills.filter((skill) => candidateSkills.some((have) => have.includes(skill.toLowerCase()) || skill.toLowerCase().includes(have))) ?? [];
+    const missingReferenceSkill = referenceProfile?.coreSkills.find((skill) => !sharedReferenceSkills.includes(skill));
+    const misses = [...new Set([...e.misses, ...(missingReferenceSkill ? [`Verify ${missingReferenceSkill}`] : []), ...r.misses])];
     // A thing the engine counted as met is not also missing, whatever the
     // platform's own check made of it.
-    const hits = [...new Set([...e.hits, ...r.hits])];
+    const hits = [...new Set([...e.hits, ...sharedReferenceSkills.slice(0, 4), ...r.hits])];
     return { hits, misses: misses.filter((m) => !hits.includes(m)) };
   };
 
@@ -676,6 +704,9 @@ async function ResultsView({
             engineTerms={engineTerms}
             companies={engineCompanies}
             intent={searchIntent}
+            referenceProfile={referenceProfile}
+            strongMatches={strongReferenceMatches}
+            broaderMatches={broaderReferenceMatches}
           />
 
           <div className="rounded-xl border border-rule bg-surface p-4">
@@ -684,6 +715,7 @@ async function ResultsView({
               prior={q}
               initialMode={mode}
               openingId={forOpening}
+              referenceProfile={referenceProfile ? referenceParam : ""}
               compact
             />
             <form action={saveSearch} className="mt-3 flex items-center gap-2 border-t border-rule pt-3">
@@ -691,6 +723,7 @@ async function ResultsView({
               <input type="hidden" name="mode" value={mode} />
               <input type="hidden" name="count" value={total} />
               <input type="hidden" name="turns" value={JSON.stringify(turnsOf(q))} />
+              {referenceProfile && <input type="hidden" name="ref" value={referenceParam} />}
               {searchIntent && <input type="hidden" name="intent" value={JSON.stringify(searchIntent)} />}
               {forOpening && <input type="hidden" name="openingId" value={forOpening} />}
               <input
@@ -760,13 +793,16 @@ async function ResultsView({
                 <span className="text-[11.5px] font-semibold uppercase tracking-wider text-ink-soft">
                   <span className="tabular">{total.toLocaleString()}</span> {mode === "meaning" ? (total === 1 ? "relevant person" : "relevant people") : "results"}
                 </span>
-                {mode === "meaning" && below > 0 && (
-                  <a href={`${pageHref(1)}&below=1`} className="text-[12px] font-medium text-accent hover:underline">
-                    {below.toLocaleString()} more possible {below === 1 ? "match" : "matches"} just below the bar — show {below === 1 ? "it" : "them"}
-                  </a>
+                {(mode === "meaning" || referenceProfile) && below > 0 && !showBelow && (
+                  <Link href={broaderHref(true)} className="text-[12px] font-medium text-accent hover:underline">
+                    {referenceProfile ? `Show ${below.toLocaleString()} broader ${below === 1 ? "match" : "matches"}` : `${below.toLocaleString()} more possible ${below === 1 ? "match" : "matches"} just below the bar — show ${below === 1 ? "it" : "them"}`}
+                  </Link>
                 )}
-                {mode === "meaning" && showBelow && (
-                  <span className="text-[12px] text-ink-soft">Including people just below the relevance bar</span>
+                {(mode === "meaning" || referenceProfile) && showBelow && (
+                  <span className="text-[12px] text-ink-soft">
+                    Including broader, lower-confidence matches
+                    {referenceProfile && <> · <Link href={broaderHref(false)} className="font-medium text-accent hover:underline">hide them</Link></>}
+                  </span>
                 )}
                 <span className="text-[12px] text-ink-faint">
                   {/* `scanned` counts the rows this request happens to hold,

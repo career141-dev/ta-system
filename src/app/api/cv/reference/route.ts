@@ -3,12 +3,13 @@ import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
 import { extractBlueprintFromFile, extractBlueprintFromText, type ReferenceCvBlueprint } from "@/lib/referenceCv";
+import { MAX_REFERENCE_CV_BYTES, referenceCvFileProblem } from "@/lib/referenceCvFile";
 
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_BYTES = MAX_REFERENCE_CV_BYTES;
 const TYPES: Record<string, string> = {
   "application/pdf": "PDF",
-  "application/msword": "Word",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "Word",
+  "text/plain": "Text",
 };
 
 const answer = (data: Record<string, unknown>, status = 200) =>
@@ -48,6 +49,8 @@ export async function POST(req: NextRequest) {
           minYears: c.totalExperienceYears ? Math.max(1, c.totalExperienceYears - 2) : null,
           maxYears: c.totalExperienceYears ? c.totalExperienceYears + 3 : null,
           skills: c.skills ?? [],
+          coreSkills: (c.skills ?? []).slice(0, 6),
+          supportingSkills: (c.skills ?? []).slice(6, 14),
           employers: [c.currentEmployer, ...(c.workHistory ?? []).map((h) => h.employer)].filter((e): e is string => Boolean(e)),
           industries: c.industries ?? [],
           education: c.educationDegree ? [c.educationDegree] : [],
@@ -73,20 +76,20 @@ export async function POST(req: NextRequest) {
 
     const file = form.get("file");
     if (!(file instanceof File) || file.size === 0) {
-      return answer({ ok: false, message: "Please select a CV document (PDF or Word)." }, 400);
+      return answer({ ok: false, message: "Please select a PDF, DOCX or TXT CV." }, 400);
     }
-    if (file.size > MAX_BYTES) {
-      return answer({ ok: false, message: "That file is over 10 MB. Please save a smaller document." }, 413);
-    }
+    const fileProblem = referenceCvFileProblem(file.name, file.size);
+    if (fileProblem) return answer({ ok: false, message: fileProblem }, file.size > MAX_BYTES ? 413 : 400);
 
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    const isDocx = TYPES[file.type] === "Word" || /\.(docx?|doc)$/i.test(file.name);
-    if (!isPdf && !isDocx) {
-      return answer({ ok: false, message: "A reference CV must be a PDF or Word document (.pdf, .docx, .doc)." }, 400);
+    const isDocx = TYPES[file.type] === "Word" || /\.docx$/i.test(file.name);
+    const isText = TYPES[file.type] === "Text" || /\.txt$/i.test(file.name);
+    if (!isPdf && !isDocx && !isText) {
+      return answer({ ok: false, message: "A reference CV must be a PDF, DOCX or TXT file." }, 400);
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const { blueprint, text } = await extractBlueprintFromFile(buffer, file.type || (isPdf ? "application/pdf" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+    const { blueprint, text } = await extractBlueprintFromFile(buffer, file.type || (isPdf ? "application/pdf" : isDocx ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "text/plain"));
 
     return answer({
       ok: true,

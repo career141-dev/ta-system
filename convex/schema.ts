@@ -2784,6 +2784,8 @@ export default defineSchema({
     /** Recruiter intent memory only — no candidate contact data or raw CV text. */
     intent: v.optional(v.union(v.any(), v.null())),
     turns: v.optional(v.array(v.string())),
+    /** Encoded role/skill profile only; never raw CV text or contact data. */
+    referenceProfile: v.optional(v.union(v.string(), v.null())),
   }).index("by_owner", ["ownerId"])
     // Deleting an opening clears it from saved searches (ta/openingDelete.ts, 2 Oct).
     .index("by_opening", ["openingId"]),
