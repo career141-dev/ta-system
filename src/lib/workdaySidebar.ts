@@ -1,6 +1,6 @@
 import type { WorkdayCheck, WorkdayJobView } from "./workday";
 
-const CANDIDATE_TASKS = new Set(["review", "candidate", "details", "handoff", "followup", "email", "profile", "upload", "director_wait", "director_candidate"]);
+const CANDIDATE_TASKS = new Set(["review", "candidate", "details", "handoff", "followup", "email", "profile", "upload", "director_wait"]);
 
 /** One sidebar check per job; the backend and job pages retain the individual actions. */
 export function sidebarChecks(job: WorkdayJobView): WorkdayCheck[] {

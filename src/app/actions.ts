@@ -12,6 +12,7 @@ import type { FeedbackCategory, FeedbackPriority, FeedbackStatus, FeedbackItem }
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { BACK_TO_TABLES_REASON, movedBackToTables, awaitingShortlist } from "@/lib/pipeline";
 import { BULK_STAGES } from "@/lib/bulkStages";
+import { linkedinPostUrl } from "@/lib/workdayRequirements";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
@@ -1342,13 +1343,11 @@ export async function addJobPost(formData: FormData) {
   const title = String(formData.get("title") ?? "").trim();
   if (!title) return;
   const externalUrl = String(formData.get("externalUrl") ?? formData.get("jobLink") ?? "").trim() || null;
-  // The same check as editing a post (updatePost): a link without a job or
-  // project number is saved but never routes a CV (review of PR #31, 24 Sep).
+  // Creation, editing and EOD readiness accept the same LinkedIn link formats.
   if (externalUrl) {
-    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
-    if (!linkedinJobId(externalUrl) && !linkedinProjectId(externalUrl)) {
+    if (!linkedinPostUrl(externalUrl)) {
       await fail(
-        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
+        "Paste a valid LinkedIn job, Recruiter project, or job post link.",
       );
     }
   }
@@ -1407,10 +1406,9 @@ export async function updatePost(formData: FormData) {
   const linkBefore = repo.jobPosts().find((p) => p.id === postId)?.externalUrl ?? null;
   if (formData.has("externalUrl")) {
     const url = String(formData.get("externalUrl") ?? "").trim();
-    const { linkedinJobId, linkedinProjectId } = await import("../../convex/lib/postRouting");
-    if (url && !linkedinJobId(url) && !linkedinProjectId(url)) {
+    if (url && !linkedinPostUrl(url)) {
       await fail(
-        "That LinkedIn link has no job or project number. Paste the job's LinkedIn Recruiter link (linkedin.com/talent/hire/…), or the \"View applicant\" link from one of its application emails.",
+        "Paste a valid LinkedIn job, Recruiter project, or job post link.",
       );
     }
     patch.externalUrl = url || null;
@@ -3471,7 +3469,7 @@ export async function keepSuggestion(formData: FormData) {
     held = await matchLink(entryId, user.id);
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
-  await back(`${heldLine(held)}${s!.name ?? "They"} added to Excel Tables as Shortlisted.`);
+  await back(`${heldLine(held)}${s!.name ?? "They"} selected and added to Excel Tables.`);
 }
 
 /** The Excel Tables row a suggestion already has on this opening — by its address, or name and company (1 Oct). */
@@ -4672,6 +4670,7 @@ export async function sendEod(formData: FormData) {
   // here, not only on the button: the form can arrive from a stale page. Leads and
   // directors are not held to it, and the client copy sends no email.
   const research = checkResearchSubmission({
+    excused: isConvex() && kind === "director" && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
     role: user.role,
     kind,
     link: String(formData.get("chatgptLink") ?? ""),
@@ -4868,6 +4867,7 @@ export async function resendEod(formData: FormData) {
     const recipients = eodRecipients({ removed, extraTo: toList.ok, extraCc: ccList.ok, shortlistInbox: repo.shortlistInbox() });
     if (recipients.to.length === 0) return done("Not sent: nobody is on the To line. Add an address as To.");
     const research = checkResearchSubmission({
+      excused: isConvex() && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
       role: user.role,
       kind: "director",
       link: String(formData.get("chatgptLink") ?? ""),
@@ -5013,6 +5013,7 @@ async function emailEod(input: {
   revised?: boolean;
 }): Promise<{ ok: true; note: string; workdayMailId?: string | null } | { ok: false; error: string }> {
   const { openingId, user } = input;
+  if (!input.applicationIds.length) return { ok: false, error: "Include at least one CV from Director Review before sending the end-of-day email." };
   const opening = repo.opening(openingId);
   if (!opening) return { ok: false, error: "That opening no longer exists." };
   const to = input.to.trim() || EOD_TO;
@@ -5077,6 +5078,8 @@ async function emailEod(input: {
       left.push(c.fullName);
     }
   }
+
+  if (!attachments.length) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the end-of-day email." };
 
   const html = eodEmailHtml({
     rows,

@@ -81,6 +81,11 @@ export default defineSchema({
     workdayId: v.optional(v.id("taWorkdays")), noCandidateReason: v.optional(v.string()),
     noCandidateAt: v.optional(v.number()), chatgptLink: v.optional(v.string()), confirmedAt: v.optional(v.number()),
   }).index("by_user_job", ["userId", "jobId"]).index("by_job", ["jobId"]),
+  taWorkdayExceptions: defineTable({
+    workdayId: v.id("taWorkdays"), userId: v.id("users"), jobId: v.id("jobs"),
+    key: v.string(), reason: v.string(), version: v.string(), at: v.number(), by: v.id("users"),
+    action: v.union(v.literal("submit"), v.literal("withdraw")),
+  }).index("by_workday_job", ["workdayId", "jobId"]),
   taWorkdayTaskEvents: defineTable({
     workdayId: v.id("taWorkdays"), userId: v.id("users"), jobId: v.id("jobs"),
     key: v.string(), label: v.string(), href: v.string(), kind: v.string(),
@@ -2092,10 +2097,12 @@ export default defineSchema({
       v.literal("scoop_received"),
       v.literal("strategy_assigned"),
       v.literal("workday_started"), v.literal("workday_finished"),
-      v.literal("workday_request"), v.literal("workday_decision")
+      v.literal("workday_request"), v.literal("workday_decision"), v.literal("workday_exception")
     ),
     title: v.string(),
     body: v.string(),
+    workdayId: v.optional(v.id("taWorkdays")),
+    taskKey: v.optional(v.string()),
     cvId: v.optional(v.id("cvs")),
     candidateId: v.optional(v.id("candidates")),
     jobId: v.optional(v.id("jobs")),

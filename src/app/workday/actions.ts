@@ -30,6 +30,8 @@ export async function changeWorkday(
       approve: value("approve") === "yes",
       reason: value("reason"),
     });
+  else if (op === "taskException")
+    Object.assign(args, { workdayId: value("workdayId"), jobId: value("jobId"), key: value("key"), reason: value("reason"), withdraw: value("withdraw") === "yes" });
   else if (op === "carry")
     Object.assign(args, {
       workdayId: value("workdayId"),

@@ -68,6 +68,8 @@ export const listForUser = internalQuery({
         title: n.title,
         body: n.body,
         jobId: (n.jobId ?? null) as string | null,
+        href: n.type === "workday_exception" && n.workdayId && n.taskKey
+          ? `/openings?checks=open&checkDay=${encodeURIComponent(n.workdayId)}&checkJob=${encodeURIComponent(n.jobId ?? "")}&checkTask=${encodeURIComponent(n.taskKey)}` : null,
         read: n.read,
         createdAt: n.createdAt,
       })),
