@@ -2975,9 +2975,45 @@ export async function setUserActive(formData: FormData) {
 export async function runDatabaseSearch(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "database.read");
-  const said = String(formData.get("q") ?? "").trim();
+  let said = String(formData.get("q") ?? "").trim();
   const mode = String(formData.get("mode") ?? "natural");
   const openingId = String(formData.get("openingId") ?? "");
+  const cvFile = formData.get("cvFile");
+
+  if (cvFile && typeof cvFile === "object" && "arrayBuffer" in cvFile && (cvFile as File).size > 0) {
+    const file = cvFile as File;
+    try {
+      const buffer = Buffer.from(await file.arrayBuffer());
+      const { extractBlueprintFromFile } = await import("@/lib/referenceCv");
+      const { blueprint: bp } = await extractBlueprintFromFile(buffer, file.name);
+
+      const parts: string[] = [];
+      if (bp.targetTitle) {
+        parts.push(bp.targetTitle);
+      }
+      if (bp.skills && bp.skills.length > 0) {
+        parts.push(`skills: ${bp.skills.slice(0, 5).join(", ")}`);
+      }
+      if (bp.totalExperienceYears) {
+        parts.push(`${bp.totalExperienceYears} years experience`);
+      } else if (bp.minYears) {
+        parts.push(`at least ${bp.minYears} years experience`);
+      }
+      if (bp.industries && bp.industries.length > 0) {
+        parts.push(`industry: ${bp.industries.slice(0, 2).join(", ")}`);
+      }
+
+      const cvSummary = parts.join(" · ") || bp.suggestedQuery || "Candidate match";
+      if (said) {
+        said = `Candidates like reference CV (${cvSummary}) · ${said}`;
+      } else {
+        said = `Candidates matching reference CV: ${cvSummary}`;
+      }
+    } catch (err) {
+      console.warn("[runDatabaseSearch] CV document extraction fallback:", err);
+    }
+  }
+
   // A reply under the results carries on the conversation (5 Oct): the new
   // message is added to the search so far, one message per line (lib/query
   // turnsOf). Boolean is a literal string and always stands alone.

@@ -38,6 +38,9 @@ export function SearchBox({
   const [q, setQ] = useState(initialQuery);
   const [mode, setMode] = useState<"natural" | "boolean" | "meaning">(initialMode);
   const [focused, setFocused] = useState(false);
+  const [attachedFile, setAttachedFile] = useState<File | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   // A reply adds to the search; a Boolean string stands alone.
   const replying = !!prior && mode !== "boolean" && initialMode !== "boolean";
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -62,7 +65,7 @@ export function SearchBox({
   };
 
   return (
-    <form action={runDatabaseSearch} className="relative">
+    <form action={runDatabaseSearch} encType="multipart/form-data" onSubmit={() => setIsSubmitting(true)} className="relative">
       <input type="hidden" name="mode" value={mode} />
       {openingId && <input type="hidden" name="openingId" value={openingId} />}
       {replying && <input type="hidden" name="prior" value={prior} />}
@@ -72,6 +75,29 @@ export function SearchBox({
           focused ? "border-brand-line shadow-[0_0_0_3px_rgba(22,91,66,0.08)]" : "border-rule-strong"
         }`}
       >
+        {attachedFile && (
+          <div className="flex items-center gap-2 border-b border-rule bg-paper px-3.5 py-1.5 text-[12px]">
+            <span className="text-sm">📄</span>
+            <span className="truncate font-medium text-ink max-w-[260px] sm:max-w-[420px]" title={attachedFile.name}>
+              {attachedFile.name}
+            </span>
+            <span className="text-[11px] text-ink-faint">
+              ({Math.round(attachedFile.size / 1024)} KB)
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setAttachedFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+              className="ml-auto rounded px-1.5 py-0.5 text-ink-faint hover:text-danger hover:bg-tag text-[12px]"
+              title="Remove document"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         <textarea
           ref={ref}
           name="q"
@@ -88,11 +114,13 @@ export function SearchBox({
           autoFocus={autoFocus}
           rows={compact ? 3 : 2}
           placeholder={
-            mode === "boolean"
-              ? '("Merchandising Manager" OR "Senior Merchandiser") AND "Apparel"'
-              : replying
-                ? "Refine it — e.g. at least 8 years · knows React · not from Dialog · in Colombo instead"
-                : "I'm looking for a…"
+            attachedFile
+              ? "Add specific criteria (e.g. in Colombo · 5+ yrs exp · fintech) or press Search to match this CV"
+              : mode === "boolean"
+                ? '("Merchandising Manager" OR "Senior Merchandiser") AND "Apparel"'
+                : replying
+                  ? "Refine it — e.g. at least 8 years · knows React · not from Dialog · in Colombo instead"
+                  : "I'm looking for a…"
           }
           className={`w-full resize-none bg-transparent py-3 ${
             compact ? "px-3.5 pr-3.5 text-[13px]" : "px-4 pr-16 text-[15px]"
@@ -100,6 +128,36 @@ export function SearchBox({
         />
 
         <div className={`flex items-center gap-2.5 ${compact ? "px-3.5" : "px-4"} pb-2.5`}>
+          {/* Hidden File Input for CV document */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            name="cvFile"
+            accept=".pdf,.docx,.doc,.txt"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) setAttachedFile(file);
+            }}
+          />
+
+          {/* Attach CV Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
+              attachedFile
+                ? "bg-brand-soft text-brand font-semibold"
+                : "text-ink-soft hover:bg-tag hover:text-ink"
+            }`}
+            title="Attach a candidate CV (.pdf, .docx, .txt) to find lookalikes"
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+            <span>{attachedFile ? "CV attached" : "Attach CV"}</span>
+          </button>
+
           <span className="tabular text-[11.5px] text-ink-faint">
             {q.length.toLocaleString()}/4,000
           </span>
@@ -121,23 +179,27 @@ export function SearchBox({
           </div>
           {compact && (
             <button
-              disabled={!q.trim()}
+              disabled={(!q.trim() && !attachedFile) || isSubmitting}
               className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
             >
-              {replying ? "Send" : "Search"}
+              {isSubmitting ? "Searching…" : replying ? "Send" : "Search"}
             </button>
           )}
         </div>
 
         {!compact && (
           <button
-            disabled={!q.trim()}
+            disabled={(!q.trim() && !attachedFile) || isSubmitting}
             aria-label="Search"
             className="absolute right-3 top-3 grid h-10 w-10 place-items-center rounded-full bg-brand text-white transition-opacity hover:opacity-90 disabled:bg-rule-strong disabled:opacity-100"
           >
-            <svg width={18} height={18} viewBox="0 0 24 24" className="shrink-0" aria-hidden="true">
-              <path d="M3.4 20.4 21 12 3.4 3.6 3.4 10.1 16 12 3.4 13.9Z" fill="currentColor" />
-            </svg>
+            {isSubmitting ? (
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+            ) : (
+              <svg width={18} height={18} viewBox="0 0 24 24" className="shrink-0" aria-hidden="true">
+                <path d="M3.4 20.4 21 12 3.4 3.6 3.4 10.1 16 12 3.4 13.9Z" fill="currentColor" />
+              </svg>
+            )}
           </button>
         )}
       </div>
