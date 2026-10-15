@@ -43,7 +43,7 @@ export default async function DatabaseHome({
 
   // Read saved searches from Convex DB (persists across restarts) in Convex
   // mode, and from the in-memory file store otherwise.
-  let saved: { id: string; name: string; query: string; mode: "natural" | "boolean" | "meaning"; ownerId: string; openingId: string | null; createdAt: number; lastRunAt: number | null; lastResultCount: number | null; mine?: boolean }[] = [];
+  let saved: { id: string; name: string; query: string; mode: "natural" | "boolean" | "meaning"; ownerId: string; openingId: string | null; createdAt: number; lastRunAt: number | null; lastResultCount: number | null; referenceProfile?: string | null; mine?: boolean }[] = [];
   if (isConvex()) {
     try {
       const { convexActorForEmail, convexQuery } = await import("@/lib/convexServer");
@@ -129,7 +129,7 @@ export default async function DatabaseHome({
                 {mine.map((s) => (
                   <li key={s.id} className="flex items-start gap-3 px-5 py-3.5">
                     <Link
-                      href={`/database/results?q=${encodeURIComponent(s.query)}${s.mode !== "natural" ? `&mode=${s.mode}` : ""}${s.openingId ? `&for=${s.openingId}` : ""}`}
+                      href={`/database/results?q=${encodeURIComponent(s.query)}${s.mode !== "natural" ? `&mode=${s.mode}` : ""}${s.openingId ? `&for=${s.openingId}` : ""}${s.referenceProfile ? `&ref=${encodeURIComponent(s.referenceProfile)}` : ""}`}
                       className="min-w-0 flex-1"
                     >
                       <p className="text-[13px] font-medium hover:underline">{s.name}</p>
@@ -159,7 +159,7 @@ export default async function DatabaseHome({
               {others.map((s) => (
                 <li key={s.id}>
                   <Link
-                    href={`/database/results?q=${encodeURIComponent(s.query)}${s.openingId ? `&for=${s.openingId}` : ""}`}
+                    href={`/database/results?q=${encodeURIComponent(s.query)}${s.openingId ? `&for=${s.openingId}` : ""}${s.referenceProfile ? `&ref=${encodeURIComponent(s.referenceProfile)}` : ""}`}
                     className="block px-5 py-3.5"
                   >
                     <p className="text-[13px] font-medium hover:underline">{s.name}</p>

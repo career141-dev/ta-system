@@ -238,7 +238,7 @@ export function CvMatcher({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                accept=".pdf,.docx,.txt,application/pdf,text/plain,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                 onChange={handleFileSelect}
                 className="hidden"
               />
@@ -251,7 +251,7 @@ export function CvMatcher({
                 {file ? file.name : "Drag & drop reference CV here, or click to browse"}
               </p>
               <p className="mt-1 text-[12px] text-ink-faint">
-                Supports PDF or Word documents (.pdf, .docx, .doc) up to 10 MB
+                Supports PDF, DOCX or TXT documents up to 10 MB
               </p>
             </div>
           )}

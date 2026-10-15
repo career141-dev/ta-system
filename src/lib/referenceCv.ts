@@ -11,6 +11,10 @@ export interface ReferenceCvBlueprint {
   minYears: number | null;
   maxYears: number | null;
   skills: string[];
+  /** Strong, repeated or recent capabilities used to rank CV lookalikes. */
+  coreSkills?: string[];
+  /** Useful adjacent capabilities; absence must not exclude a candidate. */
+  supportingSkills?: string[];
   employers: string[];
   industries: string[];
   education: string[];
@@ -90,6 +94,8 @@ function heuristicBlueprint(text: string): ReferenceCvBlueprint {
     minYears,
     maxYears,
     skills: matchedSkills.slice(0, 10),
+    coreSkills: matchedSkills.slice(0, 6),
+    supportingSkills: matchedSkills.slice(6, 10),
     employers: [],
     industries: [],
     education: [],
@@ -136,6 +142,8 @@ Respond ONLY with a valid JSON object matching this schema:
   "minYears": number | null,
   "maxYears": number | null,
   "skills": ["string", "string"],
+  "coreSkills": ["the 3-6 strongest, repeated or most recent capabilities"],
+  "supportingSkills": ["other useful capabilities that should remain optional"],
   "employers": ["string", "string"],
   "industries": ["string", "string"],
   "education": ["string", "string"],
@@ -215,6 +223,8 @@ Do not include markdown fences, thoughts, or explanations. Only return valid JSO
         minYears: typeof parsed.minYears === "number" ? parsed.minYears : null,
         maxYears: typeof parsed.maxYears === "number" ? parsed.maxYears : null,
         skills: Array.isArray(parsed.skills) ? parsed.skills.map(String).filter(Boolean) : [],
+        coreSkills: Array.isArray(parsed.coreSkills) ? parsed.coreSkills.map(String).filter(Boolean) : [],
+        supportingSkills: Array.isArray(parsed.supportingSkills) ? parsed.supportingSkills.map(String).filter(Boolean) : [],
         employers: Array.isArray(parsed.employers) ? parsed.employers.map(String).filter(Boolean) : [],
         industries: Array.isArray(parsed.industries) ? parsed.industries.map(String).filter(Boolean) : [],
         education: Array.isArray(parsed.education) ? parsed.education.map(String).filter(Boolean) : [],
@@ -235,12 +245,12 @@ Do not include markdown fences, thoughts, or explanations. Only return valid JSO
 }
 
 /**
- * Extracts a ReferenceCvBlueprint from an uploaded file Buffer (PDF or Word DOC/DOCX).
+ * Extracts a ReferenceCvBlueprint from an uploaded PDF, DOCX or plain-text file.
  */
 export async function extractBlueprintFromFile(buffer: Buffer, fileType?: string): Promise<{ text: string; blueprint: ReferenceCvBlueprint }> {
   const text = await extractRawText(buffer, fileType);
   if (!text || text.trim().length < 20) {
-    throw new Error("Could not extract readable text from this document. Please ensure it is a valid PDF or Word CV.");
+    throw new Error("Could not extract readable text from this document. Please use a valid PDF, DOCX or TXT CV.");
   }
   const blueprint = await extractBlueprintFromText(text);
   return { text, blueprint };

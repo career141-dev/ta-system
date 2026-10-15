@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { SearchCriteria } from "@/data/types";
 import { criteriaToParams, describe, describeBoolean, parseBoolean, toBooleanString, turnsOf, withoutChip, type Chip } from "@/lib/query";
 import { appendSearchTurn, type SearchIntent } from "@/lib/searchIntent";
+import type { ReferenceSearchProfile } from "@/lib/referenceSearchProfile";
 
 /**
  * The left rail — spec §6D.2, modelled on Recruiter's AI-assisted search panel.
@@ -26,6 +27,9 @@ export function AiPanel({
   engineTerms = null,
   companies = null,
   intent = null,
+  referenceProfile = null,
+  strongMatches = 0,
+  broaderMatches = 0,
 }: {
   criteria: SearchCriteria;
   ignored: string[];
@@ -45,6 +49,9 @@ export function AiPanel({
   companies?: { names: string[]; scope: "current" | "any"; exclude: string[] } | null;
   /** Recruiter intent memory read from the conversation. */
   intent?: SearchIntent | null;
+  referenceProfile?: ReferenceSearchProfile | null;
+  strongMatches?: number;
+  broaderMatches?: number;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const chips: Chip[] = describe(criteria);
@@ -65,6 +72,14 @@ export function AiPanel({
     : engineTerms && engineTerms.length > 0
       ? engineTerms
       : [...criteria.titles, ...criteria.skills, ...criteria.industries, ...criteria.qualifications];
+  const clarifyingQuestions = intent
+    ? referenceProfile
+      ? [
+          ...intent.clarifyingQuestions.filter((question) => question.id === "overqualification" || question.id === "seniority_tolerance"),
+          ...intent.clarifyingQuestions.filter((question) => question.id !== "overqualification" && question.id !== "seniority_tolerance"),
+        ].slice(0, 1)
+      : intent.clarifyingQuestions.slice(0, 2)
+    : [];
   const clarificationHref = (turn: string) => {
     const p = criteriaToParams(criteria);
     for (const [k, v] of Object.entries(extra)) p.set(k, v);
@@ -159,10 +174,25 @@ export function AiPanel({
           {/* What it took the sentence to mean, before the results. A reading
               the TA disagrees with is the fastest explanation of a result list
               that looks wrong. */}
-          {engineRead && (
+          {engineRead && !referenceProfile && (
             <p className="rounded-lg bg-paper px-3 py-2.5 text-[12.5px] leading-relaxed text-ink">
               {engineRead}
             </p>
+          )}
+          {referenceProfile && (
+            <div className="w-full rounded-lg bg-brand-soft px-3.5 py-3 text-[12.5px] leading-relaxed text-ink">
+              <p>
+                I read the reference as a <span className="font-semibold">{referenceProfile.role}</span>
+                {referenceProfile.totalExperienceYears != null ? ` with about ${referenceProfile.totalExperienceYears} years of experience` : ""}.
+              </p>
+              {referenceProfile.coreSkills.length > 0 && (
+                <p className="mt-1 text-ink-soft">Strongest signals: {referenceProfile.coreSkills.slice(0, 6).join(", ")}.</p>
+              )}
+              <p className="mt-1.5 font-medium">
+                {strongMatches.toLocaleString()} strong {strongMatches === 1 ? "match" : "matches"}
+                {broaderMatches > 0 ? ` · ${broaderMatches.toLocaleString()} broader ${broaderMatches === 1 ? "profile" : "profiles"} available` : ""}
+              </p>
+            </div>
           )}
           {/* A company named in the search is a filter (owner, 9 Oct), so the
               panel says so plainly: a TA who sees only Dialog people knows why. */}
@@ -181,16 +211,16 @@ export function AiPanel({
               Leaving out people at <span className="font-semibold">{companies.exclude.join(", ")}</span> now.
             </p>
           )}
-          {intent && intent.summary && (
+          {intent && intent.summary && !referenceProfile && (
             <p className="rounded-lg bg-brand-soft px-3 py-2.5 text-[12.5px] leading-relaxed text-ink">
               {intent.summary}
             </p>
           )}
-          {intent && intent.clarifyingQuestions.length > 0 && (
+          {clarifyingQuestions.length > 0 && (
             <div className="w-full rounded-lg border border-rule bg-paper px-3.5 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-ink-faint">Clarify while results stay visible</p>
               <div className="mt-2.5 flex flex-col gap-3">
-                {intent.clarifyingQuestions.slice(0, 2).map((question) => (
+                {clarifyingQuestions.map((question) => (
                   <div key={question.id}>
                     <p className="text-[12.5px] font-medium leading-relaxed text-ink">{question.label}</p>
                     <div className="mt-1.5 flex flex-wrap gap-1.5">
@@ -209,14 +239,14 @@ export function AiPanel({
               </div>
             </div>
           )}
-          <p className="text-[12.5px] leading-relaxed text-ink-soft">
+          {!referenceProfile && <p className="text-[12.5px] leading-relaxed text-ink-soft">
             {mode === "boolean"
               ? "Words matched across the whole CV. Use this chat to:"
               : mode === "meaning"
                 ? "Describe the work, not the words. Similar work under other titles counts. Use this to:"
                 : "Describe who you need in words or full sentences. Use this to:"}
-          </p>
-          <ul className="ml-4 list-disc text-[12.5px] leading-relaxed text-ink-soft marker:text-ink-faint">
+          </p>}
+          {!referenceProfile && <ul className="ml-4 list-disc text-[12.5px] leading-relaxed text-ink-soft marker:text-ink-faint">
             {mode === "boolean" ? (
               <>
                 <li>Run the strings you already use on LinkedIn</li>
@@ -236,15 +266,15 @@ export function AiPanel({
                 <li>Rule out a company, a notice period or a band</li>
               </>
             )}
-          </ul>
-          <p className="text-[11.5px] leading-relaxed text-ink-faint">
+          </ul>}
+          {!referenceProfile && <p className="text-[11.5px] leading-relaxed text-ink-faint">
             {engineRead
               ? "This reads your sentence with a model and searches every CV in the database — the reading it took is above, and the filters it applied are always shown."
               : "This reads your sentence with fixed rules, not a model. It can miss things — the filters it applied are always shown, and anything it could not use is listed below."}
-          </p>
+          </p>}
         </div>
 
-        <div className="mt-4 rounded-lg bg-paper px-3.5 py-3">
+        {!referenceProfile && <div className="mt-4 rounded-lg bg-paper px-3.5 py-3">
           <p className="text-[12.5px] leading-relaxed text-ink-soft">
             {mode === "boolean" ? (
               <>A search has been started from your request. Change it through the box below, or by{" "}</>
@@ -258,9 +288,9 @@ export function AiPanel({
             </button>
             .
           </p>
-        </div>
+        </div>}
 
-        {terms.length > 0 && (
+        {!referenceProfile && terms.length > 0 && (
           <p className="mt-3.5 text-[12.5px] font-semibold leading-relaxed">
             {terms.slice(0, -1).join(", ")}
             {terms.length > 1 ? ", and " : ""}
