@@ -23,6 +23,7 @@ import { researchMissing, researchVersion, workSessionStart } from "../../src/li
 import { validateResearchLink } from "../../src/lib/eod-format";
 import {
   applyCarryForwards,
+  canExcuseCheck,
   completionBlockers,
   emailBlockers,
   validateCarry,
@@ -742,7 +743,7 @@ async function jobView(
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
     checks: await withTaskHistory(ctx, day, entry.jobId, resolved),
-    eodChecks: required.eodChecks,
+    eodChecks: await withTaskHistory(ctx, day, entry.jobId, required.eodChecks, false),
     shortlist,
     activity: {
       cvReviews: reviews,
@@ -917,12 +918,15 @@ export const emailPreflight = internalMutation({
     if (!entry) throw new Error("Add this opening to Today's Checks first.");
     await assignedJob(ctx, user, args.jobId);
     const link = validateResearchLink(args.link);
-    if (!link.ok || !args.confirmed) throw new Error(link.ok ? "Confirm your ChatGPT link before sending." : link.reason);
-    const notes = await ctx.db.query("taWorkdayCheckNotes").withIndex("by_user_job", q => q.eq("userId", user._id).eq("jobId", args.jobId)).first();
-    const patch = { workdayId: day._id, chatgptLink: link.url, confirmedAt: notes?.workdayId === day._id && notes.chatgptLink === link.url ? notes.confirmedAt ?? Date.now() : Date.now(),
-      ...(notes?.workdayId !== day._id ? { noCandidateReason: undefined, noCandidateAt: undefined } : {}) };
-    if (notes) await ctx.db.patch(notes._id, patch);
-    else await ctx.db.insert("taWorkdayCheckNotes", { userId: user._id, jobId: args.jobId, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) });
+    const excused = !args.link.trim() && !!(await requiredChecks(ctx, day, entry)).eodChecks.find(c => c.key.startsWith("chatgpt:"))?.exception;
+    if (!excused && (!link.ok || !args.confirmed)) throw new Error(link.ok ? "Confirm your ChatGPT link before sending." : link.reason);
+    if (link.ok && args.confirmed) {
+      const notes = await ctx.db.query("taWorkdayCheckNotes").withIndex("by_user_job", q => q.eq("userId", user._id).eq("jobId", args.jobId)).first();
+      const patch = { workdayId: day._id, chatgptLink: link.url, confirmedAt: notes?.workdayId === day._id && notes.chatgptLink === link.url ? notes.confirmedAt ?? Date.now() : Date.now(),
+        ...(notes?.workdayId !== day._id ? { noCandidateReason: undefined, noCandidateAt: undefined } : {}) };
+      if (notes) await ctx.db.patch(notes._id, patch);
+      else await ctx.db.insert("taWorkdayCheckNotes", { userId: user._id, jobId: args.jobId, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)) });
+    }
     await refreshWorkdayChecks(ctx, args.jobId, user._id);
     const result = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([result]);
@@ -931,7 +935,7 @@ export const emailPreflight = internalMutation({
 });
 
 export const dashboard = internalQuery({
-  args: { actorId: v.string(), detail: v.optional(v.boolean()), cursor: v.optional(v.string()), date: v.optional(v.string()) },
+  args: { actorId: v.string(), detail: v.optional(v.boolean()), cursor: v.optional(v.string()), date: v.optional(v.string()), focusWorkday: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     const role = roleOf(user);
@@ -1052,6 +1056,13 @@ export const dashboard = internalQuery({
       }
     }
     const team: WorkdayView[] = [];
+    // Notification links can target older workdays outside the current page.
+    // The normal per-job visibility checks below still apply.
+    if (lead && args.focusWorkday) {
+      const id = ctx.db.normalizeId("taWorkdays", args.focusWorkday);
+      const focused = id ? await ctx.db.get(id) : null;
+      recent = focused ? [focused] : [];
+    }
     for (const day of recent) {
       if (args.date && day.date !== args.date) continue;
       const visibleJobs =
@@ -1526,6 +1537,50 @@ export const markReviewed = internalMutation({
     });
     await refreshWorkdayChecks(ctx, app.jobId, user._id);
     return { ok: true };
+  },
+});
+
+export const taskException = internalMutation({
+  args: { actorId: v.string(), workdayId: v.id("taWorkdays"), jobId: v.id("jobs"), key: v.string(), reason: v.string(), withdraw: v.boolean() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    requireWorker(user);
+    const day = await ownedActive(ctx, user, args.workdayId);
+    if (day.date !== workdayDate(Date.now())) throw new Error("Record reasons on today's workday.");
+    const job = await assignedJob(ctx, user, args.jobId);
+    const entry = day.jobs.find(j => j.jobId === args.jobId);
+    if (!entry) throw new Error("This position is not on your workday.");
+    const check = (await requiredChecks(ctx, day, entry)).eodChecks.find(c => c.key === args.key);
+    if (!check || !canExcuseCheck(check) || !check.exceptionVersion) throw new Error("This task must be completed.");
+    if (check.status === "complete" && !args.withdraw) throw new Error("This task is already complete.");
+    const reason = args.reason.trim();
+    if (!args.withdraw && (!reason || reason.length > 1000)) throw new Error("Give a reason of up to 1,000 characters.");
+    const previous = (await ctx.db.query("taWorkdayExceptions").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect()).filter(e => e.key === args.key).at(-1);
+    const action = args.withdraw ? "withdraw" as const : "submit" as const;
+    if (previous?.action === action && (args.withdraw || (previous.reason === reason && previous.version === check.exceptionVersion))) return { ok: true };
+    if (args.withdraw && !previous) return { ok: true };
+    const at = Date.now();
+    await ctx.db.insert("taWorkdayExceptions", { workdayId: day._id, userId: user._id, jobId: args.jobId, key: args.key,
+      reason: args.withdraw ? previous!.reason : reason, version: check.exceptionVersion, at, by: user._id, action });
+    const recipients = (await ctx.db.query("users").collect()).filter(u => u.isActive && (roleOf(u) === "admin" || u._id === (entry.leadId ?? job.taLeadId)));
+    for (const recipient of recipients) await ctx.db.insert("notifications", { userId: recipient._id, type: "workday_exception", jobId: args.jobId,
+      workdayId: day._id, taskKey: args.key, title: `${user.fullName}: ${args.withdraw ? "reason withdrawn" : "reason submitted"}`,
+      body: `${job.title} · ${check.label} · ${args.withdraw ? previous!.reason : reason}`, read: false, createdAt: new Date(at).toISOString() });
+    await refreshWorkdayChecks(ctx, args.jobId, user._id);
+    return { ok: true };
+  },
+});
+
+export const researchExceptionAllowed = internalQuery({
+  args: { actorId: v.string(), jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    if (!["ta", "ta_support"].includes(roleOf(user))) return false;
+    await assignedJob(ctx, user, args.jobId);
+    const day = await activeFor(ctx, user._id);
+    const entry = day?.jobs.find(j => j.jobId === args.jobId);
+    if (!day || !entry) return false;
+    return !!(await requiredChecks(ctx, day, entry)).eodChecks.find(c => c.key.startsWith("chatgpt:"))?.exception;
   },
 });
 

@@ -2,7 +2,7 @@ import type { QueryCtx, MutationCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARCH_LABELS, workSessionStart, SUGGESTIONS_WORKDAY_REQUIRED, MIN_OWN_EXCEL_PROFILES } from "../../src/lib/workdayRequirements";
 import type { WorkdayCheck } from "../../src/lib/workday";
-import { isEodSendCheck } from "../../src/lib/workday";
+import { isEodSendCheck, canExcuseCheck, applyTaskExceptions, workdayDate } from "../../src/lib/workday";
 import { linkKey } from "../../src/lib/url";
 
 export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, entry: Doc<"taWorkdays">["jobs"][number]) {
@@ -57,9 +57,21 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     confirmedAt: ownNotes?.confirmedAt ?? accepted.at(-1)?.acceptedAt,
     emailAt: accepted.length ? Math.min(...accepted.map(r => r.finalizedAt!)) : undefined,
   };
-  const checks = setupChecks(setup, true);
+  // Version the underlying evidence, not the exception or a rendered progress label.
+  const versions: Record<string, unknown> = {
+    jd_review: [setup.jd.version, setup.jd.approved, setup.jd.reviewedVersion],
+    linkedin_post: posts.map(p => [p._id, p.externalUrl]),
+    suggestions: [suggestionVersion, latest.map(s => [s._id, s.status])],
+    excel_profiles: unique.map(l => [l._id, l.linkedinUrl]),
+    chatgpt: [ownNotes?.chatgptLink ?? null, ownNotes?.confirmedAt ?? null],
+  };
+  const exceptions = ctx.db.normalizeId("taWorkdays", day._id)
+    ? await ctx.db.query("taWorkdayExceptions").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect() : [];
+  const decorate = (rows: WorkdayCheck[]) => applyTaskExceptions(rows.map(c => canExcuseCheck(c)
+    ? { ...c, exceptionVersion: JSON.stringify([since, versions[c.key.split(":")[0]]]) } : c), exceptions, day.date === workdayDate(Date.now()));
+  const checks = decorate(setupChecks(setup, true));
   // Saved setup can be reused; the same send requirements apply in every work type.
-  const eodChecks = setupChecks({ ...setup, workType: "100%" }).filter(isEodSendCheck);
+  const eodChecks = decorate(setupChecks({ ...setup, workType: "100%" }).filter(isEodSendCheck));
   const suggestionsCheck = eodChecks.find(c => c.key.startsWith("suggestions:")) ?? null;
   const candidateCheck = checks.find(c => c.key.startsWith("director_cv:"));
   if (candidateCheck?.status === "complete" && ready.length && !accepted.length) {
@@ -84,16 +96,17 @@ export async function recordJdReview(ctx: MutationCtx, userId: Id<"users">, jobI
 }
 
 /** Event reads never manufacture a completion time for legacy evidence. */
-export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, jobId: Id<"jobs">, checks: WorkdayCheck[]) {
+export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, jobId: Id<"jobs">, checks: WorkdayCheck[], includeHistorical = true) {
   const events = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
+  const exceptions = await ctx.db.query("taWorkdayExceptions").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   const names = new Map<string, string>();
-  for (const id of new Set([...events.flatMap(e => [e.by, e.completedBy].filter(Boolean)), ...checks.map(c => c.completedBy).filter(Boolean)])) {
+  for (const id of new Set([...exceptions.map(e => e.by), ...events.flatMap(e => [e.by, e.completedBy].filter(Boolean)), ...checks.map(c => c.completedBy).filter(Boolean)])) {
     const normalized = ctx.db.normalizeId("users", id!);
     const user = normalized ? await ctx.db.get(normalized) : null;
     if (user) names.set(id!, user.fullName);
   }
   const current = new Set(checks.map(c => c.key));
-  for (const event of events) if (!current.has(event.key) && event.key.includes(":")) {
+  for (const event of events) if (includeHistorical && !current.has(event.key) && event.key.includes(":")) {
     // Historical events must not put the paused requirement back in the sidebar.
     if (!SUGGESTIONS_WORKDAY_REQUIRED && event.key.startsWith("suggestions:")) continue;
     if (event.key.startsWith("research:") || event.key.startsWith("director_candidate:")) continue;
@@ -107,6 +120,8 @@ export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taW
     const same = last?.status === c.status;
     return { ...c, completedAt: same && c.status === "complete" ? last?.completedAt ?? c.completedAt : c.completedAt,
       completedBy: names.get(c.completedBy ?? "") ?? c.completedBy ?? (same ? names.get(last?.completedBy ?? "") ?? last?.completedBy : undefined),
-      events: history.map(e => ({ status: e.status, at: e.at, by: names.get(e.by ?? ""), evidence: e.evidence, observed: e.observed })) };
+      exception: c.exception ? { ...c.exception, by: names.get(c.exception.by) ?? c.exception.by } : undefined,
+      events: [...history.map(e => ({ status: e.status, at: e.at, by: names.get(e.by ?? ""), evidence: e.evidence, observed: e.observed })),
+        ...exceptions.filter(e => e.key === c.key).map(e => ({ status: e.action === "submit" ? "reason_submitted" : "reason_withdrawn", at: e.at, by: names.get(e.by), evidence: e.reason }))].sort((a,b) => a.at-b.at) };
   });
 }

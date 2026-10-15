@@ -4634,6 +4634,7 @@ export async function sendEod(formData: FormData) {
   // here, not only on the button: the form can arrive from a stale page. Leads and
   // directors are not held to it, and the client copy sends no email.
   const research = checkResearchSubmission({
+    excused: isConvex() && kind === "director" && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
     role: user.role,
     kind,
     link: String(formData.get("chatgptLink") ?? ""),
@@ -4830,6 +4831,7 @@ export async function resendEod(formData: FormData) {
     const recipients = eodRecipients({ removed, extraTo: toList.ok, extraCc: ccList.ok, shortlistInbox: repo.shortlistInbox() });
     if (recipients.to.length === 0) return done("Not sent: nobody is on the To line. Add an address as To.");
     const research = checkResearchSubmission({
+      excused: isConvex() && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
       role: user.role,
       kind: "director",
       link: String(formData.get("chatgptLink") ?? ""),

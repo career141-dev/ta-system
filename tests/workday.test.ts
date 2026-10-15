@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   applyCarryForwards,
   completionBlockers,
+  emailBlockers,
   validateCarry,
   workdayDate,
   type WorkdayCheck,
@@ -788,6 +789,71 @@ try {
   await run("finalizeMail", { actorId: "addonTa", id: addonMail.id });
   addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
   assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "complete");
+  // Setup exceptions are scoped, audited and immediately usable, without sending mail.
+  user("exceptionTa", "ta");
+  user("exceptionOther", "ta");
+  put("users", { _id: "exceptionAdmin", fullName: "Admin", email: "admin@example.invalid", role: "admin", isActive: true });
+  put("users", { _id: "inactiveAdmin", fullName: "Inactive", email: "inactive@example.invalid", role: "admin", isActive: false });
+  put("jobs", { _id: "exceptionJob", title: "Exception job", status: "active", taLeadId: "lead", assignedTaIds: ["exceptionTa", "exceptionOther"] });
+  const exceptionDay = await run("start", { actorId: "exceptionTa", jobId: "exceptionJob", workType: "100%" });
+  const reasonArgs = { actorId: "exceptionTa", workdayId: exceptionDay.id, jobId: "exceptionJob", key: "jd_review:exceptionJob", reason: "Waiting for approved JD", withdraw: false };
+  await assert.rejects(() => run("taskException", { ...reasonArgs, actorId: "exceptionOther" }), /not yours/);
+  await assert.rejects(() => run("taskException", { ...reasonArgs, key: "director_cv:exceptionJob" }), /must be completed/);
+  await assert.rejects(() => run("taskException", { ...reasonArgs, key: "daily_email:exceptionJob" }), /must be completed/);
+  await assert.rejects(() => run("taskException", { ...reasonArgs, reason: "  " }), /Give a reason/);
+  await assert.rejects(() => run("taskException", { ...reasonArgs, reason: "x".repeat(1001) }), /Give a reason/);
+  await run("taskException", reasonArgs);
+  const exceptionNotifications = () => rows("notifications").filter(n => n.type === "workday_exception" && n.workdayId === exceptionDay.id);
+  assert.deepEqual(exceptionNotifications().map(n => n.userId).sort(), ["exceptionAdmin", "lead"]);
+  await run("taskException", reasonArgs);
+  assert.equal(exceptionNotifications().length, 2, "Retries do not create duplicate notifications");
+  let exceptionJob = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
+  assert.equal(exceptionJob.checks.find((c: Row) => c.key === reasonArgs.key).status, "incomplete", "Excusing a task does not mark it complete");
+  assert.ok(!emailBlockers([exceptionJob]).some(c => c.key === reasonArgs.key));
+  assert.ok(!completionBlockers([exceptionJob]).some(c => c.key === reasonArgs.key));
+  clock++;
+  await run("taskException", { ...reasonArgs, reason: "JD approval delayed" });
+  assert.equal(rows("taWorkdayExceptions").filter(e => e.workdayId === exceptionDay.id).length, 2, "Updates preserve the original reason");
+  await run("taskException", { ...reasonArgs, withdraw: true });
+  exceptionJob = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
+  assert.ok(emailBlockers([exceptionJob]).some(c => c.key === reasonArgs.key));
+  assert.equal(exceptionJob.checks.find((c: Row) => c.key === reasonArgs.key).events.filter((e: Row) => e.status.startsWith("reason_")).length, 3);
+  await run("taskException", reasonArgs);
+  await db.patch("exceptionJob", { jobDescription: "A newly supplied JD" });
+  exceptionJob = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
+  assert.ok(emailBlockers([exceptionJob]).some(c => c.key === reasonArgs.key), "Changed evidence reopens the task");
+  for (const prefix of ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "chatgpt"]) {
+    await run("taskException", { ...reasonArgs, key: `${prefix}:exceptionJob`, reason: `${prefix} unavailable today` });
+  }
+  assert.equal(await run("researchExceptionAllowed", { actorId: "exceptionTa", jobId: "exceptionJob" }), true);
+  assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, false, "A reason cannot substitute for a CV");
+  await assert.rejects(() => run("beginMail", { actorId: "exceptionTa", jobId: "exceptionJob", applicationIds: [], subject: "Synthetic", sentTo: "director@example.invalid" }), /at least one CV/);
+  put("candidates", { _id: "exceptionCandidate", fullName: "Synthetic", cvUploadId: "synthetic-cv" });
+  put("applications", { _id: "exceptionApp", jobId: "exceptionJob", ownerTaId: "exceptionTa", workdayReviewedAt: clock, candidateId: "exceptionCandidate", currentStage: "second_shortlist", cvFileId: "synthetic-cv", lastStageChangedAt: clock });
+  assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, true);
+  await assert.rejects(() => run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "https://chatgpt.com/c/private", confirmed: false }), /private/);
+  const exceptionMail = await run("beginMail", { actorId: "exceptionTa", jobId: "exceptionJob", applicationIds: ["exceptionApp"], subject: "Synthetic exception email", sentTo: "director@example.invalid" });
+  assert.ok(exceptionMail.id, "The transactional send reservation accepts valid exceptions");
+  await run("mailResult", { id: exceptionMail.id, status: "accepted" });
+  await run("finalizeMail", { actorId: "exceptionTa", id: exceptionMail.id });
+  const beforeFinish = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
+  for (const check of completionBlockers([beforeFinish])) {
+    assert.ok(check.canCarry, `Unexpected non-carry blocker: ${check.label}`);
+    await run("carry", { actorId: "exceptionTa", workdayId: exceptionDay.id, jobId: "exceptionJob", key: check.key, reason: "Awaiting candidate or director", nextAction: "Follow up", dueAt: clock + 3600000 });
+  }
+  assert.equal((await run("finish", { actorId: "exceptionTa", workdayId: exceptionDay.id })).ok, true);
+  const finishedException = await db.get(exceptionDay.id);
+  assert.ok(finishedException?.completion.jobs[0].checks.find((c: Row) => c.key === reasonArgs.key).exception, "Finished snapshots preserve reasons");
+  await assert.rejects(() => run("taskException", reasonArgs), /finished/);
+  const focused = await run("dashboard", { actorId: "lead", detail: true, focusWorkday: exceptionDay.id });
+  assert.equal(focused.team[0].id, exceptionDay.id);
+  const unauthorizedFocus = await run("dashboard", { actorId: "otherLead", detail: true, focusWorkday: exceptionDay.id });
+  assert.equal(unauthorizedFocus.team.length, 0, "Notification deep links cannot bypass lead scope");
+  // The same job on a later workday must not inherit any exception.
+  clock += 86400000;
+  await run("start", { actorId: "exceptionTa", jobId: "exceptionJob", workType: "100%" });
+  exceptionJob = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
+  assert.equal(exceptionJob.eodChecks.some((c: Row) => c.exception), false);
   console.log(
     "  ok  workday times, direct assigned positions, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );
