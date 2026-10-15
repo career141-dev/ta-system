@@ -8,10 +8,11 @@ const job = (checks: WorkdayCheck[]): WorkdayJobView => ({ jobId: "job", checks,
   { id: "two", name: "Candidate Two", source: "SCOOP", stage: "director_review", sent: false, shortlistedAt: 1 },
 ] } as WorkdayJobView);
 const original = job([check("review:one"), check("review:two"), check("details:one"), check("profile:three"),
-  check("director_candidate:job", { status: "complete" }), check("jd_review:job", { status: "complete" }), check("daily_email:job")]);
+  check("director_cv:job", { status: "complete" }), check("jd_review:job", { status: "complete" }), check("daily_email:job")]);
 const before = structuredClone(original);
 const displayed = sidebarChecks(original);
-assert.equal(displayed.length, 3, "All candidate tasks collapse into one check; setup/email checks remain separate");
+assert.equal(displayed.length, 4, "Candidate tasks collapse into one check; the required Director Review CV and setup/email checks remain separate");
+assert.ok(displayed.some(c => c.key.startsWith("director_cv:")));
 assert.equal(displayed[0].key, "candidate_progress:job");
 assert.equal(displayed[0].status, "incomplete", "One ready candidate cannot hide other candidate work");
 assert.match(displayed[0].progress!, /Sources: L, SCOOP/);

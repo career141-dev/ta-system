@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { runDatabaseSearch } from "@/app/actions";
+import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 
 /**
  * The way in — spec §6D.1, modelled on Recruiter's assisted-search box.
@@ -25,6 +26,7 @@ export function SearchBox({
   autoFocus = false,
   compact = false,
   prior = "",
+  referenceProfile = "",
 }: {
   vocab: string[];
   initialQuery?: string;
@@ -34,13 +36,25 @@ export function SearchBox({
   compact?: boolean;
   /** The conversation so far; set under the results, where the box replies to it. */
   prior?: string;
+  /** Validated, PII-free reference profile carried through refinements. */
+  referenceProfile?: string;
 }) {
   const [q, setQ] = useState(initialQuery);
   const [mode, setMode] = useState<"natural" | "boolean" | "meaning">(initialMode);
   const [focused, setFocused] = useState(false);
   const [attachedFile, setAttachedFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitStep, setSubmitStep] = useState(0);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const progress = attachedFile
+    ? ["Reading CV…", "Finding similar profiles…", "Ranking the best matches…"]
+    : ["Searching…", "Finding candidates…", "Ranking the best matches…"];
+  useEffect(() => {
+    if (!isSubmitting) return;
+    const timer = window.setInterval(() => setSubmitStep((step) => Math.min(step + 1, progress.length - 1)), 1_400);
+    return () => window.clearInterval(timer);
+  }, [isSubmitting, progress.length]);
   // A reply adds to the search; a Boolean string stands alone.
   const replying = !!prior && mode !== "boolean" && initialMode !== "boolean";
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -65,10 +79,11 @@ export function SearchBox({
   };
 
   return (
-    <form action={runDatabaseSearch} encType="multipart/form-data" onSubmit={() => setIsSubmitting(true)} className="relative">
+    <form action={runDatabaseSearch} encType="multipart/form-data" onSubmit={() => { setSubmitStep(0); setIsSubmitting(true); }} className="relative">
       <input type="hidden" name="mode" value={mode} />
       {openingId && <input type="hidden" name="openingId" value={openingId} />}
       {replying && <input type="hidden" name="prior" value={prior} />}
+      {referenceProfile && <input type="hidden" name="ref" value={referenceProfile} />}
 
       <div
         className={`relative rounded-xl border bg-surface transition-colors ${
@@ -133,11 +148,19 @@ export function SearchBox({
             ref={fileInputRef}
             type="file"
             name="cvFile"
-            accept=".pdf,.docx,.doc,.txt"
+            accept=".pdf,.docx,.txt"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
-              if (file) setAttachedFile(file);
+              if (!file) return;
+              const problem = referenceCvFileProblem(file.name, file.size);
+              if (problem) {
+                setFileError(problem);
+                e.currentTarget.value = "";
+                return;
+              }
+              setFileError(null);
+              setAttachedFile(file);
             }}
           />
 
@@ -182,7 +205,7 @@ export function SearchBox({
               disabled={(!q.trim() && !attachedFile) || isSubmitting}
               className="rounded-full bg-brand px-3.5 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-30"
             >
-              {isSubmitting ? "Searching…" : replying ? "Send" : "Search"}
+              {isSubmitting ? progress[submitStep] : replying ? "Send" : "Search"}
             </button>
           )}
         </div>
@@ -203,6 +226,9 @@ export function SearchBox({
           </button>
         )}
       </div>
+
+      {fileError && <p className="mt-2 text-[11.5px] text-danger" role="alert">{fileError}</p>}
+      {isSubmitting && <p className="mt-2 text-[11.5px] font-medium text-brand" role="status" aria-live="polite">{progress[submitStep]}</p>}
 
       {prior && (
         <p className="mt-2 flex items-center justify-between gap-3 text-[11.5px] text-ink-faint">

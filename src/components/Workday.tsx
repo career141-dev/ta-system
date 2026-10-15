@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { changeWorkday } from "@/app/workday/actions";
 import {
   completionBlockers,
+  canExcuseCheck,
   emailBlockers,
   confirmedResearchLink,
   workdayDate,
@@ -18,8 +19,10 @@ import { HEADER_H } from "@/lib/chrome";
 import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
 import { validateResearchLink } from "@/lib/eod-format";
 import { sidebarChecks } from "@/lib/workdaySidebar";
+import { canReviewWorkdays } from "@/lib/workdayRoles";
+import { useChatgptResearch } from "./useChatgptResearch";
 
-export function useWorkday(detail: boolean, enabled = true, query = "") {
+function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
   const [error, setError] = useState("");
   const request = useRef<AbortController | null>(null);
@@ -82,8 +85,16 @@ function useSavedChoice(key: string, initial = "") {
   return [value, save] as const;
 }
 
-function SavedDetails({ id, title, children }: { id: string; title: React.ReactNode; children: React.ReactNode }) {
-  const [open, save] = useSavedChoice(`workday-open:${id}`, "yes");
+function SavedDetails({ id, title, children, initiallyOpen = true }: { id: string; title: React.ReactNode; children: React.ReactNode; initiallyOpen?: boolean }) {
+  const [open, save] = useSavedChoice(`workday-open:${id}`, initiallyOpen ? "yes" : "no");
+  const params = useSearchParams();
+  const requestedJob = `${params.get("checkDay")}:${params.get("checkJob")}`;
+  const requestedTask = params.get("checkTask");
+  useEffect(() => {
+    if (id === requestedJob || id === `team:${params.get("checkDay")}`) save("yes");
+    // Open the targeted job once, without overriding later user toggles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, requestedJob, requestedTask]);
   return <details open={open === "yes"} onToggle={e => { const value = e.currentTarget.open ? "yes" : "no"; if (value !== open) save(value); }} className="min-w-0 rounded-lg border border-rule p-3">
     <summary className="cursor-pointer text-sm font-semibold">{title}</summary><div className="mt-3 space-y-3">{children}</div>
   </details>;
@@ -181,7 +192,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
         You can work on multiple new positions at 100% in the same workday.
       </p>
       {!day && data.options.some(o => o.carry) && <p className="text-xs text-ink-soft">Follow-up jobs carried forward: {data.options.filter(o => o.carry && o.id !== chosen?.id).map(o => o.title).join(", ")}</p>}
-      {!day && !addon && chosen?.workType === "100%" && chosen.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
+      {!day && chosen?.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.filter(c => !addon || !["linkedin_post", "research", "suggestions", "excel_profiles"].some(k => c.key.startsWith(k + ":"))).map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
       <button className={buttonClass}>
         {!day
           ? "Start workday"
@@ -192,18 +203,49 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
 }
 
 function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId: string; readOnly?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const target = `task-${dayId}-${check.key}`;
+  const params = useSearchParams();
+  const requestedTask = `${params.get("checkDay")}:${params.get("checkTask")}`;
+  useEffect(() => {
+    if (requestedTask === `${dayId}:${check.key}`) {
+      setOpen(true);
+      document.getElementById(target)?.scrollIntoView({ block: "nearest" });
+    }
+  }, [dayId, check.key, target, requestedTask]);
+  const complete = check.status === "complete";
+  const status = complete ? "Completed" : check.exception ? "Reason submitted" : check.waiting ? "Waiting" : "To do";
   return (
-    <li className="space-y-2 border-b border-rule py-3 text-sm">
+    <li id={target} className="border-b border-rule py-2 text-sm">
+      <details open={open} onToggle={e => setOpen(e.currentTarget.open)}>
+        <summary className="cursor-pointer rounded-md py-2 font-medium focus-visible:outline-2 focus-visible:outline-brand">
+          <span className={complete ? "text-green-700 dark:text-green-400" : check.exception ? "text-amber-700 dark:text-amber-400" : "text-ink-soft"}>
+            <span aria-hidden="true">{complete ? "✓" : check.exception ? "!" : check.waiting ? "◷" : "○"}</span>{" "}{check.label}
+            <span className="ml-2 text-xs font-normal">{status}</span>
+          </span>
+        </summary>
+        <div className="space-y-3 pb-2 pl-3">
       <Link
         className="font-medium underline decoration-rule underline-offset-4"
         href={check.href}
       >
-        {check.status === "complete" ? "✓ " : check.waiting ? "◷ " : "○ "}{check.label}
+        Open task page
       </Link>
       {check.progress && <p className="break-words text-xs text-ink-soft">{check.progress}</p>}
       {check.key.startsWith("candidate_progress:") && <p className="text-xs text-ink-soft">This progress check does not block sending your end-of-day email.</p>}
       {check.status === "complete" && <p className="text-xs text-brand">{check.completedAt ? `Completed ${workdayTime(check.completedAt)}` : "Completion time not recorded"}{check.completedBy ? ` · ${check.completedBy}` : ""}</p>}
-      {!!check.events?.length && <details><summary className="cursor-pointer text-xs text-ink-soft">Task history</summary><ul className="mt-2 space-y-1 text-xs">{check.events.map((event, i) => <li key={i}>{event.observed ? "Existing completion recorded" : event.status === "incomplete" ? i ? "Reopened" : "Incomplete" : event.status === "complete" ? "Completed" : "Waiting"} · {workdayTime(event.at)}{event.by ? ` · ${event.by}` : ""}</li>)}</ul></details>}
+      {!!check.events?.length && <details><summary className="cursor-pointer text-xs text-ink-soft">Task history</summary><ul className="mt-2 space-y-1 text-xs">{check.events.map((event, i) => <li key={i}>{event.observed ? "Existing completion recorded" : event.status === "incomplete" ? i ? "Reopened" : "Incomplete" : event.status === "complete" ? "Completed" : event.status === "reason_submitted" ? "Reason submitted" : event.status === "reason_withdrawn" ? "Reason withdrawn" : "Waiting"} · {workdayTime(event.at)}{event.by ? ` · ${event.by}` : ""}{event.evidence && event.status.startsWith("reason_") ? <p className="break-words text-ink-soft">{event.evidence}</p> : null}</li>)}</ul></details>}
+      {check.exception && <p className="break-words text-xs text-amber-700 dark:text-amber-400">Reason submitted: {check.exception.reason}<br />{workdayTime(check.exception.at)} · {check.exception.by}</p>}
+      {!readOnly && canExcuseCheck(check) && !complete && <details>
+        <summary className="cursor-pointer text-xs text-brand">{check.exception ? "Edit reason" : "Couldn’t complete this task"}</summary>
+        <p className="my-2 text-xs text-ink-soft">This excuses this task for today. Your TA lead and admins will be informed.</p>
+        <WorkForm op="taskException" fields={{ workdayId: dayId, jobId: check.jobId, key: check.key }}>
+          <label className="block text-xs">Reason<textarea key={check.exception?.at ?? "new"} required name="reason" maxLength={1000} defaultValue={check.exception?.reason ?? ""} className={inputClass} /></label>
+          <button className={buttonClass}>{check.exception ? "Update reason" : "Submit reason"}</button>
+        </WorkForm>
+      </details>}
+      {!readOnly && check.exception && <WorkForm op="taskException" fields={{ workdayId: dayId, jobId: check.jobId, key: check.key, withdraw: "yes" }}><button className="text-xs text-brand underline">Withdraw reason</button></WorkForm>}
+      {!readOnly && check.key.startsWith("chatgpt:") && <ChatgptConfirmation jobId={check.jobId} link={check.status === "complete" ? check.evidence : undefined} />}
       {check.waiting ? (
         <p className="text-ink-soft">
           Waiting: {check.waiting.reason}
@@ -270,17 +312,15 @@ function Check({ check, dayId, readOnly = false }: { check: WorkdayCheck; dayId:
               </div>
             </details>
           )}
-          {check.key.startsWith("director_candidate:") && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "noCandidates" }}>
-            <label className="block text-xs">Why no suitable candidates were found<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save explanation</button>
-          </WorkForm>}
-          {check.key.startsWith("research:") && <ResearchConfirmation jobId={check.jobId} />}
           {check.key.startsWith("jd_review:") && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "jd" }}><p className="text-xs text-ink-soft">Read the approved job description before confirming.</p><button className={buttonClass}>I reviewed the job description</button></WorkForm>}
           {check.needsEmptySuggestionsReason && <WorkForm op="saveCheck" fields={{ jobId: check.jobId, kind: "emptySuggestions" }}>
             <label className="block text-xs">Why no profiles were found<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save explanation</button>
           </WorkForm>}
-          {check.key.startsWith("chatgpt:") && <ChatgptConfirmation jobId={check.jobId} />}
+
         </>
       ) : null}
+        </div>
+      </details>
     </li>
   );
 }
@@ -292,27 +332,18 @@ export function ResearchConfirmation({ jobId }: { jobId: string }) {
   </WorkForm>;
 }
 
-export function ChatgptConfirmation({ jobId, link = "", confirmed = false }: { jobId: string; link?: string; confirmed?: boolean }) {
-  const [typedLink, setTypedLink] = useState("");
-  const [opened, setOpened] = useState(false);
+export function ChatgptConfirmation({ jobId, link = "" }: { jobId: string; link?: string }) {
+  const research = useChatgptResearch(jobId);
   const helpId = useId();
-  const checked = validateResearchLink(link || typedLink);
-  const ready = checked.ok && (link ? confirmed : opened);
-  return <WorkForm op="saveCheck" fields={{ jobId, kind: "chatgpt", confirmed: ready ? "on" : "", ...(link ? { link } : {}) }}>
-    {!link && <>
-      <p className="text-xs text-ink-soft">In ChatGPT, choose Share, then Create link or Copy link. Paste the shared link here; copying the browser address gives your private chat link.</p>
-      <label className="block text-xs">ChatGPT share link<input required name="link" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://chatgpt.com/share/…" value={typedLink} onChange={e => {
-        setTypedLink(e.target.value);
-        // Confirmation belongs to this exact link, as on the email composer.
-        setOpened(false);
-      }} aria-invalid={!!typedLink.trim() && !checked.ok} aria-describedby={helpId} className={inputClass} /></label>
-      <p id={helpId} aria-live="polite" className="break-words text-xs text-ink-soft">
-        {checked.ok ? "Share link accepted. Open it in a private window, then confirm below." : typedLink.trim() ? checked.reason : "Use a link beginning with https://chatgpt.com/share/."}
-      </p>
-      <label className="block text-xs"><input required type="checkbox" checked={opened} disabled={!checked.ok} onChange={e => setOpened(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
-    </>}
-    <button disabled={!ready} className={buttonClass}>Save research link</button>
-  </WorkForm>;
+  const checked = validateResearchLink(research.link);
+  useEffect(() => { if (link) research.adoptSaved(link); }, [link, research.adoptSaved]);
+  return <div className="space-y-3">
+    <p className="text-xs text-ink-soft">In ChatGPT, choose Share, then Create link or Copy link. Paste the shared link here or in the EOD email. Confirming saves it in both places.</p>
+    <label className="block text-xs">ChatGPT share link<input name="sidebarChatgptLink" inputMode="url" autoComplete="off" spellCheck={false} placeholder="https://chatgpt.com/share/…" value={research.link} disabled={research.saving} onChange={e => research.edit(e.target.value)} aria-invalid={!!research.link.trim() && !checked.ok} aria-describedby={helpId} className={inputClass} /></label>
+    <p id={helpId} className="break-words text-xs text-ink-soft">{checked.ok ? "Open the share link in a private window, then confirm below." : research.link.trim() ? checked.reason : "Use a link beginning with https://chatgpt.com/share/."}</p>
+    <label className="block text-xs"><input type="checkbox" checked={research.confirmed || research.saving} disabled={research.saving || !checked.ok} onChange={e => research.confirm(e.target.checked)} /> I opened this link in a private window and it contains no candidate details.</label>
+    <p className={`text-xs ${research.confirmed ? "text-brand" : "text-ink-soft"}`} role="status">{research.message}</p>
+  </div>;
 }
 
 export function NoCandidateReason({ jobId }: { jobId: string }) {
@@ -323,37 +354,48 @@ export function EmptySuggestionsReason({ jobId }: { jobId: string }) {
   return <WorkForm op="saveCheck" fields={{ jobId, kind: "emptySuggestions" }}><label className="block text-xs">Why this search found no profiles<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save empty-search explanation</button></WorkForm>;
 }
 
-export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResearchSaved }: { jobId: string; linkConfirmed: boolean; revised: boolean; onBlocked: (blocked: boolean) => void; onResearchSaved?: (link: string) => void }) {
+export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResearchSaved, onResearchExcused, extraReasons = [] }: { jobId: string; linkConfirmed: boolean; revised: boolean; onBlocked: (blocked: boolean) => void; onResearchSaved?: (link: string) => void; onResearchExcused?: (excused: boolean) => void; extraReasons?: { key: string; message: string }[] }) {
   const { data, error } = useWorkday(false);
   const job = data?.active?.jobs.find(j => j.jobId === jobId);
   const savedLink = confirmedResearchLink(job?.eodChecks ?? job?.checks ?? []);
+  const excused = !!job?.eodChecks?.find(c => c.key.startsWith("chatgpt:"))?.exception;
+  useEffect(() => { onResearchExcused?.(!error && excused); }, [error, excused, onResearchExcused]);
   useEffect(() => { if (savedLink) onResearchSaved?.(savedLink); }, [savedLink, onResearchSaved]);
   const blockers = job ? emailBlockers([job]).filter(c => !(linkConfirmed && c.key.startsWith("chatgpt:"))) : [];
   const blocked = !!error || !data || (data.canWork && (!job || blockers.length > 0));
+  const additionalReasons = extraReasons.filter(reason => !blockers.some(c => c.key.split(":")[0] === reason.key));
   useEffect(() => { onBlocked(blocked); }, [blocked, onBlocked]);
   if (data && !data.canWork) return null;
-  if (job && job.workType !== "100%") return null;
-  return <section className="rounded-lg border border-rule p-4 text-sm"><h3 className="font-medium">Today's Checks</h3>{error ? <p>{error}</p> : !data ? <p>Loading checks…</p> : !job ? <p>Start work on this opening in the sidebar before sending.</p> : blockers.length ? <ul className="mt-2 space-y-1">{blockers.map(c => <li key={c.key}><Link href={c.href} className="text-brand underline">{c.label}</Link>: {c.progress ?? "needs action"}</li>)}</ul> : <p className="text-brand">Required checks complete.</p>}{!revised && blockers.some(c => c.key.startsWith("director_candidate:")) && <div className="mt-3"><NoCandidateReason jobId={jobId} /></div>}</section>;
+  return <section aria-live="polite" className="rounded-lg border border-rule p-4 text-sm"><h3 className="font-medium">{blocked || extraReasons.length ? "Complete these steps to send EOD" : "Ready to send"}</h3>{error ? <p>{error}</p> : !data ? <p>Loading checks…</p> : !job ? <p>Start work on this opening in the sidebar before sending.</p> : <>
+    {(blockers.length > 0 || extraReasons.length > 0) && <ul className="mt-2 space-y-1">{blockers.map(c => <li key={c.key}><Link href={c.href} className="text-brand underline">{c.label}</Link>: {extraReasons.find(reason => reason.key === c.key.split(":")[0])?.message ?? c.progress ?? "needs action"}</li>)}{additionalReasons.map(reason => <li key={reason.key}>{reason.message}</li>)}</ul>}
+    {!blocked && !extraReasons.length && <p className="text-green-700 dark:text-green-400">Required tasks are completed or excused. CVs will be checked and prepared when you send.</p>}
+  </>}</section>;
 }
 
 function DailyReview({
   day,
   canFinish = false,
-  lead = false,
+  reviewer = false,
+  canManage = false,
 }: {
   day: WorkdayView;
   canFinish?: boolean;
-  lead?: boolean;
+  reviewer?: boolean;
+  canManage?: boolean;
 }) {
   const blockers = completionBlockers(day.jobs);
-  const displayedJobs = day.jobs.map(job => ({ ...job, checks: job.workType !== "100%" ? [] : lead ? job.checks : sidebarChecks(job) }));
-  const displayedBlockers = completionBlockers(displayedJobs);
+  const displayedJobs = day.jobs.map(job => {
+    // Follow-up jobs still have EOD setup requirements; expose their reason actions too.
+    const checks = [...job.checks, ...(job.eodChecks ?? []).filter(c => !job.checks.some(existing => existing.key === c.key))];
+    const expanded = { ...job, checks };
+    return { ...expanded, detailChecks: checks, checks: sidebarChecks(expanded) };
+  });
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap justify-between gap-2">
-        <h2 className="font-semibold">
+        {!reviewer && <h2 className="font-semibold">
           {day.name} · {day.date}
-        </h2>
+        </h2>}
         <p className="text-sm">
           Started {workdayTime(day.startedAt)} ·{" "}
           {day.finishedAt
@@ -362,7 +404,7 @@ function DailyReview({
         </p>
       </div>
       {displayedJobs.map((job) => (
-        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType}{job.workType === "100%" && <> · {job.checks.filter(c => c.status === "complete").length}/{job.checks.length} complete</>}</>}>
+        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType} · {job.checks.filter(c => c.status === "complete").length} completed · {job.checks.filter(c => c.exception).length} reason{job.checks.filter(c => c.exception).length === 1 ? "" : "s"} submitted · {completionBlockers([job]).length} remaining</>}>
           <div className="flex flex-wrap justify-between gap-2">
             <Link
               className="font-semibold text-brand"
@@ -373,7 +415,8 @@ function DailyReview({
             <span className="text-sm">{job.workType}</span>
           </div>
           {canFinish && job.workType !== "100%" && <WorkForm op="setWorkType" fields={{ workdayId: day.id, jobId: job.jobId }}><label className="block text-xs">Work type<select name="workType" defaultValue={job.workType} className={inputClass}><option>Follow-up</option><option>Add-on</option></select></label><button className={buttonClass}>Set work type</button></WorkForm>}
-          {job.workType === "100%" && <><p className="mt-2 text-sm text-ink-soft">
+          <details><summary className="cursor-pointer text-xs text-ink-soft">Activity details</summary>
+          <p className="mt-2 text-sm text-ink-soft">
             {job.activity.cvReviews} CV reviews · {job.activity.profilesAdded}{" "}
             LinkedIn profiles added · {job.activity.profilesWorked} profiles
             worked · {job.activity.sent} candidates submitted
@@ -403,8 +446,7 @@ function DailyReview({
               ? `Email accepted for sending ${workdayTime(job.activity.emailAt)}.`
               : "End-of-day email not sent."}
           </p>
-          </>}
-          {lead && job.workType === "100%" && <><p className="mt-3 text-sm font-medium">
+          {reviewer && <><p className="mt-3 text-sm font-medium">
             Shortlisted today and candidates still in progress
           </p>
           {job.shortlist.length ? (
@@ -415,6 +457,7 @@ function DailyReview({
             </p>
           )}
           </>}
+          </details>
           <Link
             href={`/openings/${job.jobId}/eod`}
             className="mt-3 inline-block text-sm text-brand underline"
@@ -426,9 +469,15 @@ function DailyReview({
               {job.checks.map((check) => <Check key={check.key} check={check} dayId={day.id} readOnly={!canFinish} />)}
             </ul>
           )}
-          {lead &&
+          {reviewer && job.detailChecks.some(c => !job.checks.some(summary => summary.key === c.key)) && <details>
+            <summary className="cursor-pointer text-xs text-ink-soft">Candidate task details</summary>
+            <ul>{job.detailChecks.filter(c => !job.checks.some(summary => summary.key === c.key)).map(check => <Check key={check.key} check={check} dayId={day.id} readOnly />)}</ul>
+          </details>}
+          {canManage && day.finishedAt === null && job.detailChecks.some(c => (c.kind === "cv_review" && c.status !== "complete") || c.key.startsWith("mail:")) && <details>
+            <summary className="cursor-pointer text-xs text-brand">Review actions</summary>
+          {canManage &&
             day.finishedAt === null &&
-            job.checks
+            job.detailChecks
               .filter(
                 (c) => c.status !== "complete" && c.kind === "cv_review" && c.key.startsWith("review:"),
               )
@@ -441,14 +490,15 @@ function DailyReview({
                     applicationId: check.key.slice(7),
                   }}
                 >
+                  <p className="text-xs text-ink-soft">{check.label}</p>
                   <button className="text-sm text-brand underline">
                     I reviewed this CV as TA Lead — record review
                   </button>
                 </WorkForm>
               ))}
-          {lead &&
+          {canManage &&
             day.finishedAt === null &&
-            job.checks
+            job.detailChecks
               .filter((c) => c.key.startsWith("mail:"))
               .map((check) => (
                 <details key={check.key} className="mt-3 text-sm">
@@ -496,6 +546,7 @@ function DailyReview({
                   </div>
                 </details>
               ))}
+          </details>}
         </SavedDetails>
       ))}
       {day.requests.map((request) => (
@@ -508,8 +559,8 @@ function DailyReview({
         <WorkForm op="finish" fields={{ workdayId: day.id }}>
           <p className="text-sm">
             {blockers.length
-              ? `${displayedBlockers.length} required steps still need action.`
-              : "All required checks are complete. Waiting items will carry forward."}
+              ? `${blockers.length} required actions remain before finishing your workday.`
+              : "Required checks are completed or excused. Waiting items will carry forward."}
           </p>
           <button className={buttonClass} disabled={blockers.length > 0}>Finish workday</button>
           <p className="text-xs text-ink-soft">
@@ -528,9 +579,15 @@ export function WorkdayDashboard() {
   const [jobFilter, setJobFilter] = useSavedChoice("workday-filter-job");
   const [status, setStatus] = useSavedChoice("workday-filter-status");
   const [cursor, setCursor] = useState("");
-  const { data, error, load } = useWorkday(true, true, `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}`);
+  const params = useSearchParams();
+  const requestedDay = params.get("checkDay");
+  const requestedJob = params.get("checkJob") ?? "";
+  const requestedFocus = `${requestedDay}:${requestedJob}:${params.get("checkTask")}`;
+  const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
+  const focus = requestedDay && dismissedFocus !== requestedFocus ? { day: requestedDay, job: requestedJob } : null;
+  const { data, error, load } = useWorkday(true, true, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}`);
   const finishedToday = data?.lastFinishedDate === workdayDate(Date.now());
-  const team = (data?.team ?? []).filter(day => (!ta || day.userId === ta) && (!date || day.date === date)).map(day => ({ ...day, jobs: day.jobs.filter(job => !jobFilter || job.jobId === jobFilter).map(job => ({ ...job, checks: job.checks.filter(c => !status || (c.waiting ? "waiting" : c.status ?? "incomplete") === status) })) })).filter(day => day.jobs.length > 0 || day.requests.length > 0);
+  const team = (data?.team ?? []).filter(day => focus ? day.id === focus.day : (!ta || day.userId === ta) && (!date || day.date === date)).map(day => ({ ...day, jobs: day.jobs.filter(job => focus ? !focus.job || job.jobId === focus.job : !jobFilter || job.jobId === jobFilter).map(job => ({ ...job, checks: job.checks.filter(c => focus || !status || (c.exception ? "excused" : c.waiting ? "waiting" : c.status ?? "incomplete") === status) })) })).filter(day => day.jobs.length > 0 || day.requests.length > 0);
   return (
     <div className="space-y-6">
       {error && (
@@ -588,13 +645,15 @@ export function WorkdayDashboard() {
           )}
         </>
       )}
-      {data?.canLead && (
+      {(data?.canReview ?? data?.canLead) && data && (
         <>
-          <h2 className="text-lg font-semibold">Team checks</h2>
+          <h2 className="text-lg font-semibold">Team checks</h2>{focus && <button className="text-xs text-brand underline" onClick={() => setDismissedFocus(requestedFocus)}>Show all workdays</button>}
+          <details><summary className="cursor-pointer text-sm text-brand">Filter team checks</summary><div className="mt-3 space-y-3">
           <label className="block text-xs">Day<input type="date" value={date} onChange={e => { setDate(e.target.value); setCursor(""); }} className={inputClass} /></label>
           <label className="block text-xs">TA<select value={ta} onChange={e => setTa(e.target.value)} className={inputClass}><option value="">All TAs</option>{[...new Map(data.team.map(d => [d.userId, d.name])).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
           <label className="block text-xs">Job<select value={jobFilter} onChange={e => setJobFilter(e.target.value)} className={inputClass}><option value="">All jobs</option>{[...new Map(data.team.flatMap(d => d.jobs.map(j => [j.jobId, j.title] as const))).entries()].map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
-          <label className="block text-xs">Task status<select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option value="">All tasks</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option><option value="waiting">Waiting</option></select></label>
+          <label className="block text-xs">Task status<select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option value="">All tasks</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option><option value="waiting">Waiting</option><option value="excused">Reason submitted</option></select></label>
+          </div></details>
           <p className="text-sm text-ink-soft">
             Start and finish times update every 20 seconds. Records show elapsed
             workday time; breaks are not measured.
@@ -605,19 +664,19 @@ export function WorkdayDashboard() {
             </p>
           )}
           {team.map((day) => (
-            <div key={day.id} className="space-y-3">
-              <DailyReview day={day} lead />
-              {day.finishedAt === null &&
+            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={false} title={<>{day.name} · {day.date} · {day.finishedAt ? "Finished" : "Working"}</>}>
+              <DailyReview day={day} reviewer canManage={data.canLead} />
+              {data.canLead && day.finishedAt === null &&
                 day.requests
                   .filter((r) => r.status === "pending")
                   .map((request) => (
-                    <section
+                    <details
                       key={request.id}
                       className="rounded-xl border border-rule p-5"
                     >
-                      <h3 className="mb-3 font-medium">
+                      <summary className="cursor-pointer text-sm font-medium">
                         {day.name}: approval to work on {request.title}
-                      </h3>
+                      </summary><div className="mt-3">
                       <WorkForm op="decide" fields={{ requestId: request.id }}>
                         <label className="block text-sm">
                           Decision reason
@@ -643,9 +702,9 @@ export function WorkdayDashboard() {
                           Decline
                         </button>
                       </WorkForm>
-                    </section>
+                    </div></details>
                   ))}
-            </div>
+            </SavedDetails>
           ))}
           <div className="flex gap-3 text-xs">{cursor && <button className="text-brand underline" onClick={() => setCursor("")}>Latest records</button>}{data.nextCursor && <button className="text-brand underline" onClick={() => setCursor(data.nextCursor!)}>Older records</button>}</div>
         </>
@@ -691,7 +750,7 @@ export function WorkdayRail() {
 
 /**
  * Pull-tab rail — closed by default on every screen size, including xl.
- * Used by ta_lead and admin: closed by default with an expand tab on the right edge.
+ * Used by TA leads, admins and directors; closed by default with an expand tab.
  * Clicking the tab slides the drawer in.
  */
 export function WorkdayRailLeadAdmin() {
@@ -704,6 +763,7 @@ export function WorkdayRailLeadAdmin() {
     {!open && (
       <button
         onClick={() => setOpen(true)}
+        aria-label="Open Today's Checks"
         aria-expanded={false}
         aria-controls="workday-rail-lead"
         className="fixed z-40 flex items-center gap-1.5 rounded-l-lg border border-r-0 border-rule-strong bg-surface py-2.5 pl-3 pr-2.5 text-xs font-semibold text-fg shadow-md transition-all hover:bg-paper hover:shadow-lg hover:pr-3.5"
@@ -717,6 +777,8 @@ export function WorkdayRailLeadAdmin() {
     {/* Drawer — slides in from right, closed by default */}
     <aside
       id="workday-rail-lead"
+      aria-hidden={!open}
+      inert={!open}
       aria-label="Today's workday checks"
       className={`fixed right-0 z-40 w-full max-w-96 overflow-y-auto border-l border-rule bg-surface p-3 pb-24 shadow-xl transition-transform duration-200 ${
         open ? "translate-x-0" : "translate-x-full"
@@ -739,14 +801,14 @@ export function WorkdayRailLeadAdmin() {
 }
 
 export function WorkdayWorkspace({ children, role }: { children: React.ReactNode; role: string }) {
-  const isLeadOrAdmin = role === "ta_lead" || role === "admin";
-  // Lead/admin: no right padding reserved by default (drawer overlays on demand).
+  const isReviewer = canReviewWorkdays(role);
+  // Team reviewers use the same compact drawer; TAs and support keep their worker rail.
   // ta/ta_support: 96-unit right padding reserved for the always-visible xl rail.
   return (
-    <div className={isLeadOrAdmin ? "" : "xl:pr-96"}>
+    <div className={isReviewer ? "" : "xl:pr-96"}>
       {children}
       <Suspense fallback={null}>
-        {isLeadOrAdmin ? <WorkdayRailLeadAdmin /> : <WorkdayRail />}
+        {isReviewer ? <WorkdayRailLeadAdmin /> : <WorkdayRail />}
       </Suspense>
     </div>
   );

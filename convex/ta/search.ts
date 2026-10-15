@@ -147,6 +147,7 @@ export const savedSearches = internalQuery({
       lastResultCount: s.lastResultCount ?? null,
       intent: s.intent ?? null,
       turns: s.turns ?? [],
+      referenceProfile: s.referenceProfile ?? null,
     }));
   },
 });
@@ -161,6 +162,7 @@ export const saveSearch = internalMutation({
     count: v.optional(v.number()),
     intent: v.optional(v.union(v.any(), v.null())),
     turns: v.optional(v.array(v.string())),
+    referenceProfile: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
@@ -175,6 +177,7 @@ export const saveSearch = internalMutation({
       lastResultCount: args.count ?? null,
       intent: args.intent ?? null,
       turns: args.turns ?? [],
+      referenceProfile: args.referenceProfile ?? null,
     });
     return { id: id as string };
   },

@@ -1,5 +1,6 @@
 "use client";
-import { ChatgptConfirmation, EodJobChecks, useWorkday } from "./Workday";
+import { EodJobChecks } from "./Workday";
+import { useChatgptResearch } from "./useChatgptResearch";
 
 import { useCallback, useEffect, useState, useRef } from "react";
 import {
@@ -384,7 +385,6 @@ export function EodComposer({
   alreadyOut,
   openSetNote,
   needsResearchLink,
-  workType,
   resend,
 }: {
   openingId: string;
@@ -411,7 +411,6 @@ export function EodComposer({
   openSetNote: string | null;
   /** A TA's email to the directors must carry their ChatGPT research link (8 Oct); the server checks it too. */
   needsResearchLink: boolean;
-  workType: string;
   /** An email already sent, opened from its copy to correct and send again (8 Oct). */
   resend?: {
     copyId: string;
@@ -423,29 +422,26 @@ export function EodComposer({
     removed: string[];
   };
 }) {
-  const { data: workday } = useWorkday(false, needsResearchLink);
-  const savedWorkType = workday?.active?.jobs.find(j => j.jobId === openingId)?.workType ?? workType;
-  const hasTasks = savedWorkType !== "Follow-up" && savedWorkType !== "Add-on";
-  const researchRequired = needsResearchLink && hasTasks;
   const draftKey = resend
     ? `eod-composer-draft:${openingId}:${kind}:resend:${resend.copyId}`
     : `eod-composer-draft:${openingId}:${kind}`;
-  const defaultIntro = initialRows.length
-    ? "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position"
-    : "Dear Sir,\n\nPlease find today's activity for the above-mentioned position.";
+  const defaultIntro = "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position";
   const defaultOutro = `Thank You\nBest Regards,\n\n${senderName}\nExecutive - Talent Acquisition`;
 
   const [subject, setSubject] = useState(initialSubject);
   const [introText, setIntroText] = useState(resend ? resend.introText : defaultIntro);
   const [outroText, setOutroText] = useState(resend ? resend.outroText : defaultOutro);
-  // Reuse today's saved workday confirmation. Editing the link or resending
-  // requires confirmation again; an older draft cannot confer confirmation.
-  const [researchLink, setResearchLink] = useState(resend?.researchLink ?? "");
-  const [researchConfirmed, setResearchConfirmed] = useState(false);
+  // Reuse today's shared workday confirmation. Editing the link clears it;
+  // an older local draft cannot confer confirmation.
+  const research = useChatgptResearch(openingId, resend?.researchLink ?? "", needsResearchLink);
+  const researchLink = research.link;
+  const researchConfirmed = research.confirmed;
   const [jobBlocked, setJobBlocked] = useState(needsResearchLink);
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
-  const researchBlocked = researchRequired && (!researchCheck.ok || !researchConfirmed);
+  const [researchExcused, setResearchExcused] = useState(false);
+  const researchRequired = needsResearchLink && !(researchExcused && !researchLink.trim());
+  const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
@@ -487,14 +483,9 @@ export function EodComposer({
   // Restore draft from localStorage on mount. Nothing is saved until this has
   // run: the save below used to write the page's defaults over the draft first.
   const [restored, setRestored] = useState(false);
-  const researchEdited = useRef(false);
   const useSavedResearch = useCallback((link: string) => {
-    if (!restored || resend || researchEdited.current) return;
-    // Today's saved confirmation is authoritative over an older local draft.
-    // Editing here clears confirmation and keeps the TA's new input intact.
-    setResearchLink(link);
-    setResearchConfirmed(true);
-  }, [restored, resend]);
+    if (restored) research.adoptSaved(link);
+  }, [restored, research.adoptSaved]);
   useEffect(() => {
     setRestored(true);
     try {
@@ -508,7 +499,7 @@ export function EodComposer({
         }
         if (saved.introText !== undefined) setIntroText(saved.introText);
         if (saved.outroText !== undefined) setOutroText(saved.outroText);
-        if (typeof saved.researchLink === "string") setResearchLink(saved.researchLink);
+        if (typeof saved.researchLink === "string") research.restoreDraft(saved.researchLink);
         if (saved.shortlistDraft !== undefined) setShortlistDraft(saved.shortlistDraft);
         // Saved as the comma text the server reads, before and after the chips.
         if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
@@ -619,11 +610,11 @@ export function EodComposer({
           the send form through form="eod-send", wherever it sits. */}
       {/* Shown to everyone on the directors' email (9 Oct): an admin or lead may add one
           too; only a TA must. The server already takes a valid link from anyone. */}
-      {kind === "director" && hasTasks && (
+      {kind === "director" && (
         <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <h3 className="text-[13.5px] font-semibold">
             ChatGPT research link{" "}
-            {needsResearchLink ? (
+            {researchRequired ? (
               <>
                 <span className="text-warn" aria-hidden="true">*</span>
                 <span className="sr-only">(required)</span>
@@ -632,6 +623,7 @@ export function EodComposer({
               <span className="font-normal text-ink-faint">(optional)</span>
             )}
           </h3>
+          {researchExcused && !researchLink.trim() && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Reason submitted in Today’s Checks. A link is excused for this workday.</p>}
           <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
             Your TA Lead and the directors will open this from the email. In ChatGPT, open today&rsquo;s research
             chat, choose <b>Share</b>, then <b>Create link</b>, and paste that link here. The address in your
@@ -644,9 +636,10 @@ export function EodComposer({
             inputMode="url"
             autoComplete="off"
             spellCheck={false}
-            required={needsResearchLink}
+            required={researchRequired}
             value={researchLink}
-            onChange={(e) => { researchEdited.current = true; setResearchLink(e.target.value); setResearchConfirmed(false); }}
+            disabled={research.saving}
+            onChange={(e) => research.edit(e.target.value)}
             onBlur={() => setResearchTouched(true)}
             placeholder="https://chatgpt.com/share/…"
             aria-invalid={researchTouched && !researchCheck.ok}
@@ -665,9 +658,10 @@ export function EodComposer({
               form="eod-send"
               type="checkbox"
               name="researchConfirmed"
-              required={needsResearchLink}
-              checked={researchConfirmed}
-              onChange={(e) => setResearchConfirmed(e.target.checked)}
+              required={researchRequired}
+              checked={researchConfirmed || research.saving}
+              disabled={research.saving || !researchCheck.ok}
+              onChange={(e) => research.confirm(e.target.checked)}
               className="mt-1 h-3.5 w-3.5 shrink-0 accent-[var(--brand,#165b42)]"
             />
             <span>
@@ -675,10 +669,9 @@ export function EodComposer({
               emails or CV text, because anyone with the link can read it.
             </span>
           </label>
-          {researchCheck.ok && <ChatgptConfirmation jobId={openingId} link={researchLink} confirmed={researchConfirmed} />}
+          <p className={`mt-2 text-xs ${researchConfirmed ? "text-brand" : "text-ink-soft"}`} role="status">{research.message || "Confirming saves this link to Today’s Checks and the EOD email."}</p>
         </section>
       )}
-      {researchRequired && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} />}
 
       <section className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
         <div className="flex flex-col gap-3 border-b border-rule px-7 py-5">
@@ -1049,11 +1042,17 @@ export function EodComposer({
             })}
           </div>
         )}
-        {effectiveRows.length > 0 && <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+        <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
           Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
-        </p>}
+        </p>
       </section>
 
+      {needsResearchLink && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
+        extraReasons={[
+          ...(initialRows.length === 0 ? [{ key: "director_cv", message: "Add at least one CV in Director Review." }] : []),
+          ...(nobodyOnTo ? [{ key: "recipient", message: "Add a valid email address on the To line." }] : []),
+          ...(researchBlocked ? [{ key: "chatgpt", message: "Add a valid ChatGPT share link and confirm it, or submit a reason in Today’s Checks." }] : []),
+        ]} />}
       <form id="eod-send" action={resend ? resendEod : sendEod} className="flex flex-wrap items-center gap-4">
         {!resend && kind === "director" && initialRows.length === 0 && <input type="hidden" name="activityOnly" value="yes" />}
         <input type="hidden" name="openingId" value={openingId} />
@@ -1071,9 +1070,11 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || (researchRequired && jobBlocked)}
+          disabled={initialRows.length === 0 || nobodyOnTo || researchBlocked || jobBlocked}
           title={
-            nobodyOnTo
+            initialRows.length === 0
+              ? "Add at least one CV in Director Review before sending"
+              : nobodyOnTo
               ? "Add an address as To first"
               : researchBlocked
                 ? "Add your ChatGPT research link and tick the box first"
@@ -1082,13 +1083,13 @@ export function EodComposer({
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
-          {resend ? "Send again as REVISED" : kind === "director" ? initialRows.length === 0 ? "Send activity email" : "Send email" : "Record that it went to the client"}
+          {resend ? "Send again as REVISED" : kind === "director" ? "Send email" : "Record that it went to the client"}
         </SubmitButton>
         {kind === "director" && (
           <span className="text-[11.5px] text-ink-faint">
             {resend
               ? "Press once — it goes to the same people, with the same CVs, numbered as before."
-              : initialRows.length ? "Press once — the CVs are stamped and attached before it goes." : "Press once — the email includes today's activity."}
+              : "Press once — the CVs are stamped and attached before it goes."}
           </span>
         )}
       </form>

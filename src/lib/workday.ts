@@ -24,6 +24,8 @@ export interface WorkdayCheck {
   progress?: string;
   needsEmptySuggestionsReason?: boolean;
   blocksEmail?: boolean;
+  exceptionVersion?: string;
+  exception?: { reason: string; at: number; by: string };
   events?: { status: string; at: number; by?: string; evidence?: string; observed?: boolean }[];
   waiting?: { reason: string; nextAction: string; dueAt: number };
 }
@@ -85,6 +87,7 @@ export interface WorkdayView {
 export interface WorkdayPayload {
   canWork: boolean;
   canLead: boolean;
+  canReview: boolean;
   role: string;
   lastFinishedAt: number | null;
   lastFinishedDate: string | null;
@@ -145,19 +148,36 @@ export function validateCarry(
 }
 
 export function completionBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.filter(j => j.workType !== "Follow-up" && j.workType !== "Add-on")
-    .flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting);
+  return jobs.flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting && !c.exception);
 }
 
 export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.filter(j => j.workType !== "Follow-up" && j.workType !== "Add-on")
-    .flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
-    .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting);
+  return jobs.flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
+    .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting && !c.exception);
 }
 
-/** 14 Oct: temporarily send once these four setup checks are complete. */
+/** Only setup/review work can be excused; CVs and mail safety stay mandatory. */
+export function canExcuseCheck(check: Pick<WorkdayCheck, "key">): boolean {
+  return ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "chatgpt"].includes(check.key.split(":")[0]);
+}
+
+export interface TaskException {
+  key: string; reason: string; version: string; at: number; by: string;
+  action: "submit" | "withdraw";
+}
+
+export function applyTaskExceptions(checks: WorkdayCheck[], events: TaskException[], currentDay: boolean): WorkdayCheck[] {
+  return checks.map(check => {
+    const event = events.filter(e => e.key === check.key).at(-1);
+    return currentDay && canExcuseCheck(check) && check.status !== "complete" && event?.action === "submit" && event.version === check.exceptionVersion
+      ? { ...check, exception: { reason: event.reason, at: event.at, by: event.by } }
+      : check;
+  });
+}
+
+/** 15 Oct: require the post link, Suggestions decisions and a Director Review CV; research fields are optional. */
 export function isEodSendCheck(check: Pick<WorkdayCheck, "key">): boolean {
-  return ["jd_review", "research", "excel_profiles", "chatgpt", "mail"].includes(check.key.split(":")[0]);
+  return ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "director_cv", "chatgpt", "mail"].includes(check.key.split(":")[0]);
 }
 
 export function confirmedResearchLink(checks: WorkdayCheck[]): string | null {

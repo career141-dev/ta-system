@@ -972,6 +972,8 @@ export interface SavedSearch {
   lastRunAt: number | null;
   /** The count when it was last run, so "12 new since Tuesday" is possible. */
   lastResultCount: number | null;
+  /** Bounded, PII-free reference profile used by CV lookalike searches. */
+  referenceProfile?: string | null;
   /** Search memory saved with the query. Recruiter intent only, never CV text or contact data. */
   intent?: unknown | null;
   turns?: string[];

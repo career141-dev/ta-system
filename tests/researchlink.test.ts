@@ -30,6 +30,9 @@ const bad = (s: string) => !validateResearchLink(s).ok;
 
 const ID = "68f1a2b3-4c5d-8e9f-a0b1-c2d3e4f5a6b7";
 
+eq("a trusted task exception allows an empty research link", checkResearchSubmission({ role: "ta", kind: "director", link: "", confirmed: false, excused: true }), { ok: true, url: null });
+eq("an exception does not allow a private link", checkResearchSubmission({ role: "ta", kind: "director", link: `https://chatgpt.com/c/${ID}`, confirmed: true, excused: true }).ok, false);
+eq("an exception does not confirm an edited share link", checkResearchSubmission({ role: "ta", kind: "director", link: `https://chatgpt.com/share/${ID}`, confirmed: false, excused: true }).ok, false);
 console.log("\nWhich links are accepted");
 eq("a share link on chatgpt.com", url(`https://chatgpt.com/share/${ID}`), `https://chatgpt.com/share/${ID}`);
 eq("the older host chat.openai.com", url(`https://chat.openai.com/share/${ID}`), `https://chat.openai.com/share/${ID}`);
