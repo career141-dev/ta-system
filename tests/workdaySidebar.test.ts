@@ -36,6 +36,6 @@ assert.equal(sidebarChecks(job([check("upload:one"), check("mail:one", { kind: "
 const empty = { ...job([]), shortlist: [] };
 assert.deepEqual(sidebarChecks(empty), []);
 for (const workType of ["Follow-up", "Add-on"] as const) {
-  assert.deepEqual(sidebarChecks({ ...original, workType }), [], "Returning positions do not synthesize candidate progress from their shortlist");
+  assert.deepEqual(sidebarChecks({ ...original, workType }).map(c => c.key), ["director_cv:job", "daily_email:job"], "Returning positions show only mode-aware EOD tracking");
 }
 console.log("Workday sidebar candidate grouping, stage totals, waiting states and preserved Finish gates passed.");

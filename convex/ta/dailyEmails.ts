@@ -4,6 +4,8 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess } from "./guard";
 import { mapUser } from "../../src/data/convex/map";
 import { workdayDate } from "../../src/lib/workday";
+import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
+import { workSessionStart } from "../../src/lib/workdayRequirements";
 import { dailySendProblem, sameCandidateList, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
 import { validateResearchLink, checkResearchSubmission } from "../../src/lib/eod-format";
 import { dailyEmailsFor, finalizeDailyEmail, middayRequired } from "../lib/dailyEmail";
@@ -108,8 +110,22 @@ export const begin = internalMutation({
       const sent = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds));
       for (const e of all.filter(e => e.status === "accepted")) for (const id of e.applicationIds) sent.add(id);
       const apps = await ctx.db.query("applications").withIndex("by_jobId", q => q.eq("jobId", args.jobId)).collect();
-      const eligible = apps.filter(a => a.currentStage === "second_shortlist" && (!worker(user) || a.ownerTaId === user._id) && !sent.has(a._id));
+      const entry = day?.jobs.find(j => j.jobId === args.jobId);
+      const currentWorkType = entry?.workType ?? "100%";
+      const sessionStart = entry ? workSessionStart(entry) : null;
+      const eligible = apps.filter(a => !sent.has(a._id) && (
+        args.submissionType === "eod"
+          ? isEodCandidateEligible({
+              stage: a.currentStage,
+              ownerTaId: a.ownerTaId,
+              isAddOn: a.isAddOn,
+              lastStageChangedAt: a.lastStageChangedAt,
+            }, { taId: worker(user) ? user._id : null, workType: currentWorkType, sessionStart })
+          : a.currentStage === "second_shortlist" && (!worker(user) || a.ownerTaId === user._id)
+      ));
       if (!sameCandidateList(args.applicationIds, eligible.map(a => a._id))) throw new Error("The candidate list changed. Reload, review the updated list and send again.");
+      if (args.submissionType === "eod" && currentWorkType === "100%" && !args.applicationIds.length)
+        throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
       if (day && args.submissionType === "eod") {
         const blockers = setup!.eodChecks.filter(c => !["director_cv", "chatgpt"].includes(c.key.split(":")[0]) && c.status !== "complete" && !c.exception);
         if (blockers.length) throw new Error(`Complete Today's Checks: ${blockers.map(c => c.label).join("; ")}`);

@@ -12,10 +12,14 @@ candidate task rows. Completion ratios and the remaining-step count use the
 grouped view; Finish still checks the original candidate requirements. Job
 pages and the lead's team review retain the detailed actions and history.
 
-The first workday for a TA/opening is 100%. Returning jobs default to Follow-up;
-the TA can explicitly select Add-on. Pending assigned jobs carry into the next
-workday as Follow-up and do not consume the ten manually selected job slots.
-Changing a carried job to Add-on makes it a deliberately selected job.
+Newly created openings default to 100%. The TA can change the opening to
+Follow-up or Add-on from its top bar before or during the first recorded
+workday; this is needed when an older position is entered into the system for
+the first time. That per-TA opening mode is the default in Today's Checks and
+changes to it are kept in the active workday's mode history. Pending assigned
+jobs carry into the next workday as Follow-up and do not consume the ten
+manually selected job slots. Changing a carried job to Add-on makes it a
+deliberately selected job.
 
 ## Requirements
 
@@ -37,24 +41,28 @@ TA's confirmation, including when an old version is restored. Reconfirmation
 records a new server timestamp; repeated confirmation preserves the original
 time. Existing approvals without a saved reviewed version need confirmation;
 there is no automatic historical backfill. Follow-up and Add-on do not repeat
-the JD setup requirement. Leads see the review's actor, time, and event history.
+the JD, LinkedIn, Suggestions or Excel setup requirements. They track only
+eligible Director Review candidates, the confirmed ChatGPT link and the EOD
+email. Leads see the actor, time and event history.
 
-Every work type requires a Director Review CV or a CV already submitted during
-that work session. A no-candidate explanation cannot replace the CV. General
-candidate work remains grouped; Director Review CV readiness is a separate
-sidebar check. TA Shortlist may be zero. Follow-up requires due actions
-to be completed or valid waiting reasons with next actions and future due times.
-Director replies can remain waiting. Each selected/carried job needs its daily
-email and confirmed ChatGPT research share link before the workday can finish.
+100% requires a Director Review CV or a CV already submitted during that work
+session. Follow-up and Add-on show their eligible Director Review count, but
+zero candidates is valid and does not block the EOD email. Add-on includes only
+the TA's candidates tagged Add-on and progressed to Director Review during the
+current Add-on session. General 100% candidate work remains grouped; Director
+Review CV readiness is a separate sidebar check. Each selected/carried job
+needs its daily email and confirmed ChatGPT research share link before the
+workday can finish.
 
-EOD sending requires confirmed review of the approved JD, a valid LinkedIn job,
-post or Recruiter project link, completed human Suggestions review, one own Excel
-profile, a Director Review CV, and a confirmed ChatGPT research share link.
-These checks apply to every work type and reuse saved setup evidence. The LinkedIn
-link is compulsory; a reason-only exception is not accepted. General candidate
-work does not block sending, while selected candidate validation and duplicate/
-uncertain-mail safeguards remain enforced. Empty activity-only emails are disabled,
-and at least one CV must be successfully prepared and attached before sending.
+100% EOD sending requires confirmed review of the approved JD, a valid LinkedIn
+job, post or Recruiter project link, completed human Suggestions review, one own
+Excel profile, a Director Review CV, and a confirmed ChatGPT research share
+link. Follow-up and Add-on require the confirmed ChatGPT link and retain
+duplicate/uncertain-mail safeguards without repeating first-day setup. An empty
+activity email is allowed only for Follow-up and Add-on; it keeps the normal
+effort section and ChatGPT link without a candidate table or attachments. When
+candidates are included, selected-candidate validation and successful CV
+attachment preparation remain enforced.
 The composer fills the ChatGPT link from today's saved confirmation. Editing
 that link clears confirmation, and revised emails require confirmation again.
 The Excel minimum is temporarily one (14 October). It still counts only valid,

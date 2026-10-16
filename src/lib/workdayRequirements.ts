@@ -51,7 +51,6 @@ export interface SetupEvidence {
 
 /** The same saved evidence drives sidebar ticks, send preflight and Finish. */
 export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_WORKDAY_REQUIRED): WorkdayCheck[] {
-  if (e.workType !== "100%") return [];
   const base = `/openings/${e.jobId}`;
   const rows: WorkdayCheck[] = [];
   const add = (key: string, label: string, href: string, complete: boolean, progress: string,
@@ -75,8 +74,9 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
     add("excel_profiles", "Own Excel Tables profiles", `${base}/hh/links`, e.profiles.count >= MIN_OWN_EXCEL_PROFILES, `${e.profiles.count}/${MIN_OWN_EXCEL_PROFILES}`, e.profiles.at, e.userId, String(e.profiles.count));
   }
   const hasDirectorCv = e.ready > 0 || e.submitted > 0;
-  add("director_cv", "Director Review CV", `${base}/pipeline/director_review`, hasDirectorCv,
-    e.submitted ? `${e.submitted} submitted` : e.ready ? `${e.ready} ready` : "Move at least one candidate with a CV to Director Review before sending",
+  const candidateRequired = e.workType === "100%";
+  add("director_cv", e.workType === "100%" ? "Director Review CV" : "Eligible Director Review candidates", `${base}/pipeline/director_review`, !candidateRequired || hasDirectorCv,
+    e.submitted ? `${e.submitted} submitted` : e.ready ? `${e.ready} ready` : candidateRequired ? "Move at least one candidate with a CV to Director Review before sending" : "No eligible candidates today — a link-only activity email is allowed",
     undefined, e.userId);
   const validLink = validateResearchLink(e.chatgptLink);
   add("chatgpt", "ChatGPT research link", `${base}/eod`, validLink.ok && !!e.confirmedAt,
