@@ -17,6 +17,7 @@ import { inputClass } from "./form";
 import { resendEod, sendEod } from "@/app/actions";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
+import type { WorkingStage } from "@/data/types";
 
 function noteLineToHtml(line: string): string {
   let l = line
@@ -385,6 +386,7 @@ export function EodComposer({
   alreadyOut,
   openSetNote,
   needsResearchLink,
+  workType,
   resend,
 }: {
   openingId: string;
@@ -411,6 +413,7 @@ export function EodComposer({
   openSetNote: string | null;
   /** A TA's email to the directors must carry their ChatGPT research link (8 Oct); the server checks it too. */
   needsResearchLink: boolean;
+  workType: WorkingStage;
   /** An email already sent, opened from its copy to correct and send again (8 Oct). */
   resend?: {
     copyId: string;
@@ -422,10 +425,13 @@ export function EodComposer({
     removed: string[];
   };
 }) {
+  const hasTasks = workType === "100%";
   const draftKey = resend
     ? `eod-composer-draft:${openingId}:${kind}:resend:${resend.copyId}`
     : `eod-composer-draft:${openingId}:${kind}`;
-  const defaultIntro = "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position";
+  const defaultIntro = initialRows.length
+    ? "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position"
+    : "Dear Sir,\n\nPlease find today's activity for the above-mentioned position.";
   const defaultOutro = `Thank You\nBest Regards,\n\n${senderName}\nExecutive - Talent Acquisition`;
 
   const [subject, setSubject] = useState(initialSubject);
@@ -440,7 +446,7 @@ export function EodComposer({
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const [researchExcused, setResearchExcused] = useState(false);
-  const researchRequired = needsResearchLink && !(researchExcused && !researchLink.trim());
+  const researchRequired = needsResearchLink && hasTasks && !(researchExcused && !researchLink.trim());
   const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
@@ -610,7 +616,7 @@ export function EodComposer({
           the send form through form="eod-send", wherever it sits. */}
       {/* Shown to everyone on the directors' email (9 Oct): an admin or lead may add one
           too; only a TA must. The server already takes a valid link from anyone. */}
-      {kind === "director" && (
+      {kind === "director" && hasTasks && (
         <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <h3 className="text-[13.5px] font-semibold">
             ChatGPT research link{" "}
@@ -1042,9 +1048,9 @@ export function EodComposer({
             })}
           </div>
         )}
-        <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+        {effectiveRows.length > 0 && <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
           Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
-        </p>
+        </p>}
       </section>
 
       {needsResearchLink && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
@@ -1070,9 +1076,9 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={initialRows.length === 0 || nobodyOnTo || researchBlocked || jobBlocked}
+          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || (researchRequired && jobBlocked)}
           title={
-            initialRows.length === 0
+            initialRows.length === 0 && kind !== "director"
               ? "Add at least one CV in Director Review before sending"
               : nobodyOnTo
               ? "Add an address as To first"
@@ -1083,13 +1089,13 @@ export function EodComposer({
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
-          {resend ? "Send again as REVISED" : kind === "director" ? "Send email" : "Record that it went to the client"}
+          {resend ? "Send again as REVISED" : kind === "director" ? initialRows.length === 0 ? "Send activity email" : "Send email" : "Record that it went to the client"}
         </SubmitButton>
         {kind === "director" && (
           <span className="text-[11.5px] text-ink-faint">
             {resend
               ? "Press once — it goes to the same people, with the same CVs, numbered as before."
-              : "Press once — the CVs are stamped and attached before it goes."}
+              : initialRows.length ? "Press once — the CVs are stamped and attached before it goes." : "Press once — the email includes today's activity."}
           </span>
         )}
       </form>

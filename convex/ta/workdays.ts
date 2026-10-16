@@ -784,7 +784,7 @@ async function view(
   now: number,
 ): Promise<WorkdayView> {
   if (day.finishedAt !== undefined && day.completion)
-    return day.completion as WorkdayView;
+    return withoutReturningTasks(day.completion as WorkdayView);
   const user = await ctx.db.get(day.userId);
   const requests = await ctx.db
     .query("taWorkdayRequests")
@@ -807,6 +807,13 @@ async function view(
         reason: r.reason,
       })),
     ),
+  };
+}
+
+function withoutReturningTasks(day: WorkdayView): WorkdayView {
+  return {
+    ...day,
+    jobs: day.jobs.map(job => job.workType === "100%" ? job : { ...job, checks: [], eodChecks: [] }),
   };
 }
 
@@ -912,12 +919,22 @@ export const emailPreflight = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), link: v.string(), confirmed: v.boolean(), revised: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
-    if (!["ta", "ta_support"].includes(roleOf(user))) return { ok: true, blockers: [] };
+    if (!["ta", "ta_support"].includes(roleOf(user))) return { ok: true, blockers: [], workType: "100%" as const };
     const day = await activeFor(ctx, user._id);
     if (!day) throw new Error("Start your workday in Today's Checks before sending.");
     const entry = day.jobs.find(j => j.jobId === args.jobId);
     if (!entry) throw new Error("Add this opening to Today's Checks first.");
     await assignedJob(ctx, user, args.jobId);
+    if (entry.workType !== "100%") {
+      // Returning work has no task gate, but duplicate/uncertain sends remain blocked.
+      const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
+      const pending = receipts.some(r => r.status === "sending" || r.status === "uncertain" || (r.status === "accepted" && !r.finalizedAt));
+      return {
+        ok: !pending,
+        blockers: pending ? ["This job has a send in progress or an uncertain result. Ask the lead to reconcile it before retrying."] : [],
+        workType: entry.workType,
+      };
+    }
     const link = validateResearchLink(args.link);
     const excused = !args.link.trim() && !!(await requiredChecks(ctx, day, entry)).eodChecks.find(c => c.key.startsWith("chatgpt:"))?.exception;
     if (!excused && (!link.ok || !args.confirmed)) throw new Error(link.ok ? "Confirm your ChatGPT link before sending." : link.reason);
@@ -931,7 +948,7 @@ export const emailPreflight = internalMutation({
     await refreshWorkdayChecks(ctx, args.jobId, user._id);
     const result = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([result]);
-    return { ok: !blockers.length, blockers: blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`) };
+    return { ok: !blockers.length, blockers: blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`), workType: entry.workType };
   },
 });
 
@@ -1096,7 +1113,7 @@ export const dashboard = internalQuery({
       result.requests = result.requests.filter((r) =>
         visibleRequests.some((v) => v._id === r.id),
       );
-      team.push(result);
+      team.push(withoutReturningTasks(result));
     }
     return {
       canWork: worker,
@@ -1139,12 +1156,13 @@ export const beginMail = internalMutation({
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
-    if (!args.applicationIds.length) throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
     const day = await activeFor(ctx, user._id);
     if (!day || !day.jobs.some((j) => j.jobId === args.jobId))
       return { id: null };
     await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId)!;
+    if (!args.applicationIds.length && entry.workType === "100%")
+      throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
     const current = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([current]).filter(c => !c.key.startsWith("mail:"));
     if (blockers.length) throw new Error(`Complete Today's Checks before sending: ${blockers.map(c => c.label).join("; ")}.`);
@@ -1165,6 +1183,8 @@ export const beginMail = internalMutation({
       throw new Error(
         "This job has a send in progress or an uncertain result. Ask the lead to reconcile it before retrying.",
       );
+    if (!args.applicationIds.length && previous.some(r => r.status === "accepted"))
+      throw new Error("This activity email has already been sent in this workday.");
     const sentToday = new Set(
       previous
         .filter((r) => r.status === "accepted")

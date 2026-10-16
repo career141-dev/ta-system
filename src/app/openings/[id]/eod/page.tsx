@@ -341,7 +341,7 @@ export default async function EodPage({
         effort={resendCopy ? resendCopy.effort : effort}
         senderName={user.name}
         alreadyOut={!!awaiting}
-        needsResearchLink={needsResearchLink(user.role, kind)}
+        needsResearchLink={needsResearchLink(user.role, kind, workType)}
         workType={workType}
         resend={
           resendCopy

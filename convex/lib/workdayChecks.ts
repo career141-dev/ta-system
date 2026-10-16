@@ -70,8 +70,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const decorate = (rows: WorkdayCheck[]) => applyTaskExceptions(rows.map(c => canExcuseCheck(c)
     ? { ...c, exceptionVersion: JSON.stringify([since, versions[c.key.split(":")[0]]]) } : c), exceptions, day.date === workdayDate(Date.now()));
   const checks = decorate(setupChecks(setup, true));
-  // Saved setup can be reused; the same send requirements apply in every work type.
-  const eodChecks = decorate(setupChecks({ ...setup, workType: "100%" }).filter(isEodSendCheck));
+  const eodChecks = checks.filter(isEodSendCheck);
   const suggestionsCheck = eodChecks.find(c => c.key.startsWith("suggestions:")) ?? null;
   const candidateCheck = checks.find(c => c.key.startsWith("director_cv:"));
   if (candidateCheck?.status === "complete" && ready.length && !accepted.length) {
@@ -97,6 +96,8 @@ export async function recordJdReview(ctx: MutationCtx, userId: Id<"users">, jobI
 
 /** Event reads never manufacture a completion time for legacy evidence. */
 export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, jobId: Id<"jobs">, checks: WorkdayCheck[], includeHistorical = true) {
+  // Returning positions have no tasks, including events saved before this policy.
+  if (day.jobs.find(j => j.jobId === jobId)?.workType !== "100%") return [];
   const events = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   const exceptions = await ctx.db.query("taWorkdayExceptions").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   const names = new Map<string, string>();

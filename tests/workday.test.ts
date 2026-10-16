@@ -779,38 +779,35 @@ try {
   }
   put("jobs", { _id: "manual:10", title: "One too many", taLeadId: "lead", assignedTaIds: ["carryTa"] });
   await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId: "manual:10", workType: "100%" }), /at most ten/);
-  // A later Add-on session must not reuse this day's earlier email/explanation.
-  user("addonTa", "ta");
-  put("jobs", { _id: "addonJob", title: "Add-on job", status: "active", taLeadId: "lead", assignedTaIds: ["addonTa"] });
-  put("taWorkdays", { _id: "addonPast", userId: "addonTa", date: workdayDate(clock - 86400000), startedAt: clock - 86400000, finishedAt: clock - 1, jobs: [{ jobId: "addonJob", workType: "100%", addedAt: clock - 86400000, modeHistory: [] }] });
-  const addonDay = await run("start", { actorId: "addonTa", jobId: "addonJob", workType: "Follow-up" });
-  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "noCandidates", reason: "Earlier session found no candidates" });
-  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
-  put("taWorkdayMail", { _id: "earlierEmail", workdayId: addonDay.id, userId: "addonTa", jobId: "addonJob", applicationIds: [], status: "accepted", startedAt: clock, acceptedAt: clock, finalizedAt: clock });
-  clock += 20;
-  await run("setWorkType", { actorId: "addonTa", workdayId: addonDay.id, jobId: "addonJob", workType: "Add-on" });
-  let addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_cv:")).status, "incomplete");
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
-  assert.equal(addonChecks.some((c: Row) => c.key.startsWith("jd_review:")), false, "Add-on does not repeat JD setup");
-  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "noCandidates", reason: "No additional suitable candidates in this Add-on session" });
-  addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_cv:")).status, "incomplete", "A no-candidate explanation does not substitute for the required CV");
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
-  await assert.rejects(() => run("beginMail", { actorId: "addonTa", jobId: "addonJob", applicationIds: [], subject: "Synthetic Add-on update", sentTo: "director@example.invalid" }), /at least one CV/);
-  await db.patch("addonJob", { jobDescription: "Synthetic Add-on JD", jdStatus: "approved" });
-  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "jd" });
-  put("jobPosts", { _id: "addonPost", openingId: "addonJob", channel: "LinkedIn", externalUrl: "https://linkedin.com/talent/hire/1528413625/overview", postedAt: clock });
-  await run("recordSourcingRun", { actorId: "addonTa", jobId: "addonJob", userId: "addonTa", round: 1, count: 0 });
-  await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "emptySuggestions", reason: "No profiles in synthetic search" });
-  put("candidates", { _id: "addonCandidate", fullName: "Synthetic Add-on candidate", cvUploadId: "synthetic-cv" });
-  put("applications", { _id: "addonApp", candidateId: "addonCandidate", jobId: "addonJob", ownerTaId: "addonTa", currentStage: "second_shortlist", sourceChannel: "Database", cvFileId: "synthetic-cv", lastStageChangedAt: clock });
-  for (let i = 0; i < 3; i++) put("linkVault", { _id: `addonProfile:${i}`, openingId: "addonJob", addedBy: "addonTa", createdAt: clock, linkedinUrl: `https://linkedin.com/in/addon-${i}`, outcome: "contacted", conversationLog: [], isEyeMarked: false });
-  const addonMail = await run("beginMail", { actorId: "addonTa", jobId: "addonJob", applicationIds: ["addonApp"], subject: "Synthetic Add-on update", sentTo: "director@example.invalid", researchLink: "https://chatgpt.com/share/12345678" });
-  await run("mailResult", { id: addonMail.id, status: "accepted" });
-  await run("finalizeMail", { actorId: "addonTa", id: addonMail.id });
-  addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "complete");
+  // Returning positions have no tasks, but activity-only mail keeps duplicate-send safety.
+  const mixedDay = (await run("dashboard", { actorId: "carryTa" })).active;
+  assert.ok(mixedDay.jobs.filter((j: Row) => j.workType === "100%").every((j: Row) => j.checks.length > 0));
+  assert.ok(mixedDay.jobs.filter((j: Row) => j.workType === "Follow-up").every((j: Row) => !j.checks.length && !j.eodChecks.length));
+  for (const mode of ["Follow-up", "Add-on"] as const) {
+    const actorId = `returning:${mode}`;
+    const jobId = `returningJob:${mode}`;
+    user(actorId, "ta");
+    put("jobs", { _id: jobId, title: jobId, status: "active", taLeadId: "lead", assignedTaIds: [actorId] });
+    put("taWorkdays", { _id: `past:${mode}`, userId: actorId, date: workdayDate(clock - 86400000), startedAt: clock - 86400000, finishedAt: clock - 1, jobs: [{ jobId, workType: "100%", addedAt: clock - 86400000, modeHistory: [] }] });
+    const returningDay = await run("start", { actorId, jobId, workType: mode });
+    put("taWorkdayTaskEvents", { _id: `oldTask:${mode}`, workdayId: returningDay.id, userId: actorId, jobId, key: `chatgpt:${jobId}`, label: "Old research task", href: "/", kind: "details", status: "incomplete", at: clock });
+    const current = (await run("dashboard", { actorId })).active.jobs[0];
+    assert.deepEqual(current.checks, []);
+    assert.deepEqual(current.eodChecks, []);
+    const preflight = await run("emailPreflight", { actorId, jobId, link: "", confirmed: false });
+    assert.equal(preflight.ok, true);
+    assert.equal(preflight.workType, mode);
+    const args = { actorId, jobId, applicationIds: [], subject: "Synthetic activity update", sentTo: "director@example.invalid" };
+    const mail = await run("beginMail", args);
+    assert.ok(mail.id);
+    await assert.rejects(() => run("beginMail", args), /send in progress/);
+    await run("mailResult", { id: mail.id, status: "accepted" });
+    await run("finalizeMail", { actorId, id: mail.id });
+    await assert.rejects(() => run("beginMail", args), /activity email has already been sent/);
+    assert.equal((await run("finish", { actorId, workdayId: returningDay.id })).ok, true);
+    const finished = (await run("dashboard", { actorId, detail: true })).history.find((d: Row) => d.id === returningDay.id);
+    assert.ok(finished.jobs.every((j: Row) => !j.checks.length && !j.eodChecks.length));
+  }
   // Setup exceptions are scoped, audited and immediately usable, without sending mail.
   user("exceptionTa", "ta");
   user("exceptionOther", "ta");
