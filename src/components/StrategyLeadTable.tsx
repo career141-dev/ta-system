@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import {
   addStrategyDoneByInline,
   removeStrategyDoneByInline,
@@ -55,13 +56,137 @@ export function StrategyLeadTable({
     .filter((r): r is NonNullable<typeof r> => !!r)
     .sort((a, b) => b.at - a.at)[0] ?? null;
 
+  const [pendingAdds, setPendingAdds] = useState<{ strategyId: string; person: { id: string; name: string } }[]>([]);
+  const [pendingRemoves, setPendingRemoves] = useState<{ strategyId: string; taId: string }[]>([]);
+  const [pendingTicks, setPendingTicks] = useState<Record<string, boolean>>({});
+  const [pendingStruck, setPendingStruck] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    // Clear confirmed adds
+    setPendingAdds((prev) =>
+      prev.filter((a) => !lines.some((l) => l.strategyId === a.strategyId && l.doneBy.some((d) => d.id === a.person.id)))
+    );
+    // Clear confirmed removes
+    setPendingRemoves((prev) =>
+      prev.filter((r) => lines.some((l) => l.strategyId === r.strategyId && l.doneBy.some((d) => d.id === r.taId)))
+    );
+    // Clear confirmed ticks
+    setPendingTicks((prev) => {
+      const next = { ...prev };
+      for (const [sId, ticked] of Object.entries(prev)) {
+        const item = lines.find((l) => l.strategyId === sId);
+        if (item && item.ticked === ticked) delete next[sId];
+      }
+      return next;
+    });
+    // Clear confirmed struck
+    setPendingStruck((prev) => {
+      const next = { ...prev };
+      for (const [sId, struck] of Object.entries(prev)) {
+        const item = lines.find((l) => l.strategyId === sId);
+        if (item && item.struck === struck) delete next[sId];
+      }
+      return next;
+    });
+  }, [lines]);
+
+  useEffect(() => {
+    if (add.result && !add.result.ok) setPendingAdds([]);
+    if (remove.result && !remove.result.ok) setPendingRemoves([]);
+    if (line.result && !line.result.ok) setPendingTicks({});
+    if (na.result && !na.result.ok) setPendingStruck({});
+  }, [add.result, remove.result, line.result, na.result]);
+
+  const todayStr = useMemo(() => {
+    try {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Colombo" }).format(new Date());
+    } catch {
+      return new Date().toISOString().slice(0, 10);
+    }
+  }, []);
+
+  const displayedLines = useMemo(() => {
+    return lines.map((l) => {
+      let doneBy = [...l.doneBy];
+      const adds = pendingAdds.filter((a) => a.strategyId === l.strategyId);
+      const removes = pendingRemoves.filter((r) => r.strategyId === l.strategyId);
+
+      for (const a of adds) {
+        if (!doneBy.some((d) => d.id === a.person.id)) {
+          doneBy.push(a.person);
+        }
+      }
+      if (removes.length > 0) {
+        const removeIds = new Set(removes.map((r) => r.taId));
+        doneBy = doneBy.filter((d) => !removeIds.has(d.id));
+      }
+
+      const hasOptimisticAdd = adds.length > 0;
+      const ticked = l.strategyId in pendingTicks ? pendingTicks[l.strategyId] : (hasOptimisticAdd || l.ticked);
+      const struck = l.strategyId in pendingStruck ? pendingStruck[l.strategyId] : l.struck;
+      const assignedValue = hasOptimisticAdd && !l.assignedValue ? todayStr : l.assignedValue;
+
+      return {
+        ...l,
+        doneBy,
+        ticked,
+        struck,
+        assignedValue,
+      };
+    });
+  }, [lines, pendingAdds, pendingRemoves, pendingTicks, pendingStruck, todayStr]);
+
   const save = (strategyId: string, field: string, value: string) => {
+    if (field === "selected") {
+      setPendingTicks((prev) => ({ ...prev, [strategyId]: value === "1" }));
+    }
     const fd = new FormData();
     fd.set("openingId", openingId);
     fd.set("strategyId", strategyId);
     fd.set("field", field);
     fd.set("value", value);
     line.run(fd);
+  };
+
+  const handleAdd = (strategyId: string, taId: string) => {
+    const person = people.find((p) => p.id === taId);
+    if (!person) return;
+
+    setPendingRemoves((prev) => prev.filter((r) => !(r.strategyId === strategyId && r.taId === taId)));
+    setPendingAdds((prev) => {
+      if (prev.some((a) => a.strategyId === strategyId && a.person.id === taId)) return prev;
+      return [...prev, { strategyId, person }];
+    });
+
+    const fd = new FormData();
+    fd.set("openingId", openingId);
+    fd.set("strategyId", strategyId);
+    fd.set("taId", taId);
+    add.run(fd);
+  };
+
+  const handleRemove = (strategyId: string, rowId: string | null, taId: string) => {
+    setPendingAdds((prev) => prev.filter((a) => !(a.strategyId === strategyId && a.person.id === taId)));
+    setPendingRemoves((prev) => {
+      if (prev.some((r) => r.strategyId === strategyId && r.taId === taId)) return prev;
+      return [...prev, { strategyId, taId }];
+    });
+
+    const fd = new FormData();
+    if (rowId) fd.set("rowId", rowId);
+    fd.set("openingId", openingId);
+    fd.set("strategyId", strategyId);
+    fd.set("taId", taId);
+    remove.run(fd);
+  };
+
+  const toggleNa = (strategyId: string, currentStruck: boolean) => {
+    setPendingStruck((prev) => ({ ...prev, [strategyId]: !currentStruck }));
+    const fd = new FormData();
+    fd.set("openingId", openingId);
+    fd.set("strategyId", strategyId);
+    fd.set("na", currentStruck ? "0" : "1");
+    na.run(fd);
   };
 
   const th = "px-3 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-faint";
@@ -84,7 +209,7 @@ export function StrategyLeadTable({
             </tr>
           </thead>
           <tbody>
-            {lines.map((l) => {
+            {displayedLines.map((l) => {
               const free = people.filter((t) => !l.doneBy.some((d) => d.id === t.id));
               const locked = l.struck || (!l.active && !l.rowId);
               return (
@@ -93,7 +218,7 @@ export function StrategyLeadTable({
                     <input
                       key={`t${l.ticked}`}
                       type="checkbox"
-                      defaultChecked={l.ticked}
+                      checked={l.ticked}
                       disabled={locked || (!l.active && !l.ticked)}
                       onChange={(e) => save(l.strategyId, "selected", e.target.checked ? "1" : "0")}
                       aria-label={`Use ${l.name} on this job`}
@@ -116,13 +241,7 @@ export function StrategyLeadTable({
                           {d.name}
                           <button
                             type="button"
-                            disabled={busy || !l.rowId}
-                            onClick={() => {
-                              const fd = new FormData();
-                              fd.set("rowId", l.rowId!);
-                              fd.set("taId", d.id);
-                              remove.run(fd);
-                            }}
+                            onClick={() => handleRemove(l.strategyId, l.rowId, d.id)}
                             title={`Take ${d.name} off`}
                             aria-label={`Take ${d.name} off ${l.name}`}
                             className="grid h-4 w-4 place-items-center rounded-full text-[11px] text-ink-faint hover:bg-rule hover:text-ink"
@@ -134,15 +253,10 @@ export function StrategyLeadTable({
                       {!locked && l.active && free.length > 0 && (
                         <select
                           key={l.doneBy.map((d) => d.id).join(",")}
-                          defaultValue=""
-                          disabled={busy}
+                          value=""
                           onChange={(e) => {
                             if (!e.target.value) return;
-                            const fd = new FormData();
-                            fd.set("openingId", openingId);
-                            fd.set("strategyId", l.strategyId);
-                            fd.set("taId", e.target.value);
-                            add.run(fd);
+                            handleAdd(l.strategyId, e.target.value);
                           }}
                           aria-label={`Assign someone to ${l.name}`}
                           className="cursor-pointer appearance-none rounded-full border border-dashed border-rule-strong bg-transparent px-2.5 py-0.5 text-[11.5px] text-ink-soft hover:border-brand-line hover:text-brand"
@@ -220,14 +334,8 @@ export function StrategyLeadTable({
                   <td className={`${td} text-right`}>
                     <button
                       type="button"
-                      disabled={busy || (!l.active && !l.rowId)}
-                      onClick={() => {
-                        const fd = new FormData();
-                        fd.set("openingId", openingId);
-                        fd.set("strategyId", l.strategyId);
-                        fd.set("na", l.struck ? "0" : "1");
-                        na.run(fd);
-                      }}
+                      disabled={!l.active && !l.rowId}
+                      onClick={() => toggleNa(l.strategyId, l.struck)}
                       title={l.struck ? "Use it on this job again" : "Not for this job: the TAs see it crossed out"}
                       className={`whitespace-nowrap rounded-md border px-2.5 py-1 text-[11px] font-semibold disabled:opacity-50 ${
                         l.struck ? "border-warn bg-warn-soft text-warn" : "border-rule text-ink-soft hover:border-warn hover:text-warn"

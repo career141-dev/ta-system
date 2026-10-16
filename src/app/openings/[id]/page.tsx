@@ -33,7 +33,8 @@ export default async function OverviewPage({
   const user = await getCurrentUser();
   const o = repo.opening(id);
   if (!o) notFound();
-  const deskSeat = seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null);
+  const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
+  const deskSeat = seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null, onStrategy);
   const counts = deskSeat.ownDeskOf
     ? visibleToSeat(repo.applications(id), deskSeat).reduce(
         (m, a) => { m[a.stage] = (m[a.stage] ?? 0) + 1; return m; },
@@ -44,7 +45,7 @@ export default async function OverviewPage({
   const sets = setsForOpening(id);
   const openSet = sets.find((s) => s.status === "open" && s.taId === user.id);
   // A TA's overview is their own desk; a lead's is both TAs' (2 Oct).
-  const apps = visibleToSeat(repo.applications(id), seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null));
+  const apps = visibleToSeat(repo.applications(id), deskSeat);
   const posts = repo.jobPosts(id).filter((p) => p.status === "live");
   const cvsToday = posts.reduce((n, p) => n + p.cvCountToday, 0);
   const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;

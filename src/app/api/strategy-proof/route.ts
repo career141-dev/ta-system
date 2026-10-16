@@ -78,6 +78,8 @@ export async function POST(req: NextRequest) {
     // The loaded tables are behind the picture just attached: re-read them next load.
     markTablesStale();
     revalidatePath(`/openings/${row.openingId}/strategies`);
+    revalidatePath(`/strategy/${row.openingId}`);
+    revalidatePath("/strategy");
     return answer({ ok: true, id: storageId });
   } catch (e) {
     console.warn("[strategy proof]", (e as Error).message);

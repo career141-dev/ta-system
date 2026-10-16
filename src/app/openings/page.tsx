@@ -212,8 +212,8 @@ export default async function OpeningsPage({
           )}
           {list.map((o) => {
             const client = clients.find((c) => c.id === o.clientId);
-            // Counted over this reader's own desk — a TA is not shown the other TA's numbers (2 Oct).
-            const oSeat = seatFor(user, repo.assignmentFor(o.id, user.id)?.role ?? null);
+            const onStrategy = repo.strategyAssignments(o.id).some((r) => r.doneBy.includes(user.id));
+            const oSeat = seatFor(user, repo.assignmentFor(o.id, user.id)?.role ?? null, onStrategy);
             const c = oSeat.ownDeskOf
               ? visibleToSeat(repo.applications(o.id), oSeat).reduce((m, a) => { m[a.stage] = (m[a.stage] ?? 0) + 1; return m; }, {} as ReturnType<typeof stageCounts>)
               : stageCounts(o.id);

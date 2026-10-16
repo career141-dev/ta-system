@@ -141,8 +141,9 @@ export default async function CandidateDrawer({
   // opening, or a client seat looking at a stage before their shortlist, gets
   // nothing rather than a page with the buttons hidden.
   const assignment = repo.assignmentFor(id, user.id) ?? null;
-  const seat = seatFor(user, assignment?.role ?? null);
-  if (!allows(user, "opening.read", { openingId: id, assignment })) notFound();
+  const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
+  const seat = seatFor(user, assignment?.role ?? null, onStrategy);
+  if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
   if (seat.stages !== null && !seat.stages.includes(app.stage)) notFound();
   // Another TA's candidate is not a page this TA can open, whatever the address.
   if (visibleToSeat([app], seat).length === 0) notFound();

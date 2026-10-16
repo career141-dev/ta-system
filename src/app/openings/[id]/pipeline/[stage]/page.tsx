@@ -44,7 +44,9 @@ export default async function StagePage({
   // A stage this seat may not see is not an empty list, it is not a page. A
   // client contact typing /pipeline/rejected should get nothing, not a
   // filtered nothing that tells them the stage exists.
-  const seat = seatFor(user, repo.assignmentFor(id, user.id)?.role ?? null);
+  const assignment = repo.assignmentFor(id, user.id) ?? null;
+  const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
+  const seat = seatFor(user, assignment?.role ?? null, onStrategy);
   if (seat.stages !== null && !seat.stages.includes(s)) notFound();
 
   // A TA's stage page is their own candidates and the unclaimed ones; the
@@ -56,10 +58,10 @@ export default async function StagePage({
   // Each TA numbers their own sets, so a TA sees theirs; a lead sees both.
   const sets = setsForOpening(id, seat.ownDeskOf ?? undefined);
   const oldest = [...everyone].sort((a, b) => a.lastStageChangedAt - b.lastStageChangedAt)[0];
-  const canManage = allows(user, "opening.manage", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
+  const canManage = allows(user, "opening.manage", { openingId: id, assignment, onStrategy });
   // Whoever works this opening can bring in a headhunted CV (the upload route
   // checks the same rule).
-  const canAct = allows(user, "opening.act", { openingId: id, assignment: repo.assignmentFor(id, user.id) ?? null });
+  const canAct = allows(user, "opening.act", { openingId: id, assignment, onStrategy });
 
   return (
     <>

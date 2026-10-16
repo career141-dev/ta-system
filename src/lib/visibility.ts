@@ -162,7 +162,7 @@ export interface Seat {
   ownDeskOf?: string | null;
 }
 
-export function seatFor(user: User, assignment: AssignmentRole | null | undefined): Seat {
+export function seatFor(user: User, assignment: AssignmentRole | null | undefined, onStrategy = false): Seat {
   if (!user.isActive) return { role: null, canSeeSourcing: false, canAct: false, stages: [] };
 
   // Leads, directors, ops and admin are never narrowed by an assignment —
@@ -176,7 +176,7 @@ export function seatFor(user: User, assignment: AssignmentRole | null | undefine
   if (isReadOnly(user)) {
     return {
       role: assignment ?? null,
-      canSeeSourcing: !!assignment && assignment !== "client_contact",
+      canSeeSourcing: (!!assignment && assignment !== "client_contact") || onStrategy,
       canAct: false,
       stages: assignment === "client_contact" ? CLIENT_VISIBLE : assignment ? null : [],
     };
@@ -197,6 +197,14 @@ export function seatFor(user: User, assignment: AssignmentRole | null | undefine
     case "supporting_recruiter":
       return { role: assignment, canSeeSourcing: true, canAct: true, stages: null, ownDeskOf: isTa(user) ? user.id : null };
     default:
+      if (onStrategy) {
+        return {
+          role: null,
+          canSeeSourcing: true,
+          canAct: false,
+          stages: [],
+        };
+      }
       // Not on this opening at all.
       return { role: null, canSeeSourcing: false, canAct: false, stages: [] };
   }
