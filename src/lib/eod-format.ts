@@ -281,8 +281,8 @@ export function validateResearchLink(raw: string | null | undefined): ResearchLi
 }
 
 /** Who must attach one: a TA sending the email that goes to the directors. Leads, directors and admins are exempt; the client copy sends no email. */
-export function needsResearchLink(role: Role, kind: "director" | "client", workType: string = "100%"): boolean {
-  return (role === "ta" || role === "ta_support") && kind === "director" && workType === "100%";
+export function needsResearchLink(role: Role, kind: "director" | "client", _workType: string = "100%"): boolean {
+  return (role === "ta" || role === "ta_support") && kind === "director";
 }
 
 /**

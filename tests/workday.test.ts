@@ -207,7 +207,7 @@ try {
   const support = await run("start", {
     actorId: "support",
     jobId: "job1",
-    workType: "Follow-up",
+    workType: "100%",
   });
   assert.equal(
     (
@@ -273,7 +273,7 @@ try {
     await run("saveCheck", { actorId, jobId, kind: "noCandidates", reason: "No suitable synthetic candidates" });
     await run("saveCheck", { actorId, jobId, kind: "chatgpt", link: "https://chatgpt.com/share/12345678", confirmed: true });
     put("candidates", { _id: `requiredCandidate:${actorId}:${jobId}`, fullName: "Synthetic required CV", cvUploadId: "synthetic-cv" });
-    put("applications", { _id: `requiredApp:${actorId}:${jobId}`, candidateId: `requiredCandidate:${actorId}:${jobId}`, jobId, ownerTaId: actorId, currentStage: "second_shortlist", sourceChannel: "Database", lastStageChangedAt: clock, cvFileId: "synthetic-cv" });
+    put("applications", { _id: `requiredApp:${actorId}:${jobId}`, candidateId: `requiredCandidate:${actorId}:${jobId}`, jobId, ownerTaId: actorId, currentStage: "second_shortlist", sourceChannel: "Database", lastStageChangedAt: clock, cvFileId: "synthetic-cv", isAddOn: actorId === "ta" && jobId === "job2" });
   }
   // Human decisions are required for every result in the applicable round.
   clock++;
@@ -389,9 +389,10 @@ try {
   assert.ok(!checkedJob.checks.some((c: Row) => c.key.startsWith("research:")), "Research edits never restore the retired field checklist");
   await run("saveCheck", { actorId: "ta", jobId: "job1", kind: "research" });
   await run("saveCheck", { actorId: "support", jobId: "job1", kind: "research" });
-  await assert.rejects(() => workdays.recordActiveMode(ctx, "support" as any, "job3" as any, "Add-on"), /first workday/);
+  await workdays.recordActiveMode(ctx, "support" as any, "job3" as any, "Add-on");
+  assert.equal(rows("taWorkdays")[1].jobs[1].workType, "Add-on", "A newly entered historical job can be changed immediately");
   await workdays.recordActiveMode(ctx, "support" as any, "job3" as any, "100%");
-  assert.equal(rows("taWorkdays")[1].jobs[1].modeHistory.length, 1);
+  assert.equal(rows("taWorkdays")[1].jobs[1].modeHistory.length, 3, "Every manual mode change remains in the audit history");
 
   put("candidates", {
     _id: "huntedCandidate",
@@ -604,6 +605,13 @@ try {
   assert.equal((await db.get("app"))?.workdayReviewedAt, clock);
 
   for (const jobId of ["job1", "job2"]) {
+    if (jobId === "job2") {
+      put("candidates", { _id: "notAddonCandidate", fullName: "Not an add-on", cvUploadId: "synthetic-cv" });
+      put("applications", { _id: "notAddonApp", candidateId: "notAddonCandidate", jobId, ownerTaId: "ta", currentStage: "second_shortlist", sourceChannel: "Database", lastStageChangedAt: clock, cvFileId: "synthetic-cv", isAddOn: false });
+      await assert.rejects(() => run("beginMail", {
+        actorId: "ta", jobId, applicationIds: ["notAddonApp"], subject: "Synthetic Director Review CV", sentTo: "director@example.invalid",
+      }), /Add-on candidates progressed to Director Review/);
+    }
     const receipt = await run("beginMail", {
       actorId: "ta",
       jobId,
@@ -770,7 +778,7 @@ try {
   const carryDay = await run("start", { actorId: "carryTa", jobId: "newPrimary", workType: "Follow-up" });
   const carried = await db.get(carryDay.id);
   assert.equal(carried?.jobs.length, 13);
-  assert.equal(carried?.jobs[0].workType, "100%", "The browser cannot skip first-day setup by requesting Follow-up");
+  assert.equal(carried?.jobs[0].workType, "Follow-up", "A historical job entered today can start directly in Follow-up");
   assert.equal(carried?.jobs.filter((j: Row) => j.carried && j.workType === "Follow-up").length, 12);
   for (let i = 0; i < 9; i++) {
     const jobId = `manual:${i}`;
@@ -779,10 +787,10 @@ try {
   }
   put("jobs", { _id: "manual:10", title: "One too many", taLeadId: "lead", assignedTaIds: ["carryTa"] });
   await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId: "manual:10", workType: "100%" }), /at most ten/);
-  // Returning positions have no tasks, but activity-only mail keeps duplicate-send safety.
+  // Returning positions track only EOD candidates, ChatGPT and the EOD email.
   const mixedDay = (await run("dashboard", { actorId: "carryTa" })).active;
   assert.ok(mixedDay.jobs.filter((j: Row) => j.workType === "100%").every((j: Row) => j.checks.length > 0));
-  assert.ok(mixedDay.jobs.filter((j: Row) => j.workType === "Follow-up").every((j: Row) => !j.checks.length && !j.eodChecks.length));
+  assert.ok(mixedDay.jobs.filter((j: Row) => j.workType === "Follow-up").every((j: Row) => j.checks.some((c: Row) => c.key.startsWith("chatgpt:"))));
   for (const mode of ["Follow-up", "Add-on"] as const) {
     const actorId = `returning:${mode}`;
     const jobId = `returningJob:${mode}`;
@@ -792,9 +800,9 @@ try {
     const returningDay = await run("start", { actorId, jobId, workType: mode });
     put("taWorkdayTaskEvents", { _id: `oldTask:${mode}`, workdayId: returningDay.id, userId: actorId, jobId, key: `chatgpt:${jobId}`, label: "Old research task", href: "/", kind: "details", status: "incomplete", at: clock });
     const current = (await run("dashboard", { actorId })).active.jobs[0];
-    assert.deepEqual(current.checks, []);
-    assert.deepEqual(current.eodChecks, []);
-    const preflight = await run("emailPreflight", { actorId, jobId, link: "", confirmed: false });
+    assert.deepEqual(current.checks.map((c: Row) => c.key.split(":")[0]), ["director_cv", "chatgpt", "daily_email"]);
+    assert.deepEqual(current.eodChecks.map((c: Row) => c.key.split(":")[0]), ["director_cv", "chatgpt"]);
+    const preflight = await run("emailPreflight", { actorId, jobId, link: "https://chatgpt.com/share/12345678", confirmed: true });
     assert.equal(preflight.ok, true);
     assert.equal(preflight.workType, mode);
     const args = { actorId, jobId, applicationIds: [], subject: "Synthetic activity update", sentTo: "director@example.invalid" };
@@ -806,7 +814,7 @@ try {
     await assert.rejects(() => run("beginMail", args), /activity email has already been sent/);
     assert.equal((await run("finish", { actorId, workdayId: returningDay.id })).ok, true);
     const finished = (await run("dashboard", { actorId, detail: true })).history.find((d: Row) => d.id === returningDay.id);
-    assert.ok(finished.jobs.every((j: Row) => !j.checks.length && !j.eodChecks.length));
+    assert.ok(finished.jobs.every((j: Row) => j.checks.some((c: Row) => c.key.startsWith("daily_email:") && c.status === "complete")));
   }
   // Setup exceptions are scoped, audited and immediately usable, without sending mail.
   user("exceptionTa", "ta");

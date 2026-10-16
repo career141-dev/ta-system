@@ -98,6 +98,14 @@ export interface WorkdayPayload {
   nextCursor?: string | null;
 }
 
+const RETURNING_CHECKS = new Set(["director_cv", "chatgpt", "daily_email", "mail"]);
+
+/** Follow-up and Add-on track only today's EOD deliverables and mail safety. */
+export function checksForWorkType(workType: WorkType, checks: WorkdayCheck[]): WorkdayCheck[] {
+  if (workType === "100%") return checks;
+  return checks.filter((check) => RETURNING_CHECKS.has(check.key.split(":")[0]));
+}
+
 export function workdayDate(now: number): string {
   return new Date(now).toLocaleDateString("en-CA", {
     timeZone: "Asia/Colombo",
@@ -148,11 +156,11 @@ export function validateCarry(
 }
 
 export function completionBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.filter(j => j.workType !== "Follow-up" && j.workType !== "Add-on").flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting && !c.exception);
+  return jobs.flatMap((j) => j.checks).filter((c) => c.status !== "complete" && !c.waiting && !c.exception);
 }
 
 export function emailBlockers(jobs: WorkdayJobView[]): WorkdayCheck[] {
-  return jobs.filter(j => j.workType !== "Follow-up" && j.workType !== "Add-on").flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
+  return jobs.flatMap(j => j.eodChecks ? [...j.eodChecks, ...j.checks.filter(c => c.key.startsWith("mail:"))] : j.checks)
     .filter(c => isEodSendCheck(c) && c.status !== "complete" && !c.waiting && !c.exception);
 }
 

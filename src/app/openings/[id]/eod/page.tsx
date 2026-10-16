@@ -27,6 +27,7 @@ import * as backend from "@/data/convex/backend";
 import { isWordFile } from "@/lib/wordToPdf";
 import type { ShortlistRow } from "@/lib/eod-format";
 import { EodDraftCleanup } from "@/components/EodDraftCleanup";
+import type { WorkingStage } from "@/data/types";
 
 const PAGE_SIZE = 10;
 
@@ -56,6 +57,18 @@ export default async function EodPage({
   await requireSourcingSeat(id);
   const kind: "director" | "client" = !midday && sp.kind === "client" ? "client" : "director";
   const user = await getCurrentUser();
+  let workType: WorkingStage = repo.workingStage(id, user.id);
+  let sessionStart: number | null = null;
+  if (isConvex() && isTa(user)) {
+    const context = await convexQuery<{ workType: WorkingStage; sessionStart: number | null }>("ta/workdays:eodContext", {
+      actorId: user.id,
+      jobId: id,
+    }).catch(() => null);
+    if (context) {
+      workType = context.workType;
+      sessionStart = context.sessionStart;
+    }
+  }
   const dailyEmails = kind === "director" && isConvex() ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
   const dailyHistory = dailyEmails.filter(e => e.submissionType === (midday ? "midday" : "eod"));
   // A query string alone cannot delete a draft. Match it to this user's
@@ -75,10 +88,14 @@ export default async function EodPage({
   const director = repo.users().find((u) => u.role === "director");
   const lead = repo.user(o.taLeadId);
 
-  const rows = shortlistRows(id, isTa(user) ? user.id : null, kind);
+  const rows = shortlistRows(
+    id,
+    isTa(user) ? user.id : null,
+    kind,
+    kind === "director" ? { workType, sessionStart } : undefined,
+  );
   const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user) : [];
   const effort = effortRow(id, user);
-  const workType = repo.workingStage(id, user.id);
 
   // This TA's own sets — each recruiter numbers their own.
   const sets = setsForOpening(id, user.id);
@@ -376,7 +393,6 @@ export default async function EodPage({
         senderName={user.name}
         alreadyOut={!!awaiting}
         needsResearchLink={midday || needsResearchLink(user.role, kind, workType)}
-        workType={workType}
         resend={
           correction?.snapshot ? { copyId: correction._id, introText: correction.snapshot.introText, outroText: correction.snapshot.outroText,
             researchLink: correction.snapshot.researchLink, extraTo: correction.snapshot.extraTo, extraCc: correction.snapshot.extraCc, removed: correction.snapshot.removed } : resendCopy

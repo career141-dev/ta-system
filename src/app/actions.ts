@@ -26,6 +26,7 @@ import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from
 import { noticePeriodToDays } from "@/lib/answered";
 import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
 import { referenceCvFileProblem } from "@/lib/referenceCvFile";
+import { isEodCandidateEligible } from "@/lib/eodEligibility";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -1962,7 +1963,7 @@ export async function setWorkingStage(formData: FormData) {
   await primeStore({ openingId });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const stage = String(formData.get("stage")) as WorkingStage;
-  if (!["100%", "Follow-up", "Add-on"].includes(stage)) return;
+  if (!["100%", "Follow-up", "Add-on"].includes(stage)) return { ok: false as const, message: "Choose a valid working stage." };
 
   if (isConvex()) {
     try {
@@ -1973,9 +1974,7 @@ export async function setWorkingStage(formData: FormData) {
       });
       markTablesStale();
     } catch (e) {
-      // Swallowed, the menu showed the new value while nothing was saved
-      // (review of PR #11, 22 September).
-      await fail(backendMessage(e, "The working stage could not be saved."));
+      return { ok: false as const, message: backendMessage(e, "The working stage could not be saved.") };
     }
   } else {
     repo.setWorkingStage(openingId, user.id, stage);
@@ -1984,6 +1983,7 @@ export async function setWorkingStage(formData: FormData) {
   revalidatePath("/openings");
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/eod`);
+  return { ok: true as const };
 }
 
 /** "We should be able to remove and add TAs" — answer 2, 11 Sep. */
@@ -4631,6 +4631,16 @@ async function eodResearchSubmission(user: User, openingId: string, kind: "direc
   return checkResearchSubmission({ role: user.role, kind, link, confirmed, workType, excused });
 }
 
+async function eodWorkContext(user: User, openingId: string): Promise<{ workType: WorkingStage; sessionStart: number | null }> {
+  if (isConvex() && isTa(user)) {
+    return convexQuery<{ workType: WorkingStage; sessionStart: number | null }>("ta/workdays:eodContext", {
+      actorId: user.id,
+      jobId: openingId,
+    });
+  }
+  return { workType: repo.workingStage(openingId, user.id), sessionStart: colomboDayStart(Date.now()) };
+}
+
 export async function addMiddayEmail(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
   await primeStore({ openingId });
@@ -4685,7 +4695,8 @@ export async function sendDailyEmail(formData: FormData) {
     const emails = await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: openingId });
     const parent = parentId ? emails.find(e => e._id === parentId && e.userId === user.id && e.submissionType === "eod" && !e.parentId) : undefined;
     if (parentId && !parent?.snapshot) throw new Error("That original EOD email is no longer available to correct.");
-    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director");
+    const context = await eodWorkContext(user, openingId);
+    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context);
     const ids = parent ? parent.applicationIds : String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
     const rows = shortlistRowsFromForm(formData, baseRows);
     const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user));
@@ -4735,10 +4746,11 @@ export async function sendEod(formData: FormData) {
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   const ids = String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
+  const context = kind === "director" ? await eodWorkContext(user, openingId) : null;
   const activityOnly = kind === "director" && formData.get("activityOnly") === "yes" && ids.length === 0;
   if (activityOnly) {
     const { shortlistRows } = await import("@/lib/eod");
-    if (shortlistRows(openingId, isTa(user) ? user.id : null).length) await fail("Candidates are ready for Director Review. Reload and include them in the email.");
+    if (shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined).length) await fail("Candidates are ready for Director Review. Reload and include them in the email.");
   }
 
   // Anybody already sent to this reviewer is dropped, and so is anybody who is
@@ -4750,7 +4762,18 @@ export async function sendEod(formData: FormData) {
   // director sends for the desk.
   const mine = (id: string) => !isTa(user) || repo.application(id)?.ownerTaId === user.id;
   const notMine = ids.filter((id) => !mine(id));
-  const fresh = ids.filter((id) => mine(id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && repo.application(id)?.openingId === openingId);
+  const fresh = ids.filter((id) => {
+    const app = repo.application(id);
+    if (!app) return false;
+    return mine(id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && app.openingId === openingId && (
+      kind !== "director" || !context || isEodCandidateEligible({
+        stage: app.stage,
+        ownerTaId: app.ownerTaId,
+        isAddOn: app.isAddOn,
+        lastStageChangedAt: app.lastStageChangedAt,
+      }, { taId: isTa(user) ? user.id : null, ...context })
+    );
+  });
   if (notMine.length > 0 && fresh.length === 0)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent("Nothing sent — you can send only the candidates you shortlisted.")}`);
   if (fresh.length === 0 && !activityOnly)
@@ -4798,7 +4821,7 @@ export async function sendEod(formData: FormData) {
   if (kind === "director") {
     const { effortFromForm, effortRow, shortlistRowsFromForm, shortlistRows } = await import("@/lib/eod");
     const effort = effortFromForm(formData, effortRow(openingId, user));
-    const baseRows = shortlistRows(openingId, null, "director");
+    const baseRows = shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined);
     const editedRows = shortlistRowsFromForm(formData, baseRows);
     const introText = formData.has("introText") ? String(formData.get("introText")) : undefined;
     const outroText = formData.has("outroText") ? String(formData.get("outroText")) : undefined;

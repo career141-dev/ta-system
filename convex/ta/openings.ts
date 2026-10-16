@@ -407,6 +407,7 @@ export const setWorkingStage = internalMutation({
       if (assignment.assignmentRole === "client_contact") throw new Error("A client seat does not work the pipeline.");
       await ctx.db.patch(assignment._id, { workingStage: args.stage });
       await recordActiveMode(ctx, targetUserId, jobId, args.stage);
+      await refreshWorkdayChecks(ctx, jobId, targetUserId);
       return { ok: true, stage: args.stage };
     }
 
@@ -425,6 +426,7 @@ export const setWorkingStage = internalMutation({
     if (held) await ctx.db.patch(held._id, { value: args.stage, updatedAt: Date.now() });
     else await ctx.db.insert("taSettings", { key, value: args.stage, updatedAt: Date.now() });
     await recordActiveMode(ctx, targetUserId, jobId, args.stage);
+    await refreshWorkdayChecks(ctx, jobId, targetUserId);
     return { ok: true, stage: args.stage };
   },
 });

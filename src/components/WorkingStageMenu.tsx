@@ -37,7 +37,8 @@ export function WorkingStageMenu({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [current, setCurrent] = useState<WorkingStage>(stage);
-  const [, startTransition] = useTransition();
+  const [saving, startTransition] = useTransition();
+  const [error, setError] = useState("");
   const box = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -81,6 +82,7 @@ export function WorkingStageMenu({
         }}
         aria-haspopup="menu"
         aria-expanded={open}
+        disabled={saving}
         title={`Current working stage: ${current}`}
         className={`flex items-center gap-1.5 rounded-full border border-rule bg-tag font-medium text-ink-soft transition-colors hover:border-rule-strong hover:text-ink ${pad}`}
       >
@@ -108,6 +110,8 @@ export function WorkingStageMenu({
               onClick={async (e) => {
                 e.preventDefault();
                 e.stopPropagation();
+                const previous = current;
+                setError("");
                 setCurrent(s);
                 setOpen(false);
                 window.dispatchEvent(
@@ -117,7 +121,14 @@ export function WorkingStageMenu({
                   const fd = new FormData();
                   fd.append("openingId", openingId);
                   fd.append("stage", s);
-                  await setWorkingStage(fd);
+                  const result = await setWorkingStage(fd).catch(() => ({ ok: false as const, message: "The working stage could not be saved." }));
+                  if (!result.ok) {
+                    setCurrent(previous);
+                    setError(result.message);
+                    window.dispatchEvent(
+                      new CustomEvent("working-stage-changed", { detail: { openingId, stage: previous } }),
+                    );
+                  }
                   router.refresh();
                 });
               }}
@@ -136,6 +147,11 @@ export function WorkingStageMenu({
             </button>
           ))}
         </div>
+      )}
+      {error && (
+        <p role="alert" className="absolute left-0 top-full z-50 mt-1.5 w-[240px] rounded-lg border border-danger/40 bg-danger-soft px-3 py-2 text-[11px] leading-relaxed text-danger shadow-lg">
+          {error}
+        </p>
       )}
     </div>
   );

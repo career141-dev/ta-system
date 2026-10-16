@@ -4,6 +4,7 @@ import { colomboDayStart } from "@/lib/calendar";
 import { cvSource, headhuntedCandidates } from "@/lib/cvSource";
 import type { Application, Candidate, Id, User } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
+import { isEodCandidateEligible, type EodEligibility } from "./eodEligibility";
 
 /**
  * The end-of-day email — spec §10.
@@ -38,6 +39,7 @@ export function shortlistRows(
   openingId: Id,
   taId: Id | null,
   kind: "director" | "client" = "director",
+  eligibility?: Pick<EodEligibility, "workType" | "sessionStart">,
 ): ShortlistRow[] {
   // Who is waiting to be sent: people at the stage BEFORE this reviewer's
   // decision, and not already in a set that went to them. The list used to
@@ -53,7 +55,19 @@ export function shortlistRows(
   // moves them to Director Review first.
   const apps = repo
     .applications(openingId)
-    .filter((a) => a.stage === stage && !alreadySent.has(a.id))
+    .filter((a) => {
+      if (alreadySent.has(a.id)) return false;
+      if (kind !== "director" || !eligibility) return a.stage === stage;
+      return isEodCandidateEligible(
+        {
+          stage: a.stage,
+          ownerTaId: a.ownerTaId,
+          isAddOn: a.isAddOn,
+          lastStageChangedAt: a.lastStageChangedAt,
+        },
+        { taId, ...eligibility },
+      );
+    })
     // The client's copy is the Director's decision, not the TA's, so it is not
     // narrowed to one recruiter's own shortlisting.
     .filter((a) => (taId && kind === "director" ? a.ownerTaId === taId : true))

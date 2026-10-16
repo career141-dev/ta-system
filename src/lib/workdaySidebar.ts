@@ -1,10 +1,12 @@
-import type { WorkdayCheck, WorkdayJobView } from "./workday";
+import { checksForWorkType, type WorkdayCheck, type WorkdayJobView } from "./workday";
 
 const CANDIDATE_TASKS = new Set(["review", "candidate", "details", "handoff", "followup", "email", "profile", "upload", "director_wait"]);
 
 /** One sidebar check per job; the backend and job pages retain the individual actions. */
 export function sidebarChecks(job: WorkdayJobView): WorkdayCheck[] {
-  if (job.workType === "Follow-up" || job.workType === "Add-on") return [];
+  if (job.workType === "Follow-up" || job.workType === "Add-on") {
+    return checksForWorkType(job.workType, job.checks);
+  }
   const candidateChecks = job.checks.filter(c => CANDIDATE_TASKS.has(c.key.split(":")[0]));
   if (!candidateChecks.length && !job.shortlist.length) return job.checks;
   const pending = candidateChecks.filter(c => c.status !== "complete" && !c.waiting);
