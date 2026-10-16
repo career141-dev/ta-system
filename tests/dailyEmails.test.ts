@@ -5,6 +5,7 @@ import { dailySendProblem, sameCandidateList } from "../src/lib/dailyEmail";
 import { workdayDate } from "../src/lib/workday";
 import { requiredChecks } from "../convex/lib/workdayChecks";
 import { matchReviewReply } from "../src/lib/routing";
+import { normalizeRetention, purgeExpired } from "../convex/ta/eodCopies";
 
 // Real internal handlers, synthetic database, no transport or credentials.
 type Row = Record<string, any>;
@@ -20,13 +21,16 @@ const db = {
   insert: async (table: string, value: Row) => put(table, { ...structuredClone(value), _id: `${table}:${++serial}` }),
   patch: async (id: string, value: Row) => { const row = [...tables.values()].flat().find(r => r._id === id); assert.ok(row); Object.assign(row, structuredClone(value)); },
   normalizeId: (_: string, id: string) => id,
+  delete: async (id: string) => { for (const table of tables.values()) { const index = table.findIndex(r => r._id === id); if (index >= 0) table.splice(index, 1); } },
   query: (table: string) => {
     const predicates: ((row: Row) => boolean)[] = [];
     let desc = false;
     const query = {
       withIndex: (_: string, apply: (q: any) => unknown) => {
         const builder = { eq: (key: string, value: unknown) => { predicates.push(r => r[key] === value); return builder; },
-          gte: (key: string, value: number) => { predicates.push(r => r[key] >= value); return builder; } };
+          gte: (key: string, value: number) => { predicates.push(r => r[key] >= value); return builder; },
+          gt: (key: string, value: number) => { predicates.push(r => r[key] > value); return builder; },
+          lte: (key: string, value: number) => { predicates.push(r => r[key] <= value); return builder; } };
         apply(builder); return query;
       },
       filter: (apply: (q: any) => (r: Row) => boolean) => {
@@ -44,7 +48,8 @@ const db = {
     return query;
   },
 };
-const ctx = { db, auth: { getUserIdentity: async () => null }, scheduler: { runAfter: async () => null, runAt: async () => null } } as any;
+const deletedFiles: string[] = [];
+const ctx = { db, storage: { getUrl: async (id: string) => `http://127.0.0.1/files/${id}`, delete: async (id: string) => { deletedFiles.push(id); } }, auth: { getUserIdentity: async () => null }, scheduler: { runAfter: async () => null, runAt: async () => null } } as any;
 const run = (name: keyof typeof mail, args: Row) => (mail[name] as any)._handler(ctx, args);
 const link = "https://chatgpt.com/share/12345678";
 const snapshot = (ids: string[], subject = "MIDDAY 1 - ACME - ENGINEER") => ({ subject, html: "<p>Saved exact content</p>", from: "ta@example.invalid", to: ["director@example.invalid"], cc: [],
@@ -59,7 +64,7 @@ const candidate = (id: string, owner = "ta") => {
   put("candidates", { _id: `c:${id}`, fullName: id });
   put("applications", { _id: id, candidateId: `c:${id}`, jobId: "job", ownerTaId: owner, currentStage: "second_shortlist", lastStageChangedAt: now, sourceChannel: "Database", setNumber: 1 });
 };
-const begin = (ids: string[], draftId?: string, extra: Row = {}) => run("begin", { actorId: "ta", jobId: "job", submissionType: draftId ? "midday" : "eod", draftId,
+const begin = (ids: string[], draftId?: string, extra: Row = {}) => run("begin", { actorId: "ta", jobId: "job", submissionType: draftId ? "midday" : "eod", draftId, previewConfirmed: true,
   revision: draftId ? rows("dailyEmails").find(e => e._id === draftId)!.revision : undefined, applicationIds: ids, snapshot: snapshot(ids), confirmed: true, ...extra });
 
 try {
@@ -109,22 +114,58 @@ try {
     version: check.exceptionVersion, action: "submit", at: now, by: "ta", reason: "Synthetic setup exception" });
   const eod = await begin(["c", "d", "e"]);
   await run("result", { id: eod.id, status: "accepted" });
+  assert.equal((await db.get("day"))?.finishedAt, now, "Original 100% EOD finishes the clock atomically");
+  const originalFinish = now;
   assert.deepEqual(rows("reviewRounds")[1].applicationIds, ["c", "d", "e"], "EOD includes only the three candidates after midday");
   await assert.rejects(() => begin([]), /already been sent/);
   await assert.rejects(() => run("createDraft", { actorId: "ta", jobId: "job" }), /already been sent/);
   await assert.rejects(() => begin(["c"], undefined, { parentId: eod.id }), /original candidates/);
+  await assert.rejects(() => begin(["c", "d", "e"], undefined, { parentId: eod.id, previewConfirmed: false }), /preview/);
+  now += 30 * 86400000;
   const correction = await begin(["c", "d", "e"], undefined, { parentId: eod.id });
   await run("result", { id: correction.id, status: "accepted" });
   assert.equal(rows("reviewRounds").length, 2, "Corrections reuse the original round");
   assert.equal(rows("reviewRounds")[1].revisedAt.length, 1);
   await finalizeDailyEmail(ctx, await db.get(correction.id) as any);
   assert.equal(rows("reviewRounds")[1].revisedAt.length, 1);
-  assert.equal(rows("dailyEmails").find(e => e._id === correction.id)!.expiresAt, rows("dailyEmails").find(e => e._id === eod.id)!.expiresAt);
+  assert.equal(rows("dailyEmails").find(e => e._id === correction.id)!.expiresAt, now + 31 * 86400000);
+  assert.equal((await db.get("day"))?.finishedAt, originalFinish, "Resends never retime the workday");
+  assert.equal((await db.get(correction.id))?.date, workdayDate(originalFinish), "Resends preserve original work date");
+  assert.equal((await run("sent", { actorId: "ta" })).length, 2, "Backups are selected by send time");
+  assert.equal((await run("sent", { actorId: "other" })).length, 0);
+  now += 2 * 86400000;
+  await db.patch(eod.id, { snapshot: undefined });
+  const file = { id: "savedFile", name: "Original CV.pdf", applicationId: "c" };
+  put("dailyEmailAttachments", { _id: file.id, userId: "ta", jobId: "job", applicationId: "c", name: file.name, storageId: "original-pdf", createdAt: originalFinish, expiresAt: now });
+  const retainedSnapshot = { ...(await db.get(correction.id))!.snapshot, attachments: [file] };
+  await db.patch(correction.id, { snapshot: retainedSnapshot, expiresAt: now - 1 });
+  await (normalizeRetention as any)._handler(ctx, { dryRun: true });
+  assert.equal((await db.get(correction.id))!.expiresAt, now - 1, "Retention migration dry run never writes");
+  await (normalizeRetention as any)._handler(ctx, { dryRun: false });
+  assert.equal((await db.get(correction.id))!.expiresAt, (await db.get(correction.id))!.acceptedAt + 31 * 86400000);
+  assert.equal((await run("attachment", { actorId: "ta", emailId: correction.id, attachmentId: file.id })).url, "http://127.0.0.1/files/original-pdf");
+  await assert.rejects(() => run("attachment", { actorId: "other", emailId: correction.id, attachmentId: file.id }), /another TA/);
+  const later = await begin(["c", "d", "e"], undefined, { parentId: correction.id, snapshot: retainedSnapshot });
+  await run("result", { id: later.id, status: "accepted" });
+  assert.equal((await db.get(file.id))!.expiresAt, now + 31 * 86400000, "Resends retain their exact saved PDFs for a fresh 31 days");
+  assert.equal((await db.get(later.id))?.parentId, eod.id, "A retained revision remains correctable after original content expires");
+  assert.equal(rows("reviewRounds").length, 2);
+  put("eodEmailCopies", { _id: "legacyCopy", sentBy: "ta", openingId: "job", roundId: "legacyRound", version: 1,
+    sentAt: now - 1000, expiresAt: now + 86400000, subject: "Legacy activity", introText: "Hello", outroText: "Thanks", researchLink: link,
+    applicationIds: [], rows: [], effort: { date: "2026-10-16", assignee: "ta", hundredOrFollowUp: "Follow-up" }, to: ["director@example.invalid"], cc: [], extraTo: [], extraCc: [], removed: [] });
+  await (normalizeRetention as any)._handler(ctx, { dryRun: true });
+  assert.equal(rows("dailyEmails").some(e => e.legacyCopyId === "legacyCopy"), false);
+  await (normalizeRetention as any)._handler(ctx, { dryRun: false });
+  await (normalizeRetention as any)._handler(ctx, { dryRun: false });
+  assert.equal(rows("dailyEmails").filter(e => e.legacyCopyId === "legacyCopy").length, 1, "Legacy copy import is idempotent and never sends mail");
+  assert.equal(rows("reviewRounds").length, 2);
   now += 86400000;
   await assert.rejects(() => run("saveDraft", { actorId: "ta", id: first, revision: 2, fields: {} }), /unsent/);
   assert.equal((await run("list", { actorId: "other", jobId: "job" })).length, 0, "TAs cannot read another sender's copies");
   now += 32 * 86400000;
   assert.equal((await run("list", { actorId: "ta", jobId: "job" }))[0].snapshot, undefined, "Expired content is hidden immediately");
   await assert.rejects(() => begin(["c", "d", "e"], undefined, { parentId: eod.id }), /retained EOD/);
+  await (purgeExpired as any)._handler(ctx, {});
+  assert.deepEqual(deletedFiles, ["original-pdf"], "Independent PDFs are removed only after every backup reference expires");
   console.log("Daily email drafts, ordering, ownership, candidates, failures, reconciliation, corrections and retention passed.");
 } finally { Date.now = originalNow; }

@@ -49,6 +49,7 @@ export interface WorkdayJobView {
   jobId: string;
   title: string;
   workType: WorkType;
+  eodSentAt?: number;
   checks: WorkdayCheck[];
   /** Temporary EOD setup gate, independent of candidate queues and Finish. */
   eodChecks?: WorkdayCheck[];
@@ -75,6 +76,7 @@ export interface WorkdayView {
   date: string;
   startedAt: number;
   finishedAt: number | null;
+  closureReason?: "eod" | "expired";
   jobs: WorkdayJobView[];
   requests: {
     id: string;
@@ -96,6 +98,7 @@ export interface WorkdayPayload {
   team: WorkdayView[];
   options: { id: string; title: string; workType?: WorkType; carry?: boolean; preview?: WorkdayJobView }[];
   nextCursor?: string | null;
+  sentEmails?: { id: string; rootId: string; jobId: string; title: string; date: string; sentAt: number; workType?: WorkType; subject: string; to: string[]; cc: string[]; revised: boolean; legacy?: boolean }[];
 }
 
 const RETURNING_CHECKS = new Set(["director_cv", "chatgpt", "daily_email", "mail"]);

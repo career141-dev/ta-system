@@ -3,14 +3,19 @@
 // A sent end-of-day email is kept for a month so the TA can read it back, and
 // correct it and send it again when the TA Lead or a Director asks (8 Oct —
 // first a day, then the desk asked for a month of history). Once the month is
-// over every version of the email is deleted here. The review round it opened
-// stays, with `revisedAt` saying it was resent; only the copies of the email go.
+// over that version's content is deleted here. Each new accepted revision has
+// its own 31 days. The review round and lineage stay after content expiry.
 //
 // The app hides a copy the moment its month is over (src/data/store.ts
 // eodCopies), so this only has to catch up, not be on time.
 
 import { internalMutation } from "../_generated/server";
 import { internal } from "../_generated/api";
+import type { Id } from "../_generated/dataModel";
+import { v } from "convex/values";
+import { EMAIL_RETENTION_MS, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
+import { eodEmailHtml } from "../../src/lib/eod-format";
+import { workdayDate } from "../../src/lib/workday";
 
 const BATCH = 200;
 
@@ -29,7 +34,59 @@ export const purgeExpired = internalMutation({
       // An uncertain send needs its payload to recover. Keep it until resolved.
       await ctx.db.patch(email._id, { snapshot: undefined, fields: {}, expiresAt: undefined });
     }
+    const files = await ctx.db.query("dailyEmailAttachments").withIndex("by_expires", q => q.lte("expiresAt", Date.now())).take(BATCH);
+    for (const file of files) {
+      const emails = await ctx.db.query("dailyEmails").withIndex("by_job", q => q.eq("jobId", file.jobId)).collect();
+      const references = emails.filter(e => (e.snapshot as DailyEmailSnapshot | undefined)?.attachments?.some(a => a.id === file._id));
+      const held = references.filter(e => ["sending", "uncertain"].includes(e.status) || (e.expiresAt ?? 0) > Date.now());
+      if (held.length) {
+        await ctx.db.patch(file._id, { expiresAt: Math.max(Date.now() + 86400000, ...held.map(e => e.expiresAt ?? 0)) });
+      } else {
+        await ctx.storage.delete(file.storageId);
+        await ctx.db.delete(file._id);
+      }
+    }
     if (due.length === BATCH || daily.length === BATCH) await ctx.scheduler.runAfter(0, internal.ta.eodCopies.purgeExpired, {});
     return { deleted: due.length };
+  },
+});
+
+/** Release-pipeline migration. Deleted content cannot be reconstructed. */
+export const normalizeRetention = internalMutation({
+  args: { dryRun: v.boolean() },
+  handler: async (ctx, args) => {
+    const emails = await ctx.db.query("dailyEmails").collect();
+    const affected = emails.filter(e => e.status === "accepted" && !!e.snapshot && e.acceptedAt && (e.expiresAt ?? 0) < e.acceptedAt + EMAIL_RETENTION_MS);
+    if (!args.dryRun) for (const email of affected) {
+      const expiresAt = email.acceptedAt! + EMAIL_RETENTION_MS;
+      await ctx.db.patch(email._id, { expiresAt });
+      for (const a of (email.snapshot as DailyEmailSnapshot).attachments ?? []) {
+        const file = await ctx.db.get(a.id as Id<"dailyEmailAttachments">);
+        if (file) await ctx.db.patch(file._id, { expiresAt: Math.max(file.expiresAt, expiresAt) });
+      }
+    }
+    const legacy = (await ctx.db.query("eodEmailCopies").collect()).filter(c => c.sentAt + EMAIL_RETENTION_MS > Date.now()).sort((a, b) => a.sentAt - b.sentAt);
+    const adopted = new Set(emails.map(e => e.legacyCopyId));
+    const missing = legacy.filter(c => !adopted.has(c._id));
+    if (!args.dryRun) {
+      const roots = new Map(emails.filter(e => e.legacyCopyId && !e.parentId && e.roundId).map(e => [e.roundId!, e._id]));
+      for (const copy of missing) {
+        const sender = await ctx.db.get(copy.sentBy);
+        const round = await ctx.db.get(copy.roundId);
+        const root = roots.get(copy.roundId);
+        const mode = copy.effort?.hundredOrFollowUp;
+        const workType = mode === "Follow-up" || mode === "Add-on" ? mode : "100%";
+        const id = await ctx.db.insert("dailyEmails", { userId: copy.sentBy, jobId: copy.openingId,
+          date: workdayDate(round?.sentAt ?? copy.sentAt), submissionType: "eod", status: "accepted", number: 1, revision: 0,
+          fields: {}, applicationIds: copy.applicationIds, roundId: copy.roundId, legacyCopyId: copy._id,
+          ...(root ? { parentId: root } : {}), workType, createdAt: copy.sentAt, acceptedAt: copy.sentAt, finalizedAt: copy.sentAt,
+          expiresAt: copy.sentAt + EMAIL_RETENTION_MS,
+          snapshot: { ...copy, from: sender?.email ?? "", workType, attachmentNames: [],
+            html: eodEmailHtml({ rows: copy.rows, effort: copy.effort, senderName: sender?.fullName ?? "", introText: copy.introText, outroText: copy.outroText, researchLink: copy.researchLink }) },
+        });
+        if (!root) roots.set(copy.roundId, id);
+      }
+    }
+    return { dryRun: args.dryRun, affected: affected.length, legacyCopiesToImport: missing.length };
   },
 });
