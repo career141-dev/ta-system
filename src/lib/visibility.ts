@@ -178,7 +178,7 @@ export function seatFor(user: User, assignment: AssignmentRole | null | undefine
       role: assignment ?? null,
       canSeeSourcing: (!!assignment && assignment !== "client_contact") || onStrategy,
       canAct: false,
-      stages: assignment === "client_contact" ? CLIENT_VISIBLE : (assignment || onStrategy) ? null : [],
+      stages: assignment === "client_contact" ? CLIENT_VISIBLE : assignment ? null : [],
     };
   }
 
@@ -199,11 +199,10 @@ export function seatFor(user: User, assignment: AssignmentRole | null | undefine
     default:
       if (onStrategy) {
         return {
-          role: "supporting_recruiter",
+          role: null,
           canSeeSourcing: true,
-          canAct: true,
-          stages: null,
-          ownDeskOf: isTa(user) ? user.id : null,
+          canAct: false,
+          stages: [],
         };
       }
       // Not on this opening at all.
