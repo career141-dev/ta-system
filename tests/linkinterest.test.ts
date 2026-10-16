@@ -1,7 +1,7 @@
 /**
  * Excel Tables by interest and by L (the desk, 29 Sep): All / Pending /
- * Interested / Not interested over the same rows, L1, L2… as each TA starts
- * them with the sidebar's +, and the pipeline moving with the row — Interested
+ * Interested / Not interested over the same rows, L1 auto-starting with the
+ * first row and L2, L3… started with +, and the pipeline moving with the row — Interested
  * is on the pipeline, Not interested is Rejected there. Nobody is deleted or
  * copied. Uses the same store calls the actions make, on a disposable seed.
  */
@@ -99,41 +99,46 @@ console.log("\nNot interested, never on the pipeline: straight into Rejected");
   eq("logging it does not change the Declined outcome", repo.linkEntry(w)!.outcome, "declined");
 }
 
-console.log("\nL1, L2, L3: started with + by each TA");
+console.log("\nL1 auto-starts; + starts each later sourcing batch");
 {
-  const before = repo.addLink(o.id, "https://linkedin.com/in/before-any-l", ta.id, "Before Any");
-  eq("before their first +, a row is in no L", repo.linkEntry(before)!.level ?? null, null);
-  eq("+ starts L1", repo.addLinkLevel(o.id, ta.id), 1);
-  const one = repo.addLink(o.id, "https://linkedin.com/in/in-l-one", ta.id, "In One");
-  eq("a row added now is in L1", repo.linkEntry(one)!.level, 1);
-  eq("+ again starts L2", repo.addLinkLevel(o.id, ta.id), 2);
-  const two = repo.addLink(o.id, "https://linkedin.com/in/in-l-two", ta.id, "In Two");
-  eq("and rows go into the latest", repo.linkEntry(two)!.level, 2);
-  eq("L1 keeps its row", repo.linkEntry(one)!.level, 1);
-  eq("the TA has two L's", repo.linkLevels(o.id, ta.id).length, 2);
-  eq("another TA has none of them", repo.linkLevels(o.id, other.id).length, 0);
-  eq("another TA's first + is their own L1", repo.addLinkLevel(o.id, other.id), 1);
-  eq("labelled with the day it was started", /^L2 · \d{1,2} \w{3,4}$/.test(levelLabel(repo.linkLevels(o.id, ta.id)[1])), true);
+  const before = repo.addLink(o.id, "https://linkedin.com/in/before-any-l", other.id, "Before Any");
+  eq("the first row automatically starts in L1", repo.linkEntry(before)!.level, 1);
+  eq("the automatic L1 is visible", repo.linkLevels(o.id, other.id).map((l) => l.n), [1]);
+  eq("+ starts L2", repo.addLinkLevel(o.id, other.id), 2);
+  const one = repo.addLink(o.id, "https://linkedin.com/in/in-l-two", other.id, "In Two");
+  eq("a row added now is in L2", repo.linkEntry(one)!.level, 2);
+  eq("+ again starts L3", repo.addLinkLevel(o.id, other.id), 3);
+  const two = repo.addLink(o.id, "https://linkedin.com/in/in-l-three", other.id, "In Three");
+  eq("and rows go into the latest", repo.linkEntry(two)!.level, 3);
+  eq("L2 keeps its row", repo.linkEntry(one)!.level, 2);
+  eq("the TA has three L's", repo.linkLevels(o.id, other.id).length, 3);
+  eq("each TA has their own Ls", repo.linkLevels(o.id, ta.id).map((l) => l.n), [1]);
+  eq("labelled with the day it was started", /^L3 · \d{1,2} \w{3,4}$/.test(levelLabel(repo.linkLevels(o.id, other.id)[2])), true);
 
   // Rename and delete (the desk, 29 Sep).
-  eq("an L can be named", repo.renameLinkLevel(o.id, ta.id, 2, "  Banks  "), true);
-  eq("and shows its name", levelLabel(repo.linkLevels(o.id, ta.id)[1]), "L2 · Banks");
-  repo.renameLinkLevel(o.id, ta.id, 2, "");
-  eq("a blank name puts the date back", /^L2 · \d/.test(levelLabel(repo.linkLevels(o.id, ta.id)[1])), true);
-  eq("another TA's L cannot be renamed through yours", repo.renameLinkLevel(o.id, ta.id, 5, "X"), false);
+  eq("an L can be named", repo.renameLinkLevel(o.id, other.id, 3, "  Banks  "), true);
+  eq("and shows its name", levelLabel(repo.linkLevels(o.id, other.id)[2]), "L3 · Banks");
+  repo.renameLinkLevel(o.id, other.id, 3, "");
+  eq("a blank name puts the date back", /^L3 · \d/.test(levelLabel(repo.linkLevels(o.id, other.id)[2])), true);
+  eq("another TA's L cannot be renamed through yours", repo.renameLinkLevel(o.id, other.id, 5, "X"), false);
   const rows = repo.linkVault(o.id).length;
-  eq("deleting L1 reports its one row", repo.deleteLinkLevel(o.id, ta.id, 1), 1);
-  eq("L1 is gone from the list", repo.linkLevels(o.id, ta.id).map((l) => l.n), [2]);
+  eq("deleting L2 reports its one row", repo.deleteLinkLevel(o.id, other.id, 2), 1);
+  eq("L2 is gone from the list", repo.linkLevels(o.id, other.id).map((l) => l.n), [1, 3]);
   eq("its row is still in the table", repo.linkVault(o.id).length, rows);
   eq("in no L now", repo.linkEntry(one)!.level ?? null, null);
-  eq("L2 keeps its number and its row", repo.linkEntry(two)!.level, 2);
-  eq("deleting it twice does nothing", repo.deleteLinkLevel(o.id, ta.id, 1), null);
-  eq("the next + is L3, not a second L1", repo.addLinkLevel(o.id, ta.id), 3);
-  const three = repo.addLink(o.id, "https://linkedin.com/in/in-l-three", ta.id, "In Three");
-  eq("new rows go into it", repo.linkEntry(three)!.level, 3);
-  repo.deleteLinkLevel(o.id, ta.id, 3);
-  const after = repo.addLink(o.id, "https://linkedin.com/in/after-delete", ta.id, "After Delete");
-  eq("with the latest deleted, rows go into the latest still there", repo.linkEntry(after)!.level, 2);
+  eq("L3 keeps its number and its row", repo.linkEntry(two)!.level, 3);
+  eq("deleting it twice does nothing", repo.deleteLinkLevel(o.id, other.id, 2), null);
+  eq("the next + is L4, not a second L2", repo.addLinkLevel(o.id, other.id), 4);
+  const three = repo.addLink(o.id, "https://linkedin.com/in/in-l-four", other.id, "In Four");
+  eq("new rows go into it", repo.linkEntry(three)!.level, 4);
+  repo.deleteLinkLevel(o.id, other.id, 4);
+  const after = repo.addLink(o.id, "https://linkedin.com/in/after-delete", other.id, "After Delete");
+  eq("with the latest deleted, rows go into the latest still there", repo.linkEntry(after)!.level, 3);
+  repo.deleteLinkLevel(o.id, other.id, 1);
+  repo.deleteLinkLevel(o.id, other.id, 3);
+  const restart = repo.addLink(o.id, "https://linkedin.com/in/after-all-delete", other.id, "After All Delete");
+  eq("with no active L, a new row starts the next number", repo.linkEntry(restart)!.level, 5);
+  eq("a row from a deleted L remains unlevelled", repo.linkEntry(one)!.level ?? null, null);
 
   // All Ls → Interested gathers every L's; L2 + Interested only L2's.
   const table = [

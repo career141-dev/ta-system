@@ -2453,8 +2453,11 @@ const rawRepo = {
     // Added on an Add-on day, it is an add-on — the TA filters for them
     // rather than hunting through the whole table (the desk, 28 Sep).
     const addOn = this.workingStage(openingId, addedBy) === "Add-on";
-    // It goes into the TA's latest L; before their first + it is in none.
-    const level = this.linkLevels(openingId, addedBy).at(-1)?.n ?? 0;
+    // A row must always belong to a sourcing batch. TAs naturally paste into
+    // All before noticing the small + in the sidebar, which used to leave the
+    // first rows in no L. Start the next available L for them when none is
+    // active; otherwise keep using their latest active L (15 Oct).
+    const level = this.linkLevels(openingId, addedBy).at(-1)?.n ?? this.addLinkLevel(openingId, addedBy);
     mutate((db) => {
       db.linkVault.push({
         id,
