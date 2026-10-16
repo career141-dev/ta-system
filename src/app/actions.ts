@@ -4612,6 +4612,8 @@ async function eodResearchSubmission(user: User, openingId: string, kind: "direc
   const confirmed = formData.get("researchConfirmed") === "on";
   let workType: WorkingStage = repo.workingStage(openingId, user.id);
   let excused = false;
+  // Corrections belong to their saved submission, not today's attendance.
+  if (revised) return checkResearchSubmission({ role: user.role, kind, link, confirmed, workType });
   if (kind === "director" && isConvex()) {
     try {
       const check = await convexMutation<{ ok: boolean; blockers: string[]; workType: WorkingStage }>("ta/workdays:emailPreflight", {
@@ -4693,23 +4695,31 @@ export async function sendDailyEmail(formData: FormData) {
     const { shortlistRows, shortlistRowsFromForm, effortFromForm, effortRow } = await import("@/lib/eod");
     const { revisedSubject, validateResearchLink } = await import("@/lib/eod-format");
     const emails = await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: openingId });
-    const parent = parentId ? emails.find(e => e._id === parentId && e.userId === user.id && e.submissionType === "eod" && !e.parentId) : undefined;
+    const parent = parentId ? emails.find(e => e._id === parentId && e.userId === user.id && e.submissionType === "eod" && e.status === "accepted") : undefined;
     if (parentId && !parent?.snapshot) throw new Error("That original EOD email is no longer available to correct.");
-    const context = await eodWorkContext(user, openingId);
-    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context);
+    if (parent && formData.get("previewConfirmed") !== "on") throw new Error("Review and confirm the revised email preview before sending.");
+    const context = parent ? null : await eodWorkContext(user, openingId);
+    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined);
     const ids = parent ? parent.applicationIds : String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
     const rows = shortlistRowsFromForm(formData, baseRows);
     const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user));
+    const submittedMode = parent?.workType ?? parent?.snapshot?.workType ?? context?.workType;
+    if (submittedMode) effort.hundredOrFollowUp = submittedMode;
     const extraTo = parseAddressList(String(formData.get("extraTo") ?? ""));
     const extraCc = parseAddressList(String(formData.get("extraCc") ?? ""));
     if (extraTo.bad.length || extraCc.bad.length) throw new Error("Correct the invalid To or Cc email addresses.");
     const removed = parseAddressList(String(formData.get("removed") ?? "")).ok;
     const recipients = eodRecipients({ removed, extraTo: extraTo.ok, extraCc: extraCc.ok, shortlistInbox: repo.shortlistInbox() });
+    if (parent?.snapshot) {
+      const off = new Set(removed.map(a => a.toLowerCase()));
+      recipients.to = [...new Set([parent.snapshot.to[0], ...extraTo.ok].filter(a => a && !off.has(a.toLowerCase())))];
+      recipients.cc = [...new Set([...parent.snapshot.cc, ...extraCc.ok].filter(a => !off.has(a.toLowerCase()) && !recipients.to.includes(a)))];
+    }
     if (!recipients.to.length) throw new Error("Add an address on the To line.");
     const confirmed = formData.get("researchConfirmed") === "on";
     // Midday always carries fresh research. EOD keeps the server-authoritative
     // work type and exception rules already used by the live send path.
-    const research = type === "midday"
+    const research = type === "midday" || parent
       ? checkResearchSubmission({ role: "ta", kind: "director", link: String(formData.get("chatgptLink") ?? ""), confirmed })
       : await eodResearchSubmission(user, openingId, "director", formData, !!parentId);
     if (!research.ok) throw new Error(research.reason);
@@ -4722,6 +4732,9 @@ export async function sendDailyEmail(formData: FormData) {
       activityOnly: ids.length === 0, skipAttachments: type === "midday" && skipAttachments, daily: { submissionType: type, draftId: draftId || undefined,
         revision: draftId ? Number(formData.get("dailyDraftRevision")) : undefined, parentId: parentId || undefined,
         extraTo: extraTo.ok, extraCc: extraCc.ok, removed, confirmed },
+      savedAttachments: parent?.snapshot?.attachments,
+      regenerateAttachments: formData.get("regenerateAttachments") === "yes",
+      workType: submittedMode,
     });
     if (!result.ok) throw new Error(result.error);
     sentId = result.dailyEmailId ?? "";
@@ -5038,8 +5051,8 @@ export async function resendEod(formData: FormData) {
         roundId: prev.roundId,
         version,
         sentBy: user.id,
-        // The first send's day, so a correction never stretches it.
-        expiresAt: prev.expiresAt,
+        // Every revised version has its own month of retention.
+        expiresAt: Date.now() + 31 * 86400000,
         subject,
         introText,
         outroText,
@@ -5120,6 +5133,9 @@ async function emailEod(input: {
   activityOnly?: boolean;
   revised?: boolean;
   skipAttachments?: boolean;
+  savedAttachments?: import("@/lib/dailyEmail").SavedEmailAttachment[];
+  regenerateAttachments?: boolean;
+  workType?: WorkingStage;
   daily?: { submissionType: SubmissionType; draftId?: string; revision?: number; parentId?: string; extraTo: string[]; extraCc: string[]; removed: string[]; confirmed: boolean };
 }): Promise<{ ok: true; note: string; workdayMailId?: string | null; dailyEmailId?: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
@@ -5158,12 +5174,24 @@ async function emailEod(input: {
 
   const isMidday = input.daily?.submissionType === "midday";
   const attachments: { name: string; contentType: string; base64: string }[] = [];
+  const savedAttachments: import("@/lib/dailyEmail").SavedEmailAttachment[] = [];
   const preparationFailures: string[] = [];
   if (!input.skipAttachments) {
     for (const r of rows) {
+      const saved = !input.regenerateAttachments && input.savedAttachments?.find(a => a.applicationId === r.applicationId);
+      if (saved && input.daily?.parentId) {
+        try {
+          const file = await convexQuery<{ url: string; name: string }>("ta/dailyEmails:attachment", { actorId: user.id, emailId: input.daily.parentId, attachmentId: saved.id });
+          const response = await fetch(internalUploadUrl(file.url), { cache: "no-store" });
+          if (!response.ok) throw new Error("Saved CV could not be read.");
+          attachments.push({ name: file.name, contentType: "application/pdf", base64: Buffer.from(await response.arrayBuffer()).toString("base64") });
+          savedAttachments.push(saved);
+        } catch { preparationFailures.push(r.name); }
+        continue;
+      }
       const app = repo.application(r.applicationId);
       const c = app ? repo.candidate(app.candidateId) : null;
-      if (!app || !c) continue;
+      if (!app || !c) { preparationFailures.push(r.name); continue; }
       try {
         // The same file as the drawer's Prepared CV (lib/preparedCvFile, 29 Sep):
         // what the desk holds, with the box where the TA put it — and whatever
@@ -5178,7 +5206,16 @@ async function emailEod(input: {
         const pdfBytes = (await preparedCvFile(app, c, opening, { annotation })).bytes;
 
         const base64 = Buffer.from(pdfBytes).toString("base64");
-        attachments.push({ name: preparedCvFileName(c.fullName), contentType: "application/pdf", base64 });
+        const name = preparedCvFileName(c.fullName);
+        if (input.daily) {
+          const url = await convexMutation<string>("ta/cv:uploadUrl", { actorId: user.id });
+          const uploaded = await fetch(internalUploadUrl(url), { method: "POST", headers: { "content-type": "application/pdf" }, body: Buffer.from(pdfBytes) });
+          if (!uploaded.ok) throw new Error("The email's CV backup could not be stored.");
+          const { storageId } = await uploaded.json();
+          const id = await convexMutation<string>("ta/dailyEmails:saveAttachment", { actorId: user.id, jobId: openingId, applicationId: r.applicationId, storageId, name });
+          savedAttachments.push({ id, name, applicationId: r.applicationId });
+        }
+        attachments.push({ name, contentType: "application/pdf", base64 });
       } catch (e) {
         console.error(`[End of day] CV for ${c.fullName} could not be prepared:`, (e as Error).message);
         preparationFailures.push(c.fullName);
@@ -5211,11 +5248,13 @@ async function emailEod(input: {
     if (input.daily) {
       const snapshot: DailyEmailSnapshot = { subject: input.subject.trim(), html, from: user.email,
         to: [to, ...(input.extraTo ?? [])], cc: input.cc, attachmentNames: attachments.map(a => a.name), rows,
+        attachments: savedAttachments,
+        workType: input.workType,
         effort: input.effort ?? effortRow(openingId, user), introText: input.introText ?? "", outroText: input.outroText ?? "",
         researchLink: input.researchLink ?? "", extraTo: input.daily.extraTo, extraCc: input.daily.extraCc, removed: input.daily.removed };
       const reservation = await convexMutation<{ id: string }>("ta/dailyEmails:begin", { actorId: user.id, jobId: openingId,
         submissionType: input.daily.submissionType, draftId: input.daily.draftId, revision: input.daily.revision,
-        parentId: input.daily.parentId, applicationIds: input.applicationIds, snapshot, confirmed: input.daily.confirmed, trackedAt: repo.shortlistInbox() ?? undefined });
+        parentId: input.daily.parentId, applicationIds: input.applicationIds, snapshot, confirmed: input.daily.confirmed, previewConfirmed: !!input.daily.parentId, trackedAt: repo.shortlistInbox() ?? undefined });
       dailyEmailId = reservation.id;
     } else if (!input.revised) {
       const receipt = await convexMutation<{ id: string | null }>("ta/workdays:beginMail", { actorId: user.id, jobId: openingId, applicationIds: input.applicationIds, subject: input.subject, sentTo: to, researchLink: input.researchLink ?? undefined });

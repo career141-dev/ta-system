@@ -6,7 +6,7 @@ import { mapUser } from "../../src/data/convex/map";
 import { workdayDate } from "../../src/lib/workday";
 import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
 import { workSessionStart } from "../../src/lib/workdayRequirements";
-import { dailySendProblem, sameCandidateList, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
+import { dailySendProblem, sameCandidateList, EMAIL_RETENTION_MS, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
 import { validateResearchLink, checkResearchSubmission } from "../../src/lib/eod-format";
 import { dailyEmailsFor, finalizeDailyEmail, middayRequired } from "../lib/dailyEmail";
 import { requiredChecks } from "../lib/workdayChecks";
@@ -28,11 +28,59 @@ async function access(ctx: Ctx, actorId: string, jobId: Id<"jobs">, readOnly = f
 }
 
 async function workday(ctx: Ctx, user: Doc<"users">, jobId: Id<"jobs">) {
-  const day = await ctx.db.query("taWorkdays").withIndex("by_user_finished", q => q.eq("userId", user._id).eq("finishedAt", undefined)).first();
+  const days = await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", user._id)).collect();
+  const day = days.find(d => d.date === workdayDate(Date.now()) && (d.finishedAt === undefined || d.closureReason === "eod"));
   if (worker(user) && (!day || day.date !== workdayDate(Date.now()) || !day.jobs.some(j => j.jobId === jobId)))
     throw new Error("Start today's workday and add this opening before sending.");
   return day?.date === workdayDate(Date.now()) && day.jobs.some(j => j.jobId === jobId) ? day : null;
 }
+
+export const saveAttachment = internalMutation({
+  args: { actorId: v.string(), jobId: v.id("jobs"), applicationId: v.id("applications"), storageId: v.id("_storage"), name: v.string() },
+  handler: async (ctx, args) => {
+    const user = await access(ctx, args.actorId, args.jobId);
+    const app = await ctx.db.get(args.applicationId);
+    if (!app || app.jobId !== args.jobId || (worker(user) && app.ownerTaId !== user._id)) throw new Error("This attachment is not on your position.");
+    return ctx.db.insert("dailyEmailAttachments", { userId: user._id, jobId: args.jobId, applicationId: args.applicationId,
+      storageId: args.storageId, name: args.name, createdAt: Date.now(), expiresAt: Date.now() + EMAIL_RETENTION_MS });
+  },
+});
+
+export const attachment = internalQuery({
+  args: { actorId: v.string(), emailId: v.id("dailyEmails"), attachmentId: v.id("dailyEmailAttachments") },
+  handler: async (ctx, args) => {
+    const email = await ctx.db.get(args.emailId);
+    if (!email) throw new Error("Email not found.");
+    const user = await access(ctx, args.actorId, email.jobId, true);
+    if (worker(user) && email.userId !== user._id) throw new Error("This email belongs to another TA.");
+    const snapshot = email.snapshot as DailyEmailSnapshot | undefined;
+    if (!snapshot || !email.expiresAt || email.expiresAt <= Date.now() || !snapshot.attachments?.some(a => a.id === args.attachmentId)) throw new Error("This attachment is no longer retained.");
+    const file = await ctx.db.get(args.attachmentId);
+    if (!file || file.userId !== email.userId || file.jobId !== email.jobId) throw new Error("Attachment not found.");
+    return { url: await ctx.storage.getUrl(file.storageId), name: file.name };
+  },
+});
+
+/** Metadata only: the sidebar does not fetch every rendered email or PDF. */
+export const sent = internalQuery({
+  args: { actorId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const emails = await ctx.db.query("dailyEmails").withIndex("by_user_accepted", q => q.eq("userId", user._id).gte("acceptedAt", Date.now() - EMAIL_RETENTION_MS)).collect();
+    const saved = await Promise.all(emails.filter(e => e.submissionType === "eod" && e.status === "accepted" && e.finalizedAt && e.snapshot && (e.expiresAt ?? 0) > Date.now()).map(async e => ({
+      id: e._id, rootId: e.parentId ?? e._id, jobId: e.jobId, title: (await ctx.db.get(e.jobId))?.title ?? "Unavailable position",
+      date: e.date, sentAt: e.acceptedAt!, workType: e.workType ?? e.snapshot.workType, subject: e.snapshot.subject,
+      to: e.snapshot.to, cc: e.snapshot.cc, revised: !!e.parentId,
+    })));
+    const legacy = await ctx.db.query("eodEmailCopies").withIndex("by_expires", q => q.gte("expiresAt", Date.now())).collect();
+    const adopted = new Set(emails.map(e => e.legacyCopyId));
+    return [...saved, ...await Promise.all(legacy.filter(e => e.sentBy === user._id && e.sentAt >= Date.now() - EMAIL_RETENTION_MS && !adopted.has(e._id)).map(async e => ({
+      id: e._id, rootId: e.roundId, jobId: e.openingId, title: (await ctx.db.get(e.openingId))?.title ?? "Unavailable position",
+      date: workdayDate(e.sentAt), sentAt: e.sentAt, workType: e.effort?.hundredOrFollowUp,
+      subject: e.subject, to: e.to, cc: e.cc, revised: e.version > 1, legacy: true,
+    })))];
+  },
+});
 
 export const list = internalQuery({
   args: { actorId: v.string(), jobId: v.id("jobs") },
@@ -77,12 +125,14 @@ export const saveDraft = internalMutation({
 export const begin = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), submissionType,
     draftId: v.optional(v.id("dailyEmails")), revision: v.optional(v.number()), parentId: v.optional(v.id("dailyEmails")),
-    applicationIds: v.array(v.id("applications")), snapshot: v.any(), confirmed: v.boolean(), trackedAt: v.optional(v.string()) },
+    applicationIds: v.array(v.id("applications")), snapshot: v.any(), confirmed: v.boolean(), previewConfirmed: v.optional(v.boolean()), trackedAt: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await access(ctx, args.actorId, args.jobId);
-    const parent = args.parentId ? await ctx.db.get(args.parentId) : null;
-    if (args.parentId && (!parent || parent.userId !== user._id || parent.jobId !== args.jobId || parent.submissionType !== "eod" || parent.parentId || parent.status !== "accepted" || !parent.snapshot || (parent.expiresAt ?? 0) <= Date.now()))
-      throw new Error("Only your original, retained EOD email can be corrected.");
+    const source = args.parentId ? await ctx.db.get(args.parentId) : null;
+    if (args.parentId && (!source || source.userId !== user._id || source.jobId !== args.jobId || source.submissionType !== "eod" || args.submissionType !== "eod" || source.status !== "accepted" || !source.snapshot || (source.expiresAt ?? 0) <= Date.now()))
+      throw new Error("Only your retained EOD emails can be corrected.");
+    const parent = source;
+    if (parent && !args.previewConfirmed) throw new Error("Review and confirm the revised email preview before sending.");
     const day = parent ? null : await workday(ctx, user, args.jobId);
     const setup = day && args.submissionType === "eod" ? await requiredChecks(ctx, day, day.jobs.find(j => j.jobId === args.jobId)!) : null;
     const date = workdayDate(Date.now());
@@ -93,6 +143,18 @@ export const begin = internalMutation({
     const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent);
     if (problem) throw new Error(problem);
     const snapshot = args.snapshot as DailyEmailSnapshot;
+    const entry = day?.jobs.find(j => j.jobId === args.jobId);
+    if (day?.finishedAt !== undefined && entry?.workType === "100%") {
+      const already = emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId);
+      if (!already) throw new Error("The workday clock has stopped. Change this unfinished position to Follow-up or Add-on before sending.");
+    }
+    const selectedMode = parent?.workType ?? parent?.snapshot?.workType ?? entry?.workType ?? "100%";
+    if (snapshot.workType && snapshot.workType !== selectedMode) throw new Error("The work type changed. Reload and review the email before sending.");
+    snapshot.workType = selectedMode;
+    for (const a of snapshot.attachments ?? []) {
+      const file = await ctx.db.get(a.id as Id<"dailyEmailAttachments">);
+      if (!file || file.userId !== user._id || file.jobId !== args.jobId || file.applicationId !== a.applicationId || !args.applicationIds.includes(file.applicationId)) throw new Error("The saved CV attachment does not belong to this email.");
+    }
     const link = validateResearchLink(snapshot.researchLink);
     if (args.submissionType === "midday") {
       if (!link.ok || !args.confirmed) throw new Error(link.ok ? "Confirm your ChatGPT link before sending." : link.reason);
@@ -143,14 +205,15 @@ export const begin = internalMutation({
       throw new Error("This midday draft changed. Reload it before sending.");
     const now = Date.now();
     const payload = { status: "sending" as const, startedAt: now, snapshot, applicationIds: args.applicationIds,
-      trackedAt: args.trackedAt, expiresAt: parent?.expiresAt ?? now + 31 * 86400000 };
-    const id = draft ? draft._id : await ctx.db.insert("dailyEmails", { jobId: args.jobId, userId: user._id, date,
+      trackedAt: args.trackedAt, workType: selectedMode, expiresAt: now + EMAIL_RETENTION_MS };
+    const id = draft ? draft._id : await ctx.db.insert("dailyEmails", { jobId: args.jobId, userId: user._id, date: parent?.date ?? date,
       submissionType: "eod", number: 1, revision: 0, fields: {}, createdAt: now,
-      ...(parent ? { parentId: parent._id } : {}), ...payload });
+      ...(parent ? { parentId: parent.parentId ?? parent._id } : {}), ...payload });
     if (draft) await ctx.db.patch(id, { ...payload, revision: draft.revision + 1 });
     if (day) {
       const receiptId = await ctx.db.insert("taWorkdayMail", { workdayId: day._id, userId: user._id, jobId: args.jobId,
         dailyEmailId: id, submissionType: args.submissionType, applicationIds: args.applicationIds,
+        workType: selectedMode,
         status: "sending", startedAt: now, subject: snapshot.subject, sentTo: snapshot.to[0], researchLink: snapshot.researchLink });
       await ctx.db.patch(id, { receiptId });
     }

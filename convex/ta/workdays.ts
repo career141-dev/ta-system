@@ -26,7 +26,6 @@ import { canReviewWorkdays } from "../../src/lib/workdayRoles";
 import {
   applyCarryForwards,
   canExcuseCheck,
-  completionBlockers,
   emailBlockers,
   checksForWorkType,
   validateCarry,
@@ -56,19 +55,16 @@ function requireWorker(user: Doc<"users">) {
 }
 
 async function activeFor(ctx: Ctx, userId: Id<"users">) {
-  return ctx.db
-    .query("taWorkdays")
-    .withIndex("by_user_finished", (q) =>
-      q.eq("userId", userId).eq("finishedAt", undefined),
-    )
-    .first();
+  const days = await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", userId)).collect();
+  return days.find(d => d.date === workdayDate(Date.now()) && (d.finishedAt === undefined || d.closureReason === "eod")) ?? null;
 }
 
 async function ownedActive(ctx: Ctx, user: Doc<"users">, id: Id<"taWorkdays">) {
   const day = await ctx.db.get(id);
   if (!day || day.userId !== user._id)
     throw new Error("That workday is not yours.");
-  if (day.finishedAt !== undefined)
+  if (day.date !== workdayDate(Date.now())) throw new Error("Start today's workday first.");
+  if (day.finishedAt !== undefined && day.closureReason !== "eod")
     throw new Error("That workday is already finished.");
   return day;
 }
@@ -125,6 +121,12 @@ export async function recordActiveMode(
   const day = await activeFor(ctx, userId);
   const entry = day?.jobs.find((j) => j.jobId === jobId);
   if (!day || !entry || entry.workType === stage) return;
+  const sent = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
+  if (sent.some(r => ["sending", "uncertain"].includes(r.status) || (r.status === "accepted" && !r.finalizedAt)))
+    throw new Error("Wait for this position's email result or ask the lead to reconcile it before changing work type.");
+  if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod"))
+    throw new Error("This position's EOD has been sent. Its recorded work type cannot change today.");
+  if (day.finishedAt !== undefined && stage === "100%") throw new Error("The workday clock has stopped. Choose Follow-up or Add-on.");
   await ctx.db.patch(day._id, {
     jobs: day.jobs.map((j) =>
       j.jobId === jobId
@@ -139,6 +141,7 @@ export async function recordActiveMode(
         : j,
     ),
   });
+  await autoCompleteWorkday(ctx, day._id);
 }
 
 async function suggestedMode(_ctx: Ctx, _userId: Id<"users">, _jobId: Id<"jobs">, requested: WorkType): Promise<WorkType> {
@@ -209,8 +212,10 @@ async function attachLead(
     .query("taWorkdayLeads")
     .withIndex("by_workday", (q) => q.eq("workdayId", workdayId))
     .collect();
-  if (!existing.some((r) => r.leadId === leadId))
-    await ctx.db.insert("taWorkdayLeads", { workdayId, leadId });
+  if (!existing.some((r) => r.leadId === leadId)) {
+    const day = await ctx.db.get(workdayId);
+    await ctx.db.insert("taWorkdayLeads", { workdayId, leadId, ...(day?.finishedAt !== undefined ? { finishedAt: day.finishedAt } : {}) });
+  }
 }
 
 async function jobView(
@@ -743,6 +748,8 @@ async function jobView(
     jobId: entry.jobId,
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
+    eodSentAt: (await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect())
+      .find(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod")?.acceptedAt,
     checks: await withTaskHistory(ctx, day, entry.jobId, resolved, entry.workType === "100%"),
     eodChecks: await withTaskHistory(ctx, day, entry.jobId, eodChecks, false),
     shortlist,
@@ -782,8 +789,9 @@ async function view(
   ctx: Ctx,
   day: Doc<"taWorkdays">,
   now: number,
+  live = false,
 ): Promise<WorkdayView> {
-  if (day.finishedAt !== undefined && day.completion)
+  if (day.finishedAt !== undefined && day.completion && !live)
     return withoutReturningTasks(day.completion as WorkdayView);
   const user = await ctx.db.get(day.userId);
   const requests = await ctx.db
@@ -797,6 +805,7 @@ async function view(
     date: day.date,
     startedAt: day.startedAt,
     finishedAt: day.finishedAt ?? null,
+    closureReason: day.closureReason,
     jobs: await Promise.all(day.jobs.map((j) => jobView(ctx, day, j, now))),
     requests: await Promise.all(
       requests.map(async (r) => ({
@@ -814,11 +823,73 @@ function withoutReturningTasks(day: WorkdayView): WorkdayView {
   return day;
 }
 
+/** Sending closes the clock, not the remaining returning-mode submissions. */
+export async function autoCompleteWorkday(ctx: MutationCtx, id: Id<"taWorkdays">) {
+  const day = await ctx.db.get(id);
+  if (!day || day.finishedAt !== undefined) return;
+  const receipts = (await Promise.all(day.jobs.map(j => ctx.db.query("taWorkdayMail")
+    .withIndex("by_workday_job", q => q.eq("workdayId", id).eq("jobId", j.jobId)).collect()))).flat()
+    .filter(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod");
+  const primary = receipts.filter(r => {
+    const entry = day.jobs.find(j => j.jobId === r.jobId);
+    const recorded = entry?.modeHistory.filter(m => m.at <= r.startedAt).at(-1)?.workType;
+    return (r.workType ?? recorded ?? entry?.workType) === "100%";
+  });
+  const allSent = day.jobs.length > 0 && day.jobs.every(j => receipts.some(r => r.jobId === j.jobId));
+  const finishedAt = primary.length ? Math.min(...primary.map(r => r.acceptedAt ?? r.finalizedAt!))
+    : !day.jobs.some(j => j.workType === "100%") && allSent ? Math.max(...receipts.map(r => r.acceptedAt ?? r.finalizedAt!)) : null;
+  if (finishedAt === null) return;
+  await closeWorkday(ctx, day, finishedAt, "eod");
+}
+
+async function closeWorkday(ctx: MutationCtx, day: Doc<"taWorkdays">, at: number, reason: "eod" | "expired") {
+  const snapshot = await view(ctx, { ...day, completion: undefined }, at);
+  snapshot.finishedAt = at;
+  snapshot.closureReason = reason;
+  snapshot.requests = snapshot.requests.map(r => r.status === "pending" ? { ...r, status: "denied", reason: "Workday closed before approval" } : r);
+  await ctx.db.patch(day._id, { finishedAt: at, closureReason: reason, completion: snapshot });
+  const seats = await ctx.db.query("taWorkdayLeads").withIndex("by_workday", q => q.eq("workdayId", day._id)).collect();
+  for (const seat of seats) await ctx.db.patch(seat._id, { finishedAt: at });
+  const requests = await ctx.db.query("taWorkdayRequests").withIndex("by_workday", q => q.eq("workdayId", day._id)).collect();
+  for (const request of requests.filter(r => r.status === "pending")) await ctx.db.patch(request._id, {
+    status: "denied", decidedAt: at, reason: "Workday closed before approval",
+  });
+  if (reason === "eod") {
+    const user = await ctx.db.get(day.userId);
+    if (user) for (const entry of day.jobs) await notify(ctx, entry.leadId, user, entry.jobId, "workday_finished", "Workday completed by EOD email");
+  }
+}
+
+async function recoverStaleDays(ctx: MutationCtx, userId: Id<"users">) {
+  const days = await ctx.db.query("taWorkdays").withIndex("by_user_finished", q => q.eq("userId", userId).eq("finishedAt", undefined)).collect();
+  for (const day of days.filter(d => d.date < workdayDate(Date.now()))) {
+    await autoCompleteWorkday(ctx, day._id);
+    if ((await ctx.db.get(day._id))?.finishedAt === undefined) {
+      const midnight = Date.parse(`${day.date}T00:00:00+05:30`) + 86400000;
+      await closeWorkday(ctx, day, midnight, "expired");
+    }
+  }
+}
+
+/** Pipeline only: never turns missing mail into a successful completed day. */
+export const recoverOpenWorkdays = internalMutation({
+  args: { dryRun: v.boolean() },
+  handler: async (ctx, args) => {
+    const days = await ctx.db.query("taWorkdays").withIndex("by_finished", q => q.eq("finishedAt", undefined)).collect();
+    const stale = days.filter(d => d.date < workdayDate(Date.now()));
+    if (!args.dryRun) for (const userId of new Set(stale.map(d => d.userId))) await recoverStaleDays(ctx, userId);
+    return { dryRun: args.dryRun, affected: stale.length };
+  },
+});
+
 /** Run in the write transaction, never in a dashboard query. */
 export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, actorId?: Id<"users">) {
-  const days = await ctx.db.query("taWorkdays").withIndex("by_finished", q => q.eq("finishedAt", undefined)).collect();
+  const open = await ctx.db.query("taWorkdays").withIndex("by_finished", q => q.eq("finishedAt", undefined)).collect();
+  const today = await ctx.db.query("taWorkdays").withIndex("by_date", q => q.eq("date", workdayDate(Date.now()))).collect();
+  const days = [...new Map([...open, ...today.filter(d => d.closureReason === "eod")].map(d => [d._id, d])).values()];
   const now = Date.now();
   for (const day of days) {
+    if (day.date !== workdayDate(now)) continue;
     const entry = day.jobs.find(j => j.jobId === jobId);
     if (!entry) continue;
     const result = await jobView(ctx, day, entry, now);
@@ -995,7 +1066,7 @@ export const dashboard = internalQuery({
         role,
         lastFinishedAt,
         lastFinishedDate,
-        active: active ? await view(ctx, active, now) : null,
+        active: active ? await view(ctx, active, now, true) : null,
         history: [],
         team: [],
         options: [],
@@ -1122,14 +1193,14 @@ export const dashboard = internalQuery({
       // Build only the lead's jobs: a second job may belong to another team.
       const scoped = { ...day, jobs: visibleJobs, completion: undefined };
       const result =
-        day.finishedAt !== undefined && day.completion
+        day.finishedAt !== undefined && day.completion && !(day.closureReason === "eod" && day.date === workdayDate(now))
           ? {
               ...(day.completion as WorkdayView),
               jobs: (day.completion as WorkdayView).jobs.filter((j) =>
                 visibleJobs.some((v) => v.jobId === j.jobId),
               ),
             }
-          : await view(ctx, scoped, now);
+          : await view(ctx, scoped, now, true);
       result.requests = result.requests.filter((r) =>
         visibleRequests.some((v) => v._id === r.id),
       );
@@ -1142,7 +1213,7 @@ export const dashboard = internalQuery({
       role,
       lastFinishedAt,
       lastFinishedDate,
-      active: active ? await view(ctx, active, now) : null,
+      active: active ? await view(ctx, active, now, true) : null,
       history: await Promise.all(
         history
           .filter((d) => d.finishedAt !== undefined)
@@ -1181,6 +1252,7 @@ export const beginMail = internalMutation({
       return { id: null };
     await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId)!;
+    if (day.finishedAt !== undefined && entry.workType === "100%") throw new Error("The workday clock has stopped. Change an unfinished position to Follow-up or Add-on, or edit and resend its saved EOD.");
     if (!args.applicationIds.length && entry.workType === "100%")
       throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
     const current = await jobView(ctx, day, entry, Date.now());
@@ -1205,6 +1277,8 @@ export const beginMail = internalMutation({
       );
     if (!args.applicationIds.length && previous.some(r => r.status === "accepted"))
       throw new Error("This activity email has already been sent in this workday.");
+    if (previous.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod"))
+      throw new Error("The end-of-day email has already been sent. Edit and resend the saved email.");
     const sentToday = new Set(
       previous
         .filter((r) => r.status === "accepted")
@@ -1243,6 +1317,7 @@ export const beginMail = internalMutation({
       subject: args.subject,
       sentTo: args.sentTo,
       researchLink: args.researchLink,
+      workType: entry.workType,
     });
     return { id };
   },
@@ -1279,7 +1354,8 @@ export const finalizeMail = internalMutation({
       receipt.status !== "accepted"
     )
       throw new Error("The email was not confirmed as accepted for sending.");
-    await ctx.db.patch(receipt._id, { finalizedAt: Date.now() });
+    if (!receipt.finalizedAt) await ctx.db.patch(receipt._id, { finalizedAt: receipt.acceptedAt ?? Date.now() });
+    await autoCompleteWorkday(ctx, receipt.workdayId);
     await refreshWorkdayChecks(ctx, receipt.jobId, user._id);
   },
 });
@@ -1304,7 +1380,7 @@ export const reconcileMail = internalMutation({
       (roleOf(lead) !== "admin" && entry.leadId !== lead._id)
     )
       throw new Error("Only this job's TA Lead can reconcile its email.");
-    if (day.finishedAt !== undefined || receipt.finalizedAt)
+    if (receipt.finalizedAt)
       throw new Error("This send has already been resolved.");
     if (!args.reason.trim() || args.reason.length > 1000)
       throw new Error(
@@ -1370,6 +1446,7 @@ export const reconcileMail = internalMutation({
       reconciliationReason: args.reason.trim(),
     });
     await refreshWorkdayChecks(ctx, receipt.jobId, lead._id);
+    if (args.accepted) await autoCompleteWorkday(ctx, day._id);
     return { ok: true };
   },
 });
@@ -1379,6 +1456,7 @@ export const start = internalMutation({
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     requireWorker(user);
+    await recoverStaleDays(ctx, user._id);
     const active = await activeFor(ctx, user._id);
     if (active) return { id: active._id };
     const prior = await ctx.db
@@ -1441,6 +1519,7 @@ export const addPosition = internalMutation({
       throw new Error("A workday supports at most ten positions.");
     const job = await assignedJob(ctx, user, args.jobId);
     const mode = await suggestedMode(ctx, user._id, args.jobId, args.workType);
+    if (day.finishedAt !== undefined && mode === "100%") throw new Error("The workday clock has stopped. Add Follow-up or Add-on positions.");
     const now = Date.now();
     await ctx.db.patch(day._id, {
       jobs: [
@@ -1570,11 +1649,14 @@ export const markReviewed = internalMutation({
     const app = await ctx.db.get(args.applicationId);
     if (
       !day ||
-      day.finishedAt !== undefined ||
+      (day.finishedAt !== undefined && day.closureReason !== "eod") ||
+      day.date !== workdayDate(Date.now()) ||
       !app ||
       !day.jobs.some((j) => j.jobId === app.jobId)
     )
       throw new Error("This CV is not on an active workday.");
+    const sent = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", app.jobId)).collect();
+    if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod")) throw new Error("This CV is not on an active workday; its position's EOD has been sent.");
     if (
       lead &&
       roleOf(user) !== "admin" &&
@@ -1608,6 +1690,8 @@ export const taskException = internalMutation({
     const user = await requireActor(ctx, args.actorId);
     requireWorker(user);
     const day = await ownedActive(ctx, user, args.workdayId);
+    const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
+    if (receipts.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod")) throw new Error("This position is already finished by its EOD email.");
     if (day.date !== workdayDate(Date.now())) throw new Error("Record reasons on today's workday.");
     const job = await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId);
@@ -1700,49 +1784,9 @@ export const finish = internalMutation({
     const user = await requireActor(ctx, args.actorId);
     requireWorker(user);
     const existing = await ctx.db.get(args.workdayId);
+    if (!existing || existing.userId !== user._id) throw new Error("That workday is not yours.");
     if (existing?.userId === user._id && existing.finishedAt !== undefined)
       return { ok: true, finishedAt: existing.finishedAt };
-    const day = await ownedActive(ctx, user, args.workdayId);
-    for (const entry of day.jobs) await assignedJob(ctx, user, entry.jobId);
-    const now = Date.now();
-    // The CV queue and finish write share a transaction: a concurrent arrival
-    // invalidates the read and retries completion against the new queue.
-    for (const entry of day.jobs) await refreshWorkdayChecks(ctx, entry.jobId);
-    const snapshot = await view(ctx, day, now);
-    const blockers = completionBlockers(snapshot.jobs);
-    if (blockers.length)
-      return { ok: false, blockers: blockers.map((c) => c.label) };
-    snapshot.finishedAt = now;
-    snapshot.requests = snapshot.requests.map((r) =>
-      r.status === "pending"
-        ? { ...r, status: "denied", reason: "Workday finished before approval" }
-        : r,
-    );
-    await ctx.db.patch(day._id, { finishedAt: now, completion: snapshot });
-    const seats = await ctx.db
-      .query("taWorkdayLeads")
-      .withIndex("by_workday", (q) => q.eq("workdayId", day._id))
-      .collect();
-    for (const seat of seats) await ctx.db.patch(seat._id, { finishedAt: now });
-    const requests = await ctx.db
-      .query("taWorkdayRequests")
-      .withIndex("by_workday", (q) => q.eq("workdayId", day._id))
-      .collect();
-    for (const r of requests.filter((r) => r.status === "pending"))
-      await ctx.db.patch(r._id, {
-        status: "denied",
-        decidedAt: now,
-        reason: "Workday finished before approval",
-      });
-    for (const entry of day.jobs)
-      await notify(
-        ctx,
-        entry.leadId,
-        user,
-        entry.jobId,
-        "workday_finished",
-        "Finished workday",
-      );
-    return { ok: true, finishedAt: now };
+    throw new Error("Your workday completes automatically when the required EOD email is sent.");
   },
 });

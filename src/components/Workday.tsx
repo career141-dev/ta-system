@@ -22,6 +22,7 @@ import { validateResearchLink } from "@/lib/eod-format";
 import { sidebarChecks } from "@/lib/workdaySidebar";
 import { canReviewWorkdays } from "@/lib/workdayRoles";
 import { useChatgptResearch } from "./useChatgptResearch";
+import { WorkingStageMenu } from "./WorkingStageMenu";
 
 function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
@@ -40,7 +41,7 @@ function useWorkday(detail: boolean, enabled = true, query = "") {
       });
       if (!response.ok)
         throw new Error(
-          "Could not load workday checks. Retry before finishing work.",
+          "Could not load workday checks. Please retry.",
         );
       const next: WorkdayPayload = await response.json();
       if (current.signal.aborted || request.current !== current) return;
@@ -384,11 +385,10 @@ function DailyReview({
   reviewer?: boolean;
   canManage?: boolean;
 }) {
-  const blockers = completionBlockers(day.jobs);
   const displayedJobs = day.jobs.map(job => {
     const checks = [...job.checks, ...(job.eodChecks ?? []).filter(c => !job.checks.some(existing => existing.key === c.key))];
     const expanded = { ...job, checks };
-    return { ...expanded, detailChecks: checks, checks: sidebarChecks(expanded) };
+    return { ...expanded, detailChecks: checks, checks: job.eodSentAt ? [] : sidebarChecks(expanded) };
   });
   return (
     <section className="space-y-3">
@@ -399,12 +399,13 @@ function DailyReview({
         <p className="text-sm">
           Started {workdayTime(day.startedAt)} ·{" "}
           {day.finishedAt
-            ? `Finished ${workdayTime(day.finishedAt)}`
+            ? `${day.closureReason === "expired" ? "Expired incomplete" : "Workday completed"} ${workdayTime(day.finishedAt)}`
             : "Working"}
         </p>
       </div>
+      {day.finishedAt && day.closureReason === "eod" && <p className="text-sm text-ink-soft">{day.jobs.filter(j => !j.eodSentAt).length} emails remaining. Follow-up/Add-on emails can still be sent; the clock has stopped.</p>}
       {displayedJobs.map((job) => (
-        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType} · {job.checks.filter(c => c.status === "complete").length} completed · {job.checks.filter(c => c.exception).length} reason{job.checks.filter(c => c.exception).length === 1 ? "" : "s"} submitted · {completionBlockers([job]).length} remaining</>}>
+        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType} · {job.eodSentAt ? "EOD sent" : `${job.checks.filter(c => c.status === "complete").length} completed · ${completionBlockers([job]).length} remaining`}</>}>
           <div className="flex flex-wrap justify-between gap-2">
             <Link
               className="font-semibold text-brand"
@@ -414,7 +415,8 @@ function DailyReview({
             </Link>
             <span className="text-sm">{job.workType}</span>
           </div>
-          {canFinish && <WorkForm op="setWorkType" fields={{ workdayId: day.id, jobId: job.jobId }}><label className="block text-xs">Work type<select name="workType" defaultValue={job.workType} className={inputClass}><option>100%</option><option>Follow-up</option><option>Add-on</option></select></label><button className={buttonClass}>Set work type</button></WorkForm>}
+          {canFinish && !job.eodSentAt && <div className="flex items-center gap-3"><span className="text-xs">Work type</span><WorkingStageMenu openingId={job.jobId} stage={job.workType} /></div>}
+          {job.eodSentAt && <p className="text-sm text-brand">EOD sent {workdayTime(job.eodSentAt)} · {job.workType}</p>}
           {job.workType === "100%" && <details><summary className="cursor-pointer text-xs text-ink-soft">Activity details</summary>
           <p className="mt-2 text-sm text-ink-soft">
             {job.activity.cvReviews} CV reviews · {job.activity.profilesAdded}{" "}
@@ -473,10 +475,10 @@ function DailyReview({
             <summary className="cursor-pointer text-xs text-ink-soft">Candidate task details</summary>
             <ul>{job.detailChecks.filter(c => !job.checks.some(summary => summary.key === c.key)).map(check => <Check key={check.key} check={check} dayId={day.id} readOnly />)}</ul>
           </details>}
-          {canManage && day.finishedAt === null && job.detailChecks.some(c => (c.kind === "cv_review" && c.status !== "complete") || c.key.startsWith("mail:")) && <details>
+          {canManage && !job.eodSentAt && (day.finishedAt === null || day.closureReason === "eod") && job.detailChecks.some(c => (c.kind === "cv_review" && c.status !== "complete") || c.key.startsWith("mail:")) && <details>
             <summary className="cursor-pointer text-xs text-brand">Review actions</summary>
           {canManage &&
-            day.finishedAt === null &&
+            (day.finishedAt === null || day.closureReason === "eod") &&
             job.detailChecks
               .filter(
                 (c) => c.status !== "complete" && c.kind === "cv_review" && c.key.startsWith("review:"),
@@ -497,7 +499,7 @@ function DailyReview({
                 </WorkForm>
               ))}
           {canManage &&
-            day.finishedAt === null &&
+            (day.finishedAt === null || day.closureReason === "eod") &&
             job.detailChecks
               .filter((c) => c.key.startsWith("mail:"))
               .map((check) => (
@@ -555,20 +557,7 @@ function DailyReview({
           {request.reason ? ` — ${request.reason}` : ""}
         </p>
       ))}
-      {canFinish && (
-        <WorkForm op="finish" fields={{ workdayId: day.id }}>
-          <p className="text-sm">
-            {blockers.length
-              ? `${blockers.length} required actions remain before finishing your workday.`
-              : "Required checks are completed or excused. Waiting items will carry forward."}
-          </p>
-          <button className={buttonClass} disabled={blockers.length > 0}>Finish workday</button>
-          <p className="text-xs text-ink-soft">
-            Checks run again when you press Finish. The finish time is recorded
-            only if they pass.
-          </p>
-        </WorkForm>
-      )}
+      {canFinish && !day.finishedAt && <p className="text-xs text-ink-soft">Your 100% EOD email completes the workday automatically. On returning-only days, the last outstanding EOD completes it.</p>}
     </section>
   );
 }
@@ -601,6 +590,21 @@ export function WorkdayDashboard() {
       {!data && !error && <p role="status">Loading workday…</p>}
       {data?.canWork && (
         <>
+          <details className="rounded-xl border border-rule p-4">
+            <summary className="cursor-pointer font-semibold">Sent EOD emails · last 31 days</summary>
+            {!data.sentEmails?.length ? <p className="mt-3 text-sm text-ink-soft">No retained EOD emails.</p> :
+              [...new Set(data.sentEmails.slice().sort((a, b) => b.sentAt - a.sentAt).map(e => e.rootId))].map(rootId => {
+                const versions = data.sentEmails!.filter(e => e.rootId === rootId).sort((a, b) => b.sentAt - a.sentAt);
+                return <details key={rootId} className="mt-3 rounded border border-rule p-3" open>
+                  <summary className="text-sm font-medium">{versions[0].title} · {versions[0].date}</summary>
+                  {versions.map(e => <div key={e.id} className="mt-3 text-xs">
+                    <Link className="text-brand underline" href={`/openings/${e.jobId}/eod?${e.legacy ? "view" : "mail"}=${e.id}`}>{e.revised ? "Revised" : "Original"} · {new Date(e.sentAt).toLocaleString("en-GB", { timeZone: "Asia/Colombo" })} · {e.workType ?? "Unrecorded mode"}</Link>
+                    <p>{e.subject}</p><p>To: {e.to.join(", ")}</p><p>Cc: {e.cc.join(", ") || "None"}</p>
+                    <Link className="inline-block mt-1 text-brand underline" href={e.legacy ? `/openings/${e.jobId}/eod?resend=${e.id}` : `/openings/${e.jobId}/eod?mail=${e.id}&revise=yes`}>Edit and resend</Link>
+                  </div>)}
+                </details>;
+              })}
+          </details>
           {data.active ? (
             <>
               <DailyReview day={data.active} canFinish={!error} />
@@ -664,7 +668,7 @@ export function WorkdayDashboard() {
             </p>
           )}
           {team.map((day) => (
-            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={false} title={<>{day.name} · {day.date} · {day.finishedAt ? "Finished" : "Working"}</>}>
+            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={false} title={<>{day.name} · {day.date} · {day.closureReason === "expired" ? "Incomplete (expired)" : day.finishedAt ? "Finished" : "Working"}</>}>
               <DailyReview day={day} reviewer canManage={data.canLead} />
               {data.canLead && day.finishedAt === null &&
                 day.requests

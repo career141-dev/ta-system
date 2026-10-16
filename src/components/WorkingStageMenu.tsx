@@ -129,6 +129,7 @@ export function WorkingStageMenu({
                       new CustomEvent("working-stage-changed", { detail: { openingId, stage: previous } }),
                     );
                   }
+                  window.dispatchEvent(new Event("workday-changed"));
                   router.refresh();
                 });
               }}

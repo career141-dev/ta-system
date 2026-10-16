@@ -14,18 +14,28 @@ export default defineSchema({
     fields: v.record(v.string(), v.string()), applicationIds: v.array(v.id("applications")),
     parentId: v.optional(v.id("dailyEmails")), roundId: v.optional(v.id("reviewRounds")),
     receiptId: v.optional(v.id("taWorkdayMail")),
+    workType: v.optional(v.union(v.literal("100%"), v.literal("Follow-up"), v.literal("Add-on"))),
+    legacyCopyId: v.optional(v.id("eodEmailCopies")),
     createdAt: v.number(), startedAt: v.optional(v.number()), acceptedAt: v.optional(v.number()),
     finalizedAt: v.optional(v.number()), expiresAt: v.optional(v.number()),
     snapshot: v.optional(v.any()), trackedAt: v.optional(v.string()),
     reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
-    .index("by_job", ["jobId"]).index("by_expires", ["expiresAt"]),
-  // Explicit workday buttons; browser sessions never create attendance records.
+    .index("by_job", ["jobId"]).index("by_expires", ["expiresAt"])
+    .index("by_user_accepted", ["userId", "acceptedAt"]),
+  // Independent copies of sent PDFs. Candidate CV replacement never owns these files.
+  dailyEmailAttachments: defineTable({
+    userId: v.id("users"), jobId: v.id("jobs"), storageId: v.id("_storage"),
+    name: v.string(), applicationId: v.id("applications"), createdAt: v.number(),
+    expiresAt: v.number(),
+  }).index("by_expires", ["expiresAt"]),
+  // Explicit Start; accepted EOD submissions close the attendance clock.
   taWorkdays: defineTable({
     userId: v.id("users"),
     date: v.string(),
     startedAt: v.number(),
     finishedAt: v.optional(v.number()),
+    closureReason: v.optional(v.union(v.literal("eod"), v.literal("expired"))),
     jobs: v.array(v.object({
       jobId: v.id("jobs"),
       workType: v.union(v.literal("100%"), v.literal("Add-on"), v.literal("Follow-up")),
@@ -78,6 +88,7 @@ export default defineSchema({
     subject: v.string(),
     sentTo: v.string(),
     researchLink: v.optional(v.string()),
+    workType: v.optional(v.union(v.literal("100%"), v.literal("Follow-up"), v.literal("Add-on"))),
     reconciledAt: v.optional(v.number()),
     reconciledBy: v.optional(v.id("users")),
     reconciliationReason: v.optional(v.string()),

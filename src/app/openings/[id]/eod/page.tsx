@@ -74,9 +74,9 @@ export default async function EodPage({
   // A query string alone cannot delete a draft. Match it to this user's
   // accepted backend record so a failed/replayed URL never clears their work.
   const sentDaily = sp.sent ? dailyEmails.find(e => e._id === sp.sent && e.userId === user.id && e.status === "accepted" && !!e.finalizedAt) : undefined;
-  const selectedDaily = dailyHistory.find(e => e._id === sp.mail);
+  const selectedDaily = dailyHistory.find(e => e._id === sp.mail || (!!e.legacyCopyId && (e.legacyCopyId === sp.resend || e.legacyCopyId === sp.view)));
   const draft = midday && selectedDaily && selectedDaily.userId === user.id && selectedDaily.date === workdayDate(Date.now()) && ["draft", "failed"].includes(selectedDaily.status) ? selectedDaily : undefined;
-  const correction = !midday && sp.revise === "yes" && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && !selectedDaily.parentId && selectedDaily.snapshot ? selectedDaily : undefined;
+  const correction = !midday && (sp.revise === "yes" || !!sp.resend) && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && selectedDaily.snapshot ? selectedDaily : undefined;
   const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId);
   await primeEyeMarked(id, user);
   const o = repo.opening(id);
@@ -371,22 +371,24 @@ export default async function EodPage({
       {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
       {(!midday || !!draft) && (!selectedDaily || !!draft || !!correction) && (!eodClosed || !!correction || !!resendCopy) && <>
       {!midday && <LiveTableRefresh />}
-      {!midday && workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
+      {!midday && !correction && workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
       <EodComposer
         key={draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}
         submissionType={midday ? "midday" : "eod"}
         dailyDraft={draft ? { id: draft._id, revision: draft.revision, fields: draft.fields } : undefined}
         dailyParentId={correction?._id}
+        useDailyEmail={isConvex() && isTa(user)}
+        savedAttachments={correction?.snapshot?.attachments}
         openingId={id}
         kind={kind}
         subject={correction?.snapshot ? revisedSubject(correction.snapshot.subject) : resendCopy ? revisedSubject(resendCopy.subject) : midday ? `MIDDAY ${draft?.number ?? 1} - ${workdayDate(Date.now())} - ${formattedSubject}` : formattedSubject}
         toName={kind === "director" ? "Job Orders" : (director?.name ?? "Director")}
-        toEmail={kind === "director" ? EOD_TO : (director?.email ?? "")}
+        toEmail={correction?.snapshot?.to[0] ?? (kind === "director" ? EOD_TO : (director?.email ?? ""))}
         ccName={kind === "director" ? "" : (lead?.name ?? "")}
         ccEmail={kind === "director" ? "" : (lead?.email ?? "")}
-        trackedAt={repo.shortlistInbox()}
+        trackedAt={correction ? null : repo.shortlistInbox()}
         eodCc={null}
-        fixedCc={kind === "director" ? [...EOD_CC_DEFAULTS] : []}
+        fixedCc={correction?.snapshot?.cc ?? (kind === "director" ? [...EOD_CC_DEFAULTS] : [])}
         canAddRecipients={kind === "director"}
         rows={composerRows}
         effort={correction?.snapshot?.effort ?? (resendCopy ? resendCopy.effort : effort)}
@@ -395,7 +397,7 @@ export default async function EodPage({
         needsResearchLink={midday || needsResearchLink(user.role, kind, workType)}
         resend={
           correction?.snapshot ? { copyId: correction._id, introText: correction.snapshot.introText, outroText: correction.snapshot.outroText,
-            researchLink: correction.snapshot.researchLink, extraTo: correction.snapshot.extraTo, extraCc: correction.snapshot.extraCc, removed: correction.snapshot.removed } : resendCopy
+            researchLink: correction.snapshot.researchLink, extraTo: correction.snapshot.to.slice(1), extraCc: [], removed: [] } : resendCopy
             ? {
                 copyId: resendCopy.id,
                 introText: resendCopy.introText,

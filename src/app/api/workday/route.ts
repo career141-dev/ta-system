@@ -23,12 +23,15 @@ export async function GET(request: Request) {
       date: new URL(request.url).searchParams.get("date") || undefined,
       focusWorkday: new URL(request.url).searchParams.get("checkDay") || undefined,
     });
+    if (payload.canWork && new URL(request.url).searchParams.get("detail") === "1") {
+      payload.sentEmails = await convexQuery("ta/dailyEmails:sent", { actorId: user.id });
+    }
     return NextResponse.json(payload, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch {
     return NextResponse.json(
-      { error: "Could not load workday checks. Retry before finishing work." },
+      { error: "Could not load workday checks. Please retry." },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
