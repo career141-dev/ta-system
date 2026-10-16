@@ -797,9 +797,13 @@ const rawRepo = {
   opening: (id: Id) => load().openings.find((o) => o.id === id) ?? null,
 
   openingsForUser(user: User): Opening[] {
-    const all = load().openings;
-    if (isTa(user)) return all.filter((o) => o.assignedTaIds.includes(user.id) || !!repo.assignmentFor(o.id, user.id));
-    if (user.role === "ta_lead") return all.filter((o) => o.taLeadId === user.id || o.assignedTaIds.includes(user.id));
+    const db = load();
+    const all = db.openings;
+    const strategyOpeningIds = new Set(
+      db.strategyAssignments.filter((r) => r.doneBy.includes(user.id)).map((r) => r.openingId)
+    );
+    if (isTa(user)) return all.filter((o) => o.assignedTaIds.includes(user.id) || !!repo.assignmentFor(o.id, user.id) || strategyOpeningIds.has(o.id));
+    if (user.role === "ta_lead") return all.filter((o) => o.taLeadId === user.id || o.assignedTaIds.includes(user.id) || strategyOpeningIds.has(o.id));
     // A client or a viewer sees the openings they have been put on, and no
     // others — this returned every opening on the desk for them.
     if (user.role === "client" || user.role === "viewer") return all.filter((o) => !!repo.assignmentFor(o.id, user.id));

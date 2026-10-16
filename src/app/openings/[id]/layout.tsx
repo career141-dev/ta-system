@@ -31,7 +31,7 @@ export default async function OpeningLayout({
   const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
   if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
   // What this person is on this opening decides what the rail even offers.
-  const seat = seatFor(user, assignment?.role ?? null);
+  const seat = seatFor(user, assignment?.role ?? null, onStrategy);
   const dailyEmails = seat.canSeeSourcing && isConvex()
     ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
   const todayEmails = dailyEmails.filter(e => e.userId === user.id && e.date === workdayDate(Date.now()));

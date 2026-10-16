@@ -214,19 +214,19 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
       if (ctx.assignment && ctx.ownerTaId && ctx.ownerTaId !== user.id && isTa(user)) {
         return deny("That row is another recruiter's. Their table is theirs to work.");
       }
-      return ctx.assignment ? ALLOW : deny("You are not on this opening.");
+      return ctx.assignment || ctx.onStrategy ? ALLOW : deny("You are not on this opening.");
 
     case "opening.manage":
       if (isDeskWide(user)) return ALLOW;
-      if (ctx.assignment?.role === "primary_recruiter" || ctx.assignment?.role === "supporting_recruiter") {
+      if (ctx.assignment?.role === "primary_recruiter" || ctx.assignment?.role === "supporting_recruiter" || ctx.onStrategy) {
         return ALLOW;
       }
       return deny("Only the recruiters on this opening, or a lead, can change it.");
 
     case "opening.act": {
       if (!isDeskWide(user)) {
-        if (!ctx.assignment) return deny("You are not on this opening.");
-        if (ctx.assignment.role === "client_contact") {
+        if (!ctx.assignment && !ctx.onStrategy) return deny("You are not on this opening.");
+        if (ctx.assignment?.role === "client_contact") {
           return deny("A client seat reads its shortlist; it does not work the pipeline.");
         }
       }

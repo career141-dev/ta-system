@@ -5909,14 +5909,27 @@ function revalidateStrategies(openingId?: string) {
   // The loaded tables are behind what was just written: the next load re-reads
   // them, so the person sees their own change and the other side sees it too.
   markTablesStale();
-  revalidatePath("/strategy", "layout");
-  if (openingId) revalidatePath(`/openings/${openingId}/strategies`);
+  revalidatePath("/strategy");
+  revalidatePath("/strategy", "page");
+  if (openingId) {
+    revalidatePath(`/strategy/${openingId}`);
+    revalidatePath(`/strategy/${openingId}`, "page");
+    revalidatePath(`/openings/${openingId}/strategies`);
+    revalidatePath(`/openings/${openingId}`);
+  }
 }
 
 /** The row a form names, and the opening it is really on. */
 function strategyRowOf(formData: FormData, field = "rowId") {
-  const row = repo.strategyAssignment(String(formData.get(field) ?? ""));
-  return row ?? null;
+  const byId = String(formData.get(field) ?? "");
+  const row = byId ? repo.strategyAssignment(byId) : null;
+  if (row) return row;
+  const openingId = String(formData.get("openingId") ?? "");
+  const strategyId = String(formData.get("strategyId") ?? "");
+  if (openingId && strategyId) {
+    return repo.strategyAssignments(openingId).find((r) => r.strategyId === strategyId) ?? null;
+  }
+  return null;
 }
 
 /**
@@ -5977,7 +5990,8 @@ export async function addStrategyDoneBy(formData: FormData) {
 
 /** Take a TA off a strategy. Whatever they already submitted stays on the row. */
 export async function removeStrategyDoneBy(formData: FormData) {
-  await primeStore();
+  const openingIdParam = String(formData.get("openingId") ?? "");
+  await primeStore(openingIdParam ? { openingId: openingIdParam } : undefined);
   const row = strategyRowOf(formData);
   if (!row) await fail("That strategy is no longer on this job's table.");
   await authorizeOn(row!.openingId, "strategy.assign");

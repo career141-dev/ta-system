@@ -126,10 +126,11 @@ export function CandidateList({
    * access control; filtering the rows is.
    */
   const assignment = repo.assignmentFor(openingId, currentUser.id) ?? null;
-  const seat = seatFor(currentUser, assignment?.role ?? null);
+  const onStrategy = repo.strategyAssignments(openingId).some((r) => r.doneBy.includes(currentUser.id));
+  const seat = seatFor(currentUser, assignment?.role ?? null, onStrategy);
   const canDecideDirector = allows(currentUser, "decide.director", { openingId, assignment });
   const canDecideClient = allows(currentUser, "decide.client", { openingId, assignment });
-  const canManage = allows(currentUser, "opening.manage", { openingId, assignment });
+  const canManage = allows(currentUser, "opening.manage", { openingId, assignment, onStrategy });
   const apps = visibleToSeat(given, seat);
 
   const active = Object.entries(filters).filter(([k, v]) => v && k !== "page" && k !== "msg");

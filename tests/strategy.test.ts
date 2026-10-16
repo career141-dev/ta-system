@@ -12,7 +12,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { can } from "@/lib/auth";
-import { scopeStrategies } from "@/lib/visibility";
+import { scopeStrategies, seatFor } from "@/lib/visibility";
 import { colomboDateValue, colomboDayFromValue, colomboDayStart } from "@/lib/calendar";
 import { DESK_STRATEGIES, countsOf, isPlannable, plannerByTa, proofsForLead, proofsVisibleTo, strategyTable } from "@/lib/strategyPlanner";
 import type { Assignment, StrategyAssignment, User } from "@/data/types";
@@ -55,6 +55,14 @@ console.log("\nWho may work a strategy they were given");
   eq("a lead does not work strategies as a TA", ok(user("ta_lead"), "strategy.work", { assignment: on("primary_recruiter") }), false);
   eq("a viewer cannot", ok(user("viewer"), "strategy.work", { assignment: on("primary_recruiter") }), false);
   eq("a team member with strategies assigned on the job", ok(user("ta_support"), "strategy.work", { onStrategy: true }), true);
+  eq("a TA with strategy assigned gets sourcing capability", ok(ta, "opening.sourcing", { onStrategy: true }), true);
+  eq("a TA with strategy assigned gets act capability", ok(ta, "opening.act", { onStrategy: true }), true);
+  eq("a TA with strategy assigned gets manage capability", ok(ta, "opening.manage", { onStrategy: true }), true);
+
+  const stratSeat = seatFor(ta, null, true);
+  eq("seat for TA on strategy has canSeeSourcing", stratSeat.canSeeSourcing, true);
+  eq("seat for TA on strategy has canAct", stratSeat.canAct, true);
+  eq("seat for TA on strategy has stages null", stratSeat.stages, null);
 }
 
 console.log("\nWho sees which row");

@@ -20,8 +20,9 @@ export function mayOpenCv(user: User, candidateId: string, appId: string | null)
   const app = repo.application(appId);
   if (!app || app.candidateId !== candidateId) return false;
   const assignment = repo.assignmentFor(app.openingId, user.id) ?? null;
-  const seat = seatFor(user, assignment?.role ?? null);
-  return allows(user, "opening.read", { openingId: app.openingId, assignment }) && (seat.stages === null || seat.stages.includes(app.stage));
+  const onStrategy = repo.strategyAssignments(app.openingId).some((r) => r.doneBy.includes(user.id));
+  const seat = seatFor(user, assignment?.role ?? null, onStrategy);
+  return allows(user, "opening.read", { openingId: app.openingId, assignment, onStrategy }) && (seat.stages === null || seat.stages.includes(app.stage));
 }
 
 export type CvBytes =
