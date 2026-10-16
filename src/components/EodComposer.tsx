@@ -18,7 +18,6 @@ import { resendEod, sendEod, sendDailyEmail, saveMiddayDraft } from "@/app/actio
 import type { SubmissionType } from "@/lib/dailyEmail";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
-import type { WorkingStage } from "@/data/types";
 
 function noteLineToHtml(line: string): string {
   let l = line
@@ -387,7 +386,6 @@ export function EodComposer({
   alreadyOut,
   openSetNote,
   needsResearchLink,
-  workType,
   resend,
   submissionType = "eod",
   dailyDraft,
@@ -420,7 +418,6 @@ export function EodComposer({
   openSetNote: string | null;
   /** A TA's email to the directors must carry their ChatGPT research link (8 Oct); the server checks it too. */
   needsResearchLink: boolean;
-  workType: WorkingStage;
   /** An email already sent, opened from its copy to correct and send again (8 Oct). */
   resend?: {
     copyId: string;
@@ -432,7 +429,6 @@ export function EodComposer({
     removed: string[];
   };
 }) {
-  const hasTasks = workType === "100%";
   const savedFields = dailyDraft?.fields ?? {};
   const midday = submissionType === "midday";
   const draftKey = dailyDraft ? `midday-composer:${dailyDraft.id}` : resend
@@ -455,7 +451,7 @@ export function EodComposer({
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const [researchExcused, setResearchExcused] = useState(false);
-  const researchRequired = needsResearchLink && (midday || (hasTasks && !(researchExcused && !researchLink.trim())));
+  const researchRequired = needsResearchLink && (midday || !(researchExcused && !researchLink.trim()));
   const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>(() => Object.fromEntries(initialRows.map(row => [row.applicationId,
     Object.fromEntries(Object.keys(row).filter(key => savedFields[`shortlist_${row.applicationId}_${key}`] !== undefined).map(key => [key,
@@ -680,7 +676,7 @@ export function EodComposer({
           the send form through form="eod-send", wherever it sits. */}
       {/* Shown to everyone on the directors' email (9 Oct): an admin or lead may add one
           too; only a TA must. The server already takes a valid link from anyone. */}
-      {kind === "director" && hasTasks && (
+      {kind === "director" && (
         <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <h3 className="text-[13.5px] font-semibold">
             ChatGPT research link{" "}

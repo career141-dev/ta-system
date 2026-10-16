@@ -5,6 +5,7 @@ import type { WorkdayCheck } from "../../src/lib/workday";
 import { isEodSendCheck, canExcuseCheck, applyTaskExceptions, workdayDate } from "../../src/lib/workday";
 import { linkKey } from "../../src/lib/url";
 import { middayRequired, dailyEmailsFor } from "./dailyEmail";
+import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
 
 export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, entry: Doc<"taWorkdays">["jobs"][number]) {
   const [notes, research, posts, links, suggestions, runs, apps, receipts, rounds, provenance, job] = await Promise.all([
@@ -35,7 +36,12 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const since = workSessionStart(entry);
   const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt && (entry.workType !== "Add-on" || r.startedAt >= since));
   const dailyEod = receipts.filter(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod" && workdayDate(r.startedAt) === day.date);
-  const inDirectorReview = apps.filter(a => a.currentStage === "second_shortlist" && !sentIds.has(a._id) && (entry.workType !== "Add-on" || a.lastStageChangedAt >= since));
+  const inDirectorReview = apps.filter(a => !sentIds.has(a._id) && isEodCandidateEligible({
+    stage: a.currentStage,
+    ownerTaId: a.ownerTaId,
+    isAddOn: a.isAddOn,
+    lastStageChangedAt: a.lastStageChangedAt,
+  }, { taId: day.userId, workType: entry.workType, sessionStart: since }));
   const ready = (await Promise.all(inDirectorReview.map(async app => {
     const candidate = await ctx.db.get(app.candidateId);
     return app.cvFileId || app.cvFileName || candidate?.cvUploadId || candidate?.cvFileName ? app : null;
@@ -109,8 +115,6 @@ export async function recordJdReview(ctx: MutationCtx, userId: Id<"users">, jobI
 
 /** Event reads never manufacture a completion time for legacy evidence. */
 export async function withTaskHistory(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, jobId: Id<"jobs">, checks: WorkdayCheck[], includeHistorical = true) {
-  // Returning positions have no tasks, including events saved before this policy.
-  if (day.jobs.find(j => j.jobId === jobId)?.workType !== "100%") return [];
   const events = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   const exceptions = await ctx.db.query("taWorkdayExceptions").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   const names = new Map<string, string>();

@@ -28,6 +28,7 @@ import {
   canExcuseCheck,
   completionBlockers,
   emailBlockers,
+  checksForWorkType,
   validateCarry,
   workdayDate,
   type WorkdayCheck,
@@ -35,6 +36,7 @@ import {
   type WorkdayView,
   type WorkType,
 } from "../../src/lib/workday";
+import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
 
 type Ctx = QueryCtx | MutationCtx;
 const workType = v.union(
@@ -123,9 +125,6 @@ export async function recordActiveMode(
   const day = await activeFor(ctx, userId);
   const entry = day?.jobs.find((j) => j.jobId === jobId);
   if (!day || !entry || entry.workType === stage) return;
-  const history = await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", userId)).collect();
-  const returning = history.some(d => d.finishedAt !== undefined && d.jobs.some(j => j.jobId === jobId));
-  if ((returning && stage === "100%") || (!returning && stage !== "100%")) throw new Error("100% is the first workday; use Follow-up on returning jobs or choose Add-on.");
   await ctx.db.patch(day._id, {
     jobs: day.jobs.map((j) =>
       j.jobId === jobId
@@ -142,9 +141,8 @@ export async function recordActiveMode(
   });
 }
 
-async function suggestedMode(ctx: Ctx, userId: Id<"users">, jobId: Id<"jobs">, requested: WorkType): Promise<WorkType> {
-  const days = await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", userId)).collect();
-  return days.some(d => d.finishedAt !== undefined && d.jobs.some(j => j.jobId === jobId)) ? requested === "Add-on" ? "Add-on" : "Follow-up" : "100%";
+async function suggestedMode(_ctx: Ctx, _userId: Id<"users">, _jobId: Id<"jobs">, requested: WorkType): Promise<WorkType> {
+  return requested;
 }
 
 async function pendingJobs(ctx: Ctx, user: Doc<"users">) {
@@ -739,13 +737,14 @@ async function jobView(
   for (const app of apps.filter(a => a.ownerTaId === day.userId && a.currentStage === "second_shortlist" && sentIds.has(a._id))) {
     add(`director_wait:${app._id}`, "Waiting for the Director's reply: record the next follow-up", "follow_up", `${base}/eod`, true, app.lastStageChangedAt);
   }
-  const resolved = applyCarryForwards(checks, carries, now).map(c => ({ ...c, status: c.waiting ? "waiting" as const : c.status }));
+  const resolved = checksForWorkType(entry.workType, applyCarryForwards(checks, carries, now).map(c => ({ ...c, status: c.waiting ? "waiting" as const : c.status })));
+  const eodChecks = checksForWorkType(entry.workType, required.eodChecks);
   return {
     jobId: entry.jobId,
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
-    checks: await withTaskHistory(ctx, day, entry.jobId, resolved),
-    eodChecks: await withTaskHistory(ctx, day, entry.jobId, required.eodChecks, false),
+    checks: await withTaskHistory(ctx, day, entry.jobId, resolved, entry.workType === "100%"),
+    eodChecks: await withTaskHistory(ctx, day, entry.jobId, eodChecks, false),
     shortlist,
     activity: {
       cvReviews: reviews,
@@ -812,10 +811,7 @@ async function view(
 }
 
 function withoutReturningTasks(day: WorkdayView): WorkdayView {
-  return {
-    ...day,
-    jobs: day.jobs.map(job => job.workType === "100%" ? job : { ...job, checks: [], eodChecks: [] }),
-  };
+  return day;
 }
 
 /** Run in the write transaction, never in a dashboard query. */
@@ -916,6 +912,32 @@ export const refreshDueChecks = internalMutation({
   handler: async (ctx, args) => { await refreshWorkdayChecks(ctx, args.jobId); },
 });
 
+/** The server-authoritative mode and current session used by the EOD preview. */
+export const eodContext = internalQuery({
+  args: { actorId: v.string(), jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    requireWorker(user);
+    await assignedJob(ctx, user, args.jobId);
+    const day = await activeFor(ctx, user._id);
+    const entry = day?.jobs.find(j => j.jobId === args.jobId);
+    if (entry) return { workType: entry.workType, sessionStart: workSessionStart(entry) };
+
+    const assignment = await ctx.db.query("jobAssignments")
+      .withIndex("by_jobId_userId", q => q.eq("jobId", args.jobId).eq("userId", user._id))
+      .first();
+    if (assignment?.isActive && assignment.workingStage) {
+      return { workType: assignment.workingStage, sessionStart: null };
+    }
+    const held = await ctx.db.query("taSettings")
+      .withIndex("by_key", q => q.eq("key", workingStageKey(args.jobId, user._id)))
+      .first();
+    const saved = held?.value;
+    const stage: WorkType = saved === "Follow-up" || saved === "Add-on" ? saved : "100%";
+    return { workType: stage, sessionStart: null };
+  },
+});
+
 export const emailPreflight = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), link: v.string(), confirmed: v.boolean(), revised: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
@@ -926,16 +948,6 @@ export const emailPreflight = internalMutation({
     const entry = day.jobs.find(j => j.jobId === args.jobId);
     if (!entry) throw new Error("Add this opening to Today's Checks first.");
     await assignedJob(ctx, user, args.jobId);
-    if (entry.workType !== "100%") {
-      // Returning work has no task gate, but duplicate/uncertain sends remain blocked.
-      const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
-      const pending = receipts.some(r => r.status === "sending" || r.status === "uncertain" || (r.status === "accepted" && !r.finalizedAt));
-      return {
-        ok: !pending,
-        blockers: pending ? ["This job has a send in progress or an uncertain result. Ask the lead to reconcile it before retrying."] : [],
-        workType: entry.workType,
-      };
-    }
     const link = validateResearchLink(args.link);
     const excused = !args.link.trim() && !!(await requiredChecks(ctx, day, entry)).eodChecks.find(c => c.key.startsWith("chatgpt:"))?.exception;
     if (!excused && (!link.ok || !args.confirmed)) throw new Error(link.ok ? "Confirm your ChatGPT link before sending." : link.reason);
@@ -1013,6 +1025,7 @@ export const dashboard = internalQuery({
     ];
     const previousDays = worker ? await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", user._id)).collect() : [];
     const workedJobs = new Set(previousDays.filter(d => d.finishedAt !== undefined).flatMap(d => d.jobs.map(j => j.jobId)));
+    const assignmentModes = new Map(assignments.map(a => [a.jobId as string, a.workingStage]));
     const options = worker
       ? selectableJobs
           .filter(
@@ -1020,7 +1033,13 @@ export const dashboard = internalQuery({
               !isGone(j) && !["closed", "filled", "cancelled"].includes(j.status) &&
               (assignedIds.has(j._id) || j.assignedTaIds?.includes(user._id)),
           )
-          .map((j) => ({ id: j._id, title: j.title, workType: workedJobs.has(j._id) ? "Follow-up" as const : "100%" as const, carry: false, preview: undefined as WorkdayJobView | undefined }))
+          .map((j) => ({
+            id: j._id,
+            title: j.title,
+            workType: assignmentModes.get(j._id) ?? (workedJobs.has(j._id) ? "Follow-up" as const : "100%" as const),
+            carry: false,
+            preview: undefined as WorkdayJobView | undefined,
+          }))
       : [];
     const carryIds = !active && worker ? new Set((await pendingJobs(ctx, user)).map(j => j._id)) : new Set<string>();
     if (!active) for (const option of options) {
@@ -1195,16 +1214,23 @@ export const beginMail = internalMutation({
       throw new Error(
         "These candidates have already been sent in this workday.",
       );
+    const sessionStart = workSessionStart(entry);
     for (const id of args.applicationIds) {
       const app = await ctx.db.get(id);
       if (
         !app ||
         app.jobId !== args.jobId ||
-        app.ownerTaId !== user._id ||
-        app.currentStage !== "second_shortlist"
+        !isEodCandidateEligible({
+          stage: app.currentStage,
+          ownerTaId: app.ownerTaId,
+          isAddOn: app.isAddOn,
+          lastStageChangedAt: app.lastStageChangedAt,
+        }, { taId: user._id, workType: entry.workType, sessionStart })
       )
         throw new Error(
-          "Send only your candidates who are in Director Review.",
+          entry.workType === "Add-on"
+            ? "Send only your Add-on candidates progressed to Director Review in this Add-on session."
+            : "Send only your candidates who are in Director Review.",
         );
     }
     const id = await ctx.db.insert("taWorkdayMail", {
