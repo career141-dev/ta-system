@@ -23,7 +23,13 @@ export const purgeExpired = internalMutation({
       .withIndex("by_expires", (q) => q.lte("expiresAt", Date.now()))
       .take(BATCH);
     for (const c of due) await ctx.db.delete(c._id);
-    if (due.length === BATCH) await ctx.scheduler.runAfter(0, internal.ta.eodCopies.purgeExpired, {});
+    const daily = await ctx.db.query("dailyEmails").withIndex("by_expires", q => q.gt("expiresAt", 0).lte("expiresAt", Date.now()))
+      .filter(q => q.and(q.neq(q.field("status"), "sending"), q.neq(q.field("status"), "uncertain"))).take(BATCH);
+    for (const email of daily) {
+      // An uncertain send needs its payload to recover. Keep it until resolved.
+      await ctx.db.patch(email._id, { snapshot: undefined, fields: {}, expiresAt: undefined });
+    }
+    if (due.length === BATCH || daily.length === BATCH) await ctx.scheduler.runAfter(0, internal.ta.eodCopies.purgeExpired, {});
     return { deleted: due.length };
   },
 });

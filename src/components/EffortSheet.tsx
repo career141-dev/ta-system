@@ -21,11 +21,13 @@ export function EffortSheet({
   formId,
   draftKey,
   openingId,
+  savedFields,
 }: {
   effort: EffortRow;
   formId: string;
   draftKey: string;
   openingId?: string;
+  savedFields?: Record<string, string>;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -45,6 +47,13 @@ export function EffortSheet({
       Object.entries(effort.targets ?? {}).flatMap(([k, t]) => (t == null || t === "" ? [] : [[k, String(t)]])),
     ),
   };
+  if (savedFields) {
+    initial.kind = savedFields.effort_kind ?? initial.kind;
+    for (const [name, value] of Object.entries(savedFields)) {
+      if (name.startsWith("effort_") && name !== "effort_kind" && value !== savedFields[`base_${name}`]) initial.values[name.slice(7) as EffortKey] = value;
+      if (name.startsWith("target_")) initial.targets[name.slice(7) as EffortKey] = value;
+    }
+  }
   const [draft, setDraft] = useState<Draft>(initial);
   // The draft as the page opened with it, before anything kept was read back.
   const opened = useRef(draft);
@@ -77,6 +86,7 @@ export function EffortSheet({
   }, [openingId, draftKey]);
 
   useEffect(() => {
+    if (savedFields) return;
     try {
       const held = JSON.parse(localStorage.getItem(draftKey) ?? "null") as Draft | null;
       // Only what the TA changed is taken back. A kept draft replaced every

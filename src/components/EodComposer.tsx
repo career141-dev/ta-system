@@ -14,7 +14,8 @@ import {
 } from "@/lib/eod-format";
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
-import { resendEod, sendEod } from "@/app/actions";
+import { resendEod, sendEod, sendDailyEmail, saveMiddayDraft } from "@/app/actions";
+import type { SubmissionType } from "@/lib/dailyEmail";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
 
@@ -386,7 +387,13 @@ export function EodComposer({
   openSetNote,
   needsResearchLink,
   resend,
+  submissionType = "eod",
+  dailyDraft,
+  dailyParentId,
 }: {
+  submissionType?: SubmissionType;
+  dailyDraft?: { id: string; revision: number; fields: Record<string, string> };
+  dailyParentId?: string;
   openingId: string;
   kind: "director" | "client";
   subject: string;
@@ -422,37 +429,89 @@ export function EodComposer({
     removed: string[];
   };
 }) {
-  const draftKey = resend
+  const savedFields = dailyDraft?.fields ?? {};
+  const midday = submissionType === "midday";
+  const draftKey = dailyDraft ? `midday-composer:${dailyDraft.id}` : resend
     ? `eod-composer-draft:${openingId}:${kind}:resend:${resend.copyId}`
     : `eod-composer-draft:${openingId}:${kind}`;
   const defaultIntro = "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position";
   const defaultOutro = `Thank You\nBest Regards,\n\n${senderName}\nExecutive - Talent Acquisition`;
 
-  const [subject, setSubject] = useState(initialSubject);
-  const [introText, setIntroText] = useState(resend ? resend.introText : defaultIntro);
-  const [outroText, setOutroText] = useState(resend ? resend.outroText : defaultOutro);
+  const [subject, setSubject] = useState(savedFields.subject && savedFields.subject !== savedFields.baseSubject ? savedFields.subject : initialSubject);
+  const [introText, setIntroText] = useState(savedFields.introText ?? (resend ? resend.introText : initialRows.length ? defaultIntro : "Dear Sir,\n\nNo new candidates for Director Review. Please find today's activity summary below."));
+  const [outroText, setOutroText] = useState(savedFields.outroText ?? (resend ? resend.outroText : defaultOutro));
   // Reuse today's shared workday confirmation. Editing the link clears it;
   // an older local draft cannot confer confirmation.
-  const research = useChatgptResearch(openingId, resend?.researchLink ?? "", needsResearchLink);
+  const research = useChatgptResearch(openingId, savedFields.chatgptLink ?? resend?.researchLink ?? "", needsResearchLink && !dailyParentId);
   const researchLink = research.link;
   const researchConfirmed = research.confirmed;
-  const [jobBlocked, setJobBlocked] = useState(needsResearchLink);
+  const [jobBlocked, setJobBlocked] = useState(needsResearchLink && !midday && !dailyParentId);
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const [researchExcused, setResearchExcused] = useState(false);
-  const researchRequired = needsResearchLink && !(researchExcused && !researchLink.trim());
+  const researchRequired = needsResearchLink && (midday || !(researchExcused && !researchLink.trim()));
   const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
-  const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>({});
+  const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>(() => Object.fromEntries(initialRows.map(row => [row.applicationId,
+    Object.fromEntries(Object.keys(row).filter(key => savedFields[`shortlist_${row.applicationId}_${key}`] !== undefined).map(key => [key,
+      key === "notes" ? savedFields[`shortlist_${row.applicationId}_${key}`].split("\n") : savedFields[`shortlist_${row.applicationId}_${key}`]]))])));
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
-  const [extraTo, setExtraTo] = useState<string[]>(resend?.extraTo ?? []);
-  const [extraCc, setExtraCc] = useState<string[]>(resend?.extraCc ?? []);
+  const [extraTo, setExtraTo] = useState<string[]>(savedFields.extraTo !== undefined ? parseAddressList(savedFields.extraTo).ok : resend?.extraTo ?? []);
+  const [extraCc, setExtraCc] = useState<string[]>(savedFields.extraCc !== undefined ? parseAddressList(savedFields.extraCc).ok : resend?.extraCc ?? []);
   const [draftAddress, setDraftAddress] = useState("");
   const [addAs, setAddAs] = useState<"to" | "cc">("to");
   const [addressError, setAddressError] = useState<string | null>(null);
   // The desk's own To and Cc can be taken off too (1 Oct); the server leaves
   // off whatever is named here (lib/eod-format eodRecipients).
-  const [removed, setRemoved] = useState<string[]>(resend?.removed ?? []);
+  const [removed, setRemoved] = useState<string[]>(savedFields.removed !== undefined ? parseAddressList(savedFields.removed).ok : resend?.removed ?? []);
+  const [skipAttachments, setSkipAttachments] = useState(savedFields.skipAttachments === "yes");
+  const draftRevision = useRef(dailyDraft?.revision ?? 0);
+  const saveQueue = useRef<Promise<boolean>>(Promise.resolve(true));
+  const lastSaved = useRef(JSON.stringify(savedFields));
+  const sending = useRef(false);
+  const [saveMessage, setSaveMessage] = useState(dailyDraft ? "Draft saved" : "");
+  const [saveError, setSaveError] = useState(false);
+  const saveCurrentDraft = useCallback(() => {
+    if (!dailyDraft) return Promise.resolve(true);
+    const form = document.getElementById("eod-send") as HTMLFormElement | null;
+    if (!form) return Promise.resolve(false);
+    const fields = Object.fromEntries([...new FormData(form)].filter(([key, value]) => typeof value === "string" &&
+      /^(subject|introText|outroText|chatgptLink|extraTo|extraCc|removed|skipAttachments|shortlist_.+|effort_.+|target_.+)$/.test(key))) as Record<string, string>;
+    fields.baseSubject = initialSubject;
+    for (const [key, value] of Object.entries(effort)) if (typeof value !== "object") fields[`base_effort_${key}`] = value == null ? "" : String(value);
+    const serialized = JSON.stringify(fields);
+    saveQueue.current = saveQueue.current.then(async previous => {
+      if (!previous) return false;
+      if (serialized === lastSaved.current) return true;
+      setSaveMessage("Saving draft…");
+      try {
+        const result = await saveMiddayDraft(openingId, dailyDraft.id, draftRevision.current, fields);
+        if (!result.ok) throw new Error(result.message);
+        draftRevision.current = result.revision;
+        lastSaved.current = serialized;
+        setSaveMessage("Draft saved");
+        return true;
+      } catch (e) {
+        setSaveError(true);
+        setSaveMessage(`${e instanceof Error ? e.message : "Could not save."} Reload before sending.`);
+        return false;
+      }
+    });
+    return saveQueue.current;
+  }, [dailyDraft?.id, openingId, initialSubject, effort]);
+  useEffect(() => {
+    if (!dailyDraft) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const changed = () => {
+      if (sending.current) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => { void saveCurrentDraft(); }, 750);
+    };
+    document.addEventListener("input", changed);
+    document.addEventListener("change", changed);
+    document.addEventListener("click", changed);
+    return () => { clearTimeout(timer); document.removeEventListener("input", changed); document.removeEventListener("change", changed); document.removeEventListener("click", changed); };
+  }, [dailyDraft?.id, saveCurrentDraft]);
   const isOff = (a: string | null | undefined) => !!a && removed.includes(a.toLowerCase());
   const takeOff = (a: string) => setRemoved((prev) => (prev.includes(a.toLowerCase()) ? prev : [...prev, a.toLowerCase()]));
   const putBack = (a: string) => {
@@ -488,6 +547,7 @@ export function EodComposer({
   }, [restored, research.adoptSaved]);
   useEffect(() => {
     setRestored(true);
+    if (dailyDraft) return;
     try {
       const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
       if (saved) {
@@ -505,6 +565,7 @@ export function EodComposer({
         if (typeof saved.extraTo === "string") setExtraTo(parseAddressList(saved.extraTo).ok);
         if (typeof saved.extraCc === "string") setExtraCc(parseAddressList(saved.extraCc).ok);
         if (typeof saved.removed === "string") setRemoved(parseAddressList(saved.removed).ok);
+        if (typeof saved.skipAttachments === "boolean") setSkipAttachments(saved.skipAttachments);
       }
     } catch {
       /* storage disabled */
@@ -513,7 +574,7 @@ export function EodComposer({
 
   // Persist draft to localStorage
   useEffect(() => {
-    if (!restored) return;
+    if (!restored || dailyDraft) return;
     try {
       localStorage.setItem(
         draftKey,
@@ -527,15 +588,17 @@ export function EodComposer({
           extraTo: extraTo.join(", "),
           extraCc: extraCc.join(", "),
           removed: removed.join(", "),
+          skipAttachments,
         }),
       );
     } catch {
       /* storage disabled */
     }
-  }, [restored, draftKey, subject, initialSubject, introText, outroText, researchLink, shortlistDraft, extraTo, extraCc, removed]);
+  }, [restored, draftKey, subject, initialSubject, introText, outroText, researchLink, shortlistDraft, extraTo, extraCc, removed, skipAttachments]);
 
   // Clear draft on send
   useEffect(() => {
+    if (dailyDraft) return;
     const form = document.getElementById("eod-send");
     const clear = () => {
       try {
@@ -605,6 +668,7 @@ export function EodComposer({
 
   return (
     <div className="flex flex-col gap-5">
+      {dailyDraft && <p role="status" className={saveError ? "text-sm text-danger" : "text-sm text-ink-soft"}>{saveMessage} <button type="button" onClick={() => void saveCurrentDraft()} className="ml-3 text-brand underline">Save draft</button></p>}
       {/* First on the page (9 Oct): at the bottom, under the CV table and the
           attachments, TAs scrolled past it and asked where it was. It belongs to
           the send form through form="eod-send", wherever it sits. */}
@@ -623,7 +687,6 @@ export function EodComposer({
               <span className="font-normal text-ink-faint">(optional)</span>
             )}
           </h3>
-          {researchExcused && !researchLink.trim() && <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">Reason submitted in Today’s Checks. A link is excused for this workday.</p>}
           <p className="mt-1.5 max-w-[68ch] text-[12.5px] leading-relaxed text-ink-soft">
             Your TA Lead and the directors will open this from the email. In ChatGPT, open today&rsquo;s research
             chat, choose <b>Share</b>, then <b>Create link</b>, and paste that link here. The address in your
@@ -985,9 +1048,10 @@ export function EodComposer({
               </span>
             </div>
             <EffortSheet
+              savedFields={dailyDraft?.fields}
               effort={effort}
               formId="eod-send"
-              draftKey={resend ? `eod-effort:${openingId}:resend:${resend.copyId}` : `eod-effort:${openingId}:${effort.date}`}
+              draftKey={dailyDraft ? `midday-effort:${dailyDraft.id}` : resend ? `eod-effort:${openingId}:resend:${resend.copyId}` : `eod-effort:${openingId}:${effort.date}`}
               openingId={openingId}
             />
           </div>
@@ -1011,10 +1075,30 @@ export function EodComposer({
       </section>
 
       <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
-        <h2 className="text-[13.5px] font-semibold">
-          Attachments <span className="ml-1.5 font-normal text-[12px] text-ink-faint">{effectiveRows.length}</span>
-        </h2>
-        {effectiveRows.length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-[13.5px] font-semibold">
+            Attachments <span className="ml-1.5 font-normal text-[12px] text-ink-faint">{skipAttachments ? 0 : effectiveRows.length}</span>
+          </h2>
+          {midday && (
+            <label className="flex items-center gap-2 cursor-pointer text-[12.5px] text-ink select-none">
+              <input
+                type="checkbox"
+                checked={skipAttachments}
+                onChange={(e) => setSkipAttachments(e.target.checked)}
+                className="h-4 w-4 rounded border-rule text-brand focus:ring-brand"
+              />
+              <span className="font-medium">Send without CV attachments</span>
+            </label>
+          )}
+        </div>
+        {midday && (
+          <input type="hidden" form="eod-send" name="skipAttachments" value={skipAttachments ? "yes" : "no"} />
+        )}
+        {skipAttachments ? (
+          <div className="mt-3 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-3.5 text-[12px] leading-relaxed text-ink-soft">
+            <span className="font-semibold text-ink">CV attachments skipped:</span> This midday email will be sent with no PDF attachments. The candidate table and effort summary will still be included. Explain the reason in the email body or notes.
+          </div>
+        ) : effectiveRows.length === 0 ? (
           <p className="mt-2 text-[12.5px] text-ink-faint">Nothing to attach.</p>
         ) : (
           <div className="mt-3 flex flex-col gap-2">
@@ -1042,18 +1126,29 @@ export function EodComposer({
             })}
           </div>
         )}
-        <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
-          Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
-        </p>
+        {!skipAttachments && (
+          <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+            Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
+          </p>
+        )}
       </section>
 
-      {needsResearchLink && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
+      {needsResearchLink && !midday && !dailyParentId && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
         extraReasons={[
-          ...(initialRows.length === 0 ? [{ key: "director_cv", message: "Add at least one CV in Director Review." }] : []),
           ...(nobodyOnTo ? [{ key: "recipient", message: "Add a valid email address on the To line." }] : []),
-          ...(researchBlocked ? [{ key: "chatgpt", message: "Add a valid ChatGPT share link and confirm it, or submit a reason in Today’s Checks." }] : []),
+          ...(researchBlocked ? [{ key: "chatgpt", message: "Add a valid ChatGPT share link and confirm it." }] : []),
         ]} />}
-      <form id="eod-send" action={resend ? resendEod : sendEod} className="flex flex-wrap items-center gap-4">
+      <form id="eod-send" action={async data => {
+        sending.current = true;
+        try {
+          if (dailyDraft && !await saveCurrentDraft()) return;
+          if (dailyDraft) data.set("dailyDraftRevision", String(draftRevision.current));
+          await (dailyDraft || dailyParentId ? sendDailyEmail : resend ? resendEod : sendEod)(data);
+        } finally { sending.current = false; }
+      }} className="flex flex-wrap items-center gap-4">
+        <input type="hidden" name="submissionType" value={submissionType} />
+        {dailyDraft && <input type="hidden" name="dailyDraftId" value={dailyDraft.id} />}
+        {dailyParentId && <input type="hidden" name="dailyParentId" value={dailyParentId} />}
         {!resend && kind === "director" && initialRows.length === 0 && <input type="hidden" name="activityOnly" value="yes" />}
         <input type="hidden" name="openingId" value={openingId} />
         {resend && <input type="hidden" name="copyId" value={resend.copyId} />}
@@ -1070,9 +1165,9 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={initialRows.length === 0 || nobodyOnTo || researchBlocked || jobBlocked}
+          disabled={(kind === "client" && initialRows.length === 0) || nobodyOnTo || researchBlocked || jobBlocked || saveError}
           title={
-            initialRows.length === 0
+            kind === "client" && initialRows.length === 0
               ? "Add at least one CV in Director Review before sending"
               : nobodyOnTo
               ? "Add an address as To first"

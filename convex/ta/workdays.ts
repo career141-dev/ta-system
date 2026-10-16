@@ -18,6 +18,7 @@ import { isGone } from "../../src/lib/bin";
 import { workingStageKey } from "../../src/lib/workingStage";
 import { colomboDayStart } from "../../src/lib/calendar";
 import { assertWorkdayScope } from "../lib/workdayScope";
+import { finalizeDailyEmail } from "../lib/dailyEmail";
 import { requiredChecks, withTaskHistory } from "../lib/workdayChecks";
 import { researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
 import { validateResearchLink } from "../../src/lib/eod-format";
@@ -1276,6 +1277,13 @@ export const reconcileMail = internalMutation({
       );
     const now = Date.now();
     if (args.accepted) {
+      if (receipt.dailyEmailId) {
+        const email = await ctx.db.get(receipt.dailyEmailId);
+        if (!email) throw new Error("The saved email could not be found.");
+        await ctx.db.patch(email._id, { status: "accepted", acceptedAt: email.acceptedAt ?? now,
+          reconciledBy: lead._id, reconciliationReason: args.reason.trim() });
+        await finalizeDailyEmail(ctx, { ...email, status: "accepted", acceptedAt: email.acceptedAt ?? now });
+      }
       const rounds = await ctx.db
         .query("reviewRounds")
         .withIndex("by_opening", (q) => q.eq("openingId", receipt.jobId))
@@ -1288,7 +1296,7 @@ export const reconcileMail = internalMutation({
           r.applicationIds.length === receipt.applicationIds.length &&
           receipt.applicationIds.every((id) => r.applicationIds.includes(id)),
       );
-      if (!exists)
+      if (!exists && !receipt.dailyEmailId)
         await ctx.db.insert("reviewRounds", {
           openingId: receipt.jobId,
           kind: "director",
@@ -1304,6 +1312,9 @@ export const reconcileMail = internalMutation({
           decisions: [],
         });
     }
+    if (!args.accepted && receipt.dailyEmailId) await ctx.db.patch(receipt.dailyEmailId, {
+      status: "failed", reconciledBy: lead._id, reconciliationReason: args.reason.trim(),
+    });
     await ctx.db.patch(receipt._id, {
       status: args.accepted ? "accepted" : "failed",
       acceptedAt: args.accepted ? (receipt.acceptedAt ?? now) : undefined,

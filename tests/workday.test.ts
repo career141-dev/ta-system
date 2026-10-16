@@ -287,7 +287,7 @@ try {
   assert.equal(await suggestionsBlocked(), false, "Select/not-selected decisions complete human review");
   await db.patch("requiredApp:ta:job1", { cvFileId: undefined });
   await db.patch("requiredCandidate:ta:job1", { cvUploadId: undefined });
-  assert.ok((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("Director Review CV")), "A stage label or no-candidate explanation cannot replace an actual linked CV");
+  assert.ok(!(await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("Director Review CV")), "Activity-only emails do not require a CV; actual candidate attachments are validated by the sender");
   await db.patch("requiredApp:ta:job1", { cvFileId: "synthetic-cv" });
   await db.patch("requiredCandidate:ta:job1", { cvUploadId: "synthetic-cv" });
   // One eligible own profile is sufficient when all other send requirements pass.
@@ -790,13 +790,13 @@ try {
   clock += 20;
   await run("setWorkType", { actorId: "addonTa", workdayId: addonDay.id, jobId: "addonJob", workType: "Add-on" });
   let addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_cv:")).status, "incomplete");
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
+  assert.equal(addonChecks.some((c: Row) => c.key.startsWith("director_cv:")), false, "An activity summary does not require a CV");
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "complete", "Changing work mode cannot require a second original EOD on the same day");
   assert.equal(addonChecks.some((c: Row) => c.key.startsWith("jd_review:")), false, "Add-on does not repeat JD setup");
   await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "noCandidates", reason: "No additional suitable candidates in this Add-on session" });
   addonChecks = (await run("dashboard", { actorId: "addonTa" })).active.jobs[0].checks;
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("director_cv:")).status, "incomplete", "A no-candidate explanation does not substitute for the required CV");
-  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "incomplete");
+  assert.equal(addonChecks.some((c: Row) => c.key.startsWith("director_cv:")), false, "Activity-only emails remain available in Add-on mode");
+  assert.equal(addonChecks.find((c: Row) => c.key.startsWith("daily_email:")).status, "complete", "The day's original EOD remains complete after an Add-on explanation");
   await assert.rejects(() => run("beginMail", { actorId: "addonTa", jobId: "addonJob", applicationIds: [], subject: "Synthetic Add-on update", sentTo: "director@example.invalid" }), /at least one CV/);
   await db.patch("addonJob", { jobDescription: "Synthetic Add-on JD", jdStatus: "approved" });
   await run("saveCheck", { actorId: "addonTa", jobId: "addonJob", kind: "jd" });
@@ -848,7 +848,7 @@ try {
     await run("taskException", { ...reasonArgs, key: `${prefix}:exceptionJob`, reason: `${prefix} unavailable today` });
   }
   assert.equal(await run("researchExceptionAllowed", { actorId: "exceptionTa", jobId: "exceptionJob" }), true);
-  assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, false, "A reason cannot substitute for a CV");
+  assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, true, "Existing setup exceptions allow an activity summary without a CV");
   await assert.rejects(() => run("beginMail", { actorId: "exceptionTa", jobId: "exceptionJob", applicationIds: [], subject: "Synthetic", sentTo: "director@example.invalid" }), /at least one CV/);
   put("candidates", { _id: "exceptionCandidate", fullName: "Synthetic", cvUploadId: "synthetic-cv" });
   put("applications", { _id: "exceptionApp", jobId: "exceptionJob", ownerTaId: "exceptionTa", workdayReviewedAt: clock, candidateId: "exceptionCandidate", currentStage: "second_shortlist", cvFileId: "synthetic-cv", lastStageChangedAt: clock });

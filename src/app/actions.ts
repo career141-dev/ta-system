@@ -21,6 +21,7 @@ import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
+import type { DailyEmail, DailyEmailSnapshot, SubmissionType } from "@/lib/dailyEmail";
 import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from "@/lib/eod-format";
 import { noticePeriodToDays } from "@/lib/answered";
 import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
@@ -4605,7 +4606,103 @@ export async function finishCall(formData: FormData) {
  */
 const eodInFlight = new Set<string>();
 
+export async function addMiddayEmail(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  let id: string;
+  try {
+    id = await convexMutation<string>("ta/dailyEmails:createDraft", { actorId: user.id, jobId: openingId });
+  } catch (e) { return fail(backendMessage(e, "Could not create the midday email.")); }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  redirect(`/openings/${openingId}/midday?mail=${id}`);
+}
+
+export async function saveMiddayDraft(openingId: string, id: string, revision: number, fields: Record<string, string>) {
+  await primeStore({ openingId });
+  const form = new FormData();
+  form.set("openingId", openingId);
+  const user = await authorize(form, "opening.act", { opening: "openingId" });
+  try {
+    const result = await convexMutation<{ revision: number }>("ta/dailyEmails:saveDraft", { actorId: user.id, id, revision, fields });
+    return { ok: true as const, revision: result.revision };
+  } catch (e) { return { ok: false as const, message: backendMessage(e, "Could not save the draft.") }; }
+}
+
+export async function reconcileDailyEmail(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  try {
+    await convexMutation("ta/dailyEmails:reconcile", { actorId: user.id, id: String(formData.get("dailyEmailId")),
+      accepted: formData.get("accepted") === "yes", reason: String(formData.get("reason") ?? "") });
+  } catch (e) { return fail(backendMessage(e, "Could not reconcile this email.")); }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  return back("Email result reconciled.");
+}
+
+/** Both daily submissions share the same durable reservation and transport. */
+export async function sendDailyEmail(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  const type: SubmissionType = formData.get("submissionType") === "midday" ? "midday" : "eod";
+  const draftId = String(formData.get("dailyDraftId") ?? "");
+  const parentId = String(formData.get("dailyParentId") ?? "");
+  await primeStore({ openingId, allApplications: true });
+  const user = await authorize(formData, parentId ? "opening.read" : "opening.act", { opening: "openingId" });
+  const permission = can(user, "opening.act", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
+  if (!permission.ok) return fail(permission.message);
+  const baseUrl = `/openings/${openingId}/${type === "midday" ? "midday" : "eod"}`;
+  let message = "";
+  let sentId = "";
+  try {
+    const { shortlistRows, shortlistRowsFromForm, effortFromForm, effortRow } = await import("@/lib/eod");
+    const { revisedSubject, validateResearchLink } = await import("@/lib/eod-format");
+    const emails = await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: openingId });
+    const parent = parentId ? emails.find(e => e._id === parentId && e.userId === user.id && e.submissionType === "eod" && !e.parentId) : undefined;
+    if (parentId && !parent?.snapshot) throw new Error("That original EOD email is no longer available to correct.");
+    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director");
+    const ids = parent ? parent.applicationIds : String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
+    const rows = shortlistRowsFromForm(formData, baseRows);
+    const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user));
+    const extraTo = parseAddressList(String(formData.get("extraTo") ?? ""));
+    const extraCc = parseAddressList(String(formData.get("extraCc") ?? ""));
+    if (extraTo.bad.length || extraCc.bad.length) throw new Error("Correct the invalid To or Cc email addresses.");
+    const removed = parseAddressList(String(formData.get("removed") ?? "")).ok;
+    const recipients = eodRecipients({ removed, extraTo: extraTo.ok, extraCc: extraCc.ok, shortlistInbox: repo.shortlistInbox() });
+    if (!recipients.to.length) throw new Error("Add an address on the To line.");
+    const confirmed = formData.get("researchConfirmed") === "on";
+    const research = checkResearchSubmission({ role: type === "midday" ? "ta" : user.role, kind: "director",
+      link: String(formData.get("chatgptLink") ?? ""), confirmed,
+      excused: type === "eod" && !parentId && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }) });
+    if (!research.ok) throw new Error(research.reason);
+    const rawSubject = String(formData.get("subject") ?? "").trim();
+    const subject = parent ? revisedSubject(rawSubject) : rawSubject;
+    const skipAttachments = formData.get("skipAttachments") === "yes";
+    const result = await emailEod({ openingId, user, applicationIds: ids, to: recipients.to[0], extraTo: recipients.to.slice(1),
+      cc: recipients.cc, subject, effort, rows, baseRows, researchLink: research.url,
+      introText: String(formData.get("introText") ?? ""), outroText: String(formData.get("outroText") ?? ""),
+      activityOnly: ids.length === 0, skipAttachments: type === "midday" && skipAttachments, daily: { submissionType: type, draftId: draftId || undefined,
+        revision: draftId ? Number(formData.get("dailyDraftRevision")) : undefined, parentId: parentId || undefined,
+        extraTo: extraTo.ok, extraCc: extraCc.ok, removed, confirmed },
+    });
+    if (!result.ok) throw new Error(result.error);
+    sentId = result.dailyEmailId ?? "";
+    message = result.note;
+    // Mail is already recorded atomically. Failure to update an edited profile
+    // must not invite a second send.
+    try { message += await saveEodEdits(rows, baseRows, ids); }
+    catch { message += " Email sent; profile edits could not be saved. Review the candidate records."; }
+    await afterBackendWrite(openingId);
+  } catch (e) {
+    message = sentId ? "Email sent and recorded. Reload to see its saved copy." : backendMessage(e, "Could not send the email. Check its status before retrying.");
+  }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  const mail = sentId || draftId || parentId;
+  redirect(`${baseUrl}?${mail ? `mail=${encodeURIComponent(mail)}&` : ""}msg=${encodeURIComponent(message)}`);
+}
+
 export async function sendEod(formData: FormData) {
+  if (isConvex() && (formData.get("kind") ?? "director") === "director") return sendDailyEmail(formData);
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
   await primeStore({ openingId, allApplications: true });
@@ -5002,9 +5099,11 @@ async function emailEod(input: {
   researchLink?: string | null;
   activityOnly?: boolean;
   revised?: boolean;
-}): Promise<{ ok: true; note: string; workdayMailId?: string | null } | { ok: false; error: string }> {
+  skipAttachments?: boolean;
+  daily?: { submissionType: SubmissionType; draftId?: string; revision?: number; parentId?: string; extraTo: string[]; extraCc: string[]; removed: string[]; confirmed: boolean };
+}): Promise<{ ok: true; note: string; workdayMailId?: string | null; dailyEmailId?: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
-  if (!input.applicationIds.length) return { ok: false, error: "Include at least one CV from Director Review before sending the end-of-day email." };
+  if (!input.applicationIds.length && !input.activityOnly) return { ok: false, error: "Include at least one CV or send an activity summary." };
   const opening = repo.opening(openingId);
   if (!opening) return { ok: false, error: "That opening no longer exists." };
   const to = input.to.trim() || EOD_TO;
@@ -5037,40 +5136,46 @@ async function emailEod(input: {
 
   if (rows.length === 0 && !input.activityOnly) return { ok: false, error: "Nobody on that list is ready to send." };
 
+  const isMidday = input.daily?.submissionType === "midday";
   const attachments: { name: string; contentType: string; base64: string }[] = [];
   const left: string[] = [];
   let used = 0;
-  for (const r of rows) {
-    const app = repo.application(r.applicationId);
-    const c = app ? repo.candidate(app.candidateId) : null;
-    if (!app || !c) continue;
-    try {
-      // The same file as the drawer's Prepared CV (lib/preparedCvFile, 29 Sep):
-      // what the desk holds, with the box where the TA put it — and whatever
-      // the TA changed on this email, so the attachment says what the email
-      // says. A field they did not touch comes from the record, so the table's
-      // own "Not disclosed" for an unknown salary never reaches the CV.
-      const { preparedCvFile } = await import("@/lib/preparedCvFile");
-      const { boxContent } = await import("@/lib/preparedCv");
-      const { boxOverrides, eodDetailChanges } = await import("@/lib/eod-format");
-      const base = baseById.get(r.applicationId);
-      const annotation = { ...boxContent(app, c, opening), ...(base ? boxOverrides(eodDetailChanges(base, r)) : {}) };
-      const pdfBytes = (await preparedCvFile(app, c, opening, { annotation })).bytes;
+  if (!input.skipAttachments) {
+    for (const r of rows) {
+      const app = repo.application(r.applicationId);
+      const c = app ? repo.candidate(app.candidateId) : null;
+      if (!app || !c) continue;
+      try {
+        // The same file as the drawer's Prepared CV (lib/preparedCvFile, 29 Sep):
+        // what the desk holds, with the box where the TA put it — and whatever
+        // the TA changed on this email, so the attachment says what the email
+        // says. A field they did not touch comes from the record, so the table's
+        // own "Not disclosed" for an unknown salary never reaches the CV.
+        const { preparedCvFile } = await import("@/lib/preparedCvFile");
+        const { boxContent } = await import("@/lib/preparedCv");
+        const { boxOverrides, eodDetailChanges } = await import("@/lib/eod-format");
+        const base = baseById.get(r.applicationId);
+        const annotation = { ...boxContent(app, c, opening), ...(base ? boxOverrides(eodDetailChanges(base, r)) : {}) };
+        const pdfBytes = (await preparedCvFile(app, c, opening, { annotation })).bytes;
 
-      const base64 = Buffer.from(pdfBytes).toString("base64");
-      if (used + base64.length > EOD_ATTACHMENT_BUDGET) {
+        const base64 = Buffer.from(pdfBytes).toString("base64");
+        if (used + base64.length > EOD_ATTACHMENT_BUDGET) {
+          left.push(c.fullName);
+          continue;
+        }
+        used += base64.length;
+        attachments.push({ name: preparedCvFileName(c.fullName), contentType: "application/pdf", base64 });
+      } catch (e) {
+        console.error(`[End of day] CV for ${c.fullName} could not be prepared:`, (e as Error).message);
         left.push(c.fullName);
-        continue;
       }
-      used += base64.length;
-      attachments.push({ name: preparedCvFileName(c.fullName), contentType: "application/pdf", base64 });
-    } catch (e) {
-      console.error(`[End of day] CV for ${c.fullName} could not be prepared:`, (e as Error).message);
-      left.push(c.fullName);
     }
   }
 
-  if (!attachments.length) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the end-of-day email." };
+  // Midday emails can be sent without attachments (reasons explained in the email body).
+  // EOD emails require attachments if candidates are included.
+  if (!attachments.length && !input.activityOnly && !isMidday) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the email." };
+  if (input.daily && left.length && !isMidday) return { ok: false, error: `Not sent: prepare or reduce the CV attachments for ${left.join(", ")} before sending. No candidates have been marked as sent.` };
 
   const html = eodEmailHtml({
     rows,
@@ -5079,15 +5184,25 @@ async function emailEod(input: {
     introText: input.introText,
     outroText: input.outroText,
     researchLink: input.researchLink,
-    attachmentNote: left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
+    attachmentNote: !input.skipAttachments && left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
   });
 
   let result:
     | { ok: true; from: string; to: string; alsoTo?: string[]; cc: string[]; note: string }
     | { ok: false; error: string };
   let workdayMailId: string | null = null;
+  let dailyEmailId: string | undefined;
   try {
-    if (!input.revised) {
+    if (input.daily) {
+      const snapshot: DailyEmailSnapshot = { subject: input.subject.trim(), html, from: user.email,
+        to: [to, ...(input.extraTo ?? [])], cc: input.cc, attachmentNames: attachments.map(a => a.name), rows,
+        effort: input.effort ?? effortRow(openingId, user), introText: input.introText ?? "", outroText: input.outroText ?? "",
+        researchLink: input.researchLink ?? "", extraTo: input.daily.extraTo, extraCc: input.daily.extraCc, removed: input.daily.removed };
+      const reservation = await convexMutation<{ id: string }>("ta/dailyEmails:begin", { actorId: user.id, jobId: openingId,
+        submissionType: input.daily.submissionType, draftId: input.daily.draftId, revision: input.daily.revision,
+        parentId: input.daily.parentId, applicationIds: input.applicationIds, snapshot, confirmed: input.daily.confirmed, trackedAt: repo.shortlistInbox() ?? undefined });
+      dailyEmailId = reservation.id;
+    } else if (!input.revised) {
       const receipt = await convexMutation<{ id: string | null }>("ta/workdays:beginMail", { actorId: user.id, jobId: openingId, applicationIds: input.applicationIds, subject: input.subject, sentTo: to, researchLink: input.researchLink ?? undefined });
       workdayMailId = receipt.id;
     }
@@ -5103,6 +5218,7 @@ async function emailEod(input: {
       html,
       attachments,
       workdayMailId: workdayMailId ?? undefined,
+      dailyEmailId,
     });
   } catch (e) {
     return { ok: false, error: backendMessage(e, "The email could not be sent.") };
@@ -5114,6 +5230,7 @@ async function emailEod(input: {
   return {
     ok: true,
     workdayMailId,
+    dailyEmailId,
     note: `Sent from ${result.from} to ${sentTo}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ", no cc"}, with ${attachments.length} CV${attachments.length === 1 ? "" : "s"} attached.${result.note ? ` ${result.note.trim()}` : ""}`,
   };
 }
