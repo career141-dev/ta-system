@@ -24,7 +24,8 @@ export default async function OpeningLayout({
   // Every page under an opening passes through here, so reading is refused
   // here once: somebody not on it gets a 404, not a page with buttons hidden.
   const assignment = repo.assignmentFor(id, user.id) ?? null;
-  if (!allows(user, "opening.read", { openingId: id, assignment })) notFound();
+  const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
+  if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
   // What this person is on this opening decides what the rail even offers.
   const seat = seatFor(user, assignment?.role ?? null);
   const apps = visibleToSeat(repo.applications(id), seat);

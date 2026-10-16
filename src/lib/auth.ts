@@ -73,6 +73,8 @@ export interface AuthContext {
   openingId?: Id | null;
   /** This user's assignment on that opening, if any. */
   assignment?: Assignment | null;
+  /** True when the user has strategies assigned to them on this opening. */
+  onStrategy?: boolean;
   /**
    * The candidate's owning TA, for the collision lock: first to shortlist owns,
    * and a second TA does not act on what the first has claimed.
@@ -161,9 +163,10 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
         : deny("Only a TA Lead, Director or Admin can assign strategies.");
 
     case "strategy.work":
-      // The TA the strategies were given to, and only on a job they are on.
-      if (!isTa(user)) return deny("Strategies are worked by the TA they were given to.");
-      if (!ctx.assignment || ctx.assignment.role === "client_contact") return deny("You are not on this opening.");
+      // A team member works the strategies they were given on a job.
+      if (!isTa(user) && !ctx.onStrategy) return deny("Strategies are worked by the TA they were given to.");
+      if (ctx.assignment?.role === "client_contact") return deny("You are not on this opening.");
+      if (!ctx.assignment && !ctx.onStrategy) return deny("You are not on this opening.");
       return ALLOW;
 
     case "database.read":
@@ -241,7 +244,7 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
 
     case "opening.read":
       if (isDeskWide(user)) return ALLOW;
-      return ctx.assignment ? ALLOW : deny("You are not on this opening.");
+      return ctx.assignment || ctx.onStrategy ? ALLOW : deny("You are not on this opening.");
 
     case "opening.create":
       return user.role === "client"
