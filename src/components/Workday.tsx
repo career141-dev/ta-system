@@ -192,7 +192,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
         You can work on multiple new positions at 100% in the same workday.
       </p>
       {!day && data.options.some(o => o.carry) && <p className="text-xs text-ink-soft">Follow-up jobs carried forward: {data.options.filter(o => o.carry && o.id !== chosen?.id).map(o => o.title).join(", ")}</p>}
-      {!day && chosen?.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.filter(c => !addon || !["linkedin_post", "research", "suggestions", "excel_profiles"].some(k => c.key.startsWith(k + ":"))).map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
+      {!day && !addon && chosen?.workType === "100%" && chosen.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
       <button className={buttonClass}>
         {!day
           ? "Start workday"
@@ -366,6 +366,7 @@ export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResea
   const additionalReasons = extraReasons.filter(reason => !blockers.some(c => c.key.split(":")[0] === reason.key));
   useEffect(() => { onBlocked(blocked); }, [blocked, onBlocked]);
   if (data && !data.canWork) return null;
+  if (job && job.workType !== "100%") return null;
   return <section aria-live="polite" className="rounded-lg border border-rule p-4 text-sm"><h3 className="font-medium">{blocked || extraReasons.length ? "Complete these steps to send EOD" : "Ready to send"}</h3>{error ? <p>{error}</p> : !data ? <p>Loading checks…</p> : !job ? <p>Start work on this opening in the sidebar before sending.</p> : <>
     {(blockers.length > 0 || extraReasons.length > 0) && <ul className="mt-2 space-y-1">{blockers.map(c => <li key={c.key}><Link href={c.href} className="text-brand underline">{c.label}</Link>: {extraReasons.find(reason => reason.key === c.key.split(":")[0])?.message ?? c.progress ?? "needs action"}</li>)}{additionalReasons.map(reason => <li key={reason.key}>{reason.message}</li>)}</ul>}
     {!blocked && !extraReasons.length && <p className="text-green-700 dark:text-green-400">Required tasks are completed or excused. CVs will be checked and prepared when you send.</p>}
@@ -385,7 +386,7 @@ function DailyReview({
 }) {
   const blockers = completionBlockers(day.jobs);
   const displayedJobs = day.jobs.map(job => {
-    // Follow-up jobs still have EOD setup requirements; expose their reason actions too.
+    if (job.workType !== "100%") return { ...job, detailChecks: [], checks: [] };
     const checks = [...job.checks, ...(job.eodChecks ?? []).filter(c => !job.checks.some(existing => existing.key === c.key))];
     const expanded = { ...job, checks };
     return { ...expanded, detailChecks: checks, checks: sidebarChecks(expanded) };
@@ -404,7 +405,7 @@ function DailyReview({
         </p>
       </div>
       {displayedJobs.map((job) => (
-        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType} · {job.checks.filter(c => c.status === "complete").length} completed · {job.checks.filter(c => c.exception).length} reason{job.checks.filter(c => c.exception).length === 1 ? "" : "s"} submitted · {completionBlockers([job]).length} remaining</>}>
+        <SavedDetails key={job.jobId} id={`${day.id}:${job.jobId}`} title={<>{job.title} · {job.workType}{job.workType === "100%" && <> · {job.checks.filter(c => c.status === "complete").length} completed · {job.checks.filter(c => c.exception).length} reason{job.checks.filter(c => c.exception).length === 1 ? "" : "s"} submitted · {completionBlockers([job]).length} remaining</>}</>}>
           <div className="flex flex-wrap justify-between gap-2">
             <Link
               className="font-semibold text-brand"
@@ -415,7 +416,7 @@ function DailyReview({
             <span className="text-sm">{job.workType}</span>
           </div>
           {canFinish && job.workType !== "100%" && <WorkForm op="setWorkType" fields={{ workdayId: day.id, jobId: job.jobId }}><label className="block text-xs">Work type<select name="workType" defaultValue={job.workType} className={inputClass}><option>Follow-up</option><option>Add-on</option></select></label><button className={buttonClass}>Set work type</button></WorkForm>}
-          <details><summary className="cursor-pointer text-xs text-ink-soft">Activity details</summary>
+          {job.workType === "100%" && <details><summary className="cursor-pointer text-xs text-ink-soft">Activity details</summary>
           <p className="mt-2 text-sm text-ink-soft">
             {job.activity.cvReviews} CV reviews · {job.activity.profilesAdded}{" "}
             LinkedIn profiles added · {job.activity.profilesWorked} profiles
@@ -457,7 +458,7 @@ function DailyReview({
             </p>
           )}
           </>}
-          </details>
+          </details>}
           <Link
             href={`/openings/${job.jobId}/eod`}
             className="mt-3 inline-block text-sm text-brand underline"

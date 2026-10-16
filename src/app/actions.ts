@@ -4605,6 +4605,31 @@ export async function finishCall(formData: FormData) {
  */
 const eodInFlight = new Set<string>();
 
+/** Read the saved work type in preflight; an editable form must not waive tasks. */
+async function eodResearchSubmission(user: User, openingId: string, kind: "director" | "client", formData: FormData, revised = false) {
+  const link = String(formData.get("chatgptLink") ?? "");
+  const confirmed = formData.get("researchConfirmed") === "on";
+  let workType: WorkingStage = repo.workingStage(openingId, user.id);
+  let excused = false;
+  if (kind === "director" && isConvex()) {
+    try {
+      const check = await convexMutation<{ ok: boolean; blockers: string[]; workType: WorkingStage }>("ta/workdays:emailPreflight", {
+        actorId: user.id,
+        jobId: openingId,
+        link,
+        confirmed,
+        revised,
+      });
+      if (!check.ok) return { ok: false as const, reason: check.blockers.join("; ") };
+      workType = check.workType;
+      excused = await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId });
+    } catch (error) {
+      return { ok: false as const, reason: backendMessage(error, "Could not check the requirements. Try again.") };
+    }
+  }
+  return checkResearchSubmission({ role: user.role, kind, link, confirmed, workType, excused });
+}
+
 export async function sendEod(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
@@ -4657,22 +4682,9 @@ export async function sendEod(formData: FormData) {
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(
       "Not sent: nobody is on the To line. Add an address as To.",
     )}`);
-  // A TA's end-of-day email carries their ChatGPT research link (8 Oct). Checked
-  // here, not only on the button: the form can arrive from a stale page. Leads and
-  // directors are not held to it, and the client copy sends no email.
-  const research = checkResearchSubmission({
-    excused: isConvex() && kind === "director" && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
-    role: user.role,
-    kind,
-    link: String(formData.get("chatgptLink") ?? ""),
-    confirmed: formData.get("researchConfirmed") === "on",
-  });
+  const research = await eodResearchSubmission(user, openingId, kind, formData);
   if (!research.ok)
     redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${research.reason}`)}`);
-  if (kind === "director" && isConvex()) {
-    const check = await convexMutation<{ ok: boolean; blockers: string[] }>("ta/workdays:emailPreflight", { actorId: user.id, jobId: openingId, link: research.url ?? "", confirmed: formData.get("researchConfirmed") === "on" });
-    if (!check.ok) redirect(`/openings/${openingId}/eod?kind=${kind}&msg=${encodeURIComponent(`Not sent: ${check.blockers.join("; ")}`)}`);
-  }
   const sentTo = kind === "director" ? recipients.to[0] : String(formData.get("to") ?? "");
 
   // The Director's copy is really sent now, through Microsoft Graph from the
@@ -4857,18 +4869,8 @@ export async function resendEod(formData: FormData) {
     const removed = parseAddressList(String(formData.get("removed") ?? "")).ok;
     const recipients = eodRecipients({ removed, extraTo: toList.ok, extraCc: ccList.ok, shortlistInbox: repo.shortlistInbox() });
     if (recipients.to.length === 0) return done("Not sent: nobody is on the To line. Add an address as To.");
-    const research = checkResearchSubmission({
-      excused: isConvex() && await convexQuery<boolean>("ta/workdays:researchExceptionAllowed", { actorId: user.id, jobId: openingId }),
-      role: user.role,
-      kind: "director",
-      link: String(formData.get("chatgptLink") ?? ""),
-      confirmed: formData.get("researchConfirmed") === "on",
-    });
+    const research = await eodResearchSubmission(user, openingId, "director", formData, true);
     if (!research.ok) return done(`Not sent: ${research.reason}`);
-    if (isConvex()) {
-      const check = await convexMutation<{ ok: boolean; blockers: string[] }>("ta/workdays:emailPreflight", { actorId: user.id, jobId: openingId, link: research.url ?? "", confirmed: formData.get("researchConfirmed") === "on", revised: true });
-      if (!check.ok) return done(`Not sent: ${check.blockers.join("; ")}`);
-    }
     const typed = String(formData.get("subject") ?? "").trim();
     if (!typed) return done("Not sent: the email needs a subject.");
 

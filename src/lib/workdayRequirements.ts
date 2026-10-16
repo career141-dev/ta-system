@@ -51,6 +51,7 @@ export interface SetupEvidence {
 
 /** The same saved evidence drives sidebar ticks, send preflight and Finish. */
 export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_WORKDAY_REQUIRED): WorkdayCheck[] {
+  if (e.workType !== "100%") return [];
   const base = `/openings/${e.jobId}`;
   const rows: WorkdayCheck[] = [];
   const add = (key: string, label: string, href: string, complete: boolean, progress: string,
