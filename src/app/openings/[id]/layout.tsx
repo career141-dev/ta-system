@@ -32,7 +32,11 @@ export default async function OpeningLayout({
   if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
   // What this person is on this opening decides what the rail even offers.
   const seat = seatFor(user, assignment?.role ?? null, onStrategy);
-  const dailyEmails = seat.canSeeSourcing && isConvex()
+  // Strategy-only access includes sourcing, but not the recruiter's Midday/EOD
+  // workflow. Querying those records for a strategy assignee makes the backend
+  // correctly refuse the request and leaves the opening on its loading screen.
+  const canUseDailyEmail = seat.canAct;
+  const dailyEmails = canUseDailyEmail && isConvex()
     ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
   const todayEmails = dailyEmails.filter(e => e.userId === user.id && e.date === workdayDate(Date.now()));
   const apps = visibleToSeat(repo.applications(id), seat);
@@ -61,7 +65,7 @@ export default async function OpeningLayout({
       <div className="flex flex-col lg:flex-row">
         {/* The rail reads ?post= to know which job post is showing. */}
         <Suspense fallback={<div className="hidden w-[238px] shrink-0 border-r border-rule lg:block" />}>
-          <ProjectSidebar openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing}
+          <ProjectSidebar openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing} canUseDailyEmail={canUseDailyEmail}
             middayEmails={todayEmails.filter(e => e.submissionType === "midday").map(e => ({ id: e._id, number: e.number, status: e.status }))}
             dailyEmailClosed={todayEmails.some(e => e.submissionType === "eod" && e.status === "accepted" && !e.parentId)} />
         </Suspense>
