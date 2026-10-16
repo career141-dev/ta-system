@@ -4725,7 +4725,7 @@ export async function sendDailyEmail(formData: FormData) {
   }
   revalidatePath(`/openings/${openingId}`, "layout");
   const mail = sentId || draftId || parentId;
-  redirect(`${baseUrl}?${mail ? `mail=${encodeURIComponent(mail)}&` : ""}msg=${encodeURIComponent(message)}`);
+  redirect(`${baseUrl}?${mail ? `mail=${encodeURIComponent(mail)}&` : ""}${sentId ? `sent=${encodeURIComponent(sentId)}&` : ""}msg=${encodeURIComponent(message)}`);
 }
 
 export async function sendEod(formData: FormData) {
@@ -5072,13 +5072,6 @@ async function saveEodEdits(editedRows: ShortlistRow[], baseRows: ShortlistRow[]
 }
 
 /**
- * Graph's sendMail takes about 4 MB in one request; the CVs share what is left
- * after the email. Raising this (to 20 MB, PR #56) made a large set fail to
- * send at all instead of listing the CVs that did not fit (review, 25 Sep).
- */
-const EOD_ATTACHMENT_BUDGET = 3 * 1024 * 1024;
-
-/**
  * Send the Director's end-of-day email through Microsoft Graph (convex/ta/eodMail.ts).
  *
  * The same email the composer shows: the shortlist table for exactly these
@@ -5142,8 +5135,7 @@ async function emailEod(input: {
 
   const isMidday = input.daily?.submissionType === "midday";
   const attachments: { name: string; contentType: string; base64: string }[] = [];
-  const left: string[] = [];
-  let used = 0;
+  const preparationFailures: string[] = [];
   if (!input.skipAttachments) {
     for (const r of rows) {
       const app = repo.application(r.applicationId);
@@ -5163,23 +5155,19 @@ async function emailEod(input: {
         const pdfBytes = (await preparedCvFile(app, c, opening, { annotation })).bytes;
 
         const base64 = Buffer.from(pdfBytes).toString("base64");
-        if (used + base64.length > EOD_ATTACHMENT_BUDGET) {
-          left.push(c.fullName);
-          continue;
-        }
-        used += base64.length;
         attachments.push({ name: preparedCvFileName(c.fullName), contentType: "application/pdf", base64 });
       } catch (e) {
         console.error(`[End of day] CV for ${c.fullName} could not be prepared:`, (e as Error).message);
-        left.push(c.fullName);
+        preparationFailures.push(c.fullName);
       }
     }
   }
 
   // Midday emails can be sent without attachments (reasons explained in the email body).
-  // EOD emails require attachments if candidates are included.
+  // EOD is all-or-nothing: preparation happens before the durable send
+  // reservation, then Graph's draft/upload-session path carries every PDF.
+  if (preparationFailures.length && !isMidday) return { ok: false, error: `Not sent: could not prepare the CV attachment for ${preparationFailures.join(", ")}. No candidates have been marked as sent.` };
   if (!attachments.length && !input.activityOnly && !isMidday) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the email." };
-  if (input.daily && left.length && !isMidday) return { ok: false, error: `Not sent: prepare or reduce the CV attachments for ${left.join(", ")} before sending. No candidates have been marked as sent.` };
 
   const html = eodEmailHtml({
     rows,
@@ -5188,7 +5176,7 @@ async function emailEod(input: {
     introText: input.introText,
     outroText: input.outroText,
     researchLink: input.researchLink,
-    attachmentNote: !input.skipAttachments && left.length ? `CVs not attached (too large to send in one email): ${left.join(", ")}.` : null,
+    attachmentNote: null,
   });
 
   let result:

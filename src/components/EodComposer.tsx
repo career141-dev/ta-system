@@ -18,6 +18,7 @@ import { resendEod, sendEod, sendDailyEmail, saveMiddayDraft } from "@/app/actio
 import type { SubmissionType } from "@/lib/dailyEmail";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
+import { decodeEodBrowserDraft, encodeEodBrowserDraft } from "@/lib/eodDraft";
 import type { WorkingStage } from "@/data/types";
 
 function noteLineToHtml(line: string): string {
@@ -555,7 +556,7 @@ export function EodComposer({
     setRestored(true);
     if (dailyDraft) return;
     try {
-      const saved = JSON.parse(localStorage.getItem(draftKey) ?? "null");
+      const saved = decodeEodBrowserDraft(localStorage.getItem(draftKey));
       if (saved) {
         // Only a subject the TA typed, and only while the set and CV count it
         // was typed over still stand: the saved line was the page's own, so a
@@ -584,7 +585,7 @@ export function EodComposer({
     try {
       localStorage.setItem(
         draftKey,
-        JSON.stringify({
+        encodeEodBrowserDraft({
           subject,
           baseSubject: initialSubject,
           introText,
@@ -601,21 +602,6 @@ export function EodComposer({
       /* storage disabled */
     }
   }, [restored, draftKey, subject, initialSubject, introText, outroText, researchLink, shortlistDraft, extraTo, extraCc, removed, skipAttachments]);
-
-  // Clear draft on send
-  useEffect(() => {
-    if (dailyDraft) return;
-    const form = document.getElementById("eod-send");
-    const clear = () => {
-      try {
-        localStorage.removeItem(draftKey);
-      } catch {
-        /* storage disabled */
-      }
-    };
-    form?.addEventListener("submit", clear);
-    return () => form?.removeEventListener("submit", clear);
-  }, [draftKey]);
 
   const updateCandidateField = (appId: string, field: keyof ShortlistRow, value: any) => {
     setShortlistDraft((prev) => ({
@@ -1146,6 +1132,28 @@ export function EodComposer({
       <form id="eod-send" action={async data => {
         sending.current = true;
         try {
+          // Keep the last rendered values before navigation. The old submit
+          // listener deleted this draft before server validation, so Age,
+          // Current Company and Current Designation (and every other edit)
+          // disappeared whenever validation or attachment preparation failed.
+          if (!dailyDraft) {
+            try {
+              localStorage.setItem(draftKey, encodeEodBrowserDraft({
+                subject,
+                baseSubject: initialSubject,
+                introText,
+                outroText,
+                researchLink,
+                shortlistDraft,
+                extraTo: extraTo.join(", "),
+                extraCc: extraCc.join(", "),
+                removed: removed.join(", "),
+                skipAttachments,
+              }));
+            } catch {
+              /* storage disabled; the form can still be submitted */
+            }
+          }
           if (dailyDraft && !await saveCurrentDraft()) return;
           if (dailyDraft) data.set("dailyDraftRevision", String(draftRevision.current));
           await (dailyDraft || dailyParentId ? sendDailyEmail : resend ? resendEod : sendEod)(data);

@@ -120,20 +120,6 @@ export function EffortSheet({
     // initial.values is read, not watched: it is the records' figure this draft is measured against.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, draftKey]);
-  // Sent means done: the next visit starts from the records again.
-  useEffect(() => {
-    const form = document.getElementById(formId);
-    const clear = () => {
-      try {
-        localStorage.removeItem(draftKey);
-      } catch {
-        /* nothing kept */
-      }
-    };
-    form?.addEventListener("submit", clear);
-    return () => form?.removeEventListener("submit", clear);
-  }, [formId, draftKey]);
-
   const cols = effortColumns(draft.kind);
   const th =
     "whitespace-nowrap border border-rule bg-tag px-2.5 py-2 text-left text-[10.5px] font-semibold uppercase tracking-[0.04em] text-ink-soft";

@@ -56,6 +56,10 @@ export const send = internalAction({
           subject: args.subject,
           html: args.html,
           attachments: args.attachments,
+          // A five-CV set regularly exceeds Graph's one-request sendMail
+          // payload. Build a draft, attach every CV separately (using an
+          // upload session for a file at least 3 MB), then send the draft.
+          attachmentMode: "draft",
           testInbox: "EOD_TEST_EMAIL",
           // Internal only: in test mode the desk still gets it beside the test inbox.
           keepInternalInTest: "career141.com",

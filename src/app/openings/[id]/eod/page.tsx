@@ -26,6 +26,7 @@ import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import { isWordFile } from "@/lib/wordToPdf";
 import type { ShortlistRow } from "@/lib/eod-format";
+import { EodDraftCleanup } from "@/components/EodDraftCleanup";
 
 const PAGE_SIZE = 10;
 
@@ -46,7 +47,7 @@ export default async function EodPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string }>;
+  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string; sent?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -57,6 +58,9 @@ export default async function EodPage({
   const user = await getCurrentUser();
   const dailyEmails = kind === "director" && isConvex() ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
   const dailyHistory = dailyEmails.filter(e => e.submissionType === (midday ? "midday" : "eod"));
+  // A query string alone cannot delete a draft. Match it to this user's
+  // accepted backend record so a failed/replayed URL never clears their work.
+  const sentDaily = sp.sent ? dailyEmails.find(e => e._id === sp.sent && e.userId === user.id && e.status === "accepted" && !!e.finalizedAt) : undefined;
   const selectedDaily = dailyHistory.find(e => e._id === sp.mail);
   const draft = midday && selectedDaily && selectedDaily.userId === user.id && selectedDaily.date === workdayDate(Date.now()) && ["draft", "failed"].includes(selectedDaily.status) ? selectedDaily : undefined;
   const correction = !midday && sp.revise === "yes" && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && !selectedDaily.parentId && selectedDaily.snapshot ? selectedDaily : undefined;
@@ -170,6 +174,14 @@ export default async function EodPage({
 
   return (
     <div className="mx-auto max-w-[1100px] py-1 sm:px-8 sm:py-9">
+      {sentDaily?.submissionType === "eod" && <EodDraftCleanup keys={[
+        sentDaily.parentId
+          ? `eod-composer-draft:${id}:director:resend:${sentDaily.parentId}`
+          : `eod-composer-draft:${id}:director`,
+        sentDaily.parentId
+          ? `eod-effort:${id}:resend:${sentDaily.parentId}`
+          : `eod-effort:${id}:${sentDaily.snapshot?.effort.date ?? effort.date}`,
+      ]} />}
       <div className="flex items-center justify-between">
         <Link
           href={`/openings/${id}`}
