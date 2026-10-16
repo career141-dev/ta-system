@@ -123,5 +123,16 @@ eq("ambiguous set falls back to the newest", ambiguous.round?.id, "r_sep11");
 eq("and says it is a guess", /most recent/.test(ambiguous.note), true);
 eq("and offers the other set", ambiguous.near.map((r) => r.id), ["r_sep1"]);
 
+const middaySubjects = [
+  "MIDDAY 1 - 2026-10-16 - SET 1 - DELMO - BRAND MANAGER - 2 CVs",
+  "MIDDAY 2 - 2026-10-16 - SET 1 - DELMO - BRAND MANAGER - 2 CVs",
+  "SET 1 - DELMO - BRAND MANAGER - 2 CVs",
+];
+const middayRounds = middaySubjects.map((subject, i) => round(`midday:${i}`, "op_brand", "director", 1000 + i, "awaiting", subject));
+for (const [i, subject] of middaySubjects.entries()) {
+  eq(`a reply identifies daily email ${i + 1} with the same set and CV count`, M("director@career141.com", `Re: ${subject}`, middayRounds).round?.id, `midday:${i}`);
+}
+eq("a revised EOD reply still identifies its original round", M("director@career141.com", `Re: REVISED - ${middaySubjects[2]}`, middayRounds).round?.id, "midday:2");
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

@@ -82,7 +82,7 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
   add("chatgpt", "ChatGPT research link", `${base}/eod`, validLink.ok && !!e.confirmedAt,
     validLink.ok ? e.confirmedAt ? "Link confirmed" : "Confirm the link" : validLink.reason,
     e.confirmedAt, e.userId, validLink.ok ? validLink.url : undefined);
-  add("daily_email", "End-of-day email", `${base}/eod`, !!e.emailAt,
+  add("daily_email", "EOD email sent", `${base}/eod`, !!e.emailAt,
     e.emailAt ? "Sent and recorded" : "Send the daily email", e.emailAt, e.userId, undefined, false);
   return (includeSuggestions ? rows : rows.filter(c => !c.key.startsWith("suggestions:")))
     .map(c => ({ ...c, blocksEmail: isEodSendCheck(c) }));

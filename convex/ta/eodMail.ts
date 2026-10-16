@@ -36,6 +36,7 @@ export const send = internalAction({
       }),
     ),
     workdayMailId: v.optional(v.id("taWorkdayMail")),
+    dailyEmailId: v.optional(v.id("dailyEmails")),
   },
   handler: async (ctx, args): Promise<MailResult> => {
     const systemInbox =
@@ -62,6 +63,7 @@ export const send = internalAction({
         getGraphToken,
       );
     } catch (error) {
+      if (args.dailyEmailId) await ctx.runMutation(makeFunctionReference<"mutation">("ta/dailyEmails:result"), { id: args.dailyEmailId, status: "uncertain" });
       if (args.workdayMailId)
         await ctx.runMutation(
           makeFunctionReference<"mutation">("ta/workdays:mailResult"),
@@ -69,6 +71,11 @@ export const send = internalAction({
         );
       throw error;
     }
+    if (args.dailyEmailId) await ctx.runMutation(makeFunctionReference<"mutation">("ta/dailyEmails:result"), {
+      id: args.dailyEmailId,
+      status: result.ok ? "accepted" : /could not be reached|returned 5\d\d/i.test(result.error) ? "uncertain" : "failed",
+      ...(result.ok ? { delivered: { from: result.from, to: [result.to, ...(result.alsoTo ?? [])], cc: result.cc } } : {}),
+    });
     if (args.workdayMailId)
       await ctx.runMutation(
         makeFunctionReference<"mutation">("ta/workdays:mailResult"),

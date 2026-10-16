@@ -4,6 +4,7 @@ import { setupChecks, researchMissing, researchVersion, linkedinPostUrl, RESEARC
 import type { WorkdayCheck } from "../../src/lib/workday";
 import { isEodSendCheck, canExcuseCheck, applyTaskExceptions, workdayDate } from "../../src/lib/workday";
 import { linkKey } from "../../src/lib/url";
+import { middayRequired, dailyEmailsFor } from "./dailyEmail";
 
 export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, entry: Doc<"taWorkdays">["jobs"][number]) {
   const [notes, research, posts, links, suggestions, runs, apps, receipts, rounds, provenance, job] = await Promise.all([
@@ -33,6 +34,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const sentIds = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds as string[]));
   const since = workSessionStart(entry);
   const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt && (entry.workType !== "Add-on" || r.startedAt >= since));
+  const dailyEod = receipts.filter(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod" && workdayDate(r.startedAt) === day.date);
   const inDirectorReview = apps.filter(a => a.currentStage === "second_shortlist" && !sentIds.has(a._id) && (entry.workType !== "Add-on" || a.lastStageChangedAt >= since));
   const ready = (await Promise.all(inDirectorReview.map(async app => {
     const candidate = await ctx.db.get(app.candidateId);
@@ -55,7 +57,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     noCandidateAt: ownNotes?.noCandidateAt,
     chatgptLink: ownNotes?.chatgptLink ?? accepted.at(-1)?.researchLink,
     confirmedAt: ownNotes?.confirmedAt ?? accepted.at(-1)?.acceptedAt,
-    emailAt: accepted.length ? Math.min(...accepted.map(r => r.finalizedAt!)) : undefined,
+    emailAt: dailyEod.length ? Math.min(...dailyEod.map(r => r.finalizedAt!)) : undefined,
   };
   // Version the underlying evidence, not the exception or a rendered progress label.
   const versions: Record<string, unknown> = {
@@ -71,6 +73,17 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     ? { ...c, exceptionVersion: JSON.stringify([since, versions[c.key.split(":")[0]]]) } : c), exceptions, day.date === workdayDate(Date.now()));
   const checks = decorate(setupChecks(setup, true));
   const eodChecks = checks.filter(isEodSendCheck);
+  if (await middayRequired(ctx, day.date)) {
+    const emails = await dailyEmailsFor(ctx, day.userId, entry.jobId, day.date);
+    const sent = emails.find(e => e.submissionType === "midday" && e.status === "accepted" && e.finalizedAt);
+    const check: WorkdayCheck = { key: `midday_email:${entry.jobId}`, jobId: entry.jobId,
+      label: "Midday email sent", href: `/openings/${entry.jobId}/midday`, kind: "email", canCarry: false,
+      evidenceAt: sent?.acceptedAt ?? 0, status: sent ? "complete" : "incomplete",
+      completedAt: sent?.acceptedAt, completedBy: sent?.userId, blocksEmail: true,
+      progress: sent ? "Sent and recorded" : "Send at least one midday email today" };
+    checks.push(check);
+    eodChecks.push(check);
+  }
   const suggestionsCheck = eodChecks.find(c => c.key.startsWith("suggestions:")) ?? null;
   const candidateCheck = checks.find(c => c.key.startsWith("director_cv:"));
   if (candidateCheck?.status === "complete" && ready.length && !accepted.length) {

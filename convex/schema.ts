@@ -3,6 +3,23 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  dailyEmailPolicy: defineTable({ key: v.string(), requiredFrom: v.string() }).index("by_key", ["key"]),
+  // Drafts and transport acknowledgements share an id. A retry cannot create
+  // a second original after Graph has accepted the first (16 Oct).
+  dailyEmails: defineTable({
+    jobId: v.id("jobs"), userId: v.id("users"), date: v.string(),
+    submissionType: v.union(v.literal("midday"), v.literal("eod")),
+    number: v.number(), revision: v.number(),
+    status: v.union(v.literal("draft"), v.literal("sending"), v.literal("accepted"), v.literal("failed"), v.literal("uncertain")),
+    fields: v.record(v.string(), v.string()), applicationIds: v.array(v.id("applications")),
+    parentId: v.optional(v.id("dailyEmails")), roundId: v.optional(v.id("reviewRounds")),
+    receiptId: v.optional(v.id("taWorkdayMail")),
+    createdAt: v.number(), startedAt: v.optional(v.number()), acceptedAt: v.optional(v.number()),
+    finalizedAt: v.optional(v.number()), expiresAt: v.optional(v.number()),
+    snapshot: v.optional(v.any()), trackedAt: v.optional(v.string()),
+    reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
+  }).index("by_user_job_date", ["userId", "jobId", "date"])
+    .index("by_job", ["jobId"]).index("by_expires", ["expiresAt"]),
   // Explicit workday buttons; browser sessions never create attendance records.
   taWorkdays: defineTable({
     userId: v.id("users"),
@@ -47,6 +64,9 @@ export default defineSchema({
     evidenceAt: v.number(),
   }).index("by_user_job", ["userId", "jobId"]),
   taWorkdayMail: defineTable({
+    dailyEmailId: v.optional(v.id("dailyEmails")),
+    submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
+    revised: v.optional(v.boolean()),
     workdayId: v.id("taWorkdays"),
     userId: v.id("users"),
     jobId: v.id("jobs"),
@@ -2890,6 +2910,7 @@ export default defineSchema({
    * round it answers even when a forward loses the thread headers.
    */
   reviewRounds: defineTable({
+    submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
     openingId: v.id("jobs"),
     kind: v.union(v.literal("director"), v.literal("client")),
     token: v.string(),

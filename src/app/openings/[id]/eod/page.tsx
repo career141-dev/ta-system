@@ -6,7 +6,11 @@ import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
 import { EOD_CC_DEFAULTS, EOD_TO, eodEmailHtml, needsResearchLink, revisedSubject, validateResearchLink } from "@/lib/eod-format";
 import type { EodEmailCopy, User } from "@/data/types";
-import { readEodReply, readInboundReply } from "@/app/actions";
+import { readEodReply, readInboundReply, addMiddayEmail } from "@/app/actions";
+import { DailyEmailHistory, DailyEmailView } from "@/components/DailyEmailHistory";
+import type { DailyEmail } from "@/lib/dailyEmail";
+import { workdayDate } from "@/lib/workday";
+import { convexQuery } from "@/lib/convexServer";
 import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
 import { primeStore } from "@/data/prime";
@@ -42,14 +46,21 @@ export default async function EodPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string }>;
+  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
+  const midday = sp.mode === "midday";
   await primeStore({ openingId: id });
   await requireSourcingSeat(id);
-  const kind: "director" | "client" = sp.kind === "client" ? "client" : "director";
+  const kind: "director" | "client" = !midday && sp.kind === "client" ? "client" : "director";
   const user = await getCurrentUser();
+  const dailyEmails = kind === "director" && isConvex() ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
+  const dailyHistory = dailyEmails.filter(e => e.submissionType === (midday ? "midday" : "eod"));
+  const selectedDaily = dailyHistory.find(e => e._id === sp.mail);
+  const draft = midday && selectedDaily && selectedDaily.userId === user.id && selectedDaily.date === workdayDate(Date.now()) && ["draft", "failed"].includes(selectedDaily.status) ? selectedDaily : undefined;
+  const correction = !midday && sp.revise === "yes" && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && !selectedDaily.parentId && selectedDaily.snapshot ? selectedDaily : undefined;
+  const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId);
   await primeEyeMarked(id, user);
   const o = repo.opening(id);
   if (!o) notFound();
@@ -117,7 +128,7 @@ export default async function EodPage({
       ? "That email is more than a month old, so its copy has been cleared."
       : null;
 
-  const rawRows = resendCopy ? resendCopy.rows : rows;
+  const rawRows = correction?.snapshot?.rows ?? (resendCopy ? resendCopy.rows : rows);
   const candidateIds = rawRows
     .map((r) => r.candidateId ?? repo.application(r.applicationId)?.candidateId)
     .filter(Boolean) as string[];
@@ -172,7 +183,7 @@ export default async function EodPage({
       </div>
 
       <header className="mb-7 mt-3">
-        <h1 className="text-[26px] font-semibold tracking-tight">End of Day Submission</h1>
+        <h1 className="text-[26px] font-semibold tracking-tight">{midday ? `Midday email${draft ? ` · Email ${draft.number}` : ""}` : "End of Day Submission"}</h1>
         <p className="mt-1.5 max-w-[74ch] text-[13.5px] leading-relaxed text-ink-soft">
           {kind === "director"
             ? `Daily shortlist and effort summary sent to ${EOD_TO}, copying the desk. Add or take off To and Cc addresses below.`
@@ -300,7 +311,14 @@ export default async function EodPage({
         </form>
       </details>
 
-      {copies.length > 0 && (
+      {kind === "director" && <DailyEmailHistory emails={dailyHistory} openingId={id} />}
+      {midday && <form action={addMiddayEmail} className="mb-5">
+        <input type="hidden" name="openingId" value={id} />
+        <SubmitButton disabled={eodClosed} pendingLabel="Adding…" className="rounded-lg bg-brand px-4 py-2 text-white disabled:opacity-40">Add midday email</SubmitButton>
+      </form>}
+      {eodClosed && !correction && <p className="mb-5 text-sm">End of day has been sent. You can read your sent emails or correct the original EOD email. New submissions resume tomorrow.</p>}
+      {selectedDaily && !draft && !correction && <DailyEmailView email={selectedDaily} openingId={id} canCorrect={selectedDaily.userId === user.id} canReconcile={["ta_lead", "admin"].includes(user.role)} />}
+      {!midday && copies.length > 0 && (
         <SentHistory copies={copies} user={user} openingId={id} openId={resendCopy?.id} viewId={viewCopy?.id} />
       )}
 
@@ -322,13 +340,17 @@ export default async function EodPage({
       )}
 
       {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
-      <LiveTableRefresh />
-      {workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
+      {(!midday || !!draft) && (!selectedDaily || !!draft || !!correction) && (!eodClosed || !!correction || !!resendCopy) && <>
+      {!midday && <LiveTableRefresh />}
+      {!midday && workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
       <EodComposer
-        key={resendCopy?.id ?? "new"}
+        key={draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}
+        submissionType={midday ? "midday" : "eod"}
+        dailyDraft={draft ? { id: draft._id, revision: draft.revision, fields: draft.fields } : undefined}
+        dailyParentId={correction?._id}
         openingId={id}
         kind={kind}
-        subject={resendCopy ? revisedSubject(resendCopy.subject) : formattedSubject}
+        subject={correction?.snapshot ? revisedSubject(correction.snapshot.subject) : resendCopy ? revisedSubject(resendCopy.subject) : midday ? `MIDDAY ${draft?.number ?? 1} - ${workdayDate(Date.now())} - ${formattedSubject}` : formattedSubject}
         toName={kind === "director" ? "Job Orders" : (director?.name ?? "Director")}
         toEmail={kind === "director" ? EOD_TO : (director?.email ?? "")}
         ccName={kind === "director" ? "" : (lead?.name ?? "")}
@@ -338,13 +360,14 @@ export default async function EodPage({
         fixedCc={kind === "director" ? [...EOD_CC_DEFAULTS] : []}
         canAddRecipients={kind === "director"}
         rows={composerRows}
-        effort={resendCopy ? resendCopy.effort : effort}
+        effort={correction?.snapshot?.effort ?? (resendCopy ? resendCopy.effort : effort)}
         senderName={user.name}
         alreadyOut={!!awaiting}
-        needsResearchLink={needsResearchLink(user.role, kind, workType)}
+        needsResearchLink={midday || needsResearchLink(user.role, kind, workType)}
         workType={workType}
         resend={
-          resendCopy
+          correction?.snapshot ? { copyId: correction._id, introText: correction.snapshot.introText, outroText: correction.snapshot.outroText,
+            researchLink: correction.snapshot.researchLink, extraTo: correction.snapshot.extraTo, extraCc: correction.snapshot.extraCc, removed: correction.snapshot.removed } : resendCopy
             ? {
                 copyId: resendCopy.id,
                 introText: resendCopy.introText,
@@ -364,6 +387,7 @@ export default async function EodPage({
             : null
         }
       />
+      </>}
 
       {/* ── Email Replies & Review History ──────────────────────────────── */}
       {history.length > 0 && (

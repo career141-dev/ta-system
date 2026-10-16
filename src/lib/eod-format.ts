@@ -338,7 +338,7 @@ export function eodEmailHtml(input: {
         (r) =>
           `<tr><td ${td}>${r.no}</td><td ${td}><b>${esc(r.name)}</b></td><td ${td}>${esc(r.age)}</td><td ${td}>${esc(r.notice)}</td><td ${td}>${r.notes.map(formatNoteHtml).join("<br>")}</td><td ${td}>${esc(r.currentCompany)}</td><td ${td}>${esc(r.currentDesignation)}</td><td ${td}>${esc(r.currentRemuneration)}</td><td ${td}>${esc(r.expectedRemuneration)}</td></tr>`,
       )
-      .join("") || `<tr><td ${td} colspan="${SHORTLIST_COLUMNS.length}">No candidate submissions in this email.</td></tr>`,
+      .join("") || `<tr><td ${td} colspan="${SHORTLIST_COLUMNS.length}">No new candidates for Director Review.</td></tr>`,
   );
 
   const cols = effortColumns(input.effort.hundredOrFollowUp);
