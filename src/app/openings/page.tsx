@@ -17,17 +17,9 @@ import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { BulkBar, BulkConfirm, RowCheck } from "@/components/BulkSelect";
 import { deleteOpenings } from "@/app/actions";
+import { OPENING_BUCKETS, statusMatchesBucket, type OpeningBucket } from "@/lib/openingStatus";
 
 const PAGE_SIZE = 20;
-
-const BUCKETS = [
-  { key: "mine", label: "My openings" },
-  { key: "all", label: "All active" },
-  // Openings entered before anyone is free to take them (plan 4.1, 21 Sep).
-  { key: "unassigned", label: "Unassigned" },
-  { key: "hold", label: "On hold" },
-  { key: "closed", label: "Closed" },
-];
 
 // Whole words only (review of PR #31): "male" is inside "Female", "uk" inside "Sukkur".
 function toCountry(loc: string): string {
@@ -60,7 +52,10 @@ export default async function OpeningsPage({
   }>;
 }) {
   const sp = await searchParams;
-  const { bucket = "mine", q = "", country, location = country, industry, clientId, taId } = sp;
+  const { bucket: requestedBucket = "mine", q = "", country, location = country, industry, clientId, taId } = sp;
+  const bucket = OPENING_BUCKETS.some((item) => item.key === requestedBucket)
+    ? requestedBucket as OpeningBucket
+    : "mine";
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const clients = repo.clients();
@@ -92,14 +87,10 @@ export default async function OpeningsPage({
 
   let list =
     bucket === "mine"
-      ? mine.filter((o) => o.status === "open")
+      ? mine.filter((o) => statusMatchesBucket(o.status, bucket))
       : bucket === "unassigned"
         ? all.filter((o) => o.status === "open" && o.assignedTaIds.length === 0)
-        : bucket === "hold"
-        ? all.filter((o) => o.status === "on_hold")
-        : bucket === "closed"
-          ? all.filter((o) => ["closed", "filled"].includes(o.status))
-          : all.filter((o) => o.status === "open");
+        : all.filter((o) => statusMatchesBucket(o.status, bucket));
 
   // Country filter
   if (location && location !== "all") {
@@ -148,10 +139,11 @@ export default async function OpeningsPage({
     all: all.filter((o) => o.status === "open").length,
     unassigned: all.filter((o) => o.status === "open" && o.assignedTaIds.length === 0).length,
     hold: all.filter((o) => o.status === "on_hold").length,
-    closed: all.filter((o) => ["closed", "filled"].includes(o.status)).length,
+    placed: all.filter((o) => o.status === "filled").length,
+    closed: all.filter((o) => o.status === "closed").length,
   } as Record<string, number>;
 
-  const bucketItems = BUCKETS.map((b) => ({
+  const bucketItems = OPENING_BUCKETS.map((b) => ({
     key: b.key,
     label: b.label,
     count: counts[b.key] ?? 0,

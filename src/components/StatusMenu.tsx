@@ -2,16 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 import { setOpeningStatus } from "@/app/actions";
+import { OPENING_STATUS_LABEL, type OpeningStatus } from "@/lib/openingStatus";
 import { SubmitButton } from "./Submit";
 
-export type OpeningStatus = "open" | "on_hold" | "closed" | "filled";
-
-export const STATUS_LABEL: Record<OpeningStatus, string> = {
-  open: "Active",
-  on_hold: "On hold",
-  closed: "Closed",
-  filled: "Filled",
-};
+export type { OpeningStatus } from "@/lib/openingStatus";
 
 const TONE: Record<OpeningStatus, string> = {
   open: "border-brand-line bg-brand-soft text-brand",
@@ -82,7 +76,7 @@ export function StatusMenu({
         className={`flex items-center gap-1.5 rounded-full border font-medium transition-colors ${pad} ${TONE[status]}`}
       >
         <span className={`h-1.5 w-1.5 rounded-full ${DOT[status]}`} />
-        {STATUS_LABEL[status]}
+        {OPENING_STATUS_LABEL[status]}
         <svg width={10} height={10} viewBox="0 0 16 16" aria-hidden="true" className="opacity-60">
           <path d="M4 6.5L8 10.5L12 6.5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -109,7 +103,7 @@ export function StatusMenu({
               }`}
             >
               <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[s]}`} />
-              {STATUS_LABEL[s]}
+              {OPENING_STATUS_LABEL[s]}
               {s === status && <span className="ml-auto text-[11px] text-ink-faint">now</span>}
             </SubmitButton>
           ))}
