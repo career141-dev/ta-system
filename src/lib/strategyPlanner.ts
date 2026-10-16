@@ -41,8 +41,8 @@ export function countsOf(rows: StrategyAssignment[]): StrategyCounts {
   return c;
 }
 
-/** Jobs a lead still plans: open or on hold. Closed and filled ones are over. */
-export const isPlannable = (o: Opening) => o.status === "open" || o.status === "on_hold";
+/** Jobs a lead plans: open jobs. On hold, closed, and filled ones are not in the strategy sheet. */
+export const isPlannable = (o: Opening) => o.status === "open";
 
 export interface PlannerJob {
   opening: Opening;

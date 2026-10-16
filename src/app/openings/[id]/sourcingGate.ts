@@ -14,6 +14,7 @@ import { seatFor } from "@/lib/visibility";
 export async function requireSourcingSeat(openingId: string) {
   const user = await getCurrentUser();
   const assignment = repo.assignmentFor(openingId, user.id) ?? null;
-  if (!seatFor(user, assignment?.role ?? null).canSeeSourcing) notFound();
+  const onStrategy = repo.strategyAssignments(openingId).some((r) => r.doneBy.includes(user.id));
+  if (!seatFor(user, assignment?.role ?? null).canSeeSourcing && !onStrategy) notFound();
   return user;
 }

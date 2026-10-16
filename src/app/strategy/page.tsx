@@ -26,6 +26,11 @@ export default async function StrategyPlannerPage({ searchParams }: { searchPara
   const canManage = allows(user, "strategy.manage");
   const strategies = repo.strategies(true);
   const nameOf = (id: string | null) => (id ? repo.user(id)?.name ?? "Someone" : "");
+  const allUsers = repo
+    .users()
+    .filter((u) => u.isActive && u.role !== "client")
+    .map((u) => ({ id: u.id, name: u.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const th = "px-4 py-2.5 text-left text-[11px] font-semibold uppercase tracking-wider text-ink-faint";
   const cols = "grid grid-cols-[minmax(150px,1.2fr)_minmax(200px,2fr)_120px_minmax(130px,1fr)_150px] items-center gap-x-4";
@@ -85,7 +90,6 @@ export default async function StrategyPlannerPage({ searchParams }: { searchPara
                     </span>
                     <span className="min-w-0 px-4 text-[13px] font-medium uppercase tracking-wide">
                       {opening.title}
-                      {opening.status === "on_hold" && <span className="ml-2 rounded-full bg-paper px-2 py-0.5 text-[10.5px] normal-case tracking-normal text-ink-soft">On hold</span>}
                     </span>
                     <span className="px-4 text-[12.5px] text-ink-soft tabular">{dayLabel(opening.assignedAt)}</span>
                     <span className="min-w-0 truncate px-4 text-[12.5px]">
@@ -94,7 +98,7 @@ export default async function StrategyPlannerPage({ searchParams }: { searchPara
                     <span className="px-4"><Progress c={counts} /></span>
                   </summary>
                   <div className="border-t border-rule bg-paper/40">
-                    <StrategyLeadTable openingId={opening.id} tas={tas.map((t) => ({ id: t.id, name: t.name }))} lines={lines} />
+                    <StrategyLeadTable openingId={opening.id} users={allUsers} lines={lines} />
                     <p className="flex flex-wrap gap-x-4 px-4 pb-3 text-[11.5px] text-ink-faint">
                       <Link href={`/strategy/${opening.id}`} className="text-brand hover:underline">Open on its own page</Link>
                       <Link href={`/openings/${opening.id}`} className="text-brand hover:underline">Open the job</Link>

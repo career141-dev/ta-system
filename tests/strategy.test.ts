@@ -14,7 +14,7 @@ import path from "node:path";
 import { can } from "@/lib/auth";
 import { scopeStrategies } from "@/lib/visibility";
 import { colomboDateValue, colomboDayFromValue, colomboDayStart } from "@/lib/calendar";
-import { DESK_STRATEGIES, countsOf, plannerByTa, proofsForLead, proofsVisibleTo, strategyTable } from "@/lib/strategyPlanner";
+import { DESK_STRATEGIES, countsOf, isPlannable, plannerByTa, proofsForLead, proofsVisibleTo, strategyTable } from "@/lib/strategyPlanner";
 import type { Assignment, StrategyAssignment, User } from "@/data/types";
 
 // The rows are kept in the in-memory JSON store, in a scratch directory.
@@ -54,6 +54,7 @@ console.log("\nWho may work a strategy they were given");
   eq("a client contact seat", ok(ta, "strategy.work", { assignment: on("client_contact") }), false);
   eq("a lead does not work strategies as a TA", ok(user("ta_lead"), "strategy.work", { assignment: on("primary_recruiter") }), false);
   eq("a viewer cannot", ok(user("viewer"), "strategy.work", { assignment: on("primary_recruiter") }), false);
+  eq("a team member with strategies assigned on the job", ok(user("ta_support"), "strategy.work", { onStrategy: true }), true);
 }
 
 console.log("\nWho sees which row");
@@ -81,6 +82,7 @@ console.log("\nWho sees which row");
   eq("a director sees all", scopeStrategies(rows, user("director")).length, 7);
   eq("a client sees none, not even the struck-through", scopeStrategies(rows, user("client")).length, 0);
   eq("a viewer sees none", scopeStrategies(rows, user("viewer")).length, 0);
+  eq("a non-TA assigned to a strategy sees the ticked and struck rows", scopeStrategies(rows, user("viewer", { id: "u_other" })).map((r) => r.id), ["a", "b", "d", "e", "f"]);
 }
 
 console.log("\nThe desk's list");
@@ -259,6 +261,10 @@ console.log("\nProgress, with struck-through strategies left out");
   eq("and no job with a TA is listed there", groups.flatMap((g) => g.jobs.map((j) => j.opening.id)).every((jid) => !unstaffed.some((x) => x.id === jid)), true);
   repo.removeStrategyRow(repo.strategyRow(o.id, sc.id)!.id);
   eq("taking a row off the table removes it", repo.strategyRow(o.id, sc.id), undefined);
+
+  eq("an open position is on the strategy sheet", isPlannable({ ...o, status: "open" }), true);
+  eq("an on-hold position is removed from the strategy sheet", isPlannable({ ...o, status: "on_hold" }), false);
+  eq("a closed position is not on the strategy sheet", isPlannable({ ...o, status: "closed" }), false);
 }
 
 console.log("\nThe tables are in every list the Convex store needs");

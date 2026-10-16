@@ -5780,7 +5780,8 @@ async function authorizeOn(openingId: string, capability: Capability): Promise<U
   const user = await getCurrentUser();
   if (!openingId || !repo.opening(openingId)) await fail("That opening no longer exists.");
   const assignment = repo.assignmentFor(openingId, user.id) ?? null;
-  const decision = can(user, capability, { openingId, assignment, ownerTaId: null });
+  const onStrategy = repo.strategyAssignments(openingId).some((r) => r.doneBy.includes(user.id));
+  const decision = can(user, capability, { openingId, assignment, ownerTaId: null, onStrategy });
   if (!decision.ok) await fail(decision.message);
   return user;
 }
@@ -5820,11 +5821,11 @@ export async function addStrategyDoneBy(formData: FormData) {
   const strategyId = String(formData.get("strategyId") ?? "");
   const taId = String(formData.get("taId") ?? "");
 
-  // The TA must really be on this job and be a TA: the dropdown came from the browser.
+  // The assignee must be an active account with access: the dropdown came from the browser.
   const opening = repo.opening(openingId)!;
   const ta = repo.user(taId);
-  if (!ta || !isTa(ta) || !ta.isActive || !opening.assignedTaIds.includes(taId)) {
-    await fail("That TA is not on this job.");
+  if (!ta || !ta.isActive || ta.role === "client") {
+    await fail("That person does not have access.");
   }
   const s = repo.strategy(strategyId);
   if (!s) await fail("That strategy is no longer on the list.");

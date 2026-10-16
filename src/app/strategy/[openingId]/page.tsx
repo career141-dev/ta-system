@@ -7,7 +7,7 @@ import { inputClass } from "@/components/form";
 import { SubmitButton } from "@/components/Submit";
 import { saveStrategy } from "@/app/actions";
 import { StrategyLeadTable } from "@/components/StrategyLeadTable";
-import { leadLine, strategyTable } from "@/lib/strategyPlanner";
+import { isPlannable, leadLine, strategyTable } from "@/lib/strategyPlanner";
 import { isTa } from "@/lib/auth";
 
 /**
@@ -24,7 +24,7 @@ export default async function StrategyJobPage({ params }: { params: Promise<{ op
   await primeStore({ openingId });
   await pageUser("strategy.assign");
   const opening = repo.opening(openingId);
-  if (!opening) notFound();
+  if (!opening || !isPlannable(opening)) notFound();
 
   const lines = strategyTable(repo.strategies(true), repo.strategyAssignments(openingId));
   const tas = opening.assignedTaIds
@@ -32,6 +32,11 @@ export default async function StrategyJobPage({ params }: { params: Promise<{ op
     .filter((u): u is NonNullable<typeof u> => !!u && isTa(u) && u.isActive);
   const nameOf = (id: string | null) => (id ? repo.user(id)?.name ?? "Someone" : "");
   const headings = [...new Set(repo.strategies().map((s) => s.group).filter((g): g is string => !!g))];
+  const allUsers = repo
+    .users()
+    .filter((u) => u.isActive && u.role !== "client")
+    .map((u) => ({ id: u.id, name: u.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <main className="mx-auto max-w-[1180px] px-4 pb-24 pt-8 sm:px-6">
@@ -48,14 +53,14 @@ export default async function StrategyJobPage({ params }: { params: Promise<{ op
         crosses one out for the job. Changes save as you make them, and what a TA submits appears on its row.
       </p>
 
-      {tas.length === 0 && (
+      {tas.length === 0 && allUsers.length === 0 && (
         <p className="mt-5 rounded-lg bg-warn-soft px-4 py-3 text-[12.5px] text-warn">
-          No TA is on this job yet, so there is nobody to put on a strategy. Add one under Overview, then Change the team.
+          No team members are available to put on a strategy.
         </p>
       )}
 
       <div className="mt-6 overflow-hidden rounded-xl border border-rule bg-surface">
-        <StrategyLeadTable openingId={openingId} tas={tas.map((t) => ({ id: t.id, name: t.name }))} lines={lines.map((l) => leadLine(l, nameOf))} />
+        <StrategyLeadTable openingId={openingId} users={allUsers} lines={lines.map((l) => leadLine(l, nameOf))} />
         <div className="border-t border-rule bg-paper/60 px-3 py-3">
           <form action={saveStrategy} className="flex flex-wrap items-center gap-2">
             <span className="text-[12px] font-medium text-ink-soft">Add a strategy to the list:</span>

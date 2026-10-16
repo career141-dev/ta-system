@@ -37,12 +37,15 @@ export interface LeadStrategyLine {
 export function StrategyLeadTable({
   openingId,
   tas,
+  users,
   lines,
 }: {
   openingId: string;
-  tas: { id: string; name: string }[];
+  tas?: { id: string; name: string }[];
+  users?: { id: string; name: string }[];
   lines: LeadStrategyLine[];
 }) {
+  const people = users ?? tas ?? [];
   const line = useInline(updateStrategyLineInline);
   const add = useInline(addStrategyDoneByInline);
   const remove = useInline(removeStrategyDoneByInline);
@@ -82,7 +85,7 @@ export function StrategyLeadTable({
           </thead>
           <tbody>
             {lines.map((l) => {
-              const free = tas.filter((t) => !l.doneBy.some((d) => d.id === t.id));
+              const free = people.filter((t) => !l.doneBy.some((d) => d.id === t.id));
               const locked = l.struck || (!l.active && !l.rowId);
               return (
                 <tr key={l.strategyId} className={`border-b border-rule last:border-b-0 ${l.struck ? "bg-paper/60" : l.ticked ? "" : "text-ink-soft"}`}>
@@ -141,15 +144,15 @@ export function StrategyLeadTable({
                             fd.set("taId", e.target.value);
                             add.run(fd);
                           }}
-                          aria-label={`Put a TA on ${l.name}`}
+                          aria-label={`Assign someone to ${l.name}`}
                           className="cursor-pointer appearance-none rounded-full border border-dashed border-rule-strong bg-transparent px-2.5 py-0.5 text-[11.5px] text-ink-soft hover:border-brand-line hover:text-brand"
                         >
                           <option value="" disabled>+ Add</option>
                           {free.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                         </select>
                       )}
-                      {l.doneBy.length === 0 && tas.length === 0 && !l.struck && (
-                        <span className="text-[11.5px] text-ink-faint">No TA on the job</span>
+                      {l.doneBy.length === 0 && people.length === 0 && !l.struck && (
+                        <span className="text-[11.5px] text-ink-faint">No users available</span>
                       )}
                     </div>
                   </td>

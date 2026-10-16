@@ -267,6 +267,7 @@ export function rowIsAnotherTas(
  */
 export function scopeStrategies(rows: StrategyAssignment[], user: User): StrategyAssignment[] {
   if (!isScoped(user)) return rows;
-  if (!isTa(user)) return [];
+  if (user.role === "client") return [];
+  if (!isTa(user) && !rows.some((r) => r.doneBy.includes(user.id))) return [];
   return rows.filter((r) => isTicked(r) || r.notApplicable);
 }
