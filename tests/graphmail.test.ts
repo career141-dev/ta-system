@@ -18,8 +18,8 @@ const env = (vars: Record<string, string | undefined>) => {
 /** A fake Microsoft Graph: records each call and answers with `status` (or per sender). */
 function fakeGraph(status: number | ((url: string) => number) = 202, body = "") {
   const calls: { url: string; auth: string; payload: any }[] = [];
-  const fetchImpl = async (url: string, init: { headers: Record<string, string>; body: string }) => {
-    calls.push({ url, auth: init.headers.Authorization, payload: JSON.parse(init.body) });
+  const fetchImpl = async (url: string, init: { headers: Record<string, string>; body?: string | Uint8Array }) => {
+    calls.push({ url, auth: init.headers.Authorization ?? "", payload: typeof init.body === "string" && init.body ? JSON.parse(init.body) : init.body });
     const s = typeof status === "function" ? status(url) : status;
     return { ok: s >= 200 && s < 300, status: s, text: async () => body };
   };
@@ -122,6 +122,37 @@ async function main() {
   eq("azim@career141.com is the default end-of-day copy", DEFAULT_EOD_CC, "azim@career141.com");
   eq("live: copies kept, the recipient and junk removed", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["lead@career141.com", "azim@career141.com", "shortlists@career141.com"]);
   eq("CV attached as a file", g.calls[0].payload.message.attachments[0], { "@odata.type": "#microsoft.graph.fileAttachment", name: "Nimal Perera - Career141.pdf", contentType: "application/pdf", contentBytes: "JVBERi0=" });
+
+  // EOD uses a draft so five normal CVs do not share sendMail's old 3 MB
+  // request budget. Each one is attached, then the completed draft is sent.
+  const draftCalls: { url: string; method: string; headers: Record<string, string>; body?: string | Uint8Array }[] = [];
+  const draftGraph = async (url: string, init: { method: string; headers: Record<string, string>; body?: string | Uint8Array }) => {
+    draftCalls.push({ url, method: init.method, headers: init.headers, body: init.body });
+    const response = url.endsWith("/messages")
+      ? JSON.stringify({ id: "draft-1" })
+      : url.endsWith("/createUploadSession")
+        ? JSON.stringify({ uploadUrl: "https://upload.test/cv" })
+        : "";
+    return { ok: true, status: url.endsWith("/messages") || url.endsWith("/attachments") || url.endsWith("/createUploadSession") ? 201 : 202, text: async () => response };
+  };
+  const normalCv = Buffer.alloc(700 * 1024, 1).toString("base64");
+  r = await sendFollowUpMail({ ...eod, attachmentMode: "draft", attachments: Array.from({ length: 5 }, (_, i) => ({ name: `Candidate ${i + 1}.pdf`, contentType: "application/pdf", base64: normalCv })) }, token, draftGraph);
+  eq("five CVs over the old shared budget send successfully", r.ok, true);
+  eq("all five CVs are attached to the draft", draftCalls.filter(c => c.url.endsWith("/attachments")).length, 5);
+  eq("the draft is sent only after all attachments", draftCalls.at(-1)?.url, `${GRAPH_BASE}/users/nimali%40career141.com/messages/draft-1/send`);
+  const createdDraft = JSON.parse(String(draftCalls[0].body));
+  eq("the draft body does not inline the CVs", createdDraft.attachments, undefined);
+
+  draftCalls.length = 0;
+  const largeCv = Buffer.alloc(3 * 1024 * 1024 + 10, 2).toString("base64");
+  r = await sendFollowUpMail({ ...eod, attachmentMode: "draft", attachments: [{ name: "Large Candidate.pdf", contentType: "application/pdf", base64: largeCv }] }, token, draftGraph);
+  eq("a CV at least 3 MB uses an upload session", draftCalls.some(c => c.url.endsWith("/createUploadSession")), true);
+  const chunks = draftCalls.filter(c => c.url === "https://upload.test/cv");
+  eq("large CV uploads in sequential byte ranges", chunks.map(c => c.headers["Content-Range"]), [
+    `bytes 0-${3 * 1024 * 1024 - 1}/${3 * 1024 * 1024 + 10}`,
+    `bytes ${3 * 1024 * 1024}-${3 * 1024 * 1024 + 9}/${3 * 1024 * 1024 + 10}`,
+  ]);
+  eq("pre-authenticated upload URL receives no bearer token", chunks.every(c => !c.headers.Authorization), true);
   env({ OUTREACH_TEST_EMAIL: "qa@career141.com" });
   g = fakeGraph();
   r = await sendFollowUpMail(eod, token, g.fetchImpl);

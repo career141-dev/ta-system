@@ -52,6 +52,12 @@ export interface FollowUpMail {
   /** Written as `x-c141-candidatejobid`, so a reply can be tied to its application. */
   candidateJobId?: string;
   attachments?: MailAttachment[];
+  /**
+   * Create a draft and attach every file separately before sending it. EOD
+   * uses this because Graph's one-request sendMail payload cannot carry a
+   * normal five-CV set; candidate follow-ups keep the smaller inline path.
+   */
+  attachmentMode?: "inline" | "draft";
   /** In test mode, the env var naming this email's own test mailbox (e.g. EOD_TEST_EMAIL). */
   testInbox?: string;
   /**
@@ -67,11 +73,100 @@ export type MailResult =
   | { ok: true; to: string; alsoTo?: string[]; from: string; cc: string[]; note: string }
   | { ok: false; error: string; blocked: boolean };
 
-type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string }) => Promise<{
+type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body?: string | Uint8Array }) => Promise<{
   ok: boolean;
   status: number;
   text(): Promise<string>;
 }>;
+
+const SIMPLE_ATTACHMENT_LIMIT = 3 * 1024 * 1024;
+// Microsoft recommends byte ranges below 4 MB. Three MiB also keeps the
+// request comfortably below intermediary limits and makes every range except
+// the last the same size.
+const ATTACHMENT_CHUNK = 3 * 1024 * 1024;
+
+function graphError(stage: string, from: string, status: number, body: string) {
+  return `Microsoft Graph ${stage} from ${from} returned ${status}: ${body.slice(0, 500)}`;
+}
+
+async function sendDraftWithAttachments(
+  mail: FollowUpMail,
+  from: string,
+  to: string,
+  cc: string[],
+  alsoTo: string[],
+  token: string,
+  fetchImpl: FetchLike,
+): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const auth = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+  const message = sendMailPayload({ ...mail, attachments: undefined }, to, cc, alsoTo).message;
+  const created = await fetchImpl(`${GRAPH_BASE}/users/${encodeURIComponent(from)}/messages`, {
+    method: "POST",
+    headers: auth,
+    body: JSON.stringify(message),
+  });
+  if (!created.ok) return { ok: false, status: created.status, error: graphError("draft creation", from, created.status, await created.text()) };
+  let draftId = "";
+  try {
+    draftId = String(JSON.parse(await created.text()).id ?? "");
+  } catch {
+    // Handled by the explicit error below so the user sees the failed stage.
+  }
+  if (!draftId) return { ok: false, status: 502, error: `Microsoft Graph created an email draft from ${from} without returning its ID.` };
+  const draft = `${GRAPH_BASE}/users/${encodeURIComponent(from)}/messages/${encodeURIComponent(draftId)}`;
+
+  for (const attachment of mail.attachments ?? []) {
+    const bytes = Uint8Array.from(Buffer.from(attachment.base64, "base64"));
+    if (bytes.byteLength < SIMPLE_ATTACHMENT_LIMIT) {
+      const added = await fetchImpl(`${draft}/attachments`, {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: attachment.name,
+          contentType: attachment.contentType,
+          contentBytes: attachment.base64,
+        }),
+      });
+      if (!added.ok) return { ok: false, status: added.status, error: graphError(`attachment upload for ${attachment.name}`, from, added.status, await added.text()) };
+      continue;
+    }
+
+    const session = await fetchImpl(`${draft}/attachments/createUploadSession`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ AttachmentItem: { attachmentType: "file", name: attachment.name, size: bytes.byteLength } }),
+    });
+    if (!session.ok) return { ok: false, status: session.status, error: graphError(`upload-session creation for ${attachment.name}`, from, session.status, await session.text()) };
+    let uploadUrl = "";
+    try {
+      uploadUrl = String(JSON.parse(await session.text()).uploadUrl ?? "");
+    } catch {
+      // Handled below.
+    }
+    if (!uploadUrl) return { ok: false, status: 502, error: `Microsoft Graph did not return an upload URL for ${attachment.name}.` };
+    for (let start = 0; start < bytes.byteLength; start += ATTACHMENT_CHUNK) {
+      const end = Math.min(start + ATTACHMENT_CHUNK, bytes.byteLength) - 1;
+      const chunk = bytes.slice(start, end + 1);
+      const uploaded = await fetchImpl(uploadUrl, {
+        method: "PUT",
+        // The upload URL is pre-authenticated; Graph explicitly forbids the
+        // bearer header on these PUT requests.
+        headers: {
+          "Content-Type": "application/octet-stream",
+          "Content-Length": String(chunk.byteLength),
+          "Content-Range": `bytes ${start}-${end}/${bytes.byteLength}`,
+        },
+        body: chunk,
+      });
+      if (!uploaded.ok) return { ok: false, status: uploaded.status, error: graphError(`byte upload for ${attachment.name}`, from, uploaded.status, await uploaded.text()) };
+    }
+  }
+
+  const sent = await fetchImpl(`${draft}/send`, { method: "POST", headers: { Authorization: `Bearer ${token}` } });
+  if (!sent.ok) return { ok: false, status: sent.status, error: graphError("draft send", from, sent.status, await sent.text()) };
+  return { ok: true };
+}
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const isEmail = (s: string | null | undefined) => EMAIL.test((s ?? "").trim());
@@ -176,6 +271,15 @@ export async function sendFollowUpMail(
   let lastError = "";
   for (const [i, from] of senders.entries()) {
     try {
+      if (mail.attachmentMode === "draft" && mail.attachments?.length) {
+        const draft = await sendDraftWithAttachments(mail, from, decision.to, cc, alsoTo, token, fetchImpl);
+        if (draft.ok) {
+          return { ok: true, to: decision.to, alsoTo, from, cc, note: i > 0 ? `${note} [sent from ${from}: ${senders[0]} could not send]` : note };
+        }
+        lastError = draft.error;
+        if (draft.status !== 403 && draft.status !== 404) break;
+        continue;
+      }
       const res = await fetchImpl(`${GRAPH_BASE}/users/${encodeURIComponent(from)}/sendMail`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
