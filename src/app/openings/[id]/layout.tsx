@@ -8,6 +8,10 @@ import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
 import { allows } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
 import { levelLabel } from "@/lib/linkViews";
+import { isConvex } from "@/data/mode";
+import { convexQuery } from "@/lib/convexServer";
+import type { DailyEmail } from "@/lib/dailyEmail";
+import { workdayDate } from "@/lib/workday";
 
 export default async function OpeningLayout({
   children,
@@ -28,6 +32,9 @@ export default async function OpeningLayout({
   if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
   // What this person is on this opening decides what the rail even offers.
   const seat = seatFor(user, assignment?.role ?? null);
+  const dailyEmails = seat.canSeeSourcing && isConvex()
+    ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
+  const todayEmails = dailyEmails.filter(e => e.userId === user.id && e.date === workdayDate(Date.now()));
   const apps = visibleToSeat(repo.applications(id), seat);
   // Two TAs on one opening each work their own posts — see lib/visibility.
   const posts = visiblePosts(repo.jobPosts(id), user).map((p) => ({
@@ -54,7 +61,9 @@ export default async function OpeningLayout({
       <div className="flex flex-col lg:flex-row">
         {/* The rail reads ?post= to know which job post is showing. */}
         <Suspense fallback={<div className="hidden w-[238px] shrink-0 border-r border-rule lg:block" />}>
-          <ProjectSidebar openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing} />
+          <ProjectSidebar openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing}
+            middayEmails={todayEmails.filter(e => e.submissionType === "midday").map(e => ({ id: e._id, number: e.number, status: e.status }))}
+            dailyEmailClosed={todayEmails.some(e => e.submissionType === "eod" && e.status === "accepted" && !e.parentId)} />
         </Suspense>
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</main>
       </div>

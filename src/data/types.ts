@@ -606,6 +606,7 @@ export interface PipelineEvent {
  * it answers even when the thread headers are lost by a forward.
  */
 export interface ReviewRound {
+  submissionType?: "midday" | "eod";
   id: Id;
   openingId: Id;
   kind: "director" | "client";

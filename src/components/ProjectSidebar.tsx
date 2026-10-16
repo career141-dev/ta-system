@@ -4,7 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Fragment, useEffect, useState } from "react";
 import { PIPELINE_STAGES, CLOSED_STAGES, STAGE_LABEL } from "@/data/types";
-import { addJobPost, addLinkLevel, deleteJobPost } from "@/app/actions";
+import { addJobPost, addLinkLevel, deleteJobPost, addMiddayEmail } from "@/app/actions";
+import { DAILY_EMAIL_LABEL, type DailyEmailStatus } from "@/lib/dailyEmail";
 import { SignOut } from "./SignOut";
 import { SubmitButton } from "./Submit";
 import { LinkLevelItem } from "./LinkLevelItem";
@@ -48,6 +49,8 @@ export function ProjectSidebar({
   levels = [],
   nextLevel = 1,
   canSeeSourcing = true,
+  middayEmails = [],
+  dailyEmailClosed = false,
 }: {
   openingId: string;
   posts: SidebarPost[];
@@ -58,6 +61,8 @@ export function ProjectSidebar({
   /** A client contact gets the pipeline from their shortlist on, and none of
    *  the machinery that produced it. */
   canSeeSourcing?: boolean;
+  middayEmails?: { id: string; number: number; status: DailyEmailStatus }[];
+  dailyEmailClosed?: boolean;
 }) {
   const path = usePathname();
   const search = useSearchParams();
@@ -71,6 +76,7 @@ export function ProjectSidebar({
   const [pipeOpen, setPipeOpen] = useState(inPipeline);
   const [jobOpen, setJobOpen] = useState(inJob);
   const [addingJob, setAddingJob] = useState(false);
+  const [middayOpen, setMiddayOpen] = useState(path.startsWith(`${base}/midday`));
   // On a phone the rail is a menu above the page, closed until asked for and
   // closed again once a page is picked (5 Oct, mobile).
   const [railOpen, setRailOpen] = useState(false);
@@ -98,6 +104,7 @@ export function ProjectSidebar({
     { href: `${base}/snippets`, label: "Snippets" },
     // What the TA Lead asked this TA to try on the job (Strategy Planner, 8 Oct).
     { href: `${base}/strategies`, label: "Strategies" },
+    { href: `${base}/midday`, label: "Midday email" },
     // The Director and client round trips live on the end-of-day email
     // rather than a screen of their own: the set goes out on the email the
     // desk already sends, and the reply to it is what moves people.
@@ -422,7 +429,22 @@ export function ProjectSidebar({
               </div>
             )}
 
-            {atsItems.map((i) => (
+            {atsItems.map((i) => i.label === "Midday email" ? <Fragment key={i.href}>
+              <div className={row(path.startsWith(i.href)) + " flex items-center gap-2"}>
+                <Link href={i.href} className="flex-1" onClick={() => setMiddayOpen(true)}>Midday email</Link>
+                <form action={addMiddayEmail}>
+                  <input type="hidden" name="openingId" value={openingId} />
+                  <SubmitButton disabled={dailyEmailClosed} title={dailyEmailClosed ? "EOD has been sent for today" : "Add midday email"} aria-label="Add midday email" pendingLabel="…" className="rounded border border-rule px-1.5 disabled:opacity-40">+</SubmitButton>
+                </form>
+                <button type="button" aria-label="Expand midday emails" aria-expanded={middayOpen} onClick={() => setMiddayOpen(v => !v)}><Chevron open={middayOpen} /></button>
+              </div>
+              {middayOpen && <div className="ml-3.5 border-l border-rule pl-3">
+                {middayEmails.map(e => <Link key={e.id} href={`${i.href}?mail=${e.id}`} className={sub(search.get("mail") === e.id)}>
+                  Email {e.number} <span className="ml-auto text-[11px]">{DAILY_EMAIL_LABEL[e.status]}</span>
+                </Link>)}
+                {!middayEmails.length && <span className="text-xs text-ink-soft">Use + to start Email 1</span>}
+              </div>}
+            </Fragment> : (
               <Link key={i.href} href={i.href} className={row(path.startsWith(i.href))}>
                 {i.label}
               </Link>

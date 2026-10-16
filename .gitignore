@@ -10,6 +10,7 @@ next-env.d.ts
 .env.local
 .env*.local
 .env.production
+deploy/local/*.local.yml
 
 # SSH deploy keys — generated locally, injected by CI; never stored in git
 github_deploy_key
