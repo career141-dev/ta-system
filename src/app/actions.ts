@@ -2315,7 +2315,7 @@ export async function updateOpening(formData: FormData) {
  */
 export async function updateMasterSheetOpening(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const user = await authorize(formData, "commercial.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId") ?? "");
   const opening = repo.opening(openingId);
   if (!opening) await fail("That opening no longer exists. Reload the Master Sheet and try again.");

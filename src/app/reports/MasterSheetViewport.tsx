@@ -7,7 +7,15 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
  * forms into the client bundle. CSS full-screen is deliberate: it behaves the
  * same in managed browsers that refuse the native Fullscreen API.
  */
-export function MasterSheetViewport({ children }: { children: ReactNode }) {
+export function MasterSheetViewport({
+  children,
+  editable,
+  personal,
+}: {
+  children: ReactNode;
+  editable: boolean;
+  personal: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
   const toggleRef = useRef<HTMLButtonElement>(null);
 
@@ -35,12 +43,20 @@ export function MasterSheetViewport({ children }: { children: ReactNode }) {
       className={expanded ? "fixed inset-0 z-[100] flex flex-col bg-paper p-3 sm:p-4" : undefined}
     >
       <div className="mb-3 flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-rule bg-paper px-4 py-3 text-[11.5px] text-ink-soft">
-        <span><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-amber-300 bg-amber-50" />Yellow cells can be edited</span>
+        {editable ? (
+          <span><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-amber-300 bg-amber-50" />Yellow cells can be edited</span>
+        ) : personal ? (
+          <span className="font-medium text-ink">Your assigned openings and your own work only</span>
+        ) : (
+          <span className="font-medium text-ink">Read-only Master Sheet</span>
+        )}
         <span><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-rule bg-surface" />Calculated cells follow live workflow records</span>
         <span>Click a calculated value to open its source.</span>
-        <span className="lg:ml-auto" title="The reason is kept in the audit history with who made the change and when.">
-          The reason records why a source value changed.
-        </span>
+        {editable && (
+          <span className="lg:ml-auto" title="The reason is kept in the audit history with who made the change and when.">
+            The reason records why a source value changed.
+          </span>
+        )}
         <button
           ref={toggleRef}
           type="button"

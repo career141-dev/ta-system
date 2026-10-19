@@ -17,23 +17,24 @@ const GROUP: Record<string, string> = {
   client: "Opening", title: "Opening", positionStatus: "Opening", ta: "Opening",
   contacted: "Sourcing", hunted: "Sourcing",
   valueInProgress: "Commercial value", valuePlaced: "Commercial value", valueLost: "Commercial value", valueOnHold: "Commercial value",
-  assignedAt: "Dates", l1At: "Dates", l2At: "Dates", l3At: "Dates", l4At: "Dates", closedAt: "Dates",
-  l1: "Search levels", l2: "Search levels", l3: "Search levels", l4: "Search levels",
-  set1At: "Candidate sets", set1: "Candidate sets", set2At: "Candidate sets", set2: "Candidate sets",
-  set3At: "Candidate sets", set3: "Candidate sets", set4At: "Candidate sets", set4: "Candidate sets",
-  internal1: "Internal shortlist", internal2: "Internal shortlist", internal3: "Internal shortlist", internal4: "Internal shortlist",
-  external1: "Client shortlist", external2: "Client shortlist", external3: "Client shortlist", external4: "Client shortlist",
+  assignedAt: "Dates", closedAt: "Dates",
+  l1Date: "Search levels", l1Profiles: "Search levels", l2Date: "Search levels", l2Profiles: "Search levels",
+  l3Date: "Search levels", l3Profiles: "Search levels", l4Date: "Search levels", l4Profiles: "Search levels", totalLs: "Search levels",
+  set1Date: "Candidate sets", set1Cvs: "Candidate sets", set2Date: "Candidate sets", set2Cvs: "Candidate sets",
+  set3Date: "Candidate sets", set3Cvs: "Candidate sets", set4Date: "Candidate sets", set4Cvs: "Candidate sets", cvsSent: "Candidate sets",
+  internalShortlist1: "Internal shortlist", internalShortlist2: "Internal shortlist", internalShortlist3: "Internal shortlist", internalShortlist4: "Internal shortlist", internalShortlistTotal: "Internal shortlist",
+  externalShortlist1: "Client shortlist", externalShortlist2: "Client shortlist", externalShortlist3: "Client shortlist", externalShortlist4: "Client shortlist", externalShortlistTotal: "Client shortlist",
   interviewed: "Outcome", withdrawn: "Outcome", finalists: "Outcome", placed: "Outcome",
 };
 
 function sourceHref(openingId: string, key: string): string {
-  if (key === "contacted" || key === "hunted" || /^l[1-4](At)?$/.test(key)) {
+  if (key === "contacted" || key === "hunted" || /^l[1-4](Date|Profiles)?$/.test(key) || key === "totalLs") {
     return `/openings/${openingId}/hh/links`;
   }
-  if (/^set[1-4](At)?$/.test(key) || /^internal[1-4]$/.test(key)) {
+  if (/^set[1-4](Date|Cvs)?$/.test(key) || /^internalShortlist[1-4]$/.test(key) || key === "cvsSent" || key === "internalShortlistTotal") {
     return `/openings/${openingId}/pipeline/director_review`;
   }
-  if (/^external[1-4]$/.test(key)) return `/openings/${openingId}/pipeline/client_shortlist`;
+  if (/^externalShortlist[1-4]$/.test(key) || key === "externalShortlistTotal") return `/openings/${openingId}/pipeline/client_shortlist`;
   if (key === "withdrawn") return `/openings/${openingId}/pipeline/dropped_out`;
   if (key === "interviewed" || key === "finalists" || key === "placed") {
     return `/openings/${openingId}/pipeline/interview`;
@@ -109,17 +110,20 @@ export function MasterSheetTable({
   spec,
   sortHref,
   canEditById,
+  personal,
 }: {
   columns: Column[];
   rows: Row[];
   spec: ReportSpec;
   sortHref: (key: string) => string;
   canEditById: Record<string, boolean>;
+  personal: boolean;
 }) {
   const sectionGroups = groups(columns);
+  const editableSheet = Object.values(canEditById).some(Boolean);
   return (
     <>
-      {rows.map((row) => {
+      {editableSheet && rows.map((row) => {
         const openingId = String(row.id ?? "");
         return (
           <form key={openingId} id={`master-sheet-${openingId}`} action={updateMasterSheetOpening}>
@@ -128,7 +132,7 @@ export function MasterSheetTable({
         );
       })}
 
-      <MasterSheetViewport>
+      <MasterSheetViewport editable={editableSheet} personal={personal}>
         <div className="max-h-[72vh] overflow-auto rounded-xl border border-rule bg-surface">
           <table className="min-w-max border-separate border-spacing-0 text-left">
           <thead className="sticky top-0 z-20">
@@ -142,9 +146,11 @@ export function MasterSheetTable({
                   {group.label}
                 </th>
               ))}
-              <th rowSpan={2} className="sticky right-0 z-40 min-w-[250px] border-b border-l border-rule bg-slate-800 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-white">
-                Save change
-              </th>
+              {editableSheet && (
+                <th rowSpan={2} className="sticky right-0 z-40 min-w-[250px] border-b border-l border-rule bg-slate-800 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-white">
+                  Save change
+                </th>
+              )}
             </tr>
             <tr>
               {columns.map((column) => {
@@ -172,6 +178,7 @@ export function MasterSheetTable({
                 <tr key={openingId || index} className="group hover:bg-blue-50/40">
                   {columns.map((column) => {
                     const editable = canEdit && EDITABLE.has(column.key);
+                    const sourceField = EDITABLE.has(column.key);
                     const sticky = column.key === "client" || column.key === "title";
                     return (
                       <td
@@ -179,7 +186,11 @@ export function MasterSheetTable({
                         className={`${stickyCell(column.key)} border-b border-r border-rule px-2 py-1.5 text-[12px] ${
                           sticky ? "bg-white group-hover:bg-blue-50" : editable ? "bg-amber-50/40" : "bg-slate-50/55"
                         }`}
-                        title={editable ? "Editable source field" : "Calculated from the live workflow; click to open its source"}
+                        title={editable
+                          ? "Editable source field"
+                          : sourceField
+                            ? "Shared opening field; management edits this on the combined Master Sheet"
+                            : "Calculated from the live workflow; click to open its source"}
                       >
                         {editable ? (
                           <EditableCell column={column} row={row} formId={formId} />
@@ -191,7 +202,7 @@ export function MasterSheetTable({
                       </td>
                     );
                   })}
-                  <td className="sticky right-0 z-10 border-b border-l border-rule bg-white px-2 py-1.5 group-hover:bg-blue-50">
+                  {editableSheet && <td className="sticky right-0 z-10 border-b border-l border-rule bg-white px-2 py-1.5 group-hover:bg-blue-50">
                     {canEdit ? (
                       <div className="flex items-center gap-2">
                         <input
@@ -211,7 +222,7 @@ export function MasterSheetTable({
                     ) : (
                       <span className="text-[11.5px] text-ink-faint">Read only</span>
                     )}
-                  </td>
+                  </td>}
                 </tr>
               );
             })}

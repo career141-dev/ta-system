@@ -13,7 +13,7 @@
  * dragging the store into the browser.
  */
 
-import { repo, setsForOpening, stageCounts } from "@/data/store";
+import { repo, setsForOpening } from "@/data/store";
 import { PRIORITY_TARGET, STAGE_LABEL, type Stage } from "@/data/types";
 import { colomboDaysBetween } from "./calendar";
 import {
@@ -22,7 +22,14 @@ import {
   type Filter, type ReportSpec, type Row,
 } from "./reportSpec";
 import type { Stage as PipelineStage } from "@/data/types";
-import { levelSlot, MASTER_SHEET_SLOTS, roundSlot, uniqueSubmitted } from "./masterSheet";
+import {
+  levelSlot,
+  MASTER_SHEET_SLOTS,
+  masterSheetApplicationsForUser,
+  masterSheetRoundsForApplications,
+  roundSlot,
+  uniqueSubmitted,
+} from "./masterSheet";
 
 export * from "./reportSpec";
 
@@ -34,21 +41,34 @@ const STAGES: Stage[] = [
   "interview", "offer", "placed", "rejected", "dropped_out",
 ];
 
-function openingRows(): Row[] {
+function openingRows(userId?: string): Row[] {
   const clients = repo.clients();
   const users = repo.users();
   const interviews = repo.interviews();
   const name = (id: string) => users.find((u) => u.id === id)?.name ?? null;
 
-  return repo.openings().map((o) => {
-    const c = stageCounts(o.id);
-    const sets = setsForOpening(o.id);
-    const vault = repo.linkVault(o.id);
-    const apps = repo.applications(o.id);
+  const openings = repo.openings().filter((opening) => {
+    if (!userId) return true;
+    const assignment = repo.assignmentFor(opening.id, userId);
+    return opening.assignedTaIds.includes(userId) ||
+      assignment?.role === "primary_recruiter" || assignment?.role === "supporting_recruiter";
+  });
+
+  return openings.map((o) => {
+    const allApps = repo.applications(o.id);
+    const apps = userId ? masterSheetApplicationsForUser(allApps, userId) : allApps;
+    const c = {} as Record<Stage, number>;
+    for (const app of apps) c[app.stage] = (c[app.stage] ?? 0) + 1;
+    const sets = setsForOpening(o.id, userId);
+    const allVault = repo.linkVault(o.id);
+    const vault = userId ? allVault.filter((row) => row.addedBy === userId) : allVault;
     const appIds = new Set(apps.map((app) => app.id));
     const openingInterviews = interviews.filter((interview) => appIds.has(interview.applicationId));
-    const rounds = repo.reviewRounds(o.id);
-    const levelOwners = new Set([...o.assignedTaIds, ...vault.map((row) => row.addedBy)]);
+    const allRounds = repo.reviewRounds(o.id);
+    const rounds = userId
+      ? masterSheetRoundsForApplications(allRounds, appIds)
+      : allRounds;
+    const levelOwners = new Set(userId ? [userId] : [...o.assignedTaIds, ...vault.map((row) => row.addedBy)]);
     const levels = [...levelOwners].flatMap((userId) => repo.allLinkLevels(o.id, userId));
     const [l1, l2, l3, l4] = MASTER_SHEET_SLOTS.map((n) => levelSlot(levels, vault, n));
     const [set1, set2, set3, set4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "director", n));
@@ -68,7 +88,7 @@ function openingRows(): Row[] {
       locations: o.locations.join(", ") || null,
       nationality: o.targetNationalities.join(", ") || null,
       headcount: o.headcount,
-      ta: o.assignedTaIds.map(name).filter(Boolean).join(", ") || null,
+      ta: userId ? name(userId) : o.assignedTaIds.map(name).filter(Boolean).join(", ") || null,
       lead: name(o.taLeadId),
       salaryMin: o.salaryMin,
       salaryMax: o.salaryMax,
@@ -320,12 +340,20 @@ export interface ReportResult {
   sequence?: "time" | "stage" | null;
 }
 
-export function runReport(spec: ReportSpec): ReportResult {
+export interface ReportScope {
+  /** Restricts the Master Sheet's opening rows and every activity calculation
+   * to one TA. Omit for the management-wide combined sheet. */
+  openingUserId?: string;
+}
+
+export function runReport(spec: ReportSpec, scope: ReportScope = {}): ReportResult {
   const ds = datasetFor(spec.dataset);
   const typeOf = (k: string) => ds.fields.find((f) => f.key === k)?.type ?? "text";
   const labelOf = (k: string) => ds.fields.find((f) => f.key === k)?.label ?? k;
 
-  let rows = ds.rows();
+  let rows = spec.dataset === "openings" && scope.openingUserId
+    ? openingRows(scope.openingUserId)
+    : ds.rows();
 
   // Period first — it is the filter people forget they left on.
   const days = PERIODS.find((p) => p.key === spec.period)?.days ?? null;
@@ -479,8 +507,8 @@ export function runReport(spec: ReportSpec): ReportResult {
 }
 
 
-export function reportCsv(spec: ReportSpec): string {
-  const { columns, rows } = runReport({ ...spec, limit: 100_000 });
+export function reportCsv(spec: ReportSpec, scope: ReportScope = {}): string {
+  const { columns, rows } = runReport({ ...spec, limit: 100_000 }, scope);
   return toCsv([
     columns.map((c) => c.label),
     ...rows.map((r) => columns.map((c) => cellText(r[c.key], c.type))),
