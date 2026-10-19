@@ -1,16 +1,30 @@
 # Today's Checks
 
-TAs and TA Support start and finish work from the right sidebar. Account sign-in
-does not start the clock, and sign-out does not finish work. Old `/workday` links
+TAs and TA Support start work from the right sidebar. Account sign-in
+does not start the clock. The first successfully finalized original 100% EOD
+email records the finish time automatically; there is no Finish button. On
+Follow-up/Add-on-only days, the last outstanding EOD completes the day.
+Midday emails, revisions, failures and uncertain sends do not finish or retime
+the day. Old `/workday` links
 redirect to Openings with the drawer open. TA Leads and admins use Team checks
 in the same sidebar, with date, TA, job and task-status filters.
 
-The TA's workday sidebar groups candidate work into one "Candidates sourced
-and progressed" check per job, with source names and totals in TA Shortlist,
-Director Review and submitted. It omits the individual candidate roster and
-candidate task rows. Completion ratios and the remaining-step count use the
-grouped view; Finish still checks the original candidate requirements. Job
-pages and the lead's team review retain the detailed actions and history.
+The sidebar omits the "Candidates sourced and progressed" summary and
+individual candidate action rows. Candidate actions stay on job pages and the
+lead's detailed review. EOD send checks remain authoritative; outstanding
+candidate actions do not prevent automatic completion after a valid EOD.
+
+Every unfinished position has a Work type selector synchronized with the top
+bar. Multiple 100% selections are allowed and can be corrected to returning
+modes. Sent positions retain their submitted mode. After the clock stops,
+returning positions remain editable/sendable and more returning positions can
+be added without restarting it. Remaining emails are shown separately.
+
+All dates use Asia/Colombo. Yesterday's unfinished day is never today's active
+record. Starting today recovers prior accepted EOD evidence or expires the old
+record at its next-midnight boundary as incomplete. Expired records are not
+successful completed workdays. Clock snapshots stay immutable; later returning
+submissions are recorded independently.
 
 Newly created openings default to 100%. The TA can change the opening to
 Follow-up or Add-on from its top bar before or during the first recorded
@@ -32,7 +46,7 @@ profile to Excel Tables; it does not contact the candidate or put them on the
 pipeline. All results in the applicable round must have a decision.
 
 The eight research fields are optional. They are absent from the workday sidebar
-and do not block email or Finish, including when older research task events exist.
+and do not block email or automatic completion, including when older research task events exist.
 The Research page and saved reports remain available.
 
 Approving a JD records the approving TA's review automatically. Other assigned
@@ -51,8 +65,8 @@ zero candidates is valid and does not block the EOD email. Add-on includes only
 the TA's candidates tagged Add-on and progressed to Director Review during the
 current Add-on session. General 100% candidate work remains grouped; Director
 Review CV readiness is a separate sidebar check. Each selected/carried job
-needs its daily email and confirmed ChatGPT research share link before the
-workday can finish.
+needs its daily email and confirmed ChatGPT research share link. Returning
+emails can follow the 100% email after the clock stops.
 
 100% EOD sending requires confirmed review of the approved JD, a valid LinkedIn
 job, post or Recruiter project link, completed human Suggestions review, one own
@@ -69,7 +83,8 @@ The Excel minimum is temporarily one (14 October). It still counts only valid,
 distinct LinkedIn profiles added by the TA; visible lead-added rows do not count.
 
 The composer displays outstanding send requirements. Server preflight and the
-mail reservation recheck evidence; Finish rechecks in its transaction. Existing
+mail reservation recheck evidence. Successful finalization completes the clock
+in the same transaction when the EOD completion rule is satisfied. Existing
 CV review, candidate detail, handoff, upload and uncertain-mail safeguards still
 apply. Failed/uncertain email results do not mark the email complete.
 
@@ -97,9 +112,32 @@ can reopen; earlier events remain visible. Reused evidence keeps its source time
 and actor when known. Missing historical timestamps are shown as unrecorded,
 never as the time the sidebar was opened. Finished snapshots are immutable.
 
-Schema additions are optional/new tables and require no historical backfill.
-Any future backfill must be an internal migration with dry-run support, executed
-by the release pipeline. No laptop operations against the production backend.
+## EOD backups and rollout
+
+Sent EOD emails in the sidebar list this TA's original and revised emails
+across positions for the last 31 days, grouped by original submission.
+Each successful version gets 31 days from its own accepted timestamp.
+Edit and resend starts from the selected saved version, defaults to its saved
+recipients, keeps the candidate roster/order, and requires fresh ChatGPT and
+preview confirmation. It needs no active workday and never retimes attendance,
+counts candidates twice, or resets Director decisions. Replies use the same
+review round.
+
+New daily sends keep independent copies of their actual prepared PDFs in
+Convex storage. Download/preview checks email access and retention. Resends
+reuse these PDFs unless the TA explicitly selects replacement with current
+prepared CVs. Candidate CV replacement cannot delete these independent copies.
+Cleanup retains shared files while any unexpired or unresolved send references
+them. Old backups without stored PDFs are labelled in the resend composer;
+their missing original bytes cannot be reconstructed.
+
+After deploying through the release pipeline, run `ta/eodCopies:normalizeRetention`
+with `dryRun: true`, inspect its counts, then `dryRun: false`. This extends
+retained content to 31 days per version and imports surviving legacy email
+copies into the versioned history without resending mail or altering rounds.
+Then run `ta/workdays:recoverOpenWorkdays` with dry-run followed by application
+to close stale records using accepted EOD evidence or explicit expiry.
+Both migrations are idempotent. No laptop operations against production.
 
 ## Validation
 

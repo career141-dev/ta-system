@@ -1,4 +1,8 @@
 import type { EffortRow, ShortlistRow } from "./eod-format";
+import type { WorkType } from "./workday";
+
+export const EMAIL_RETENTION_MS = 31 * 86400000;
+export interface SavedEmailAttachment { id: string; name: string; applicationId: string }
 
 export type SubmissionType = "midday" | "eod";
 export type DailyEmailStatus = "draft" | "sending" | "accepted" | "failed" | "uncertain";
@@ -9,6 +13,8 @@ export interface DailyEmailSnapshot {
   to: string[];
   cc: string[];
   attachmentNames: string[];
+  attachments?: SavedEmailAttachment[];
+  workType?: WorkType;
   rows: ShortlistRow[];
   effort: EffortRow;
   introText: string;
@@ -31,9 +37,11 @@ export interface DailyEmail {
   applicationIds: string[];
   parentId?: string;
   roundId?: string;
+  legacyCopyId?: string;
   snapshot?: DailyEmailSnapshot;
   acceptedAt?: number;
   finalizedAt?: number;
+  workType?: WorkType;
   expiresAt?: number;
 }
 

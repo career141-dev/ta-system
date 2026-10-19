@@ -392,7 +392,11 @@ export function EodComposer({
   submissionType = "eod",
   dailyDraft,
   dailyParentId,
+  savedAttachments,
+  useDailyEmail = false,
 }: {
+  useDailyEmail?: boolean;
+  savedAttachments?: import("@/lib/dailyEmail").SavedEmailAttachment[];
   submissionType?: SubmissionType;
   dailyDraft?: { id: string; revision: number; fields: Record<string, string> };
   dailyParentId?: string;
@@ -469,6 +473,8 @@ export function EodComposer({
   // off whatever is named here (lib/eod-format eodRecipients).
   const [removed, setRemoved] = useState<string[]>(savedFields.removed !== undefined ? parseAddressList(savedFields.removed).ok : resend?.removed ?? []);
   const [skipAttachments, setSkipAttachments] = useState(savedFields.skipAttachments === "yes");
+  const [regenerateAttachments, setRegenerateAttachments] = useState(false);
+  const [previewConfirmed, setPreviewConfirmed] = useState(false);
   const draftRevision = useRef(dailyDraft?.revision ?? 0);
   const saveQueue = useRef<Promise<boolean>>(Promise.resolve(true));
   const lastSaved = useRef(JSON.stringify(savedFields));
@@ -638,6 +644,8 @@ export function EodComposer({
 
   /** The attachment's preview: the record, plus only what was changed on this page. */
   const previewHref = (r: ShortlistRow) => {
+    const saved = !regenerateAttachments && savedAttachments?.find(a => a.applicationId === r.applicationId);
+    if (saved && dailyParentId) return `/api/eod/attachment?email=${dailyParentId}&attachment=${saved.id}`;
     const s = getQueryOverrides(r);
     const params = new URLSearchParams(s);
     if (boxVersion > 0) params.set("_v", String(boxVersion));
@@ -1093,6 +1101,8 @@ export function EodComposer({
         ) : (
           <div className="mt-3 flex flex-col gap-2">
             {effectiveRows.map((r) => {
+              const saved = !regenerateAttachments && savedAttachments?.find(a => a.applicationId === r.applicationId);
+              if (saved && dailyParentId) return <a key={r.applicationId} href={previewHref(r)} target="_blank" rel="noreferrer" className="rounded-xl border border-rule px-3.5 py-2.5 text-sm text-brand underline">View saved PDF · {saved.name}</a>;
               return (
                 <button
                   key={r.applicationId}
@@ -1126,6 +1136,11 @@ export function EodComposer({
           ...(nobodyOnTo ? [{ key: "recipient", message: "Add a valid email address on the To line." }] : []),
           ...(researchBlocked ? [{ key: "chatgpt", message: "Add a valid ChatGPT share link and confirm it, or submit a reason in Today’s Checks." }] : []),
         ]} />}
+      {dailyParentId && <div className="mb-4 space-y-2 text-sm">
+        <label className="block"><input form="eod-send" type="checkbox" name="regenerateAttachments" value="yes" checked={regenerateAttachments} onChange={e => setRegenerateAttachments(e.target.checked)} /> Replace saved CV attachments with newly prepared CVs using the current records and edits above</label>
+        <p className="text-xs text-ink-soft">Saved PDFs are reused unless you select replacement. Older backups without saved PDFs use the current prepared CVs.</p>
+        <label className="block"><input form="eod-send" type="checkbox" name="previewConfirmed" required checked={previewConfirmed} onChange={e => setPreviewConfirmed(e.target.checked)} /> I reviewed this revised email, its recipients and attachments.</label>
+      </div>}
       <form id="eod-send" action={async data => {
         sending.current = true;
         try {
@@ -1153,7 +1168,7 @@ export function EodComposer({
           }
           if (dailyDraft && !await saveCurrentDraft()) return;
           if (dailyDraft) data.set("dailyDraftRevision", String(draftRevision.current));
-          await (dailyDraft || dailyParentId ? sendDailyEmail : resend ? resendEod : sendEod)(data);
+          await (dailyDraft || dailyParentId || (useDailyEmail && kind === "director" && !resend) ? sendDailyEmail : resend ? resendEod : sendEod)(data);
         } finally { sending.current = false; }
       }} className="flex flex-wrap items-center gap-4">
         <input type="hidden" name="submissionType" value={submissionType} />
@@ -1175,7 +1190,7 @@ export function EodComposer({
             while the CVs were stamped and the mail sent, so TAs pressed it
             again and again — each press another send. */}
         <SubmitButton
-          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || (researchRequired && jobBlocked) || saveError}
+          disabled={(initialRows.length === 0 && kind !== "director") || nobodyOnTo || researchBlocked || (researchRequired && jobBlocked) || saveError || (!!dailyParentId && !previewConfirmed)}
           title={
             initialRows.length === 0 && kind !== "director"
               ? "Add at least one CV in Director Review before sending"

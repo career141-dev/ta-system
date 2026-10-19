@@ -8,7 +8,7 @@ export function DailyEmailHistory({ emails, openingId }: { emails: DailyEmail[];
   return <section className="mb-6 rounded-xl border border-rule bg-surface p-5">
     <h2 className="font-semibold">Email history</h2>
     {!emails.length ? <p className="mt-2 text-sm text-ink-soft">No emails yet. Use Add to start the first midday email.</p> :
-      <ul className="mt-3 space-y-2">{emails.slice().sort((a, b) => b.date.localeCompare(a.date) || b.number - a.number).map(e =>
+      <ul className="mt-3 space-y-2">{emails.slice().sort((a, b) => (b.acceptedAt ?? 0) - (a.acceptedAt ?? 0) || b.date.localeCompare(a.date)).map(e =>
         <li key={e._id} className="flex flex-wrap justify-between gap-2 text-sm">
           <Link className="text-brand underline" href={`/openings/${openingId}/${e.submissionType === "midday" ? "midday" : "eod"}?mail=${e._id}`}>
             {e.date} · {e.submissionType === "midday" ? `Email ${e.number}` : e.parentId ? "Revised EOD" : "End of day"} · {DAILY_EMAIL_LABEL[e.status]}
@@ -30,6 +30,7 @@ export function DailyEmailView({ email, openingId, canCorrect, canReconcile }: {
         <div><dt className="inline font-medium">Subject: </dt><dd className="inline">{copy.subject}</dd></div>
         <div><dt className="inline font-medium">Attachments: </dt><dd className="inline">{copy.attachmentNames.join(", ") || "None"}</dd></div>
       </dl>
+      {!!copy.attachments?.length && <ul className="mb-4 text-sm">{copy.attachments.map(a => <li key={a.id}><a className="text-brand underline" href={`/api/eod/attachment?email=${email._id}&attachment=${a.id}`} target="_blank" rel="noreferrer">{a.name}</a></li>)}</ul>}
       <iframe title="Saved email content" sandbox="" srcDoc={`<!doctype html><meta charset="utf-8"><body style="font-family:Arial,sans-serif;padding:16px">${copy.html}</body>`} className="h-[560px] w-full bg-white" />
     </> : <p className="my-3 text-sm">The email content is no longer retained. Send records remain available.</p>}
     {email.status === "uncertain" || email.status === "sending" ? <p className="mt-3 text-sm">Do not send again. Ask the TA Lead to reconcile the result in Today’s Checks.</p> : null}
@@ -40,7 +41,7 @@ export function DailyEmailView({ email, openingId, canCorrect, canReconcile }: {
       <SubmitButton name="accepted" value="no" className="text-brand underline">Verified not sent</SubmitButton>
     </form>}
     {email.status === "failed" && email.submissionType === "eod" && <Link className="mt-4 inline-block text-brand underline" href={`/openings/${openingId}/eod`}>Return to the composer to retry</Link>}
-    {canCorrect && copy && email.status === "accepted" && email.submissionType === "eod" && !email.parentId &&
-      <Link className="mt-4 inline-block text-brand underline" href={`/openings/${openingId}/eod?mail=${email._id}&revise=yes`}>Correct and send again</Link>}
+    {canCorrect && copy && email.status === "accepted" && email.submissionType === "eod" &&
+      <Link className="mt-4 inline-block text-brand underline" href={`/openings/${openingId}/eod?mail=${email._id}&revise=yes`}>Edit and resend</Link>}
   </section>;
 }

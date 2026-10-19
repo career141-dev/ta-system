@@ -357,7 +357,7 @@ try {
     assert.ok(jdCheck.events.some((e: Row) => e.status === "incomplete"));
   }
   assert.equal((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).ok, false);
-  assert.equal((await run("finish", { actorId: "ta", workdayId: day.id })).ok, false);
+  await assert.rejects(() => run("finish", { actorId: "ta", workdayId: day.id }), /automatically/);
   await (openings.saveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1", jdMarkdown: "Synthetic JD for job1" });
   assert.equal((await run("dashboard", { actorId: "ta" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:")).status, "incomplete", "Restoring old text must not restore an invalidated review");
   await (openings.approveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1" });
@@ -572,8 +572,7 @@ try {
     lastStageChangedAt: clock,
     isActive: true,
   });
-  let finish = await run("finish", { actorId: "ta", workdayId: day.id });
-  assert.equal(finish.ok, false);
+  await assert.rejects(() => run("finish", { actorId: "ta", workdayId: day.id }), /automatically/);
   assert.equal(rows("taWorkdays")[0].finishedAt, undefined);
   await assert.rejects(
     () =>
@@ -595,7 +594,7 @@ try {
         workdayId: support.id,
         applicationId: "app",
       }),
-    /assigned TA/,
+    /assigned TA|active workday/,
   );
   await run("markReviewed", {
     actorId: "ta",
@@ -631,14 +630,13 @@ try {
       /send in progress/,
     );
     await run("mailResult", { id: receipt.id, status: "accepted" });
-    assert.equal(
-      (await run("finish", { actorId: "ta", workdayId: day.id })).ok,
-      false,
-    );
+    if (jobId === "job1") assert.equal((await db.get(day.id))?.finishedAt, undefined, "Acceptance alone does not finish before finalization");
     await run("finalizeMail", { actorId: "ta", id: receipt.id });
     await db.patch(`requiredApp:ta:${jobId}`, { currentStage: "director_shortlist" });
   }
-  // A CV arriving after email acceptance still blocks the final transaction.
+  // Later arrivals do not reopen or stretch an EOD-completed workday.
+  const eodFinishedAt = (await db.get(day.id))!.finishedAt;
+  assert.equal(eodFinishedAt, clock);
   clock += 100;
   put("applications", {
     _id: "late",
@@ -651,40 +649,30 @@ try {
     lastStageChangedAt: clock,
     isActive: true,
   });
-  assert.equal(
-    (await run("finish", { actorId: "ta", workdayId: day.id })).ok,
-    false,
-  );
-  await run("markReviewed", {
+  await assert.rejects(() => run("markReviewed", {
     actorId: "ta",
     workdayId: day.id,
     applicationId: "late",
-  });
-  finish = await run("finish", { actorId: "ta", workdayId: day.id });
+  }), /active workday/);
+  const finish = await run("finish", { actorId: "ta", workdayId: day.id });
   assert.equal(finish.ok, true);
-  assert.equal(rows("taWorkdays")[0].finishedAt, clock);
+  assert.equal(rows("taWorkdays")[0].finishedAt, eodFinishedAt);
   assert.deepEqual(
     await run("finish", { actorId: "ta", workdayId: day.id }),
     finish,
   );
-  await assert.rejects(
-    () => run("start", { actorId: "ta", jobId: "job1", workType: "100%" }),
-    /already finished/,
-  );
+  assert.deepEqual(await run("start", { actorId: "ta", jobId: "job1", workType: "100%" }), day, "Returning submissions reuse the same date without restarting the clock");
   await assert.rejects(
     () => run("finish", { actorId: "support", workdayId: day.id }),
     /not yours/,
   );
-  await assert.rejects(
-    () => assertWorkdayScope(ctx, rows("users")[0] as any, "job1" as any),
-    /Start your workday/,
-  );
+  await assertWorkdayScope(ctx, rows("users")[0] as any, "job2" as any);
   const frozen = (await run("dashboard", { actorId: "ta", detail: true }))
     .history[0];
   const finishedStatus = await run("dashboard", { actorId: "ta" });
-  assert.equal(finishedStatus.lastFinishedAt, clock);
+  assert.equal(finishedStatus.lastFinishedAt, eodFinishedAt);
   assert.equal(finishedStatus.lastFinishedDate, workdayDate(clock));
-  assert.equal(completionBlockers(frozen.jobs).length, 0);
+  assert.equal(frozen.closureReason, "eod");
   await (openings.saveJd as any)._handler(ctx, { actorId: "ta", openingId: "job1", jdMarkdown: "Later JD after the finished day" });
   assert.deepEqual((await run("dashboard", { actorId: "ta", detail: true })).history[0].jobs, frozen.jobs, "Finished records keep the original JD review snapshot");
   // Current assignments must not disappear behind an older global job-list limit.
@@ -863,11 +851,7 @@ try {
   assert.ok(exceptionMail.id, "The transactional send reservation accepts valid exceptions");
   await run("mailResult", { id: exceptionMail.id, status: "accepted" });
   await run("finalizeMail", { actorId: "exceptionTa", id: exceptionMail.id });
-  const beforeFinish = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
-  for (const check of completionBlockers([beforeFinish])) {
-    assert.ok(check.canCarry, `Unexpected non-carry blocker: ${check.label}`);
-    await run("carry", { actorId: "exceptionTa", workdayId: exceptionDay.id, jobId: "exceptionJob", key: check.key, reason: "Awaiting candidate or director", nextAction: "Follow up", dueAt: clock + 3600000 });
-  }
+  assert.equal((await db.get(exceptionDay.id))?.finishedAt, clock, "An accepted EOD completes without carrying candidate actions");
   assert.equal((await run("finish", { actorId: "exceptionTa", workdayId: exceptionDay.id })).ok, true);
   const finishedException = await db.get(exceptionDay.id);
   assert.ok(finishedException?.completion.jobs[0].checks.find((c: Row) => c.key === reasonArgs.key).exception, "Finished snapshots preserve reasons");
@@ -901,6 +885,56 @@ try {
   await run("start", { actorId: "exceptionTa", jobId: "exceptionJob", workType: "100%" });
   exceptionJob = (await run("dashboard", { actorId: "exceptionTa" })).active.jobs[0];
   assert.equal(exceptionJob.eodChecks.some((c: Row) => c.exception), false);
+
+  // A returning-only day closes on the final EOD and stays usable afterward.
+  user("autoTa", "ta");
+  for (const id of ["autoA", "autoB", "autoC"]) put("jobs", { _id: id, title: id, taLeadId: "lead", assignedTaIds: ["autoTa"] });
+  const autoDay = await run("start", { actorId: "autoTa", jobId: "autoA", workType: "Follow-up" });
+  await run("addPosition", { actorId: "autoTa", workdayId: autoDay.id, jobId: "autoB", workType: "100%" });
+  await run("setWorkType", { actorId: "autoTa", workdayId: autoDay.id, jobId: "autoB", workType: "Add-on" });
+  assert.equal((await db.get(autoDay.id))!.jobs[1].modeHistory.length, 2, "Accidental 100% selection can be corrected in the work list");
+  const submitActivity = async (jobId: string) => {
+    await run("emailPreflight", { actorId: "autoTa", jobId, link: "https://chatgpt.com/share/12345678", confirmed: true });
+    const mail = await run("beginMail", { actorId: "autoTa", jobId, applicationIds: [], subject: "Synthetic activity", sentTo: "director@example.invalid" });
+    await run("mailResult", { id: mail.id, status: "accepted" });
+    await run("finalizeMail", { actorId: "autoTa", id: mail.id });
+  };
+  await submitActivity("autoA");
+  assert.equal((await db.get(autoDay.id))?.finishedAt, undefined);
+  clock += 1000;
+  await submitActivity("autoB");
+  const stoppedAt = clock;
+  assert.equal((await db.get(autoDay.id))?.finishedAt, stoppedAt);
+  await run("addPosition", { actorId: "autoTa", workdayId: autoDay.id, jobId: "autoC", workType: "Follow-up" });
+  await run("setWorkType", { actorId: "autoTa", workdayId: autoDay.id, jobId: "autoC", workType: "Add-on" });
+  clock += 1000;
+  await submitActivity("autoC");
+  assert.equal((await db.get(autoDay.id))?.finishedAt, stoppedAt, "Later returning emails do not restart the clock");
+  const liveDay = (await run("dashboard", { actorId: "autoTa" })).active;
+  assert.equal(liveDay.jobs.filter((j: Row) => !j.eodSentAt).length, 0);
+
+  // Yesterday's unfinished records never masquerade as today's workday.
+  user("staleTa", "ta");
+  put("jobs", { _id: "staleJob", title: "Stale", taLeadId: "lead", assignedTaIds: ["staleTa"] });
+  put("taWorkdays", { _id: "staleDay", userId: "staleTa", date: workdayDate(clock - 86400000), startedAt: clock - 86400000,
+    jobs: [{ jobId: "staleJob", workType: "100%", addedAt: clock - 86400000, modeHistory: [] }] });
+  assert.equal((await run("dashboard", { actorId: "staleTa" })).active, null);
+  assert.equal((await run("recoverOpenWorkdays", { dryRun: true })).affected > 0, true);
+  assert.equal((await db.get("staleDay"))?.finishedAt, undefined, "Dry run does not mutate records");
+  const newDay = await run("start", { actorId: "staleTa", jobId: "staleJob", workType: "Follow-up" });
+  assert.notEqual(newDay.id, "staleDay");
+  assert.equal((await db.get("staleDay"))?.closureReason, "expired");
+  assert.equal((await db.get(newDay.id))?.date, workdayDate(clock));
+  user("recoverTa", "ta");
+  put("jobs", { _id: "recoverJob", title: "Recover", taLeadId: "lead", assignedTaIds: ["recoverTa"] });
+  const acceptedYesterday = clock - 86400000;
+  put("taWorkdays", { _id: "recoverDay", userId: "recoverTa", date: workdayDate(acceptedYesterday), startedAt: acceptedYesterday - 3600000,
+    jobs: [{ jobId: "recoverJob", workType: "100%", addedAt: acceptedYesterday - 3600000, modeHistory: [] }] });
+  put("taWorkdayMail", { _id: "recoverReceipt", workdayId: "recoverDay", jobId: "recoverJob", userId: "recoverTa", workType: "100%",
+    status: "accepted", startedAt: acceptedYesterday - 1000, acceptedAt: acceptedYesterday, finalizedAt: acceptedYesterday, applicationIds: [] });
+  await run("start", { actorId: "recoverTa", jobId: "recoverJob", workType: "Follow-up" });
+  assert.equal((await db.get("recoverDay"))?.finishedAt, acceptedYesterday, "Yesterday's accepted EOD recovers its original finish time");
+  assert.equal((await db.get("recoverDay"))?.closureReason, "eod");
   console.log(
     "  ok  workday times, direct assigned positions, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );
