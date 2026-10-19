@@ -609,7 +609,7 @@ export interface ReviewRound {
   id: Id;
   openingId: Id;
   kind: "director" | "client";
-  /** Internal round identifier; older tracked subjects may still contain it. */
+  /** Matches an email back to this round. */
   token: string;
   /**
    * The provider's message id for the mail that went out, once a mailbox is
