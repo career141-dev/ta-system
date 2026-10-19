@@ -25,7 +25,7 @@ export const PARTNER_READ_TABLES = [
   "clients", "jobPosts", "briefs", "intakeItems", "linkVault", "researchReports",
   "benchmarks", "profileSuggestions", "sourcingChat", "jdChat", "savedSearches",
   "savedReports", "matchRuns", "matchExclusions", "strategies", "strategyAssignments",
-  "reviewRounds", "eodEmailCopies", "callFeedback", "taAlerts", "taOutreach",
+  "reviewRounds", "shortlistDecisionReviews", "eodEmailCopies", "callFeedback", "taAlerts", "taOutreach",
   "taScreeningCalls", "taSettings", "healerState", "mailIntakeMailboxes",
   "mailIntakeMessages", "feedbacks",
   "taWorkdays", "taWorkdayRequests", "taWorkdayCarry", "taWorkdayMail",

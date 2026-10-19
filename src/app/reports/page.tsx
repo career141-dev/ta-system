@@ -15,6 +15,8 @@ import { sanitizeSpec,
 import { FAILURE_MESSAGE } from "@/lib/ai";
 import type { AiFailure } from "@/lib/ai";
 import { primeStore } from "@/data/prime";
+import { can } from "@/lib/auth";
+import { MasterSheetTable } from "./MasterSheetTable";
 
 /**
  * Reports — rebuilt 12 September.
@@ -74,6 +76,16 @@ export default async function ReportsPage({
   const ds = datasetFor(spec.dataset);
   const result = runReport(spec);
   const specJson = JSON.stringify(spec);
+  const isMasterSheet = title === "Master Sheet" && spec.dataset === "openings" && !spec.groupBy;
+  const canEditById = isMasterSheet
+    ? Object.fromEntries(result.rows.map((row) => {
+        const openingId = String(row.id ?? "");
+        return [openingId, can(user, "opening.manage", {
+          openingId,
+          assignment: repo.assignmentFor(openingId, user.id) ?? null,
+        }).ok];
+      }))
+    : {};
 
   // Only the enums, and only for this dataset — the pickers offer what the
   // data actually contains rather than a list somebody typed once.
@@ -312,7 +324,17 @@ export default async function ReportsPage({
                 {result.truncated && ` of ${result.matched} — raise the limit to see the rest`}
               </span>
             </div>
-            <Table columns={result.columns} rows={result.rows} spec={spec} sortHref={sortHref} />
+            {isMasterSheet ? (
+              <MasterSheetTable
+                columns={result.columns}
+                rows={result.rows}
+                spec={spec}
+                sortHref={sortHref}
+                canEditById={canEditById}
+              />
+            ) : (
+              <Table columns={result.columns} rows={result.rows} spec={spec} sortHref={sortHref} />
+            )}
           </section>
         </>
       )}

@@ -601,9 +601,8 @@ export interface PipelineEvent {
  * today somebody reads that reply and moves people by hand. This records the
  * round so the reply can be matched to it and the moves made from it.
  *
- * The token is what makes the match reliable: it goes out in the subject and
- * comes back on the reply, so an inbound email can be tied to exactly the set
- * it answers even when the thread headers are lost by a forward.
+ * The token is an internal identifier. Microsoft 365 conversation and reply
+ * headers match normal replies without changing the recipient-facing subject.
  */
 export interface ReviewRound {
   submissionType?: "midday" | "eod";
@@ -618,6 +617,8 @@ export interface ReviewRound {
    * signal that survives a forwarded thread and a rewritten subject.
    */
   messageId: string | null;
+  conversationId?: string | null;
+  internetMessageId?: string | null;
   /** The set number this round covers, where it is a set. */
   setNumber: number | null;
   applicationIds: Id[];

@@ -532,21 +532,7 @@ export async function parseReply(
   }
 }
 
-/**
- * The whole set's decisions: what the reply picked, and everyone else in that
- * email marked not selected — the owner's rule (25 Sep, PR #56), so a set is
- * closed by its reply rather than left hanging.
- *
- * Only when the whole reply was read. If any clause could not be read, nobody
- * is marked not selected on a guess: the reply may have been about them.
- */
-export function withUnpickedRejected(parsed: ParseResult, applicationIds: string[]): ParsedDecision[] {
-  if (parsed.unmatched.length > 0) return parsed.decisions;
-  const decided = new Set(parsed.decisions.map((d) => d.applicationId));
-  return [
-    ...parsed.decisions,
-    ...applicationIds
-      .filter((id) => !decided.has(id))
-      .map((applicationId) => ({ applicationId, outcome: "rejected" as const, note: "Not selected from this set" })),
-  ];
+/** Keep older entry points safe: silence is not evidence of rejection. */
+export function withUnpickedRejected(parsed: ParseResult, _applicationIds: string[]): ParsedDecision[] {
+  return parsed.decisions;
 }

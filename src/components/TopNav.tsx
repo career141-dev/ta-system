@@ -197,6 +197,15 @@ export function TopNav({
                   Feedback & Support
                 </Link>
               )}
+              {["admin", "director", "ta_lead", "ops"].includes(user.role) && (
+                <Link
+                  href="/shortlist-decisions"
+                  onClick={() => setOpen(false)}
+                  className="block px-3 py-2 text-[12.5px] hover:bg-paper"
+                >
+                  Shortlist decisions
+                </Link>
+              )}
               {user.role === "admin" && (
                 <Link
                   href="/settings"

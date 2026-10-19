@@ -21,6 +21,7 @@ import type { Doc, Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
 import { isAutoReply, isCvAttachment, isNotAnApplication, parseApplicationEmail, type MailAttachmentMeta } from "../lib/mailParse";
 import { inferOpening, matchHouseSubject, parseHouseSubject, type OpeningLite, type ShortlistKind } from "../lib/shortlistMail";
+import { newestReplyText, reviewToken } from "../lib/shortlistReply";
 import { routeShared, type PostPick } from "../lib/postRouting";
 
 const GRAPH = "https://graph.microsoft.com/v1.0";
@@ -129,7 +130,10 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
     subject?: string;
     body?: { contentType?: string; content?: string };
     from?: { emailAddress?: { address?: string } };
-  }>(token, `${mailboxPath}?$select=subject,body,from`);
+    conversationId?: string;
+    internetMessageId?: string;
+    internetMessageHeaders?: { name?: string; value?: string }[];
+  }>(token, `${mailboxPath}?$select=subject,body,from,conversationId,internetMessageId,internetMessageHeaders`);
   if (msg.status === 404 || !msg.body) {
     await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "skipped", note: "The message was deleted before it could be read." });
     return;
@@ -139,6 +143,13 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
   const fromAddress = (msg.body.from?.emailAddress?.address ?? m.fromAddress).toLowerCase();
   const html = msg.body.body?.contentType === "html" ? msg.body.body.content ?? "" : "";
   const plain = msg.body.body?.contentType !== "html" ? msg.body.body?.content ?? "" : "";
+  const inReplyTo = msg.body.internetMessageHeaders?.find((header) => header.name?.toLowerCase() === "in-reply-to")?.value;
+  await ctx.runMutation(internal.mailIntake.model.noteTransport, {
+    id: m._id,
+    conversationId: msg.body.conversationId ?? m.conversationId,
+    internetMessageId: msg.body.internetMessageId ?? m.internetMessageId,
+    inReplyTo: inReplyTo ?? m.inReplyTo,
+  });
   const parsed = parseApplicationEmail({ subject, fromAddress, bodyHtml: html, bodyText: plain });
   const sourceChannel = channelFor(m.mailbox);
 
@@ -155,7 +166,12 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
   // shortlists@ is read differently: a CV there is someone already in the
   // pipeline being put forward, not an application.
   if (box?.kind === "shortlist") {
-    await handleShortlistMessage(ctx, token, m, mailboxPath, subject, fromAddress, parsed.text);
+    await handleShortlistMessage(ctx, token, m, mailboxPath, subject, fromAddress, parsed.text, {
+      conversationId: msg.body.conversationId ?? m.conversationId,
+      internetMessageId: msg.body.internetMessageId ?? m.internetMessageId,
+      inReplyTo: inReplyTo ?? m.inReplyTo,
+      rawBody: html || plain,
+    });
     return;
   }
 
@@ -305,6 +321,7 @@ type ShortlistNote = {
 async function handleShortlistMessage(
   ctx: ActionCtx, token: string, m: Doc<"mailIntakeMessages">, mailboxPath: string,
   subject: string, fromAddress: string, text: string,
+  transport: { conversationId?: string; internetMessageId?: string; inReplyTo?: string; rawBody: string },
 ) {
   if (isAutoReply(fromAddress, subject)) {
     await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "skipped", note: "An automatic reply or a bounce." });
@@ -314,8 +331,48 @@ async function handleShortlistMessage(
     ? ((await graph<{ value: MailAttachmentMeta[] }>(token, `${mailboxPath}/attachments?$select=id,name,contentType,size,isInline`)).body?.value ?? [])
     : [];
   const cvs = attachments.filter(isCvAttachment);
+  const tokenInSubject = reviewToken(subject);
+  const attached = await ctx.runMutation(internal.mailIntake.decisions.attachRoundTransport, {
+    token: tokenInSubject ?? undefined,
+    subject,
+    fromAddress,
+    receivedAt: m.receivedAt,
+    conversationId: transport.conversationId,
+    internetMessageId: transport.internetMessageId,
+    messageId: m.messageId,
+  });
+  const originalTrackedCopy = Boolean(
+    attached.attached && attached.isRoundMessage && !transport.inReplyTo
+    && attached.subject.trim().toLowerCase() === subject.trim().toLowerCase()
+    && attached.senderAddresses.includes(fromAddress)
+    && Math.abs(m.receivedAt - attached.sentAt) <= 60 * 60 * 1000,
+  );
   if (cvs.length === 0) {
-    await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "no_cv", note: "A shortlist mail with no CV attached." });
+    if (originalTrackedCopy) {
+      await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+        id: m._id, outcome: "skipped",
+        note: "Original tracked shortlist email; its Microsoft 365 thread identity was recorded.",
+      });
+      return;
+    }
+    const reply = await ctx.runAction(internal.mailIntake.decisions.processReply, {
+      sourceMessageId: m._id,
+      graphMessageId: m.messageId,
+      conversationId: transport.conversationId,
+      internetMessageId: transport.internetMessageId,
+      inReplyTo: transport.inReplyTo,
+      receivedAt: m.receivedAt,
+      fromAddress,
+      subject,
+      body: newestReplyText(transport.rawBody) || text || subject,
+    });
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+      id: m._id,
+      outcome: reply.status === "auto_applied" ? "filed" : "held",
+      note: reply.status === "auto_applied" ? `Shortlist decision applied. ${reply.note}` : `Shortlist decision needs review. ${reply.note}`,
+      openingIds: reply.openingId ? [reply.openingId as Id<"jobs">] : [],
+      candidateIds: reply.candidateIds as Id<"candidates">[],
+    });
     return;
   }
 

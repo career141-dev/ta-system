@@ -22,6 +22,7 @@ import {
   type Filter, type ReportSpec, type Row,
 } from "./reportSpec";
 import type { Stage as PipelineStage } from "@/data/types";
+import { levelSlot, MASTER_SHEET_SLOTS, roundSlot, uniqueSubmitted } from "./masterSheet";
 
 export * from "./reportSpec";
 
@@ -36,6 +37,7 @@ const STAGES: Stage[] = [
 function openingRows(): Row[] {
   const clients = repo.clients();
   const users = repo.users();
+  const interviews = repo.interviews();
   const name = (id: string) => users.find((u) => u.id === id)?.name ?? null;
 
   return repo.openings().map((o) => {
@@ -43,6 +45,14 @@ function openingRows(): Row[] {
     const sets = setsForOpening(o.id);
     const vault = repo.linkVault(o.id);
     const apps = repo.applications(o.id);
+    const appIds = new Set(apps.map((app) => app.id));
+    const openingInterviews = interviews.filter((interview) => appIds.has(interview.applicationId));
+    const rounds = repo.reviewRounds(o.id);
+    const levelOwners = new Set([...o.assignedTaIds, ...vault.map((row) => row.addedBy)]);
+    const levels = [...levelOwners].flatMap((userId) => repo.allLinkLevels(o.id, userId));
+    const [l1, l2, l3, l4] = MASTER_SHEET_SLOTS.map((n) => levelSlot(levels, vault, n));
+    const [set1, set2, set3, set4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "director", n));
+    const [client1, client2, client3, client4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "client", n));
     const target = PRIORITY_TARGET[o.priorityTier].days;
     const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : null;
 
@@ -74,18 +84,49 @@ function openingRows(): Row[] {
       // in a set — which is every new applicant (audit finding 29).
       totalCvs: apps.filter((a) => a.sourcingChannel !== "SCOOP").length,
       setsClosed: sets.filter((s) => s.status === "closed").length,
-      hunted: apps.filter((a) => a.sourcingChannel === "HH").length,
+      // A hunted profile exists before its CV reaches the pipeline. Counting
+      // only HH applications hid everyone still being contacted in Excel Tables.
+      hunted: vault.length,
       eyeMarked: vault.filter((v) => v.isEyeMarked).length,
-      approached: vault.filter((v) => v.outcome !== "no_contact").length,
+      contacted: vault.filter((v) => v.outcome !== "no_contact" || v.conversationLog.length > 0).length,
+      approached: vault.filter((v) => v.outcome !== "no_contact" || v.conversationLog.length > 0).length,
       inPipeline: apps.length,
       directorShortlist: c.director_shortlist ?? 0,
       clientShortlist: c.client_shortlist ?? 0,
-      interviewed: c.interview ?? 0,
+      interviewed: new Set(openingInterviews.filter((i) => i.outcome === "attended").map((i) => i.applicationId)).size,
       placed: c.placed ?? 0,
       rejected: (c.rejected ?? 0) + (c.dropped_out ?? 0),
       valueInProgress: o.valueOnProgressing,
       valuePlaced: o.valueOfPlacement,
+      valueLost: o.valueLost,
+      valueOnHold: o.positionStatus === "hold" ? o.valueOnProgressing : null,
       reference: o.positionCode,
+      l1Date: l1.at, l1Profiles: l1.count,
+      l2Date: l2.at, l2Profiles: l2.count,
+      l3Date: l3.at, l3Profiles: l3.count,
+      l4Date: l4.at, l4Profiles: l4.count,
+      totalLs: vault.filter((row) => row.level !== null && row.level !== undefined).length,
+      set1Date: set1.at, set1Cvs: set1.count,
+      set2Date: set2.at, set2Cvs: set2.count,
+      set3Date: set3.at, set3Cvs: set3.count,
+      set4Date: set4.at, set4Cvs: set4.count,
+      cvsSent: uniqueSubmitted(rounds),
+      internalShortlist1: set1.shortlisted,
+      internalShortlist2: set2.shortlisted,
+      internalShortlist3: set3.shortlisted,
+      internalShortlist4: set4.shortlisted,
+      internalShortlistTotal: set1.shortlisted + set2.shortlisted + set3.shortlisted + set4.shortlisted,
+      externalShortlist1: client1.shortlisted,
+      externalShortlist2: client2.shortlisted,
+      externalShortlist3: client3.shortlisted,
+      externalShortlist4: client4.shortlisted,
+      externalShortlistTotal: client1.shortlisted + client2.shortlisted + client3.shortlisted + client4.shortlisted,
+      withdrawn: apps.filter((app) => app.stage === "dropped_out").length,
+      finalists: new Set(
+        openingInterviews
+          .filter((i) => i.outcome !== "cancelled" && (i.round >= 3 || /\bfinal\b/i.test(i.title ?? "")))
+          .map((i) => i.applicationId),
+      ).size,
     };
   });
 }
@@ -413,7 +454,9 @@ export function runReport(spec: ReportSpec): ReportResult {
   } else {
     const cols: string[] = spec.columns.length ? spec.columns : ds.fields.slice(0, 6).map((f) => f.key);
     columns = cols.map((k) => ({ key: k, label: labelOf(k), type: typeOf(k) }));
-    out = rows.map((r) => Object.fromEntries(cols.map((k) => [k, r[k] ?? null])) as Row);
+    // Keep the source id beside the visible cells. It is not a report column or
+    // an export cell; interactive report views use it to open or edit the row.
+    out = rows.map((r) => ({ id: r.id ?? null, ...Object.fromEntries(cols.map((k) => [k, r[k] ?? null])) }) as Row);
   }
 
   if (spec.sort) {

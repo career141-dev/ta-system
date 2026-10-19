@@ -74,6 +74,7 @@ import type {
   FeedbackItem,
   FeedbackStatus,
 } from "./types";
+import { makeReviewToken } from "@/lib/reviewToken";
 import { RETIRED_STAGES } from "./types";
 import { buildSeed } from "./seed";
 import { INTERVIEW_STATUS_LABEL, interviewStatus, whenLabel } from "@/lib/interviews";
@@ -2628,12 +2629,11 @@ const rawRepo = {
     subject: string;
     dispatch?: ReviewRound["dispatch"];
     researchLink?: string | null;
+    token?: string;
   }): ReviewRound {
     // Short, unambiguous, and readable in a subject line. Excludes the letters
     // that are misread when somebody retypes one by hand.
-    const token = `C141-${Array.from({ length: 6 }, () =>
-      "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)],
-    ).join("")}`;
+    const token = input.token ?? makeReviewToken();
 
     const round: ReviewRound = {
       id: `rr_${Math.random().toString(36).slice(2, 10)}`,
@@ -2642,6 +2642,8 @@ const rawRepo = {
       token,
       // Filled when a mailbox is connected and the mail actually leaves.
       messageId: null,
+      conversationId: null,
+      internetMessageId: null,
       setNumber: input.setNumber,
       applicationIds: input.applicationIds,
       sentBy: input.sentBy,

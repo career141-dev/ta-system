@@ -26,6 +26,8 @@ type DeltaMessage = {
   subject?: string | null;
   receivedDateTime?: string | null;
   hasAttachments?: boolean | null;
+  conversationId?: string | null;
+  internetMessageId?: string | null;
   from?: { emailAddress?: { address?: string | null } | null } | null;
   "@removed"?: unknown;
 };
@@ -42,7 +44,7 @@ export const syncMailbox = internalAction({
       box.nextLink ??
       box.deltaLink ??
       `${GRAPH}/users/${encodeURIComponent(args.mailbox)}/mailFolders/inbox/messages/delta` +
-        `?$select=subject,from,receivedDateTime,hasAttachments` +
+        `?$select=subject,from,receivedDateTime,hasAttachments,conversationId,internetMessageId` +
         `&$filter=${encodeURIComponent(`receivedDateTime ge ${since}`)}`;
 
     let recorded = 0;
@@ -86,6 +88,8 @@ export const syncMailbox = internalAction({
             subject: (m.subject ?? "").slice(0, 500),
             fromAddress: (m.from?.emailAddress?.address ?? "").toLowerCase(),
             hasAttachments: Boolean(m.hasAttachments),
+            conversationId: m.conversationId ?? undefined,
+            internetMessageId: m.internetMessageId ?? undefined,
           }))
           .filter((m) => m.receivedAt >= box.backfillFrom);
         if (messages.length) {

@@ -12,7 +12,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { projectOpening } from "./model/projections";
-import { requireActor, assertJobAccess, optionalActor} from "./guard";
+import { requireActor, assertJobAccess, isDeskWideUser, optionalActor} from "./guard";
 import { scheduleExtraction } from "./requirements";
 import { autoFollowUpPatch } from "../lib/followUpScope";
 import { firstPostFor } from "../lib/firstPost";
@@ -22,6 +22,7 @@ import { workingStageKey } from "../../src/lib/workingStage";
 import { recordActiveMode, refreshWorkdayChecks } from "./workdays";
 import { invalidateJdReviews, recordJdReview } from "../lib/workdayChecks";
 import { isGone } from "../../src/lib/bin";
+import { masterSheetStatusFields } from "../../src/lib/masterSheet";
 
 
 export const list = internalQuery({
@@ -144,6 +145,91 @@ export const updateTaFields = internalMutation({
 
     await ctx.db.patch(jobId, patch);
     return { ok: true };
+  },
+});
+
+/**
+ * Save the few source values that the Master Sheet owns. Everything else in
+ * that sheet is calculated from the workflow and is deliberately not writable.
+ * The change and its reason are recorded in the same transaction as the job,
+ * so an edit can never exist without its audit trail.
+ */
+export const updateMasterSheet = internalMutation({
+  args: {
+    actorId: v.string(),
+    openingId: v.string(),
+    positionStatus: v.union(
+      v.literal("active"),
+      v.literal("hold"),
+      v.literal("lost"),
+      v.literal("filled"),
+    ),
+    assignedAt: v.union(v.number(), v.null()),
+    closedAt: v.union(v.number(), v.null()),
+    valueOnProgressing: v.union(v.number(), v.null()),
+    valueOfPlacement: v.union(v.number(), v.null()),
+    valueLost: v.union(v.number(), v.null()),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const jobId = args.openingId as Id<"jobs">;
+    const job = await ctx.db.get(jobId);
+    if (!job || isGone(job)) throw new Error("Opening not found");
+    if (!isDeskWideUser(user)) {
+      await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter"]);
+    }
+
+    const reason = args.reason.trim();
+    if (reason.length < 3) throw new Error("Add a short reason for this Master Sheet change.");
+    if (reason.length > 500) throw new Error("Keep the change reason under 500 characters.");
+
+    const status = masterSheetStatusFields(args.positionStatus, args.closedAt, job.closedAt ?? null);
+    const before = {
+      positionStatus: job.positionStatus ?? null,
+      status: job.status,
+      assignedAt: job.assignedAt ?? null,
+      closedAt: job.closedAt ?? null,
+      valueOnProgressing: job.valueOnProgressing ?? null,
+      valueOfPlacement: job.valueOfPlacement ?? null,
+      valueLost: job.valueLost ?? null,
+    };
+    const after = {
+      positionStatus: args.positionStatus,
+      status: status.backendStatus,
+      assignedAt: args.assignedAt,
+      closedAt: status.closedAt,
+      valueOnProgressing: args.valueOnProgressing,
+      valueOfPlacement: args.valueOfPlacement,
+      valueLost: args.valueLost,
+    };
+    const changes = Object.fromEntries(
+      Object.entries(after)
+        .filter(([key, value]) => before[key as keyof typeof before] !== value)
+        .map(([key, value]) => [key, { from: before[key as keyof typeof before], to: value }]),
+    );
+    if (Object.keys(changes).length === 0) return { ok: true, changed: false };
+
+    await ctx.db.patch(jobId, {
+      positionStatus: after.positionStatus,
+      status: after.status,
+      assignedAt: after.assignedAt ?? undefined,
+      closedAt: after.closedAt ?? undefined,
+      valueOnProgressing: after.valueOnProgressing ?? undefined,
+      valueOfPlacement: after.valueOfPlacement ?? undefined,
+      valueLost: after.valueLost ?? undefined,
+      updatedAt: new Date().toISOString(),
+    });
+    await ctx.db.insert("activityLog", {
+      actorId: user._id,
+      actorName: user.fullName,
+      action: "master_sheet_updated",
+      entityType: "job",
+      entityId: args.openingId,
+      metadata: { reason, changes },
+      occurredAt: new Date().toISOString(),
+    });
+    return { ok: true, changed: true };
   },
 });
 
