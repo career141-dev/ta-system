@@ -2,6 +2,7 @@ import Link from "next/link";
 import { updateMasterSheetOpening } from "@/app/actions";
 import { colomboDateValue } from "@/lib/calendar";
 import { cellText, type Column, type ReportSpec, type Row } from "@/lib/reportSpec";
+import { MasterSheetViewport } from "./MasterSheetViewport";
 
 const EDITABLE = new Set([
   "positionStatus",
@@ -118,13 +119,6 @@ export function MasterSheetTable({
   const sectionGroups = groups(columns);
   return (
     <>
-      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-rule bg-paper px-4 py-3 text-[11.5px] text-ink-soft">
-        <span><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-amber-300 bg-amber-50" />Yellow cells can be edited</span>
-        <span><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-rule bg-surface" />Calculated cells follow live workflow records</span>
-        <span>Click a calculated value to open its source.</span>
-        <span className="ml-auto">Save one row at a time with a reason.</span>
-      </div>
-
       {rows.map((row) => {
         const openingId = String(row.id ?? "");
         return (
@@ -134,8 +128,9 @@ export function MasterSheetTable({
         );
       })}
 
-      <div className="max-h-[72vh] overflow-auto rounded-xl border border-rule bg-surface">
-        <table className="min-w-max border-separate border-spacing-0 text-left">
+      <MasterSheetViewport>
+        <div className="max-h-[72vh] overflow-auto rounded-xl border border-rule bg-surface">
+          <table className="min-w-max border-separate border-spacing-0 text-left">
           <thead className="sticky top-0 z-20">
             <tr>
               {sectionGroups.map((group) => (
@@ -221,8 +216,9 @@ export function MasterSheetTable({
               );
             })}
           </tbody>
-        </table>
-      </div>
+          </table>
+        </div>
+      </MasterSheetViewport>
     </>
   );
 }
