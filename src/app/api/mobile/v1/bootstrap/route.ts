@@ -28,6 +28,7 @@ export async function GET() {
 
   const clients = repo.clients();
   const visibleOpenings = repo.openingsForUser(user);
+  const visibleOpeningIds = new Set(visibleOpenings.map((opening) => opening.id));
   const openings = visibleOpenings.filter((opening) => opening.status === "open");
   const alerts = alertsFor(user.id);
   const readAlertIds = repo.readAlertIds(user.id);
@@ -35,11 +36,9 @@ export async function GET() {
   const interviews = repo
     .interviews()
     .filter((interview) => interview.outcome === "pending" && interview.scheduledAt > Date.now())
-    .sort((a, b) => a.scheduledAt - b.scheduledAt)
-    .slice(0, 5)
     .flatMap((interview) => {
       const application = repo.application(interview.applicationId);
-      if (!application) return [];
+      if (!application || !visibleOpeningIds.has(application.openingId)) return [];
       const candidate = repo.candidate(application.candidateId);
       const opening = repo.opening(application.openingId);
       if (!candidate || !opening) return [];
@@ -53,7 +52,9 @@ export async function GET() {
         mode: interview.mode,
         confirmed: interview.confirmedAt !== null,
       }];
-    });
+    })
+    .sort((a, b) => a.scheduledAt - b.scheduledAt)
+    .slice(0, 5);
 
   const openingRows = openings.map((opening) => {
     const counts = stageCounts(opening.id);
