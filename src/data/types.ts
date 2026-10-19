@@ -847,6 +847,13 @@ export interface StrategyProof {
   submittedAt: number | null;
 }
 
+/** A post-release assignment that the named TA must acknowledge before working it. */
+export interface StrategyAcknowledgement {
+  taId: Id;
+  assignedAt: number;
+  acceptedAt: number | null;
+}
+
 /**
  * One strategy on one job: a row of the job's table. It exists once the lead has
  * acted on it (put a TA on it, dated it or struck it through); a strategy
@@ -860,6 +867,12 @@ export interface StrategyAssignment {
   strategyName: string;
   /** The TAs it is given to ("Done by"). */
   doneBy: Id[];
+  /**
+   * Explicit acknowledgements for assignments made after this feature shipped.
+   * No entry means the assignment predates the feature and is grandfathered as
+   * accepted; a null acceptedAt is a new assignment waiting for the TA.
+   */
+  acknowledgements?: StrategyAcknowledgement[];
   /** The day the lead assigned it (a Colombo day), or null. */
   assignedAt: number | null;
   assignedBy: Id | null;

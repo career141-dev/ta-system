@@ -123,16 +123,23 @@ eq("ambiguous set falls back to the newest", ambiguous.round?.id, "r_sep11");
 eq("and says it is a guess", /most recent/.test(ambiguous.note), true);
 eq("and offers the other set", ambiguous.near.map((r) => r.id), ["r_sep1"]);
 
-const middaySubjects = [
-  "MIDDAY 1 - 2026-10-16 - SET 1 - DELMO - BRAND MANAGER - 2 CVs",
-  "MIDDAY 2 - 2026-10-16 - SET 1 - DELMO - BRAND MANAGER - 2 CVs",
-  "SET 1 - DELMO - BRAND MANAGER - 2 CVs",
+// Midday and EOD now intentionally use the same subject. Provider thread IDs
+// still identify the exact email; a legacy subject-only reply remains a
+// visible best-effort match to the most recent one.
+const dailySubject = "SET 1 - DELMO - BRAND MANAGER - 2 CVs";
+const middayRounds = [
+  round("midday:0", "op_brand", "director", 1000, "awaiting", dailySubject, "<midday-1@career141.com>"),
+  round("midday:1", "op_brand", "director", 1001, "awaiting", dailySubject, "<midday-2@career141.com>"),
+  round("midday:2", "op_brand", "director", 1002, "awaiting", dailySubject, "<eod@career141.com>"),
 ];
-const middayRounds = middaySubjects.map((subject, i) => round(`midday:${i}`, "op_brand", "director", 1000 + i, "awaiting", subject));
-for (const [i, subject] of middaySubjects.entries()) {
-  eq(`a reply identifies daily email ${i + 1} with the same set and CV count`, M("director@career141.com", `Re: ${subject}`, middayRounds).round?.id, `midday:${i}`);
+for (const [i, messageId] of ["<midday-1@career141.com>", "<midday-2@career141.com>", "<eod@career141.com>"].entries()) {
+  eq(`the thread identifies daily email ${i + 1} when subjects are identical`, M("director@career141.com", `Re: ${dailySubject}`, middayRounds, messageId).round?.id, `midday:${i}`);
 }
-eq("a revised EOD reply still identifies its original round", M("director@career141.com", `Re: REVISED - ${middaySubjects[2]}`, middayRounds).round?.id, "midday:2");
+const ambiguousDaily = M("director@career141.com", `Re: ${dailySubject}`, middayRounds);
+eq("an identical subject without a thread selects the latest daily email", ambiguousDaily.round?.id, "midday:2");
+eq("an identical subject without a thread reports the fallback", /most recent/.test(ambiguousDaily.note), true);
+eq("an identical subject without a thread offers the other emails", ambiguousDaily.near.map((r) => r.id), ["midday:0", "midday:1"]);
+eq("a revised EOD reply still identifies the latest round", M("director@career141.com", `Re: REVISED - ${dailySubject}`, middayRounds).round?.id, "midday:2");
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

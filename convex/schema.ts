@@ -2890,6 +2890,12 @@ export default defineSchema({
     /** The name when the row was made, kept if the strategy is renamed or retired. */
     strategyName: v.string(),
     doneBy: v.array(v.id("users")),
+    /** New assignments require acknowledgement; absent entries are grandfathered. */
+    acknowledgements: v.optional(v.array(v.object({
+      taId: v.id("users"),
+      assignedAt: v.number(),
+      acceptedAt: v.union(v.number(), v.null()),
+    }))),
     assignedAt: v.optional(v.union(v.number(), v.null())),
     assignedBy: v.optional(v.union(v.id("users"), v.null())),
     byRole: v.optional(v.union(v.string(), v.null())),

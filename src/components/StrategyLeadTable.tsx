@@ -19,7 +19,12 @@ export interface LeadStrategyLine {
   rowId: string | null;
   ticked: boolean;
   struck: boolean;
-  doneBy: { id: string; name: string }[];
+  doneBy: {
+    id: string;
+    name: string;
+    acceptance: "not_assigned" | "pending" | "accepted";
+    acceptedLabel: string | null;
+  }[];
   /** "YYYY-MM-DD" or "". */
   assignedValue: string;
   doneValue: string;
@@ -113,7 +118,7 @@ export function StrategyLeadTable({
 
       for (const a of adds) {
         if (!doneBy.some((d) => d.id === a.person.id)) {
-          doneBy.push(a.person);
+          doneBy.push({ ...a.person, acceptance: "pending", acceptedLabel: null });
         }
       }
       if (removes.length > 0) {
@@ -237,8 +242,14 @@ export function StrategyLeadTable({
                   <td className={td}>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {l.doneBy.map((d) => (
-                        <span key={d.id} className="inline-flex items-center gap-1 rounded-full border border-rule bg-tag py-0.5 pl-2.5 pr-1 text-[12px]">
-                          {d.name}
+                        <span key={d.id} className="inline-flex items-center gap-1.5 rounded-full border border-rule bg-tag py-0.5 pl-2.5 pr-1 text-[12px]">
+                          <span>{d.name}</span>
+                          <span
+                            className={`text-[10.5px] font-medium ${d.acceptance === "pending" ? "text-warn" : "text-brand"}`}
+                            title={d.acceptedLabel ?? "The TA has not accepted this strategy yet"}
+                          >
+                            {d.acceptance === "pending" ? "Awaiting acceptance" : `✓ ${d.acceptedLabel ?? "Accepted"}`}
+                          </span>
                           <button
                             type="button"
                             onClick={() => handleRemove(l.strategyId, l.rowId, d.id)}

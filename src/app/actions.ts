@@ -6108,6 +6108,7 @@ export async function addStrategyDoneBy(formData: FormData) {
     byUserId: user.id,
     byRole: user.role,
     today: colomboDayStart(Date.now()),
+    now: Date.now(),
   });
   if (!r) await fail(`${s!.name} is retired. Bring it back on the Strategy list first.`);
   revalidateStrategies(openingId);
@@ -6139,6 +6140,17 @@ export async function removeStrategyDoneBy(formData: FormData) {
   repo.removeStrategyDoneBy(row!.id, taId);
   revalidateStrategies(row!.openingId);
   await done("Taken off.");
+}
+
+/** Accept every new strategy explicitly assigned to this TA on the job. */
+export async function acceptStrategyAssignments(formData: FormData) {
+  const openingId = String(formData.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorizeOn(openingId, "strategy.work");
+  const accepted = repo.acceptStrategyAssignments({ openingId, taId: user.id });
+  revalidateStrategies(openingId);
+  if (accepted === 0) await note("There are no new strategy assignments to accept.");
+  await done(`Accepted ${accepted} ${accepted === 1 ? "strategy" : "strategies"}. You can start working on ${accepted === 1 ? "it" : "them"} now.`);
 }
 
 /** The day the lead assigned a strategy; empty clears it. */
@@ -6204,6 +6216,7 @@ export async function submitStrategyUpdate(formData: FormData) {
   if (rows.length === 0) await fail("None of those strategies are yours to update.");
 
   const taken = repo.submitStrategyRows({ openingId, taId: user.id, rows });
+  if (taken === 0) await fail("Accept your new strategy assignments before submitting an update.");
   revalidateStrategies(openingId);
 
   // The TA Lead is told a submission arrived, not what is in it.
@@ -6331,6 +6344,10 @@ export async function updateStrategyLineInline(_: ActionResult | null, formData:
 
 export async function submitStrategyUpdateInline(_: ActionResult | null, formData: FormData) {
   return inline(() => submitStrategyUpdate(formData));
+}
+
+export async function acceptStrategyAssignmentsInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => acceptStrategyAssignments(formData));
 }
 
 export async function removeStrategyProofInline(_: ActionResult | null, formData: FormData) {

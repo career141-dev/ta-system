@@ -14,7 +14,17 @@ import path from "node:path";
 import { can } from "@/lib/auth";
 import { scopeStrategies, seatFor } from "@/lib/visibility";
 import { colomboDateValue, colomboDayFromValue, colomboDayStart } from "@/lib/calendar";
-import { DESK_STRATEGIES, countsOf, isPlannable, plannerByTa, proofsForLead, proofsVisibleTo, strategyTable } from "@/lib/strategyPlanner";
+import {
+  DESK_STRATEGIES,
+  countsOf,
+  isPlannable,
+  pendingStrategyAcceptances,
+  plannerByTa,
+  proofsForLead,
+  proofsVisibleTo,
+  strategyAcceptanceStatus,
+  strategyTable,
+} from "@/lib/strategyPlanner";
 import type { Assignment, StrategyAssignment, User } from "@/data/types";
 
 // The rows are kept in the in-memory JSON store, in a scratch directory.
@@ -126,7 +136,7 @@ console.log("\nColombo days in the date columns");
 const o = repo.openings()[0];
 const [li, rs, dh, sc] = repo.strategies();
 const today = colomboDayStart(Date.UTC(2026, 9, 8, 6, 0));
-const lead = { byUserId: "u_lead", byRole: "ta_lead" as const, today };
+const lead = { byUserId: "u_lead", byRole: "ta_lead" as const, today, now: 500 };
 
 console.log("\nThe lead puts TAs on strategies");
 {
@@ -136,6 +146,7 @@ console.log("\nThe lead puts TAs on strategies");
   eq("it keeps the strategy's name", a?.row.strategyName, li.name);
   const b = repo.addStrategyDoneBy({ openingId: o.id, strategyId: li.id, taId: "u_imalsha", ...lead });
   eq("a second TA joins the same row, no second row", [b?.created, b?.added, b?.row.doneBy, repo.strategyAssignments(o.id).length], [false, true, ["u_nuha", "u_imalsha"], 1]);
+  eq("each new assignment starts pending", b?.row.doneBy.map((id) => strategyAcceptanceStatus(b.row, id)), ["pending", "pending"]);
   const c = repo.addStrategyDoneBy({ openingId: o.id, strategyId: li.id, taId: "u_nuha", ...lead });
   eq("the same TA twice is nothing", [c?.added, c?.row.doneBy.length], [false, 2]);
   eq("an unknown strategy is refused", repo.addStrategyDoneBy({ openingId: o.id, strategyId: "st_nope", taId: "u_nuha", ...lead }), null);
@@ -154,6 +165,48 @@ console.log("\nThe lead puts TAs on strategies");
   repo.updateStrategyLine({ openingId: o.id, strategyId: li.id, selected: false, byUserId: "u_lead", byRole: "ta_lead" });
   repo.removeStrategyDoneBy(row.id, "u_nuha");
   eq("a row left with nothing on it goes", repo.strategyAssignment(row.id), undefined);
+}
+
+console.log("\nA TA accepts a batch of assigned strategies");
+{
+  const assigned = [li, rs, dh].map((s, i) => repo.addStrategyDoneBy({
+    openingId: o.id,
+    strategyId: s.id,
+    taId: "u_nuha",
+    ...lead,
+    now: 600 + i,
+  })!.row);
+  eq("three new rows are pending together", pendingStrategyAcceptances(assigned), 3);
+  eq("a legacy row without acknowledgement metadata is grandfathered", strategyAcceptanceStatus({ ...assigned[0], acknowledgements: undefined }, "u_nuha"), "accepted");
+
+  eq("one action accepts all three", repo.acceptStrategyAssignments({ openingId: o.id, taId: "u_nuha", now: 900 }), 3);
+  eq(
+    "the batch has one acceptance timestamp",
+    assigned.map((r) => repo.strategyAssignment(r.id)?.acknowledgements?.find((a) => a.taId === "u_nuha")?.acceptedAt),
+    [900, 900, 900],
+  );
+  eq("accepting the same batch again is harmless", repo.acceptStrategyAssignments({ openingId: o.id, taId: "u_nuha", now: 901 }), 0);
+
+  const later = repo.addStrategyDoneBy({ openingId: o.id, strategyId: sc.id, taId: "u_nuha", ...lead, now: 1_000 })!.row;
+  eq("a later strategy alone is pending", [pendingStrategyAcceptances(repo.strategyAssignments(o.id)), strategyAcceptanceStatus(later, "u_nuha")], [1, "pending"]);
+  eq("a hidden unticked assignment is not waiting for acceptance", pendingStrategyAcceptances([{ ...later, selected: false }]), 0);
+  eq("the earlier batch stays accepted", assigned.map((r) => strategyAcceptanceStatus(repo.strategyAssignment(r.id)!, "u_nuha")), ["accepted", "accepted", "accepted"]);
+
+  const shared = repo.addStrategyDoneBy({ openingId: o.id, strategyId: li.id, taId: "u_imalsha", ...lead, now: 1_100 })!.row;
+  eq("acceptance is per TA on a shared strategy", [strategyAcceptanceStatus(shared, "u_nuha"), strategyAcceptanceStatus(shared, "u_imalsha")], ["accepted", "pending"]);
+  repo.removeStrategyDoneBy(shared.id, "u_imalsha");
+  const reassigned = repo.addStrategyDoneBy({ openingId: o.id, strategyId: li.id, taId: "u_imalsha", ...lead, now: 1_200 })!.row;
+  eq("removing and re-adding requires fresh acceptance", strategyAcceptanceStatus(reassigned, "u_imalsha"), "pending");
+
+  repo.setStrategyNotApplicable({ openingId: o.id, strategyId: sc.id, notApplicable: true, byUserId: "u_lead", byRole: "ta_lead" });
+  eq("N/A assignments are not counted or accepted", [pendingStrategyAcceptances(repo.strategyAssignments(o.id)), repo.acceptStrategyAssignments({ openingId: o.id, taId: "u_nuha", now: 1_300 })], [1, 0]);
+  repo.setStrategyNotApplicable({ openingId: o.id, strategyId: sc.id, notApplicable: false, byUserId: "u_lead", byRole: "ta_lead" });
+  eq("a restored assignment can be accepted", repo.acceptStrategyAssignments({ openingId: o.id, taId: "u_nuha", now: 1_400 }), 1);
+
+  for (const s of [li, rs, dh, sc]) {
+    const row = repo.strategyRow(o.id, s.id);
+    if (row) repo.removeStrategyRow(row.id);
+  }
 }
 
 console.log("\nThe lead ticks strategies and edits a line in place (9 Oct)");
@@ -198,6 +251,14 @@ console.log("\nThe TA fills the row in and submits");
   const theirs = repo.strategyRow(o.id, dh.id)!;
   const struck = repo.strategyRow(o.id, sc.id)!;
   eq("before submitting, the lead has nothing from the TA", [mine.doneAt, mine.note, mine.submittedAt], [null, null, null]);
+
+  eq("a pending assigned row cannot be submitted", repo.submitStrategyRows({
+    openingId: o.id,
+    taId: "u_nuha",
+    now: 999,
+    rows: [{ rowId: mine.id, doneAt: today, note: "too early" }],
+  }), 0);
+  eq("accepting unlocks that row", repo.acceptStrategyAssignments({ openingId: o.id, taId: "u_nuha", now: 1_000 }), 1);
 
   const proof = { id: "stg_1", contentType: "image/png", size: 1234, addedAt: 5, addedBy: "u_nuha", submittedAt: null };
   eq("a proof is attached to the row", repo.addStrategyProof(mine.id, proof), true);

@@ -10,7 +10,7 @@ import { requireSourcingSeat } from "../sourcingGate";
 import { StatRow } from "@/components/StatRow";
 import { StrategyTaTable, type TaStrategyRow } from "@/components/StrategyTaTable";
 import { colomboDateValue } from "@/lib/calendar";
-import { countsOf, dayLabel, isTicked, proofsVisibleTo, strategyTable } from "@/lib/strategyPlanner";
+import { countsOf, dayLabel, isTicked, proofsVisibleTo, strategyAcceptanceStatus, strategyTable } from "@/lib/strategyPlanner";
 
 /**
  * Strategies on this job (8 Oct), as the TA sees them: the strategies their TA
@@ -49,6 +49,7 @@ export default async function OpeningStrategiesPage({ params }: { params: Promis
       struck: r.notApplicable,
       doneBy: r.doneBy.map(nameOf),
       doneByIds: r.doneBy,
+      acceptance: strategyAcceptanceStatus(r, user.id),
       submittedById: r.submittedBy ?? null,
       submittedByName: submittedUser?.name ?? null,
       assignedLabel: dayLabel(r.assignedAt),

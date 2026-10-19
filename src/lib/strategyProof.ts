@@ -1,5 +1,5 @@
 import type { StrategyAssignment, User } from "@/data/types";
-import { isTicked, proofsVisibleTo } from "@/lib/strategyPlanner";
+import { isTicked, proofsVisibleTo, strategyAcceptanceStatus } from "@/lib/strategyPlanner";
 import { isTa } from "@/lib/auth";
 
 /**
@@ -56,7 +56,7 @@ export function checkProofUpload(input: { size: number; head: Uint8Array; existi
  * route has already checked they are on the job). A lead does not attach for them.
  */
 export function mayAttachProof(user: Pick<User, "id" | "role" | "isActive">, row: StrategyAssignment): boolean {
-  return user.isActive && isTa(user) && !row.notApplicable && isTicked(row);
+  return user.isActive && isTa(user) && !row.notApplicable && isTicked(row) && strategyAcceptanceStatus(row, user.id) !== "pending";
 }
 
 /** Whether this person may open this picture: a lead the submitted ones, a TA their own. */

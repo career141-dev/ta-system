@@ -26,6 +26,36 @@ export function isTicked(r: Pick<StrategyAssignment, "selected" | "doneBy">): bo
   return r.selected ?? r.doneBy.length > 0;
 }
 
+export type StrategyAcceptanceStatus = "not_assigned" | "pending" | "accepted";
+
+/**
+ * Missing metadata is intentional: assignments from before acknowledgement was
+ * introduced remain accepted without a production backfill.
+ */
+export function strategyAcceptanceStatus(
+  row: Pick<StrategyAssignment, "doneBy" | "acknowledgements">,
+  taId: string,
+): StrategyAcceptanceStatus {
+  if (!row.doneBy.includes(taId)) return "not_assigned";
+  const acknowledgement = row.acknowledgements?.find((a) => a.taId === taId);
+  return acknowledgement?.acceptedAt === null ? "pending" : "accepted";
+}
+
+export function strategyAcceptedAt(
+  row: Pick<StrategyAssignment, "acknowledgements">,
+  taId: string,
+): number | null {
+  return row.acknowledgements?.find((a) => a.taId === taId)?.acceptedAt ?? null;
+}
+
+/** Active, explicit assignments still waiting for their named TA. */
+export function pendingStrategyAcceptances(rows: StrategyAssignment[]): number {
+  return rows.reduce(
+    (total, row) => total + (row.notApplicable || !isTicked(row) ? 0 : row.doneBy.filter((taId) => strategyAcceptanceStatus(row, taId) === "pending").length),
+    0,
+  );
+}
+
 /** A row counts toward progress when it is ticked or has a TA on it, unless it is struck through. */
 export function countsOf(rows: StrategyAssignment[]): StrategyCounts {
   const c: StrategyCounts = { assigned: 0, done: 0, notApplicable: 0 };
@@ -148,7 +178,16 @@ export function leadLine({ strategy, row }: StrategyTableLine, nameOf: (id: stri
     rowId: row?.id ?? null,
     ticked: row ? isTicked(row) : false,
     struck: !!row?.notApplicable,
-    doneBy: (row?.doneBy ?? []).map((id) => ({ id, name: nameOf(id) })),
+    doneBy: (row?.doneBy ?? []).map((id) => {
+      const acceptance = row ? strategyAcceptanceStatus(row, id) : "not_assigned";
+      const acceptedAt = row ? strategyAcceptedAt(row, id) : null;
+      return {
+        id,
+        name: nameOf(id),
+        acceptance,
+        acceptedLabel: acceptance === "accepted" ? (acceptedAt ? `Accepted ${dayLabel(acceptedAt)}` : "Accepted") : null,
+      };
+    }),
     assignedValue: colomboDateValue(row?.assignedAt ?? null),
     doneValue: colomboDateValue(row?.doneAt ?? null),
     note: row?.note ?? "",
