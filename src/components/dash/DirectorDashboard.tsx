@@ -48,7 +48,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
 
   return (
     <>
-      <section className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
+      <section className="mb-7 grid grid-cols-2 gap-3 sm:mb-8 sm:grid-cols-4 sm:gap-4">
         {[
           { n: open.length, label: "Open roles" },
           { n: waiting.length, label: "Waiting on you", warn: waiting.length > 0 },
@@ -65,7 +65,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
       </section>
 
       {waiting.length > 0 && (
-        <section className="mb-8">
+        <section className="mb-7 sm:mb-8">
           <h2 className="mb-3.5 text-[13px] font-semibold">Sets waiting on your review</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
@@ -78,9 +78,9 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
                   <Link
                     key={a.id}
                     href={`/openings/${o.id}/pipeline/director_review`}
-                    className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5 hover:bg-paper/60"
+                    className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 active:bg-paper/60 sm:flex sm:flex-wrap sm:gap-x-5 sm:px-7 sm:hover:bg-paper/60"
                   >
-                    <div className="min-w-[220px] flex-1">
+                    <div className="min-w-0 sm:min-w-[220px] sm:flex-1">
                       <p className="text-[13.5px] font-medium">{c?.fullName}</p>
                       <p className="text-[11.5px] text-ink-faint">
                         {repo.client(o.clientId)?.name} · {o.title}
@@ -88,7 +88,7 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
                       </p>
                     </div>
                     <span className="text-[12px] text-ink-soft">
-                      {repo.user(a.ownerTaId ?? "")?.name}
+                      <span className="sr-only">Owner: </span>{repo.user(a.ownerTaId ?? "")?.name}
                     </span>
                   </Link>
                 );
@@ -99,13 +99,13 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
         </section>
       )}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[1fr_1fr]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-7 sm:gap-8 lg:grid-cols-[1fr_1fr]">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Where everyone is</h2>
           <div className="rounded-2xl border border-rule bg-surface px-4 sm:px-7 py-5">
             {totals.map((t) => (
-              <div key={t.stage} className="flex items-center gap-4 border-b border-rule py-3 last:border-b-0">
-                <span className="w-[130px] shrink-0 text-[13px]">{STAGE_LABEL[t.stage]}</span>
+              <div key={t.stage} className="flex items-center gap-3 border-b border-rule py-3 last:border-b-0 sm:gap-4">
+                <span className="w-[104px] shrink-0 text-[12px] leading-tight sm:w-[130px] sm:text-[13px]">{STAGE_LABEL[t.stage]}</span>
                 <div className="h-2 flex-1 overflow-hidden rounded-full bg-tag">
                   <div className="h-full bg-brand" style={{ width: `${(t.n / widest) * 100}%` }} />
                 </div>
@@ -130,15 +130,15 @@ export function DirectorDashboard({ sp = {} }: { sp?: Params }) {
                 );
                 const v = mine.reduce((n, o) => n + (o.valueOnProgressing ?? 0), 0);
                 return (
-                  <div key={cl.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5">
-                    <div className="min-w-[140px] flex-1">
+                  <div key={cl.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 sm:flex sm:flex-wrap sm:gap-x-5 sm:px-7">
+                    <div className="min-w-0 sm:min-w-[140px] sm:flex-1">
                       <p className="text-[13.5px] font-medium">{cl.name}</p>
                       <p className="text-[11.5px] text-ink-faint">
                         {mine.length} open
                       </p>
                     </div>
-                    <span className="tabular text-[12.5px] text-ink-soft">{sets} sets</span>
-                    <span className="tabular w-[64px] text-right text-[12.5px]">
+                    <span className="tabular row-start-2 text-[12.5px] text-ink-soft sm:row-auto">{sets} sets</span>
+                    <span className="tabular row-span-2 row-start-1 text-right text-[12.5px] sm:row-auto sm:w-[64px]">
                       {v ? `$${Math.round(v / 1000)}k` : "—"}
                     </span>
                   </div>

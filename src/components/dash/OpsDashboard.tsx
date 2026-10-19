@@ -42,22 +42,22 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
 
   return (
     <>
-      <section className="mb-8 grid grid-cols-3 gap-2 sm:gap-4">
+      <section className="mb-7 grid grid-cols-3 gap-2 sm:mb-8 sm:gap-4">
         {[
           { n: withClient.length, label: "Sitting with clients" },
           { n: mine.length, label: "To chase", warn: mine.length > 0 },
           { n: interviews.length, label: "Interviews scheduled" },
         ].map((s) => (
-          <div key={s.label} className="min-w-0 rounded-2xl border border-rule bg-surface px-3 py-4 sm:px-6 sm:py-5">
+          <div key={s.label} className="min-w-0 rounded-2xl border border-rule bg-surface px-2.5 py-4 sm:px-6 sm:py-5">
             <div className={`tabular truncate text-[21px] font-semibold leading-none sm:text-[26px] ${s.warn ? "text-warn" : ""}`}>
               {s.n}
             </div>
-            <div className="mt-2 text-[12.5px] text-ink-soft">{s.label}</div>
+            <div className="mt-2 text-[11px] leading-tight text-ink-soft min-[400px]:text-[12px] sm:text-[12.5px]">{s.label}</div>
           </div>
         ))}
       </section>
 
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-7 sm:gap-8 lg:grid-cols-2">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Waiting on client feedback</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
@@ -74,9 +74,9 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
                     <Link
                       key={a.id}
                       href={`/openings/${o.id}/pipeline/client_shortlist`}
-                      className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5 hover:bg-paper/60"
+                      className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 active:bg-paper/60 sm:flex sm:flex-wrap sm:gap-x-5 sm:px-7 sm:hover:bg-paper/60"
                     >
-                      <div className="min-w-[200px] flex-1">
+                      <div className="min-w-0 sm:min-w-[200px] sm:flex-1">
                         <p className="text-[13.5px] font-medium">{c?.fullName}</p>
                         <p className="text-[11.5px] text-ink-faint">
                           {repo.client(o.clientId)?.name} · {o.title}
@@ -115,8 +115,8 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
                         .some((f) => f.kind === "pre_interview" && f.outcome === "reached")
                     : false;
                   return (
-                    <div key={iv.id} className="flex flex-wrap items-center gap-x-5 gap-y-1 px-4 sm:px-7 py-3.5">
-                      <div className="min-w-[200px] flex-1">
+                    <div key={iv.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 px-4 py-3.5 sm:flex sm:flex-wrap sm:gap-x-5 sm:px-7">
+                      <div className="min-w-0 sm:min-w-[200px] sm:flex-1">
                         <p className="text-[13.5px] font-medium">{c?.fullName}</p>
                         <p className="text-[11.5px] text-ink-faint">
                           {o?.title} · {new Date(iv.scheduledAt).toLocaleString("en-GB", {
@@ -146,11 +146,11 @@ export function OpsDashboard({ opsId, sp = {} }: { opsId: string; sp?: Params })
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
             <div className="divide-y divide-rule">
               {chaseList.rows.map((a) => (
-                <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-4 sm:px-7 py-4">
-                  <p className="min-w-[260px] flex-1 text-[13.5px]">{a.detail}</p>
+                <div key={a.id} className="grid grid-cols-1 gap-3 px-4 py-4 sm:flex sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-2 sm:px-7">
+                  <p className="min-w-0 text-[13.5px] sm:min-w-[260px] sm:flex-1">{a.detail}</p>
                   <Link
                     href={a.href}
-                    className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
+                    className="flex min-h-11 items-center justify-center rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors active:bg-brand-soft sm:min-h-0 sm:px-3.5 sm:py-1.5 sm:hover:bg-brand-soft"
                   >
                     {a.action}
                   </Link>

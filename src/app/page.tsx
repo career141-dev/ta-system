@@ -41,9 +41,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   // Spec §13 — four different jobs, four different screens.
   if (user.role === "ta_lead" || user.role === "admin") {
     return (
-      <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
-        <header className="mb-8">
-          <h1 className="text-[24px] font-semibold tracking-tight">
+      <main className="mx-auto max-w-[1180px] px-4 py-5 sm:px-8 sm:py-9">
+        <header className="mb-6 sm:mb-8">
+          <h1 className="text-[22px] font-semibold leading-tight tracking-tight sm:text-[24px]">
             {greeting}, {user.name}
           </h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">
@@ -58,9 +58,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   if (user.role === "director") {
     return (
-      <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
-        <header className="mb-8">
-          <h1 className="text-[24px] font-semibold tracking-tight">
+      <main className="mx-auto max-w-[1180px] px-4 py-5 sm:px-8 sm:py-9">
+        <header className="mb-6 sm:mb-8">
+          <h1 className="text-[22px] font-semibold leading-tight tracking-tight sm:text-[24px]">
             {greeting}, {user.name}
           </h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">Agency-wide</p>
@@ -72,9 +72,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
 
   if (user.role === "ops") {
     return (
-      <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
-        <header className="mb-8">
-          <h1 className="text-[24px] font-semibold tracking-tight">
+      <main className="mx-auto max-w-[1180px] px-4 py-5 sm:px-8 sm:py-9">
+        <header className="mb-6 sm:mb-8">
+          <h1 className="text-[22px] font-semibold leading-tight tracking-tight sm:text-[24px]">
             {greeting}, {user.name}
           </h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">Chasing and coordination</p>
@@ -95,9 +95,9 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   );
 
   return (
-    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
-      <header className="mb-8">
-        <h1 className="text-[24px] font-semibold tracking-tight">
+    <main className="mx-auto max-w-[1180px] px-4 py-5 sm:px-8 sm:py-9">
+      <header className="mb-6 sm:mb-8">
+        <h1 className="text-[22px] font-semibold leading-tight tracking-tight sm:text-[24px]">
           {greeting}, {user.name}
         </h1>
         <p className="mt-1.5 text-[13px] text-ink-soft">
@@ -108,23 +108,23 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
       </header>
 
       {urgentList.pager.total > 0 && (
-        <section className="mb-8 rounded-xl border border-rule bg-surface">
-          <h2 className="border-b border-rule px-7 py-4 text-[13px] font-semibold">
+        <section className="mb-7 overflow-hidden rounded-xl border border-rule bg-surface sm:mb-8">
+          <h2 className="border-b border-rule px-4 py-3.5 text-[13px] font-semibold sm:px-7 sm:py-4">
             Today, in order
           </h2>
           <div className="divide-y divide-rule">
             {urgentList.rows.map((a) => (
-              <div key={a.id} className="flex flex-wrap items-center gap-x-5 gap-y-2 px-7 py-4">
-                <div className="min-w-[260px] flex-1">
+              <div key={a.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 px-4 py-4 sm:flex sm:flex-wrap sm:items-center sm:gap-x-5 sm:gap-y-2 sm:px-7">
+                <div className="min-w-0 sm:min-w-[260px] sm:flex-1">
                   <p className="text-[13.5px]">{a.detail}</p>
                   <p className="mt-0.5 text-[11.5px] text-ink-faint">
                     {a.kind.replace(/_/g, " ")}
                   </p>
                 </div>
-                <span className="tabular text-[12.5px] text-ink-soft">{inHours(a.dueAt)}</span>
+                <span className="tabular whitespace-nowrap text-[12.5px] text-ink-soft">{inHours(a.dueAt)}</span>
                 <Link
                   href={a.href}
-                  className="rounded-full border border-brand-line px-3.5 py-1.5 text-[12.5px] font-medium text-brand hover:bg-brand-soft"
+                  className="col-span-2 flex min-h-11 items-center justify-center rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand active:bg-brand-soft sm:col-span-1 sm:min-h-0 sm:px-3.5 sm:py-1.5 sm:hover:bg-brand-soft"
                 >
                   {a.action}
                 </Link>
@@ -135,12 +135,12 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
         </section>
       )}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-[1fr_300px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-7 sm:gap-8 lg:grid-cols-[1fr_300px]">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">My openings</h2>
           <div className="flex flex-col gap-4">
             {myOpenings.pager.total === 0 && (
-              <div className="rounded-xl border border-rule bg-surface px-7 py-14 text-center text-[13px] text-ink-faint">
+              <div className="rounded-xl border border-rule bg-surface px-4 py-12 text-center text-[13px] text-ink-faint sm:px-7 sm:py-14">
                 {q && openings.length > 0 ? "None of your openings match that search." : "Nothing assigned to you."}
               </div>
             )}
@@ -168,10 +168,10 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                 <Link
                   key={o.id}
                   href={`/openings/${o.id}`}
-                  className="rounded-xl border border-rule bg-surface px-7 py-5 hover:border-rule-strong"
+                  className="rounded-xl border border-rule bg-surface px-4 py-4 active:border-rule-strong active:bg-paper/40 sm:px-7 sm:py-5 sm:hover:border-rule-strong"
                 >
-                  <div className="flex flex-wrap items-start justify-between gap-5">
-                    <div>
+                  <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-5">
+                    <div className="min-w-0">
                       <p className="text-[12px] text-ink-faint">{client?.name}</p>
                       <p className="mt-0.5 text-[15.5px] font-semibold tracking-tight">{o.title}</p>
                       {/* Whether LinkedIn applications reach this job, without opening it (30 Sep). */}
@@ -179,7 +179,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                         <LinkedInPill status={linkedinStatus(posts)} />
                       </div>
                     </div>
-                    <div className="flex gap-7 text-right">
+                    <div className="grid w-full grid-cols-3 gap-2 rounded-lg bg-paper p-3 text-left sm:w-auto sm:rounded-none sm:bg-transparent sm:p-0 sm:text-right">
                       <div>
                         <div className="tabular text-[16px] font-semibold leading-none">
                           {(counts.ai_follow_up ?? 0) + (counts.ta_follow_up ?? 0)}
@@ -231,7 +231,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
                     <Link
                       key={iv.id}
                       href={`/openings/${opening?.id}/candidate/${app?.id}?tab=call`}
-                      className="block px-6 py-4 hover:bg-paper/60"
+                      className="block min-h-11 px-4 py-4 active:bg-paper/60 sm:px-6 sm:hover:bg-paper/60"
                     >
                       <div className="flex items-baseline justify-between gap-3">
                         <span className="truncate text-[13px] font-medium">{cand?.fullName}</span>

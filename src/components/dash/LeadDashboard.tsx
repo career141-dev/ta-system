@@ -97,7 +97,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
 
   return (
     <>
-      <section className="mb-8">
+      <section className="mb-7 sm:mb-8">
         <h2 className="mb-3.5 text-[13px] font-semibold">The team today</h2>
         <div className="overflow-hidden rounded-2xl border border-rule bg-surface shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
           <div className="divide-y divide-rule">
@@ -105,11 +105,11 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
               <p className="px-4 sm:px-7 py-10 text-center text-[12.5px] text-ink-faint">Nobody matches that search.</p>
             )}
             {team.rows.map((l) => (
-              <div key={l.ta.id} className="flex flex-wrap items-center gap-x-6 gap-y-3 px-4 sm:px-7 py-4">
+              <div key={l.ta.id} className="grid grid-cols-[32px_minmax(0,1fr)] items-start gap-x-3 gap-y-4 px-4 py-4 sm:flex sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 sm:px-7">
                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-tag text-[11px] font-bold text-ink-soft">
                   {l.ta.initials}
                 </span>
-                <div className="min-w-[150px] flex-1">
+                <div className="min-w-0 sm:min-w-[150px] sm:flex-1">
                   <p className="text-[13.5px] font-medium">{l.ta.name}</p>
                   {/* Finding 17 — this printed every title joined by a dot, so
                       a TA carrying seventeen roles produced three dense lines
@@ -133,7 +133,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                     )}
                   </p>
                   {l.openings.length > 0 && (
-                    <p className="mt-1 flex items-center gap-1.5 text-[11.5px] text-ink-soft">
+                    <p className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px] text-ink-soft">
                       <span
                         aria-hidden
                         className={`h-1.5 w-1.5 rounded-full ${l.onLinkedIn === l.openings.length ? "bg-brand" : "bg-warn"}`}
@@ -150,7 +150,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                     </p>
                   )}
                 </div>
-                <div className="flex gap-7 text-right">
+                <div className="col-span-2 grid w-full grid-cols-2 gap-2 rounded-lg bg-paper p-3 text-left min-[480px]:grid-cols-4 sm:ml-auto sm:flex sm:w-auto sm:gap-7 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-right">
                   {[
                     { n: l.inPipeline, label: "In pipeline" },
                     { n: l.cvsToday, label: "CVs today", warn: l.cvsToday < 10 && l.openings.length > 0 },
@@ -174,7 +174,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
         <Pager {...team.pager} scroll={false} className="mt-4" />
       </section>
 
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-8 lg:grid-cols-2">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-7 sm:gap-8 lg:grid-cols-2">
         <section>
           <h2 className="mb-3.5 text-[13px] font-semibold">Needs a decision</h2>
           <div className="overflow-hidden rounded-2xl border border-rule bg-surface">
@@ -185,12 +185,12 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
             ) : (
               <div className="divide-y divide-rule">
                 {decisions.rows.map(({ kind, o }) => kind === "unassigned" ? (
-                  <Link key={`u-${o.id}`} href={`/openings/${o.id}`} className="block px-4 sm:px-7 py-4 hover:bg-paper/60">
+                  <Link key={`u-${o.id}`} href={`/openings/${o.id}`} className="block min-h-11 px-4 py-4 active:bg-paper/60 sm:px-7 sm:hover:bg-paper/60">
                     <p className="text-[13.5px]">{o.title}</p>
                     <p className="mt-0.5 text-[11.5px] text-danger">Nobody assigned</p>
                   </Link>
                 ) : kind === "jd" ? (
-                  <Link key={`j-${o.id}`} href={`/openings/${o.id}`} className="block px-4 sm:px-7 py-4 hover:bg-paper/60">
+                  <Link key={`j-${o.id}`} href={`/openings/${o.id}`} className="block min-h-11 px-4 py-4 active:bg-paper/60 sm:px-7 sm:hover:bg-paper/60">
                     <p className="text-[13.5px]">{o.title}</p>
                     <p className="mt-0.5 text-[11.5px] text-warn">
                       JD not approved by{" "}
@@ -200,7 +200,7 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                 ) : (() => {
                   const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
                   return (
-                    <Link key={`s-${o.id}`} href={`/openings/${o.id}`} className="block px-4 sm:px-7 py-4 hover:bg-paper/60">
+                    <Link key={`s-${o.id}`} href={`/openings/${o.id}`} className="block min-h-11 px-4 py-4 active:bg-paper/60 sm:px-7 sm:hover:bg-paper/60">
                       <p className="text-[13.5px]">{o.title}</p>
                       <p className="mt-0.5 text-[11.5px] text-ink-soft">
                         Day {days} against a {o.priorityTier} target of{" "}
@@ -216,14 +216,14 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
         </section>
 
         <section>
-          <div className="mb-3.5 flex items-baseline justify-between gap-3">
+          <div className="mb-3.5 flex flex-col items-start gap-2 sm:flex-row sm:items-baseline sm:justify-between sm:gap-3">
             <h2 className="text-[13px] font-semibold">Every open role</h2>
             {/* The roles LinkedIn applications cannot reliably reach, on their own (30 Sep). */}
             {(notOn.length > 0 || offOnly) && (
               <a
                 href={liHref(!offOnly)}
                 aria-current={offOnly ? "true" : undefined}
-                className={`rounded-full border px-3 py-1 text-[12px] transition-colors ${
+                className={`flex min-h-11 items-center rounded-full border px-3 py-1 text-[12px] transition-colors sm:min-h-0 ${
                   offOnly ? "border-warn bg-warn-soft font-medium text-warn" : "border-rule text-ink-soft hover:border-ink-faint hover:text-ink"
                 }`}
               >
@@ -244,9 +244,9 @@ export function LeadDashboard({ leadId, sp = {} }: { leadId: string; sp?: Params
                   <Link
                     key={o.id}
                     href={`/openings/${o.id}`}
-                    className="flex items-center gap-4 px-4 sm:px-7 py-3.5 hover:bg-paper/60"
+                    className="grid min-h-11 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 px-4 py-3.5 active:bg-paper/60 sm:flex sm:gap-4 sm:px-7 sm:hover:bg-paper/60"
                   >
-                    <div className="min-w-0 flex-1">
+                    <div className="col-span-2 min-w-0 sm:col-span-1 sm:flex-1">
                       <p className="truncate text-[13px]">{o.title}</p>
                       <p className="truncate text-[11.5px] text-ink-faint">
                         {repo.client(o.clientId)?.name} ·{" "}
