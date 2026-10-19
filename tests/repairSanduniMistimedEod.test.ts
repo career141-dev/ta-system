@@ -39,7 +39,9 @@ const ctx = { db } as any;
 const execute = (dryRun: boolean) => (run as any)._handler(ctx, { dryRun });
 
 put("users", { _id: "sanduni", email: "sanduni@career141.com", fullName: "Sanduni", isActive: true });
-put("jobs", { _id: "job", title: "Head of Manufacturing Excellence PGP" });
+// The repair must follow the immutable receipt link even if the opening was
+// renamed or binned after the EOD was accepted.
+put("jobs", { _id: "job", title: "Head of Manufacturing Excellence - PGP", binnedAt: 50 });
 put("taWorkdays", {
   _id: "friday",
   userId: "sanduni",
@@ -105,6 +107,7 @@ put("taWorkdayRequests", {
 
 const preview = await execute(true);
 assert.equal(preview.changed, false);
+assert.equal(preview.summary.opening.title, "Head of Manufacturing Excellence - PGP");
 assert.equal(find("email")!.date, "2026-10-19", "Dry run must not change the email");
 assert.equal(find("monday")!.finishedAt, 40, "Dry run must not reopen the workday");
 
