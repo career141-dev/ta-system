@@ -15,8 +15,9 @@ import { sanitizeSpec,
 import { FAILURE_MESSAGE } from "@/lib/ai";
 import type { AiFailure } from "@/lib/ai";
 import { primeStore } from "@/data/prime";
-import { can } from "@/lib/auth";
+import { can, isDeskWide, isTa } from "@/lib/auth";
 import { MasterSheetTable } from "./MasterSheetTable";
+import { notFound } from "next/navigation";
 
 /**
  * Reports — rebuilt 12 September.
@@ -44,6 +45,8 @@ export default async function ReportsPage({
   await primeStore({ allApplications: true });
   const user = await pageUser("report.read");
   const saved = repo.savedReports(user.id);
+  const canUseMasterSheet = isDeskWide(user) || isTa(user);
+  const defaultPreset = canUseMasterSheet ? PRESETS[0] : PRESETS.find((preset) => preset.key === "by-client")!;
 
   // Precedence: an explicit query, then a saved report, then a preset, then the
   // default. Everything resolves to one spec.
@@ -69,18 +72,25 @@ export default async function ReportsPage({
       title = p.label;
     }
   } else {
-    spec = PRESETS[0].spec;
-    title = PRESETS[0].label;
+    spec = defaultPreset.spec;
+    title = defaultPreset.label;
   }
 
+  const isMasterSheet = (title === "Master Sheet" || title === "My Master Sheet") && spec.dataset === "openings";
+  if (isMasterSheet && !canUseMasterSheet) notFound();
+  // This is an operational sheet rather than a free-form report. Keeping it
+  // row-based prevents a saved/grouped URL from escaping the TA's personal
+  // scope or producing a grid with no opening identity to link and save.
+  if (isMasterSheet && spec.groupBy) spec = { ...spec, groupBy: null, metrics: [] };
   const ds = datasetFor(spec.dataset);
-  const result = runReport(spec);
+  const isPersonalMasterSheet = isMasterSheet && isTa(user);
+  if (isPersonalMasterSheet) title = "My Master Sheet";
+  const result = runReport(spec, isPersonalMasterSheet ? { openingUserId: user.id } : {});
   const specJson = JSON.stringify(spec);
-  const isMasterSheet = title === "Master Sheet" && spec.dataset === "openings" && !spec.groupBy;
-  const canEditById = isMasterSheet
+  const canEditById = isMasterSheet && isDeskWide(user)
     ? Object.fromEntries(result.rows.map((row) => {
         const openingId = String(row.id ?? "");
-        return [openingId, can(user, "opening.manage", {
+        return [openingId, can(user, "commercial.manage", {
           openingId,
           assignment: repo.assignmentFor(openingId, user.id) ?? null,
         }).ok];
@@ -165,18 +175,18 @@ export default async function ReportsPage({
 
       {/* ── what you are looking at ─────────────────────────────────────── */}
       <div className="mb-6 flex flex-wrap items-center gap-1.5">
-        {PRESETS.map((p) => (
+        {PRESETS.filter((preset) => preset.key !== "master" || canUseMasterSheet).map((p) => (
           <Link
             key={p.key}
             href={`/reports?preset=${p.key}`}
             title={p.note}
             className={`rounded-full border px-4 py-2 text-[12.5px] transition-colors ${
-              title === p.label
+              (p.key === "master" ? isMasterSheet : title === p.label)
                 ? "border-navactive bg-navactive text-white"
                 : "border-rule bg-surface text-ink-soft hover:border-rule-strong hover:text-ink"
             }`}
           >
-            {p.label}
+            {p.key === "master" && isTa(user) ? "My Master Sheet" : p.label}
           </Link>
         ))}
         {saved.map((r) => (
@@ -225,7 +235,7 @@ export default async function ReportsPage({
           )}
           <SaveReport spec={specJson} suggested={title} />
           <a
-            href={`/api/reports/report.csv?spec=${encodeURIComponent(specJson)}&name=${encodeURIComponent(title)}`}
+            href={`/api/reports/report.csv?spec=${encodeURIComponent(specJson)}&name=${encodeURIComponent(title)}${isMasterSheet ? "&view=master" : ""}`}
             className="flex items-center gap-2 rounded-full border border-brand-line px-4 py-2 text-[12.5px] font-medium text-brand transition-colors hover:bg-brand-soft"
           >
             <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true">
@@ -331,6 +341,7 @@ export default async function ReportsPage({
                 spec={spec}
                 sortHref={sortHref}
                 canEditById={canEditById}
+                personal={isPersonalMasterSheet}
               />
             ) : (
               <Table columns={result.columns} rows={result.rows} spec={spec} sortHref={sortHref} />
@@ -339,15 +350,17 @@ export default async function ReportsPage({
         </>
       )}
 
-      <div className="mt-6">
-        <ReportBuilder
-          spec={spec}
-          fields={ds.fields}
-          datasets={DATASETS.map((d) => ({ key: d.key, label: d.label, note: d.note }))}
-          options={options}
-          name={title}
-        />
-      </div>
+      {!isMasterSheet && (
+        <div className="mt-6">
+          <ReportBuilder
+            spec={spec}
+            fields={ds.fields}
+            datasets={DATASETS.map((d) => ({ key: d.key, label: d.label, note: d.note }))}
+            options={options}
+            name={title}
+          />
+        </div>
+      )}
 
       <p className="max-w-[80ch] text-[11.5px] leading-relaxed text-ink-faint">
         The sentence box only writes the question — which records, which columns, which filters.

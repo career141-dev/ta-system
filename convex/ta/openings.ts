@@ -177,7 +177,7 @@ export const updateMasterSheet = internalMutation({
     const job = await ctx.db.get(jobId);
     if (!job || isGone(job)) throw new Error("Opening not found");
     if (!isDeskWideUser(user)) {
-      await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter"]);
+      throw new Error("Only a TA Lead, Director, Admin or Ops user can edit the Master Sheet.");
     }
 
     const reason = args.reason.trim();

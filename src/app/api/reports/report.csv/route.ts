@@ -1,7 +1,7 @@
 import { primeStore } from "@/data/prime";
 import { reportCsv, DEFAULT_SPEC, sanitizeSpec, type ReportSpec } from "@/lib/reporting";
 import { currentUser } from "@/lib/session";
-import { can } from "@/lib/auth";
+import { can, isDeskWide, isTa } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +16,8 @@ export async function GET(req: Request) {
   const user = await currentUser();
   if (!user) return new Response("Sign in first.", { status: 401 });
   if (!can(user, "report.read").ok) return new Response("Not allowed.", { status: 403 });
-  const raw = new URL(req.url).searchParams.get("spec");
+  const url = new URL(req.url);
+  const raw = url.searchParams.get("spec");
   let spec: ReportSpec = DEFAULT_SPEC;
   if (raw) {
     try {
@@ -25,12 +26,17 @@ export async function GET(req: Request) {
       // Fall through to the default rather than failing the download.
     }
   }
-  const name = (new URL(req.url).searchParams.get("name") ?? "report")
+  const masterSheet = url.searchParams.get("view") === "master";
+  if (masterSheet && !isDeskWide(user) && !isTa(user)) {
+    return new Response("Not allowed.", { status: 403 });
+  }
+  const scope = masterSheet && isTa(user) ? { openingUserId: user.id } : {};
+  const name = (url.searchParams.get("name") ?? "report")
     .replace(/[^a-z0-9]+/gi, "-")
     .toLowerCase();
   const stamp = new Date().toISOString().slice(0, 10);
 
-  return new Response("﻿" + reportCsv(spec), {
+  return new Response("﻿" + reportCsv(spec, scope), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="career141-${name}-${stamp}.csv"`,

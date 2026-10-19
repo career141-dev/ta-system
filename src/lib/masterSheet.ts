@@ -1,4 +1,4 @@
-import type { LinkLevel, LinkVaultEntry, ReviewRound } from "@/data/types";
+import type { Application, LinkLevel, LinkVaultEntry, ReviewRound } from "@/data/types";
 
 /** The old workbook stops at four Ls and four sets. Keep the calculation here
  * data-driven so the report is only a view over facts the desk already saved. */
@@ -79,5 +79,33 @@ export function uniqueSubmitted(rounds: readonly Pick<ReviewRound, "kind" | "dis
       .filter((round) => round.kind === "director" && round.dispatch === "sent")
       .flatMap((round) => round.applicationIds),
   ).size;
+}
+
+/** Candidate work belongs to the TA who claimed it. Unclaimed intake is still
+ * visible in the opening's workflow, but is not credited to an individual TA
+ * until somebody takes responsibility for it. */
+export function masterSheetApplicationsForUser(
+  applications: readonly Application[],
+  userId: string,
+): Application[] {
+  return applications.filter((application) => application.ownerTaId === userId);
+}
+
+/** Keep the shared email round, but only the candidates belonging to this TA.
+ * This also handles a lead sending one combined email for several recruiters:
+ * every personal sheet receives its own candidates from that common round. */
+export function masterSheetRoundsForApplications(
+  rounds: readonly ReviewRound[],
+  applicationIds: ReadonlySet<string>,
+): ReviewRound[] {
+  return rounds.flatMap((round) => {
+    const included = round.applicationIds.filter((id) => applicationIds.has(id));
+    if (included.length === 0) return [];
+    return [{
+      ...round,
+      applicationIds: included,
+      decisions: round.decisions.filter((decision) => applicationIds.has(decision.applicationId)),
+    }];
+  });
 }
 

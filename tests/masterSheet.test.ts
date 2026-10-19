@@ -1,5 +1,13 @@
 import assert from "node:assert/strict";
-import { levelSlot, masterSheetStatusFields, roundSlot, uniqueSubmitted } from "@/lib/masterSheet";
+import type { Application, ReviewRound } from "@/data/types";
+import {
+  levelSlot,
+  masterSheetApplicationsForUser,
+  masterSheetRoundsForApplications,
+  masterSheetStatusFields,
+  roundSlot,
+  uniqueSubmitted,
+} from "@/lib/masterSheet";
 
 const rounds = [
   {
@@ -60,5 +68,27 @@ assert.deepEqual(masterSheetStatusFields("lost", null, null, 100), {
 assert.deepEqual(masterSheetStatusFields("filled", 50, 40, 100), {
   status: "filled", backendStatus: "filled", closedAt: 50,
 });
+
+const personalApplications = masterSheetApplicationsForUser([
+  { id: "a", ownerTaId: "ta-1" },
+  { id: "b", ownerTaId: "ta-2" },
+  { id: "c", ownerTaId: null },
+] as Application[], "ta-1");
+assert.deepEqual(personalApplications.map((application) => application.id), ["a"], "a TA sees only candidates they own");
+
+const personalRounds = masterSheetRoundsForApplications(
+  rounds as unknown as ReviewRound[],
+  new Set(["a"]),
+);
+assert.deepEqual(
+  personalRounds.map((round) => round.applicationIds),
+  [["a"], ["a"]],
+  "a combined review email is reduced to this TA's candidates",
+);
+assert.deepEqual(
+  personalRounds.flatMap((round) => round.decisions.map((decision) => decision.applicationId)),
+  ["a", "a"],
+  "another TA's shortlist decisions do not enter the personal sheet",
+);
 
 console.log("master sheet metrics passed");
