@@ -15,7 +15,6 @@ import { internalMutation } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
 
 const TA_EMAIL = "sanduni@career141.com";
-const JOB_TITLE = "Head of Manufacturing Excellence PGP";
 const SENT_DATE = "2026-10-19";
 const INTENDED_DATE = "2026-10-16";
 const INTENDED_REPORT_AT = Date.parse(`${INTENDED_DATE}T23:59:59.999+05:30`);
@@ -39,26 +38,15 @@ export const run = internalMutation({
     if (!user.isActive)
       throw new Error(`${TA_EMAIL} is not active. Nothing was changed.`);
 
-    const jobs = (await ctx.db.query("jobs").collect()).filter(
-      (job) => job.title?.trim() === JOB_TITLE && !job.binnedAt,
-    );
-    if (jobs.length !== 1)
-      throw new Error(`Expected one active opening titled ${JOB_TITLE}; found ${jobs.length}. Nothing was changed.`);
-    const job = jobs[0];
-
     const workdays = await ctx.db
       .query("taWorkdays")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
       .collect();
-    const sourceDays = workdays.filter(
-      (day) => day.date === SENT_DATE && day.jobs.some((entry) => entry.jobId === job._id),
-    );
-    const targetDays = workdays.filter(
-      (day) => day.date === INTENDED_DATE && day.jobs.some((entry) => entry.jobId === job._id),
-    );
+    const sourceDays = workdays.filter((day) => day.date === SENT_DATE);
+    const targetDays = workdays.filter((day) => day.date === INTENDED_DATE);
     if (sourceDays.length !== 1 || targetDays.length !== 1)
       throw new Error(
-        `Expected one ${SENT_DATE} workday and one ${INTENDED_DATE} workday containing this opening; found ${sourceDays.length} and ${targetDays.length}. Nothing was changed.`,
+        `Expected one ${SENT_DATE} workday and one ${INTENDED_DATE} workday for ${TA_EMAIL}; found ${sourceDays.length} and ${targetDays.length}. Nothing was changed.`,
       );
     const source = sourceDays[0];
     const target = targetDays[0];
@@ -67,27 +55,29 @@ export const run = internalMutation({
     if (target.finishedAt === undefined || !target.completion)
       throw new Error(`${INTENDED_DATE} has no closed workday snapshot to recover. Nothing was changed.`);
 
-    const sourceReceipts = (
-      await Promise.all(
-        source.jobs.map((entry) =>
-          ctx.db
-            .query("taWorkdayMail")
-            .withIndex("by_workday_job", (q) =>
-              q.eq("workdayId", source._id).eq("jobId", entry.jobId),
-            )
-            .collect(),
-        ),
-      )
-    ).flat();
-    const acceptedSourceEods = sourceReceipts.filter(originalEod);
-    const matching = acceptedSourceEods.filter(
-      (receipt) => receipt.jobId === job._id && !!receipt.dailyEmailId,
+    // Resolve the opening from the accepted receipt, not its mutable title or
+    // bin status. The failed 19 Oct dry run proved production's display row no
+    // longer matched the original title guard, while this audit link remains.
+    const sourceReceipts = await ctx.db
+      .query("taWorkdayMail")
+      .withIndex("by_workday_job", (q) => q.eq("workdayId", source._id))
+      .collect();
+    const acceptedSourceEods = sourceReceipts.filter(
+      (receipt) => receipt.userId === user._id && originalEod(receipt) && !!receipt.dailyEmailId,
     );
-    if (matching.length !== 1 || acceptedSourceEods.length !== 1)
+    if (acceptedSourceEods.length !== 1)
       throw new Error(
-        `Expected this email to be the only accepted original EOD on ${SENT_DATE}; found ${matching.length} matching and ${acceptedSourceEods.length} total. Nothing was changed.`,
+        `Expected one accepted original EOD for ${TA_EMAIL} on ${SENT_DATE}; found ${acceptedSourceEods.length}. Nothing was changed.`,
       );
-    const receipt = matching[0];
+    const receipt = acceptedSourceEods[0];
+    const job = await ctx.db.get(receipt.jobId);
+    if (!job)
+      throw new Error("The opening linked to Monday's accepted EOD no longer exists. Nothing was changed.");
+    if (
+      !source.jobs.some((entry) => entry.jobId === job._id) ||
+      !target.jobs.some((entry) => entry.jobId === job._id)
+    )
+      throw new Error("The EOD opening is not present on both Friday and Monday workdays. Nothing was changed.");
     const email = await ctx.db.get(receipt.dailyEmailId!);
     if (
       !email ||
