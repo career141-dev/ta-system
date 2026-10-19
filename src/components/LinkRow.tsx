@@ -118,6 +118,25 @@ export function LinkRow({
     if (logIt.result?.tone === "ok") logForm.current?.reset();
   }, [logIt.result]);
   const del = useInline(deleteLinkInline);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreBox = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const away = (e: MouseEvent) => {
+      if (moreBox.current && !moreBox.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMoreOpen(false);
+    };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("mousedown", away);
+      document.removeEventListener("keydown", key);
+    };
+  }, [moreOpen]);
   const [noteOpen, setNoteOpen] = useState(false);
   const [allNotes, setAllNotes] = useState(false);
   const sendNote = useInline(addLeadNoteInline);
@@ -204,18 +223,6 @@ export function LinkRow({
                 <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium text-ink-soft">
                   {outcome}
                 </span>
-                {r.level ? (
-                  <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium tabular-nums text-ink-soft" title="The L it was added under">
-                    L{r.level}
-                  </span>
-                ) : null}
-                <span
-                  className={`rounded px-1.5 py-[3px] text-[10.5px] font-medium ${
-                    interest === "interested" ? "bg-brand-soft text-brand" : interest === "not_interested" ? "bg-danger-soft text-danger" : "bg-warn-soft text-ink-soft"
-                  }`}
-                >
-                  {INTEREST_LABEL[interest]}
-                </span>
                 {r.isAddOn && (
                   <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">Add-on</span>
                 )}
@@ -229,6 +236,20 @@ export function LinkRow({
                     Note from {noteByline(notes[0], userNames).role}
                   </span>
                 )}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+                {r.level ? (
+                  <span className="rounded bg-tag px-1.5 py-[3px] text-[10.5px] font-medium tabular-nums text-ink-soft" title="The L it was added under">
+                    L{r.level}
+                  </span>
+                ) : null}
+                <span
+                  className={`rounded px-1.5 py-[3px] text-[10.5px] font-medium ${
+                    interest === "interested" ? "bg-brand-soft text-brand" : interest === "not_interested" ? "bg-danger-soft text-danger" : "bg-warn-soft text-ink-soft"
+                  }`}
+                >
+                  {INTEREST_LABEL[interest]}
+                </span>
               </div>
               <p className="mt-0.5 text-[13px]">{r.title ?? "Title not recorded"}</p>
               <p className="mt-0.5 text-[12px] text-ink-faint">
@@ -320,8 +341,8 @@ export function LinkRow({
               )}
             </div>
 
-            <div className="flex w-full shrink-0 flex-col items-start gap-2 sm:w-auto sm:items-end">
-              <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+            <div className="flex min-w-0 w-full flex-col items-start gap-2 sm:w-auto sm:max-w-full sm:items-end">
+              <div className="flex flex-wrap items-center gap-2 sm:justify-end">
                 {onPipeline ? (
                   <Link
                     href={`/openings/${openingId}/candidate/${onPipeline.id}`}
@@ -393,47 +414,51 @@ export function LinkRow({
                 >
                   Change outcome ⇕
                 </button>
-                </>
-                )}
-                <a
-                  href={externalUrl(r.linkedinUrl) ?? undefined}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-full border border-rule px-4 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:bg-tag hover:text-ink"
-                >
-                  Open profile
-                </a>
-                {!readOnly && (
-                <>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (!window.confirm("Are you sure you want to remove this link from the table?")) return;
-                    const { formData } = submitted(e);
-                    del.run(formData);
-                  }}
-                >
-                  <input type="hidden" name="openingId" value={openingId} />
-                  <input type="hidden" name="entryId" value={r.id} />
+                <div ref={moreBox} className="relative">
                   <button
-                    type="submit"
-                    disabled={busy}
-                    className="rounded-full border border-rule px-3.5 py-1.5 text-[12.5px] text-ink-soft transition-colors hover:border-danger hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+                    type="button"
+                    onClick={() => setMoreOpen((v) => !v)}
+                    aria-label="More options"
+                    aria-expanded={moreOpen}
+                    aria-haspopup="menu"
+                    className="rounded px-1.5 py-1 text-[15px] leading-none text-ink-faint transition-colors hover:text-ink"
+                    title="More options"
                   >
-                    {del.pending ? "Removing…" : "Remove"}
+                    •••
                   </button>
-                </form>
-                <button
-                  onClick={() => setEdit((v) => !v)}
-                  aria-label="More"
-                  className="rounded px-1.5 text-[15px] leading-none text-ink-faint transition-colors hover:text-ink"
-                >
-                  •••
-                </button>
+
+                  {moreOpen && (
+                    <div
+                      role="menu"
+                      className="absolute right-0 top-full z-30 mt-1.5 w-44 rounded-xl border border-rule bg-surface p-1 text-left shadow-lg ring-1 ring-black/5"
+                    >
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          if (!window.confirm("Are you sure you want to remove this link from the table?")) return;
+                          const { formData } = submitted(e);
+                          del.run(formData);
+                          setMoreOpen(false);
+                        }}
+                      >
+                        <input type="hidden" name="openingId" value={openingId} />
+                        <input type="hidden" name="entryId" value={r.id} />
+                        <button
+                          type="submit"
+                          disabled={busy}
+                          role="menuitem"
+                          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[12.5px] font-medium text-danger transition-colors hover:bg-danger-soft disabled:opacity-50"
+                        >
+                          {del.pending ? "Removing…" : "Remove from table"}
+                        </button>
+                      </form>
+                    </div>
+                  )}
+                </div>
                 </>
                 )}
               </div>
-              <p className="text-right text-[11px] leading-snug text-ink-faint">
+              <p className="text-left sm:text-right text-[11px] leading-snug text-ink-faint">
                 Added {dateAt(r.createdAt)}
                 <br />
                 by {addedByName}
