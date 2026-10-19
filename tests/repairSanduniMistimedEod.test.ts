@@ -12,6 +12,11 @@ const find = (id: string) => [...tables.values()].flat().find((row) => row._id =
 
 const db = {
   get: async (id: string) => structuredClone(find(id) ?? null),
+  insert: async (table: string, row: Row) => {
+    const id = table === "taWorkdays" ? "friday" : `${table}-${rows(table).length + 1}`;
+    put(table, { _id: id, ...row });
+    return id;
+  },
   patch: async (id: string, patch: Row) => {
     const row = find(id);
     assert.ok(row, `Missing row ${id}`);
@@ -41,17 +46,7 @@ const execute = (dryRun: boolean) => (run as any)._handler(ctx, { dryRun });
 put("users", { _id: "sanduni", email: "sanduni@career141.com", fullName: "Sanduni", isActive: true });
 // The repair must follow the immutable receipt link even if the opening was
 // renamed or binned after the EOD was accepted.
-put("jobs", { _id: "job", title: "Head of Manufacturing Excellence - PGP", binnedAt: 50 });
-put("taWorkdays", {
-  _id: "friday",
-  userId: "sanduni",
-  date: "2026-10-16",
-  startedAt: 10,
-  finishedAt: 20,
-  closureReason: "expired",
-  jobs: [{ jobId: "job", workType: "100%", addedAt: 10, modeHistory: [] }],
-  completion: { id: "friday", finishedAt: 20, closureReason: "expired", jobs: [] },
-});
+put("jobs", { _id: "job", title: "Head of Manufacturing Excellence", binnedAt: 50 });
 put("taWorkdays", {
   _id: "monday",
   userId: "sanduni",
@@ -59,7 +54,7 @@ put("taWorkdays", {
   startedAt: 30,
   finishedAt: 40,
   closureReason: "eod",
-  jobs: [{ jobId: "job", workType: "100%", addedAt: 30, modeHistory: [] }],
+  jobs: [{ jobId: "job", workType: "100%", addedAt: 30, leadId: "lead", modeHistory: [] }],
   completion: { id: "monday", finishedAt: 40, closureReason: "eod", jobs: [] },
 });
 put("dailyEmails", {
@@ -96,7 +91,6 @@ put("taWorkdayMail", {
   applicationIds: ["application"],
 });
 put("taWorkdayLeads", { _id: "mondayLead", workdayId: "monday", leadId: "lead", finishedAt: 40 });
-put("taWorkdayLeads", { _id: "fridayLead", workdayId: "friday", leadId: "lead", finishedAt: 20 });
 put("taWorkdayRequests", {
   _id: "request",
   workdayId: "monday",
@@ -107,7 +101,9 @@ put("taWorkdayRequests", {
 
 const preview = await execute(true);
 assert.equal(preview.changed, false);
-assert.equal(preview.summary.opening.title, "Head of Manufacturing Excellence - PGP");
+assert.equal(preview.summary.opening.title, "Head of Manufacturing Excellence");
+assert.equal(preview.summary.friday.plannedCreate, true);
+assert.equal(find("friday"), undefined, "Dry run must not create the missing Friday workday");
 assert.equal(find("email")!.date, "2026-10-19", "Dry run must not change the email");
 assert.equal(find("monday")!.finishedAt, 40, "Dry run must not reopen the workday");
 
@@ -118,11 +114,13 @@ assert.equal(find("receipt")!.workdayId, "friday");
 assert.equal(find("round")!.sentAt, Date.parse("2026-10-16T23:59:59.999+05:30"));
 assert.equal(find("friday")!.closureReason, "eod");
 assert.equal(find("friday")!.completion.closureReason, "eod");
+assert.equal(find("friday")!.jobs[0].jobId, "job");
+assert.equal(find("friday")!.completion.jobs[0].activity.sent, 1);
 assert.equal(find("monday")!.finishedAt, undefined);
 assert.equal(find("monday")!.closureReason, undefined);
 assert.equal(find("monday")!.completion, undefined);
 assert.equal(find("mondayLead")!.finishedAt, undefined);
-assert.equal(find("fridayLead")!.finishedAt, 20);
+assert.equal(rows("taWorkdayLeads").find((row) => row.workdayId === "friday")!.finishedAt, Date.parse("2026-10-16T23:59:59.999+05:30"));
 assert.equal(find("request")!.status, "pending");
 assert.equal(find("request")!.reason, undefined);
 
