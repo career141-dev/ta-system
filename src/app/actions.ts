@@ -27,6 +27,7 @@ import { noticePeriodToDays } from "@/lib/answered";
 import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
 import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 import { isEodCandidateEligible } from "@/lib/eodEligibility";
+import { makeReviewToken } from "@/lib/reviewToken";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -4796,6 +4797,10 @@ export async function sendEod(formData: FormData) {
   for (const id of fresh) eodInFlight.add(holdKey(id));
   try {
   const sets = fresh.map((id) => repo.application(id)?.setNumber).filter((n): n is number => n != null);
+  const roundToken = makeReviewToken();
+  // Recipients see the normal subject. The token identifies the stored round
+  // internally; Microsoft 365's hidden thread headers match the reply.
+  const trackedSubject = String(formData.get("subject") ?? "").trim();
 
   // The desk's To and Cc start on it; the TA can add more (29 Sep) and take any
   // off, the desk's own included (1 Oct). An address that is not one stops the
@@ -4862,7 +4867,7 @@ export async function sendEod(formData: FormData) {
       to: sentTo,
       extraTo: recipients.to.slice(1),
       cc: recipients.cc,
-      subject: String(formData.get("subject") ?? ""),
+      subject: trackedSubject,
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
       rows: editedRows,
@@ -4884,7 +4889,7 @@ export async function sendEod(formData: FormData) {
       openingId,
       version: 1,
       sentBy: user.id,
-      subject: String(formData.get("subject") ?? "").trim(),
+      subject: trackedSubject,
       introText: introText ?? "",
       outroText: outroText ?? "",
       researchLink: research.url,
@@ -4936,7 +4941,8 @@ export async function sendEod(formData: FormData) {
     sentTo,
     // The address the reply is watched on: copied in, and on the reply-to.
     trackedAt: repo.shortlistInbox(),
-    subject: String(formData.get("subject") ?? ""),
+    subject: trackedSubject,
+    token: roundToken,
     researchLink: research.url,
     dispatch: kind === "director" ? "sent" : "held",
   });

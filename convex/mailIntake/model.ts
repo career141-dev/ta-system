@@ -173,6 +173,8 @@ export const recordMessages = internalMutation({
       subject: v.string(),
       fromAddress: v.string(),
       hasAttachments: v.boolean(),
+      conversationId: v.optional(v.string()),
+      internetMessageId: v.optional(v.string()),
     })),
   },
   handler: async (ctx, args) => {
@@ -200,6 +202,20 @@ export const recordMessages = internalMutation({
       added++;
     }
     return { added };
+  },
+});
+
+/** Complete transport metadata after the full Graph message has been read. */
+export const noteTransport = internalMutation({
+  args: {
+    id: v.id("mailIntakeMessages"),
+    conversationId: v.optional(v.string()),
+    internetMessageId: v.optional(v.string()),
+    inReplyTo: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...transport } = args;
+    await ctx.db.patch(id, transport);
   },
 });
 
@@ -548,6 +564,18 @@ export const setApplicationPost = internalMutation({
 });
 
 // ── Settings → Mailboxes ────────────────────────────────────────────────────
+
+/** Historical reconciliation source: messages discarded only because no CV was attached. */
+export const recentNoCvShortlist = internalQuery({
+  args: { since: v.number(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const rows = await ctx.db.query("mailIntakeMessages")
+      .withIndex("by_mailbox_received", (q) => q.eq("mailbox", SHORTLIST_MAILBOX).gte("receivedAt", args.since))
+      .order("desc")
+      .take(Math.min(args.limit ?? 1000, 2000));
+    return rows.filter((row) => row.outcome === "no_cv");
+  },
+});
 
 export const status = internalQuery({
   args: { limit: v.optional(v.number()) },

@@ -1,4 +1,4 @@
-import { NextResponse, after } from "next/server";
+import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { convexMutation, convexQuery } from "@/lib/convexServer";
@@ -27,18 +27,6 @@ export async function GET() {
   // every time it happened (21 September). A signed-out caller still gets
   // nothing: an empty feed, flagged.
   if (!user) return NextResponse.json({ signedOut: true, unreadCount: 0, notifications: [] });
-
-  // Review replies are read from the mailboxes after the feed has answered,
-  // so the bell never waits on Microsoft Graph. Throttled to once per 15 s
-  // across everyone (lib/graphInboxSync).
-  after(async () => {
-    try {
-      const { syncMailboxRepliesSilently } = await import("@/lib/graphInboxSync");
-      await syncMailboxRepliesSilently();
-    } catch (e) {
-      console.warn("[notifications] Background sync error:", (e as Error).message);
-    }
-  });
 
   const payload = await convexQuery<NotificationsPayload>("ta/notifications:listForUser", {
     userId: user.id,

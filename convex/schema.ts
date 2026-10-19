@@ -2916,9 +2916,8 @@ export default defineSchema({
   /**
    * A set of CVs sent out for a decision, and the decision that came back.
    *
-   * The token is what makes the match reliable: it goes out in the subject and
-   * comes back on the reply, so an inbound email can be tied to exactly the
-   * round it answers even when a forward loses the thread headers.
+   * The token is an internal identifier. Recipients see the normal subject;
+   * replies are matched from Microsoft 365 thread and reply headers.
    */
   reviewRounds: defineTable({
     submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
@@ -2928,6 +2927,8 @@ export default defineSchema({
     /** The provider's id for the mail that went out. A reply's In-Reply-To
      *  names it exactly — the only signal that survives a rewritten subject. */
     messageId: v.optional(v.union(v.string(), v.null())),
+    conversationId: v.optional(v.union(v.string(), v.null())),
+    internetMessageId: v.optional(v.union(v.string(), v.null())),
     setNumber: v.optional(v.union(v.number(), v.null())),
     applicationIds: v.array(v.id("applications")),
     sentBy: v.id("users"),
@@ -2961,6 +2962,47 @@ export default defineSchema({
     .index("by_opening", ["openingId"])
     .index("by_token", ["token"])
     .index("by_opening_kind", ["openingId", "kind"]),
+
+  /** A durable interpretation of one no-attachment reply at shortlists@. */
+  shortlistDecisionReviews: defineTable({
+    sourceMessageId: v.id("mailIntakeMessages"),
+    graphMessageId: v.string(),
+    conversationId: v.optional(v.string()),
+    internetMessageId: v.optional(v.string()),
+    inReplyTo: v.optional(v.string()),
+    receivedAt: v.number(),
+    fromAddress: v.string(),
+    subject: v.string(),
+    replyText: v.string(),
+    roundId: v.optional(v.id("reviewRounds")),
+    openingId: v.optional(v.id("jobs")),
+    matchMethod: v.union(
+      v.literal("conversation"), v.literal("reply_header"),
+      v.literal("token"), v.literal("subject"), v.literal("none"),
+    ),
+    matchNote: v.string(),
+    senderAuthorized: v.boolean(),
+    decisions: v.array(v.object({
+      applicationId: v.id("applications"),
+      outcome: v.union(v.literal("shortlisted"), v.literal("rejected"), v.literal("hold")),
+      evidence: v.string(),
+    })),
+    reviewReasons: v.array(v.string()),
+    status: v.union(
+      v.literal("pending"), v.literal("auto_applied"),
+      v.literal("review_required"), v.literal("confirmed"), v.literal("ignored"),
+    ),
+    historical: v.boolean(),
+    createdAt: v.number(),
+    appliedAt: v.optional(v.number()),
+    reviewedAt: v.optional(v.number()),
+    reviewedBy: v.optional(v.id("users")),
+    reviewNote: v.optional(v.string()),
+  })
+    .index("by_source_message", ["sourceMessageId"])
+    .index("by_status_received", ["status", "receivedAt"])
+    .index("by_round", ["roundId"])
+    .index("by_opening", ["openingId"]),
 
   /**
    * The end-of-day email as it went, kept for a month so the TA can correct it
@@ -3151,6 +3193,9 @@ export default defineSchema({
     subject: v.string(),
     fromAddress: v.string(),
     hasAttachments: v.boolean(),
+    conversationId: v.optional(v.string()),
+    internetMessageId: v.optional(v.string()),
+    inReplyTo: v.optional(v.string()),
     /** waiting → processing → extracting (a CV is being read) → done. */
     status: v.union(v.literal("waiting"), v.literal("processing"), v.literal("extracting"), v.literal("done")),
     /** filed: on an opening · database: no advert matched · duplicate: already held and placed ·
@@ -3181,6 +3226,7 @@ export default defineSchema({
   })
     .index("by_messageId", ["messageId"])
     .index("by_status_next", ["status", "nextAttemptAt"])
+    .index("by_mailbox_received", ["mailbox", "receivedAt"])
     .index("by_receivedAt", ["receivedAt"]),
 
   feedbacks: defineTable({
