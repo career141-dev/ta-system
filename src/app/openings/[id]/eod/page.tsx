@@ -381,7 +381,7 @@ export default async function EodPage({
         savedAttachments={correction?.snapshot?.attachments}
         openingId={id}
         kind={kind}
-        subject={correction?.snapshot ? revisedSubject(correction.snapshot.subject) : resendCopy ? revisedSubject(resendCopy.subject) : midday ? `MIDDAY ${draft?.number ?? 1} - ${workdayDate(Date.now())} - ${formattedSubject}` : formattedSubject}
+        subject={correction?.snapshot ? revisedSubject(correction.snapshot.subject) : resendCopy ? revisedSubject(resendCopy.subject) : formattedSubject}
         toName={kind === "director" ? "Job Orders" : (director?.name ?? "Director")}
         toEmail={correction?.snapshot?.to[0] ?? (kind === "director" ? EOD_TO : (director?.email ?? ""))}
         ccName={kind === "director" ? "" : (lead?.name ?? "")}
