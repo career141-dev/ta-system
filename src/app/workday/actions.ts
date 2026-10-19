@@ -7,6 +7,7 @@ import { getCurrentUser } from "@/lib/session";
 import { convexMutation } from "@/lib/convexServer";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { checkResearchSubmission } from "@/lib/eod-format";
+import { workdayErrorMessage } from "@/lib/workdayErrors";
 
 export async function changeWorkday(
   form: FormData,
@@ -96,10 +97,7 @@ export async function changeWorkday(
     unstable_rethrow(error);
     return {
       ok: false,
-      message:
-        error instanceof Error
-          ? error.message.replace(/^.*?Uncaught Error:\s*/, "").slice(0, 300)
-          : "Could not save. Try again.",
+      message: workdayErrorMessage(error, op),
     };
   }
 }
