@@ -152,17 +152,17 @@ export default async function OpeningsPage({
   const hasActiveFilters = Boolean(location || industry || clientId || (showTaFilter && taId) || q);
 
   return (
-    <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
-      <div className="mb-7 flex items-end justify-between gap-6">
-        <div>
-          <h1 className="text-[24px] font-semibold tracking-tight">Openings</h1>
+    <main className="mx-auto max-w-[1180px] px-4 py-5 sm:px-8 sm:py-9">
+      <div className="mb-6 flex flex-col items-stretch gap-4 sm:mb-7 sm:flex-row sm:items-end sm:justify-between sm:gap-6">
+        <div className="min-w-0 pr-28 sm:pr-0">
+          <h1 className="text-[22px] font-semibold leading-tight tracking-tight sm:text-[24px]">Openings</h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">
             One commercial requirement, many posts, one candidate pool.
           </p>
         </div>
         <Link
           href="/openings/new"
-          className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white hover:opacity-90"
+          className="flex min-h-11 shrink-0 items-center justify-center self-start rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white active:opacity-80 sm:min-h-0 sm:self-auto sm:hover:opacity-90"
         >
           New opening
         </Link>
@@ -243,17 +243,17 @@ export default async function OpeningsPage({
               // next job's status and stage buttons showed through the menu.
               <div
                 key={o.id}
-                className="relative rounded-xl border border-rule bg-surface px-7 py-5 transition-colors hover:border-rule-strong has-[[aria-expanded=true]]:z-20"
+                className="relative rounded-xl border border-rule bg-surface px-4 py-4 transition-colors active:border-rule-strong active:bg-paper/40 sm:px-7 sm:py-5 sm:hover:border-rule-strong sm:hover:bg-surface has-[[aria-expanded=true]]:z-20"
               >
                 <Link
                   href={`/openings/${o.id}`}
                   aria-label={`${client?.name ?? ""} — ${o.title}`}
                   className="absolute inset-0 z-0 rounded-xl"
                 />
-                <div className="pointer-events-none relative flex flex-wrap items-start justify-between gap-5">
-                  <div className="flex min-w-0 items-start gap-3.5">
+                <div className={`pointer-events-none relative grid grid-cols-1 gap-4 sm:flex sm:flex-wrap sm:items-start sm:justify-between sm:gap-5 ${mayBin(o.id) ? "sm:pr-9" : ""}`}>
+                  <div className={`flex min-w-0 items-start gap-3 ${mayBin(o.id) ? "pr-9" : ""} sm:gap-3.5 sm:pr-0`}>
                   {mayBin(o.id) && (
-                    <span className="pointer-events-auto relative z-10 pt-1">
+                    <span className="pointer-events-auto relative z-10 -ml-1 flex min-h-11 min-w-8 items-start justify-center pt-1">
                       <RowCheck form="bulk-openings" name="openingId" value={o.id} label={o.title} />
                     </span>
                   )}
@@ -289,7 +289,7 @@ export default async function OpeningsPage({
                   </div>
                   </div>
 
-                  <div className="flex shrink-0 items-start gap-8 text-right">
+                  <div className="grid w-full grid-cols-4 gap-1 rounded-lg bg-paper p-3 text-center sm:flex sm:w-auto sm:shrink-0 sm:items-start sm:gap-8 sm:rounded-none sm:bg-transparent sm:p-0 sm:text-right">
                     {[
                       { n: (c.ai_follow_up ?? 0) + (c.ta_follow_up ?? 0), l: "Follow-up" },
                       { n: c.director_review ?? 0, l: "Director" },
@@ -311,15 +311,15 @@ export default async function OpeningsPage({
                         <div className="mt-1.5 text-[11.5px] text-ink-soft">{s.l}</div>
                       </div>
                     ))}
-                    {mayBin(o.id) && (
-                      <span className="pointer-events-auto relative z-10 -mr-3 -mt-1">
-                        <OpeningMenu openingId={o.id} title={o.title} candidates={repo.applications(o.id).length} />
-                      </span>
-                    )}
                   </div>
+                  {mayBin(o.id) && (
+                    <span className="pointer-events-auto absolute right-0 top-0 z-10 sm:-mr-3 sm:-mt-1">
+                      <OpeningMenu openingId={o.id} title={o.title} candidates={repo.applications(o.id).length} />
+                    </span>
+                  )}
                 </div>
 
-                <div className="pointer-events-none relative mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-rule pt-3.5 text-[12px] text-ink-faint">
+                <div className="pointer-events-none relative mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-rule pt-3.5 text-[12px] text-ink-faint sm:gap-x-5">
                   <span>
                     {sets.filter((s) => s.status === "closed").length} sets closed
                     {openSets.map((s) =>

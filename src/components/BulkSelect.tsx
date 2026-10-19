@@ -28,7 +28,7 @@ export function RowCheck({ form, name, value, label }: { form: string; name: str
       name={name}
       value={value}
       aria-label={`Select ${label}`}
-      className="h-4 w-4 shrink-0 cursor-pointer accent-brand"
+      className="h-5 w-5 shrink-0 cursor-pointer accent-brand sm:h-4 sm:w-4"
     />
   );
 }

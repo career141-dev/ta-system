@@ -161,10 +161,10 @@ export function OpeningsToolbar({
   };
 
   return (
-    <div className="mb-6 space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="mb-5 space-y-3 sm:mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         {/* Bucket selection tabs on the left */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="-mx-4 flex snap-x gap-2 overflow-x-auto overscroll-x-contain px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
           {buckets.map((b) => {
             const next = new URLSearchParams(params.toString());
             next.set("bucket", b.key);
@@ -177,10 +177,10 @@ export function OpeningsToolbar({
               <Link
                 key={b.key}
                 href={href}
-                className={`rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors ${
+                className={`inline-flex min-h-11 shrink-0 snap-start items-center rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors sm:min-h-0 ${
                   isSelected
                     ? "border-navactive bg-navactive text-white"
-                    : "border-rule bg-surface text-ink-soft hover:border-rule-strong hover:text-ink"
+                    : "border-rule bg-surface text-ink-soft active:border-rule-strong active:bg-paper sm:hover:border-rule-strong sm:hover:bg-surface sm:hover:text-ink"
                 }`}
               >
                 {b.label}
@@ -205,10 +205,10 @@ export function OpeningsToolbar({
               onClick={() => setFilterOpen((v) => !v)}
               aria-expanded={filterOpen}
               aria-label="Filter openings"
-              className={`flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors ${
+              className={`flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors sm:min-h-0 ${
                 activeCount > 0
                   ? "border-brand bg-brand-soft font-medium text-brand"
-                  : "border-rule bg-surface text-ink-soft hover:border-rule-strong hover:text-ink"
+                  : "border-rule bg-surface text-ink-soft active:bg-paper sm:hover:border-rule-strong sm:hover:text-ink"
               }`}
             >
               <svg
@@ -222,7 +222,7 @@ export function OpeningsToolbar({
               >
                 <path d="M2 3.5h12M4 8h8M6.5 12.5h3" strokeLinecap="round" />
               </svg>
-              <span>{getButtonLabel()}</span>
+              <span className="max-w-[104px] truncate sm:max-w-none">{getButtonLabel()}</span>
               {activeCount > 1 && (
                 <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-brand px-1 text-[10.5px] font-semibold text-white">
                   {activeCount}
@@ -231,14 +231,14 @@ export function OpeningsToolbar({
             </button>
 
             {filterOpen && (
-              <div className="absolute left-0 top-full z-40 mt-2 w-80 max-w-[calc(100vw-32px)] rounded-2xl sm:left-auto sm:right-0 border border-rule bg-surface p-4 shadow-xl">
+              <div className="absolute left-0 top-full z-40 mt-2 max-h-[min(70dvh,520px)] w-80 max-w-[calc(100vw-32px)] overflow-y-auto overscroll-contain rounded-2xl border border-rule bg-surface p-4 shadow-xl sm:left-auto sm:right-0">
                 <div className="mb-3 flex items-center justify-between border-b border-rule pb-2.5">
                   <span className="text-[13px] font-semibold text-ink">Filter Openings</span>
                   {activeCount > 0 && (
                     <button
                       type="button"
                       onClick={clearAllFilters}
-                      className="text-[11.5px] text-ink-soft hover:text-brand hover:underline"
+                      className="min-h-11 px-2 text-[11.5px] text-ink-soft active:text-brand sm:min-h-0 sm:px-0 sm:hover:text-brand sm:hover:underline"
                     >
                       Reset all
                     </button>
@@ -254,7 +254,7 @@ export function OpeningsToolbar({
                     <select
                       value={selectedFilters.clientId ?? "all"}
                       onChange={(e) => setFilter("clientId", e.target.value)}
-                      className="mt-1 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[12.5px] outline-none transition-colors focus:border-brand"
+                      className="mt-1 min-h-11 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-base outline-none transition-colors focus:border-brand sm:min-h-0 sm:text-[12.5px]"
                     >
                       <option value="all">All clients</option>
                       {clientOptions.map((cl) => (
@@ -273,7 +273,7 @@ export function OpeningsToolbar({
                     <select
                       value={selectedFilters.location ?? "all"}
                       onChange={(e) => setFilter("location", e.target.value)}
-                      className="mt-1 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[12.5px] outline-none transition-colors focus:border-brand"
+                      className="mt-1 min-h-11 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-base outline-none transition-colors focus:border-brand sm:min-h-0 sm:text-[12.5px]"
                     >
                       <option value="all">All countries</option>
                       {locationOptions.map((loc) => (
@@ -292,7 +292,7 @@ export function OpeningsToolbar({
                     <select
                       value={selectedFilters.industry ?? "all"}
                       onChange={(e) => setFilter("industry", e.target.value)}
-                      className="mt-1 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[12.5px] outline-none transition-colors focus:border-brand"
+                      className="mt-1 min-h-11 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-base outline-none transition-colors focus:border-brand sm:min-h-0 sm:text-[12.5px]"
                     >
                       <option value="all">All industries</option>
                       {industryOptions.map((ind) => (
@@ -312,7 +312,7 @@ export function OpeningsToolbar({
                       <select
                         value={selectedFilters.taId ?? "all"}
                         onChange={(e) => setFilter("taId", e.target.value)}
-                        className="mt-1 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-[12.5px] outline-none transition-colors focus:border-brand"
+                        className="mt-1 min-h-11 w-full cursor-pointer rounded-lg border border-rule bg-surface px-2.5 py-1.5 text-base outline-none transition-colors focus:border-brand sm:min-h-0 sm:text-[12.5px]"
                       >
                         <option value="all">All TAs</option>
                         {taOptions.map((ta) => (
@@ -339,7 +339,7 @@ export function OpeningsToolbar({
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search openings"
               aria-label="Search openings"
-              className="w-full rounded-full border border-rule bg-surface py-2 pl-9 sm:w-[260px] pr-4 text-[13px] outline-none placeholder:text-ink-faint focus:border-brand-line"
+              className="min-h-11 w-full rounded-full border border-rule bg-surface py-2 pl-9 pr-4 text-base outline-none placeholder:text-ink-faint focus:border-brand-line sm:min-h-0 sm:w-[260px] sm:text-[13px]"
             />
           </div>
         </div>
@@ -354,7 +354,7 @@ export function OpeningsToolbar({
               key={k}
               type="button"
               onClick={() => setFilter(k, null)}
-              className="inline-flex items-center gap-1 rounded-full border border-brand/30 bg-brand-soft/60 px-2.5 py-1 text-[12px] font-medium text-brand hover:bg-brand-soft"
+              className="inline-flex min-h-10 items-center gap-1 rounded-full border border-brand/30 bg-brand-soft/60 px-2.5 py-1 text-[12px] font-medium text-brand active:bg-brand-soft sm:min-h-0 sm:hover:bg-brand-soft"
             >
               <span>{filterLabel(k, v)}</span>
               <CloseIcon size={12} />
@@ -363,7 +363,7 @@ export function OpeningsToolbar({
           <button
             type="button"
             onClick={clearAllFilters}
-            className="text-[12px] text-ink-soft underline decoration-rule hover:text-ink"
+            className="min-h-10 px-1 text-[12px] text-ink-soft underline decoration-rule active:text-ink sm:min-h-0 sm:hover:text-ink"
           >
             Clear all
           </button>

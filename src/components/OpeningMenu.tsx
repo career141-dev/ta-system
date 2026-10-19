@@ -58,7 +58,7 @@ export function OpeningMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={`More actions for ${title}`}
-        className="grid h-7 w-7 place-items-center rounded-full text-ink-faint transition-colors hover:bg-tag hover:text-ink"
+        className="grid h-11 w-11 place-items-center rounded-full text-ink-faint transition-colors active:bg-tag active:text-ink sm:h-7 sm:w-7 sm:hover:bg-tag sm:hover:text-ink"
       >
         <svg width={16} height={16} viewBox="0 0 16 16" aria-hidden="true" fill="currentColor">
           <circle cx="8" cy="3" r="1.4" />
