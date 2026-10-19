@@ -1,6 +1,7 @@
 /**
  * Reassign Sanduni's late Friday EOD, which was sent on Monday, back to the
- * Friday workday and reopen Monday for continued work.
+ * Friday workday (creating the missing historical row if necessary) and
+ * reopen Monday for continued work.
  *
  * The accepted email, attachments and candidate roster are never changed. Its
  * reporting date, review-round reporting time and workday receipt move; the
@@ -44,15 +45,15 @@ export const run = internalMutation({
       .collect();
     const sourceDays = workdays.filter((day) => day.date === SENT_DATE);
     const targetDays = workdays.filter((day) => day.date === INTENDED_DATE);
-    if (sourceDays.length !== 1 || targetDays.length !== 1)
+    if (sourceDays.length !== 1 || targetDays.length > 1)
       throw new Error(
-        `Expected one ${SENT_DATE} workday and one ${INTENDED_DATE} workday for ${TA_EMAIL}; found ${sourceDays.length} and ${targetDays.length}. Nothing was changed.`,
+        `Expected one ${SENT_DATE} workday and at most one ${INTENDED_DATE} workday for ${TA_EMAIL}; found ${sourceDays.length} and ${targetDays.length}. Nothing was changed.`,
       );
     const source = sourceDays[0];
-    const target = targetDays[0];
+    let target = targetDays[0];
     if (source.closureReason !== "eod" || source.finishedAt === undefined)
       throw new Error(`${SENT_DATE} is not an EOD-completed workday. Nothing was changed.`);
-    if (target.finishedAt === undefined || !target.completion)
+    if (target && (target.finishedAt === undefined || !target.completion))
       throw new Error(`${INTENDED_DATE} has no closed workday snapshot to recover. Nothing was changed.`);
 
     // Resolve the opening from the accepted receipt, not its mutable title or
@@ -75,9 +76,9 @@ export const run = internalMutation({
       throw new Error("The opening linked to Monday's accepted EOD no longer exists. Nothing was changed.");
     if (
       !source.jobs.some((entry) => entry.jobId === job._id) ||
-      !target.jobs.some((entry) => entry.jobId === job._id)
+      (target && !target.jobs.some((entry) => entry.jobId === job._id))
     )
-      throw new Error("The EOD opening is not present on both Friday and Monday workdays. Nothing was changed.");
+      throw new Error("The EOD opening is not present on the available Friday and Monday workdays. Nothing was changed.");
     const email = await ctx.db.get(receipt.dailyEmailId!);
     if (
       !email ||
@@ -100,12 +101,14 @@ export const run = internalMutation({
     )
       throw new Error("The email's Director-review round is missing or belongs to different records. Nothing was changed.");
 
-    const targetReceipts = await ctx.db
-      .query("taWorkdayMail")
-      .withIndex("by_workday_job", (q) =>
-        q.eq("workdayId", target._id).eq("jobId", job._id),
-      )
-      .collect();
+    const targetReceipts = target
+      ? await ctx.db
+          .query("taWorkdayMail")
+          .withIndex("by_workday_job", (q) =>
+            q.eq("workdayId", target!._id).eq("jobId", job._id),
+          )
+          .collect()
+      : [];
     if (targetReceipts.some(originalEod))
       throw new Error("Friday already has an accepted original EOD for this opening. Nothing was changed.");
 
@@ -113,10 +116,12 @@ export const run = internalMutation({
       .query("taWorkdayLeads")
       .withIndex("by_workday", (q) => q.eq("workdayId", source._id))
       .collect();
-    const targetLeads = await ctx.db
-      .query("taWorkdayLeads")
-      .withIndex("by_workday", (q) => q.eq("workdayId", target._id))
-      .collect();
+    const targetLeads = target
+      ? await ctx.db
+          .query("taWorkdayLeads")
+          .withIndex("by_workday", (q) => q.eq("workdayId", target!._id))
+          .collect()
+      : [];
     const closedRequests = (
       await ctx.db
         .query("taWorkdayRequests")
@@ -134,12 +139,75 @@ export const run = internalMutation({
       opening: { id: job._id as string, title: job.title },
       email: { id: email._id as string, acceptedAt: email.acceptedAt ?? null, fromDate: email.date, toDate: INTENDED_DATE },
       reviewRound: round ? { id: round._id as string, fromSentAt: round.sentAt, toSentAt: INTENDED_REPORT_AT } : null,
-      receipt: { id: receipt._id as string, fromWorkdayId: source._id as string, toWorkdayId: target._id as string },
+      receipt: { id: receipt._id as string, fromWorkdayId: source._id as string, toWorkdayId: target ? (target._id as string) : null },
       monday: { id: source._id as string, finishedAt: source.finishedAt, leadRows: sourceLeads.length, requestsToRestore: closedRequests.length },
-      friday: { id: target._id as string, finishedAt: target.finishedAt, priorClosureReason: target.closureReason ?? null, leadRows: targetLeads.length },
+      friday: target
+        ? { plannedCreate: false, id: target._id as string, finishedAt: target.finishedAt, priorClosureReason: target.closureReason ?? null, leadRows: targetLeads.length }
+        : { plannedCreate: true, id: null, finishedAt: INTENDED_REPORT_AT, priorClosureReason: null, leadRows: 0 },
     };
     if (args.dryRun)
       return { dryRun: true, changed: false, summary, next: 'Run again with {"dryRun":false} after reviewing these exact records.' };
+
+    if (!target) {
+      const sourceEntry = source.jobs.find((entry) => entry.jobId === job._id)!;
+      const workType = receipt.workType ?? sourceEntry.workType;
+      const targetId = await ctx.db.insert("taWorkdays", {
+        userId: user._id,
+        date: INTENDED_DATE,
+        startedAt: INTENDED_REPORT_AT,
+        finishedAt: INTENDED_REPORT_AT,
+        closureReason: "eod",
+        jobs: [{
+          jobId: job._id,
+          workType,
+          addedAt: INTENDED_REPORT_AT,
+          leadId: sourceEntry.leadId,
+          modeHistory: [{ at: INTENDED_REPORT_AT, workType }],
+        }],
+      });
+      await ctx.db.patch(targetId, {
+        completion: {
+          id: targetId,
+          userId: user._id,
+          name: user.fullName,
+          date: INTENDED_DATE,
+          startedAt: INTENDED_REPORT_AT,
+          finishedAt: INTENDED_REPORT_AT,
+          closureReason: "eod",
+          jobs: [{
+            jobId: job._id,
+            title: job.title,
+            workType,
+            eodSentAt: receipt.acceptedAt ?? receipt.finalizedAt,
+            checks: [],
+            eodChecks: [],
+            shortlist: [],
+            activity: {
+              cvReviews: 0,
+              profilesAdded: 0,
+              profilesWorked: 0,
+              researchAt: null,
+              researchActions: 0,
+              benchmarkActions: 0,
+              benchmarks: 0,
+              benchmarksAdded: 0,
+              sent: receipt.applicationIds.length,
+              emailAt: receipt.acceptedAt ?? receipt.finalizedAt ?? null,
+              jdApproved: job.jdStatus === "approved",
+              postConnected: false,
+            },
+          }],
+          requests: [],
+        },
+      });
+      if (sourceEntry.leadId)
+        await ctx.db.insert("taWorkdayLeads", {
+          workdayId: targetId,
+          leadId: sourceEntry.leadId,
+          finishedAt: INTENDED_REPORT_AT,
+        });
+      target = (await ctx.db.get(targetId))!;
+    }
 
     await ctx.db.patch(email._id, { date: INTENDED_DATE });
     await ctx.db.patch(receipt._id, { workdayId: target._id });
@@ -150,7 +218,11 @@ export const run = internalMutation({
       closureReason: "eod",
       completion: { ...targetCompletion, closureReason: "eod" },
     });
-    for (const lead of targetLeads)
+    const finalTargetLeads = await ctx.db
+      .query("taWorkdayLeads")
+      .withIndex("by_workday", (q) => q.eq("workdayId", target._id))
+      .collect();
+    for (const lead of finalTargetLeads)
       await ctx.db.patch(lead._id, { finishedAt: target.finishedAt });
 
     await ctx.db.patch(source._id, {
