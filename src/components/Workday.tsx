@@ -159,6 +159,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
       !day?.requests.some((r) => r.jobId === o.id),
   );
   const chosen = available.find(o => o.id === selected);
+  const completedByEod = day?.finishedAt != null && day.closureReason === "eod";
   if (!available.length)
     return (
       <p className="text-sm text-ink-soft">
@@ -190,9 +191,15 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
           ))}
         </select>
       </label>
-      <p className="text-xs text-ink-soft">
-        New positions start at 100%. Choose Follow-up or Add-on for historical or returning work.
-      </p>
+      {completedByEod ? (
+        <p className="text-xs text-amber-700 dark:text-amber-400">
+          Your workday was completed when the 100% EOD email was sent. You cannot add another 100% position today. Choose Follow-up or Add-on only for returning work; otherwise, add the position on your next workday.
+        </p>
+      ) : (
+        <p className="text-xs text-ink-soft">
+          New positions start at 100%. Choose Follow-up or Add-on for historical or returning work.
+        </p>
+      )}
       {!day && data.options.some(o => o.carry) && <p className="text-xs text-ink-soft">Follow-up jobs carried forward: {data.options.filter(o => o.carry && o.id !== chosen?.id).map(o => o.title).join(", ")}</p>}
       {!day && (mode ?? chosen?.workType) === "100%" && chosen?.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
       <button className={buttonClass}>

@@ -1519,7 +1519,10 @@ export const addPosition = internalMutation({
       throw new Error("A workday supports at most ten positions.");
     const job = await assignedJob(ctx, user, args.jobId);
     const mode = await suggestedMode(ctx, user._id, args.jobId, args.workType);
-    if (day.finishedAt !== undefined && mode === "100%") throw new Error("The workday clock has stopped. Add Follow-up or Add-on positions.");
+    if (day.finishedAt !== undefined && mode === "100%")
+      throw new Error(
+        "The workday clock has stopped. A 100% EOD email completed it, so another 100% position must wait until the next workday. Follow-up and Add-on are only for returning work.",
+      );
     const now = Date.now();
     await ctx.db.patch(day._id, {
       jobs: [
