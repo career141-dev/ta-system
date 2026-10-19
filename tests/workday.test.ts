@@ -913,6 +913,43 @@ try {
   const liveDay = (await run("dashboard", { actorId: "autoTa" })).active;
   assert.equal(liveDay.jobs.filter((j: Row) => !j.eodSentAt).length, 0);
 
+  // An opening in the Bin stops being current work without rewriting the
+  // workday. Restore can therefore put it back, while completed history stays
+  // an exact record of what the TA worked before deletion.
+  user("deletedTa", "ta");
+  put("jobs", { _id: "deletedJob", title: "Deleted job", status: "active", taLeadId: "lead", assignedTaIds: ["deletedTa"] });
+  put("jobs", { _id: "keptJob", title: "Kept job", status: "active", taLeadId: "lead", assignedTaIds: ["deletedTa"] });
+  const deletedDay = await run("start", { actorId: "deletedTa", jobId: "deletedJob", workType: "100%" });
+  await run("addPosition", { actorId: "deletedTa", workdayId: deletedDay.id, jobId: "keptJob", workType: "Follow-up" });
+  await db.patch("deletedJob", { binnedAt: clock, status: "cancelled" });
+  let deletedView = (await run("dashboard", { actorId: "deletedTa", detail: true })).active;
+  assert.deepEqual(deletedView.jobs.map((job: Row) => job.jobId), ["keptJob"], "A binned opening leaves the active workday");
+  const deletedLeadView = await run("dashboard", { actorId: "lead", detail: true, focusWorkday: deletedDay.id });
+  assert.deepEqual(deletedLeadView.team[0].jobs.map((job: Row) => job.jobId), ["keptJob"], "The lead no longer sees the binned opening as current work");
+  put("taWorkdayMail", { _id: "keptReceipt", workdayId: deletedDay.id, jobId: "keptJob", userId: "deletedTa", workType: "Follow-up",
+    status: "accepted", startedAt: clock, acceptedAt: clock, finalizedAt: clock, applicationIds: [] });
+  await workdays.autoCompleteWorkday(ctx, deletedDay.id);
+  assert.equal((await db.get(deletedDay.id))?.finishedAt, clock, "A binned opening cannot block completion of the remaining work");
+  const deletedHistory = (await run("dashboard", { actorId: "deletedTa", detail: true })).history.find((day: Row) => day.id === deletedDay.id);
+  assert.deepEqual(deletedHistory.jobs.map((job: Row) => job.jobId), ["deletedJob", "keptJob"], "Completed history keeps the original positions");
+
+  user("restoreTa", "ta");
+  put("jobs", { _id: "restoreJob", title: "Restore job", status: "active", taLeadId: "lead", assignedTaIds: ["restoreTa"] });
+  const restoreDay = await run("start", { actorId: "restoreTa", jobId: "restoreJob", workType: "100%" });
+  put("taWorkdayRequests", { _id: "restoreRequest", workdayId: restoreDay.id, userId: "restoreTa", jobId: "restoreJob", leadId: "lead", workType: "100%", status: "pending", requestedAt: clock });
+  await db.patch("restoreJob", { binnedAt: clock, status: "cancelled" });
+  deletedView = (await run("dashboard", { actorId: "restoreTa", detail: true })).active;
+  assert.deepEqual([deletedView.jobs.length, deletedView.requests.length], [0, 0], "A workday with only a deleted opening remains active but empty");
+  assert.equal((await run("dashboard", { actorId: "lead", detail: true, focusWorkday: restoreDay.id })).team.length, 0, "The lead does not see an empty deleted-opening workday");
+  await db.patch("restoreJob", { binnedAt: undefined, status: "active" });
+  deletedView = (await run("dashboard", { actorId: "restoreTa", detail: true })).active;
+  assert.deepEqual([deletedView.jobs[0].jobId, deletedView.requests[0].id], ["restoreJob", "restoreRequest"], "Restoring the opening restores its current workday state");
+
+  user("missingTa", "ta");
+  put("taWorkdays", { _id: "missingDay", userId: "missingTa", date: workdayDate(clock), startedAt: clock,
+    jobs: [{ jobId: "missingJob", workType: "100%", addedAt: clock, leadId: "lead", modeHistory: [] }] });
+  assert.equal((await run("dashboard", { actorId: "missingTa" })).active.jobs.length, 0, "A permanently missing opening is not shown as Unavailable job");
+
   // Yesterday's unfinished records never masquerade as today's workday.
   user("staleTa", "ta");
   put("jobs", { _id: "staleJob", title: "Stale", taLeadId: "lead", assignedTaIds: ["staleTa"] });

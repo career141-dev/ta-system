@@ -785,6 +785,33 @@ async function jobView(
   };
 }
 
+/**
+ * A workday keeps its opening ids so restoring something from the Bin can put
+ * it back exactly where it was. Current work, however, must never be blocked
+ * or displayed by an opening that has left the desk.
+ */
+async function availableWorkdayEntries(
+  ctx: Ctx,
+  entries: Doc<"taWorkdays">["jobs"],
+) {
+  const jobs = await Promise.all(entries.map((entry) => ctx.db.get(entry.jobId)));
+  return entries.filter((_, index) => {
+    const job = jobs[index];
+    return !!job && !isGone(job);
+  });
+}
+
+async function availableWorkdayRequests(
+  ctx: Ctx,
+  requests: Doc<"taWorkdayRequests">[],
+) {
+  const jobs = await Promise.all(requests.map((request) => ctx.db.get(request.jobId)));
+  return requests.filter((_, index) => {
+    const job = jobs[index];
+    return !!job && !isGone(job);
+  });
+}
+
 async function view(
   ctx: Ctx,
   day: Doc<"taWorkdays">,
@@ -794,10 +821,14 @@ async function view(
   if (day.finishedAt !== undefined && day.completion && !live)
     return withoutReturningTasks(day.completion as WorkdayView);
   const user = await ctx.db.get(day.userId);
-  const requests = await ctx.db
+  const storedRequests = await ctx.db
     .query("taWorkdayRequests")
     .withIndex("by_workday", (q) => q.eq("workdayId", day._id))
     .collect();
+  const entries = live ? await availableWorkdayEntries(ctx, day.jobs) : day.jobs;
+  const requests = live
+    ? await availableWorkdayRequests(ctx, storedRequests)
+    : storedRequests;
   return {
     id: day._id,
     userId: day.userId,
@@ -806,7 +837,7 @@ async function view(
     startedAt: day.startedAt,
     finishedAt: day.finishedAt ?? null,
     closureReason: day.closureReason,
-    jobs: await Promise.all(day.jobs.map((j) => jobView(ctx, day, j, now))),
+    jobs: await Promise.all(entries.map((j) => jobView(ctx, day, j, now))),
     requests: await Promise.all(
       requests.map(async (r) => ({
         id: r._id,
@@ -827,17 +858,18 @@ function withoutReturningTasks(day: WorkdayView): WorkdayView {
 export async function autoCompleteWorkday(ctx: MutationCtx, id: Id<"taWorkdays">) {
   const day = await ctx.db.get(id);
   if (!day || day.finishedAt !== undefined) return;
-  const receipts = (await Promise.all(day.jobs.map(j => ctx.db.query("taWorkdayMail")
+  const entries = await availableWorkdayEntries(ctx, day.jobs);
+  const receipts = (await Promise.all(entries.map(j => ctx.db.query("taWorkdayMail")
     .withIndex("by_workday_job", q => q.eq("workdayId", id).eq("jobId", j.jobId)).collect()))).flat()
     .filter(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod");
   const primary = receipts.filter(r => {
-    const entry = day.jobs.find(j => j.jobId === r.jobId);
+    const entry = entries.find(j => j.jobId === r.jobId);
     const recorded = entry?.modeHistory.filter(m => m.at <= r.startedAt).at(-1)?.workType;
     return (r.workType ?? recorded ?? entry?.workType) === "100%";
   });
-  const allSent = day.jobs.length > 0 && day.jobs.every(j => receipts.some(r => r.jobId === j.jobId));
+  const allSent = entries.length > 0 && entries.every(j => receipts.some(r => r.jobId === j.jobId));
   const finishedAt = primary.length ? Math.min(...primary.map(r => r.acceptedAt ?? r.finalizedAt!))
-    : !day.jobs.some(j => j.workType === "100%") && allSent ? Math.max(...receipts.map(r => r.acceptedAt ?? r.finalizedAt!)) : null;
+    : !entries.some(j => j.workType === "100%") && allSent ? Math.max(...receipts.map(r => r.acceptedAt ?? r.finalizedAt!)) : null;
   if (finishedAt === null) return;
   await closeWorkday(ctx, day, finishedAt, "eod");
 }
@@ -1204,6 +1236,7 @@ export const dashboard = internalQuery({
       result.requests = result.requests.filter((r) =>
         visibleRequests.some((v) => v._id === r.id),
       );
+      if (!result.jobs.length && !result.requests.length) continue;
       team.push(withoutReturningTasks(result));
     }
     return {
