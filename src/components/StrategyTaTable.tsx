@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { removeStrategyProofInline, submitStrategyUpdateInline } from "@/app/actions";
+import { acceptStrategyAssignmentsInline, removeStrategyProofInline, submitStrategyUpdateInline } from "@/app/actions";
 import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { inputClass } from "./form";
 
@@ -14,6 +14,7 @@ export interface TaStrategyRow {
   struck: boolean;
   doneBy: string[];
   doneByIds?: string[];
+  acceptance: "not_assigned" | "pending" | "accepted";
   submittedById?: string | null;
   submittedByName?: string | null;
   assignedLabel: string;
@@ -51,6 +52,7 @@ export function StrategyTaTable({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const files = useRef<Record<string, HTMLInputElement | null>>({});
   const submit = useInline(submitStrategyUpdateInline);
+  const accept = useInline(acceptStrategyAssignmentsInline);
   const remove = useInline(removeStrategyProofInline);
 
   const isRowMine = (r: TaStrategyRow) =>
@@ -58,7 +60,8 @@ export function StrategyTaTable({
     (r.doneByIds?.includes(currentUserId) ?? false) ||
     (r.doneByIds?.length ?? 0) === 0;
 
-  const editable = rows.filter((r) => !r.struck && isRowMine(r));
+  const pending = rows.filter((r) => !r.struck && isRowMine(r) && r.acceptance === "pending");
+  const editable = rows.filter((r) => !r.struck && isRowMine(r) && r.acceptance !== "pending");
   const set = (id: string, patch: Partial<{ used: boolean; date: string; note: string }>) =>
     setState((s) => ({ ...s, [id]: { ...(s[id] ?? { used: false, date: "", note: "" }), ...patch } }));
 
@@ -92,6 +95,30 @@ export function StrategyTaTable({
         <input key={r.rowId} type="hidden" name="rowId" value={r.rowId} />
       ))}
 
+      {pending.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warn/40 bg-warn-soft px-4 py-3">
+          <div>
+            <p className="text-[13px] font-medium text-warn">
+              {pending.length} new {pending.length === 1 ? "strategy is" : "strategies are"} waiting for your acceptance
+            </p>
+            <p className="mt-0.5 text-[11.5px] text-ink-soft">Accept them together before you start working on those rows.</p>
+          </div>
+          <button
+            type="button"
+            disabled={accept.pending}
+            onClick={() => {
+              const fd = new FormData();
+              fd.set("openingId", openingId);
+              accept.run(fd);
+            }}
+            className="rounded-full bg-brand px-5 py-2 text-[12.5px] font-medium text-white hover:opacity-90 disabled:opacity-60"
+          >
+            {accept.pending ? "Accepting…" : `Accept all ${pending.length} ${pending.length === 1 ? "strategy" : "strategies"}`}
+          </button>
+        </div>
+      )}
+      <ActionNote result={accept.result} />
+
       <div className="overflow-x-auto rounded-xl border border-rule bg-surface">
         <table className="w-full min-w-[900px] border-collapse">
           <thead>
@@ -120,6 +147,7 @@ export function StrategyTaTable({
               }
 
               const mine = isRowMine(r);
+              const canWork = mine && r.acceptance !== "pending";
 
               return (
                 <tr key={r.rowId}>
@@ -133,7 +161,7 @@ export function StrategyTaTable({
                   </td>
                   <td className={`${td} whitespace-nowrap text-ink-soft`}>{r.assignedLabel}</td>
                   <td className={td}>
-                    {mine ? (
+                    {canWork ? (
                       <label className="flex items-center gap-2">
                         <input
                           type="checkbox"
@@ -144,6 +172,8 @@ export function StrategyTaTable({
                         />
                         <span className="text-[12px] text-ink-soft">I used it</span>
                       </label>
+                    ) : mine ? (
+                      <span className="inline-flex rounded-full bg-warn-soft px-2.5 py-1 text-[11.5px] font-medium text-warn">Accept first</span>
                     ) : (
                       <div>
                         {r.used ? (
@@ -159,7 +189,7 @@ export function StrategyTaTable({
                     )}
                   </td>
                   <td className={td}>
-                    {mine ? (
+                    {canWork ? (
                       <input
                         type="date"
                         name={`date_${r.rowId}`}
@@ -176,7 +206,7 @@ export function StrategyTaTable({
                     )}
                   </td>
                   <td className={`${td} min-w-[240px]`}>
-                    {mine ? (
+                    {canWork ? (
                       <textarea
                         name={`note_${r.rowId}`}
                         value={s.note}
@@ -187,6 +217,8 @@ export function StrategyTaTable({
                         aria-label={`What you did with ${r.name}`}
                         className={`${inputClass} !py-1.5 !text-[12.5px]`}
                       />
+                    ) : mine ? (
+                      <span className="text-[12px] text-ink-faint">Accept this assignment to start.</span>
                     ) : (
                       <div>
                         {r.note ? (
@@ -198,7 +230,7 @@ export function StrategyTaTable({
                     )}
                   </td>
                   <td className={td}>
-                    {mine ? (
+                    {canWork ? (
                       <div className="flex flex-wrap items-center gap-1.5">
                         {r.proofs.map((p) => (
                           <span key={p.id} className="relative">
@@ -258,7 +290,7 @@ export function StrategyTaTable({
                         )}
                       </div>
                     )}
-                    {mine && r.proofs.some((p) => !p.submitted) && (
+                    {canWork && r.proofs.some((p) => !p.submitted) && (
                       <span className="mt-1 block text-[11px] text-warn">Pictures marked in amber go to your TA Lead when you submit.</span>
                     )}
                   </td>

@@ -56,6 +56,8 @@ const person = (role: User["role"], id: string, isActive = true) => ({ id, role,
 
 console.log("\nWho may attach");
 eq("the TA on the row", mayAttachProof(person("ta", "u_nuha"), row()), true);
+eq("a TA awaiting acceptance cannot attach", mayAttachProof(person("ta", "u_nuha"), row({ acknowledgements: [{ taId: "u_nuha", assignedAt: 2, acceptedAt: null }] })), false);
+eq("an accepted TA can attach", mayAttachProof(person("ta", "u_nuha"), row({ acknowledgements: [{ taId: "u_nuha", assignedAt: 2, acceptedAt: 3 }] })), true);
 eq("another TA on the job, on a ticked row (9 Oct)", mayAttachProof(person("ta", "u_imalsha"), row()), true);
 eq("not on an unticked row", mayAttachProof(person("ta", "u_nuha"), row({ selected: false })), false);
 eq("not on an older row with nobody on it", mayAttachProof(person("ta", "u_nuha"), row({ doneBy: [] })), false);

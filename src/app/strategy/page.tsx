@@ -5,7 +5,7 @@ import { pageUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { StatRow } from "@/components/StatRow";
 import { StrategyLeadTable } from "@/components/StrategyLeadTable";
-import { countsOf, dayLabel, leadLine, plannerJobs, strategyTable, type StrategyCounts } from "@/lib/strategyPlanner";
+import { countsOf, dayLabel, leadLine, pendingStrategyAcceptances, plannerJobs, strategyTable, type StrategyCounts } from "@/lib/strategyPlanner";
 
 /**
  * The Strategy Planner (8 Oct) — for TA Leads, directors and admins.
@@ -80,7 +80,9 @@ export default async function StrategyPlannerPage({ searchParams }: { searchPara
               <span className={th}>Progress</span>
             </div>
             {jobs.map(({ opening, tas, counts }) => {
-              const lines = strategyTable(strategies, rows.filter((r) => r.openingId === opening.id)).map((l) => leadLine(l, nameOf));
+              const jobRows = rows.filter((r) => r.openingId === opening.id);
+              const awaitingAcceptance = pendingStrategyAcceptances(jobRows);
+              const lines = strategyTable(strategies, jobRows).map((l) => leadLine(l, nameOf));
               return (
                 <details key={opening.id} open={job === opening.id} className="group border-b border-rule last:border-b-0">
                   <summary className={`${cols} cursor-pointer list-none py-3 transition-colors hover:bg-tag group-open:bg-tag/60 [&::-webkit-details-marker]:hidden`}>
@@ -95,7 +97,7 @@ export default async function StrategyPlannerPage({ searchParams }: { searchPara
                     <span className="min-w-0 truncate px-4 text-[12.5px]">
                       {tas.length ? tas.map((t) => t.name).join(", ") : <span className="text-warn">No TA yet</span>}
                     </span>
-                    <span className="px-4"><Progress c={counts} /></span>
+                    <span className="px-4"><Progress c={counts} awaitingAcceptance={awaitingAcceptance} /></span>
                   </summary>
                   <div className="border-t border-rule bg-paper/40">
                     <StrategyLeadTable openingId={opening.id} users={allUsers} lines={lines} />
@@ -115,12 +117,15 @@ export default async function StrategyPlannerPage({ searchParams }: { searchPara
 }
 
 /** "2 of 6 done" with a bar; struck-through strategies are not progress. */
-function Progress({ c }: { c: StrategyCounts }) {
+function Progress({ c, awaitingAcceptance }: { c: StrategyCounts; awaitingAcceptance: number }) {
   if (c.assigned === 0) return <span className="text-[12px] text-ink-faint">Not started</span>;
   const pct = Math.round((c.done / c.assigned) * 100);
   return (
     <span className="flex flex-col gap-1">
       <span className="text-[11.5px] text-ink-soft tabular">{c.done} of {c.assigned} done</span>
+      {awaitingAcceptance > 0 && (
+        <span className="text-[10.5px] font-medium text-warn tabular">{awaitingAcceptance} awaiting acceptance</span>
+      )}
       <span className="h-1.5 w-full overflow-hidden rounded-full bg-rule">
         <span className="block h-full rounded-full bg-brand" style={{ width: `${pct}%` }} />
       </span>

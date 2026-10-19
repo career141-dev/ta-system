@@ -80,7 +80,7 @@ import { buildSeed } from "./seed";
 import { INTERVIEW_STATUS_LABEL, interviewStatus, whenLabel } from "@/lib/interviews";
 import { canMove, eventTypeFor } from "@/lib/pipeline";
 import { colomboDayStart } from "@/lib/calendar";
-import { isTicked } from "@/lib/strategyPlanner";
+import { isTicked, strategyAcceptanceStatus } from "@/lib/strategyPlanner";
 import { evalBoolean, haystackFor, parseBoolean, type Vocabulary } from "@/lib/query";
 import { matchCandidate, type Result } from "@/lib/match";
 import { employerRelated, matchAgainst, planMerge } from "@/lib/dedup";
@@ -578,6 +578,7 @@ function newStrategyRow(openingId: Id, s: Strategy, byUserId: Id, byRole: Role):
     strategyId: s.id,
     strategyName: s.name,
     doneBy: [],
+    acknowledgements: [],
     assignedAt: null,
     assignedBy: byUserId,
     byRole,
@@ -3324,6 +3325,7 @@ const rawRepo = {
     byUserId: Id;
     byRole: Role;
     today: number;
+    now: number;
   }): { row: StrategyAssignment; created: boolean; added: boolean } | null {
     let out: { row: StrategyAssignment; created: boolean; added: boolean } | null = null;
     mutate((db) => {
@@ -3337,7 +3339,13 @@ const rawRepo = {
         created = true;
       }
       const added = !row.doneBy.includes(input.taId);
-      if (added) row.doneBy = [...row.doneBy, input.taId];
+      if (added) {
+        row.doneBy = [...row.doneBy, input.taId];
+        row.acknowledgements = [
+          ...(row.acknowledgements ?? []).filter((a) => a.taId !== input.taId),
+          { taId: input.taId, assignedAt: input.now, acceptedAt: null },
+        ];
+      }
       // A TA is put on a strategy the job uses, so putting them on ticks it (9 Oct).
       row.selected = true;
       // A row that was only struck through, or dated, takes its date from the first TA put on it.
@@ -3357,8 +3365,25 @@ const rawRepo = {
       const row = db.strategyAssignments.find((a) => a.id === rowId);
       if (!row) return;
       row.doneBy = row.doneBy.filter((t) => t !== taId);
+      row.acknowledgements = row.acknowledgements?.filter((a) => a.taId !== taId);
       if (strategyRowIsEmpty(row)) db.strategyAssignments = db.strategyAssignments.filter((a) => a.id !== rowId);
     });
+  },
+
+  /** Accept every active assignment currently waiting for this TA on one job. */
+  acceptStrategyAssignments(input: { openingId: Id; taId: Id; now?: number }): number {
+    const now = input.now ?? Date.now();
+    let accepted = 0;
+    mutate((db) => {
+      for (const row of db.strategyAssignments) {
+        if (row.openingId !== input.openingId || row.notApplicable || !isTicked(row) || !row.doneBy.includes(input.taId)) continue;
+        const acknowledgement = row.acknowledgements?.find((a) => a.taId === input.taId);
+        if (!acknowledgement || acknowledgement.acceptedAt !== null) continue;
+        acknowledgement.acceptedAt = now;
+        accepted++;
+      }
+    });
+    return accepted;
   },
 
   /** The day the lead says it was assigned (null clears it). */
@@ -3461,6 +3486,7 @@ const rawRepo = {
       for (const r of input.rows) {
         const row = db.strategyAssignments.find((a) => a.id === r.rowId);
         if (!row || row.openingId !== input.openingId || row.notApplicable) continue;
+        if (row.doneBy.includes(input.taId) && strategyAcceptanceStatus(row, input.taId) === "pending") continue;
         if (!row.doneBy.includes(input.taId)) {
           if (!isTicked(row)) continue;
           row.doneBy = [...row.doneBy, input.taId];
