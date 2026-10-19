@@ -28,6 +28,7 @@ import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenc
 import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 import { isEodCandidateEligible } from "@/lib/eodEligibility";
 import { makeReviewToken } from "@/lib/reviewToken";
+import { masterSheetStatusFields, type MasterSheetPositionStatus } from "@/lib/masterSheet";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -2305,6 +2306,88 @@ export async function updateOpening(formData: FormData) {
   });
   revalidatePath(`/openings/${openingId}`, "layout");
   await back("Opening saved.");
+}
+
+/**
+ * Save only the source cells exposed by the spreadsheet-style Master Sheet.
+ * Calculated workflow cells never reach this action. A reason is compulsory so
+ * the production mutation can keep a useful, attributable audit event.
+ */
+export async function updateMasterSheetOpening(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const openingId = String(formData.get("openingId") ?? "");
+  const opening = repo.opening(openingId);
+  if (!opening) await fail("That opening no longer exists. Reload the Master Sheet and try again.");
+  const currentOpening = opening!;
+
+  const rawStatus = String(formData.get("positionStatus") ?? "");
+  if (!["active", "hold", "lost", "filled"].includes(rawStatus)) {
+    await fail("Choose a valid position status.");
+  }
+  const positionStatus = rawStatus as MasterSheetPositionStatus;
+  const reason = String(formData.get("reason") ?? "").trim();
+  if (reason.length < 3) await fail("Add a short reason for this Master Sheet change.");
+  if (reason.length > 500) await fail("Keep the change reason under 500 characters.");
+
+  const date = (name: string): number | null => {
+    const raw = String(formData.get(name) ?? "").trim();
+    const parsed = raw ? colomboDayFromValue(raw) : null;
+    if (raw && parsed === null) throw new Error(`The ${name === "assignedAt" ? "assigned" : "closed"} date is invalid.`);
+    return parsed;
+  };
+  const amount = (name: string): number | null => {
+    const raw = String(formData.get(name) ?? "").replace(/,/g, "").trim();
+    if (!raw) return null;
+    const parsed = Number(raw);
+    if (!Number.isFinite(parsed) || parsed < 0) throw new Error("Values must be zero or a positive number.");
+    return parsed;
+  };
+
+  let input: Parameters<typeof backend.updateMasterSheetOpening>[2];
+  try {
+    input = {
+      positionStatus,
+      assignedAt: date("assignedAt"),
+      closedAt: date("closedAt"),
+      valueOnProgressing: amount("valueOnProgressing"),
+      valueOfPlacement: amount("valueOfPlacement"),
+      valueLost: amount("valueLost"),
+      reason,
+    };
+  } catch (error) {
+    await fail(error instanceof Error ? error.message : "One of the edited values is invalid.");
+  }
+
+  let changed = true;
+  if (isConvex()) {
+    try {
+      const result = await backend.updateMasterSheetOpening({ id: user.id }, openingId, input!);
+      changed = result.changed;
+      markTablesStale();
+    } catch (error) {
+      await fail(backendMessage(error, "The Master Sheet row could not be saved."));
+    }
+  } else {
+    const status = masterSheetStatusFields(positionStatus, input!.closedAt, currentOpening.closedAt);
+    const patch = {
+      positionStatus,
+      status: status.status,
+      assignedAt: input!.assignedAt,
+      closedAt: status.closedAt,
+      valueOnProgressing: input!.valueOnProgressing,
+      valueOfPlacement: input!.valueOfPlacement,
+      valueLost: input!.valueLost,
+      updatedAt: Date.now(),
+    };
+    changed = Object.entries(patch).some(([key, value]) => currentOpening[key as keyof typeof currentOpening] !== value);
+    if (changed) repo.updateOpening(openingId, patch);
+  }
+
+  revalidatePath("/reports");
+  revalidatePath("/openings", "layout");
+  revalidatePath(`/openings/${openingId}`, "layout");
+  await done(changed ? "Master Sheet row saved." : "Nothing changed.");
 }
 
 export async function deleteJobPost(formData: FormData) {

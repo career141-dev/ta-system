@@ -13,6 +13,29 @@ export interface MasterSheetRoundSlot extends MasterSheetSlot {
   shortlisted: number;
 }
 
+export type MasterSheetPositionStatus = "active" | "hold" | "lost" | "filled";
+
+/** One status drives both vocabularies and the closed date. A closed date on
+ * an active or held role is stale data; a lost or filled role gets the date a
+ * person supplied, then its existing date, then today. */
+export function masterSheetStatusFields(
+  positionStatus: MasterSheetPositionStatus,
+  typedClosedAt: number | null,
+  existingClosedAt: number | null,
+  now = Date.now(),
+): {
+  status: "open" | "on_hold" | "closed" | "filled";
+  backendStatus: "active" | "on_hold" | "cancelled" | "filled";
+  closedAt: number | null;
+} {
+  if (positionStatus === "active") return { status: "open", backendStatus: "active", closedAt: null };
+  if (positionStatus === "hold") return { status: "on_hold", backendStatus: "on_hold", closedAt: null };
+  const closedAt = typedClosedAt ?? existingClosedAt ?? now;
+  return positionStatus === "filled"
+    ? { status: "filled", backendStatus: "filled", closedAt }
+    : { status: "closed", backendStatus: "cancelled", closedAt };
+}
+
 export function levelSlot(
   levels: readonly Pick<LinkLevel, "n" | "at">[],
   rows: readonly Pick<LinkVaultEntry, "level">[],

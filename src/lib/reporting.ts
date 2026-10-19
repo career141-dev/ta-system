@@ -454,7 +454,9 @@ export function runReport(spec: ReportSpec): ReportResult {
   } else {
     const cols: string[] = spec.columns.length ? spec.columns : ds.fields.slice(0, 6).map((f) => f.key);
     columns = cols.map((k) => ({ key: k, label: labelOf(k), type: typeOf(k) }));
-    out = rows.map((r) => Object.fromEntries(cols.map((k) => [k, r[k] ?? null])) as Row);
+    // Keep the source id beside the visible cells. It is not a report column or
+    // an export cell; interactive report views use it to open or edit the row.
+    out = rows.map((r) => ({ id: r.id ?? null, ...Object.fromEntries(cols.map((k) => [k, r[k] ?? null])) }) as Row);
   }
 
   if (spec.sort) {

@@ -148,6 +148,26 @@ export async function setAutoFollowUp(actor: Actor, openingId: Id, enabled: bool
   });
 }
 
+export async function updateMasterSheetOpening(
+  actor: Actor,
+  openingId: Id,
+  input: {
+    positionStatus: "active" | "hold" | "lost" | "filled";
+    assignedAt: number | null;
+    closedAt: number | null;
+    valueOnProgressing: number | null;
+    valueOfPlacement: number | null;
+    valueLost: number | null;
+    reason: string;
+  },
+) {
+  return convexMutation<{ ok: boolean; changed: boolean }>("ta/openings:updateMasterSheet", {
+    actorId: requireActorId(actor),
+    openingId,
+    ...input,
+  });
+}
+
 // ─── Applications ────────────────────────────────────────────────────────────
 
 export async function applications(
