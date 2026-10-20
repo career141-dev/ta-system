@@ -1,6 +1,6 @@
 import { zipStore } from "@/lib/zip";
-import { escapeXml, sanitizeCell } from "@/lib/spreadsheetClipboard";
-export { toTsv, toHtmlTable } from "@/lib/spreadsheetClipboard";
+import { escapeXml, sanitizeCell, detectHyperlink } from "@/lib/spreadsheetClipboard";
+export { toTsv, toHtmlTable, detectHyperlink } from "@/lib/spreadsheetClipboard";
 
 /**
  * 1-based column number to Excel column letters (1 -> A, 27 -> AA).
@@ -22,9 +22,16 @@ export interface XlsxSheet {
   rows: string[][];
 }
 
+interface HyperlinkItem {
+  cellRef: string;
+  rId: string;
+  url: string;
+}
+
 /**
  * Generate a standalone OpenXML (.xlsx) file buffer without external dependencies.
  * Uses inline strings (ECMA-376) so no separate shared strings table is required.
+ * Generates native clickable hyperlinks and styling for URL cells.
  */
 export function buildXlsx({ name = "Excel Tables", headers, rows }: XlsxSheet): Buffer {
   const sheetName = (name || "Sheet1").replace(/[:\\/?*\[\]]/g, "_").slice(0, 31);
@@ -44,6 +51,7 @@ export function buildXlsx({ name = "Excel Tables", headers, rows }: XlsxSheet): 
     .join("");
 
   const sheetRowsXml: string[] = [];
+  const hyperlinks: HyperlinkItem[] = [];
 
   // Header row (row 1, style s="1" for bold & subtle fill)
   const headerCellsXml = headers
@@ -54,15 +62,21 @@ export function buildXlsx({ name = "Excel Tables", headers, rows }: XlsxSheet): 
     .join("");
   sheetRowsXml.push(`<row r="1" spans="1:${headers.length}">${headerCellsXml}</row>`);
 
-  // Data rows (starting at row 2, style s="0")
+  // Data rows (starting at row 2, style s="0" for normal, s="2" for hyperlinks)
   for (let rIdx = 0; rIdx < rows.length; rIdx++) {
     const rowNum = rIdx + 2;
     const row = rows[rIdx];
     const cellsXml = headers
-      .map((_, cIdx) => {
+      .map((h, cIdx) => {
         const cellRef = `${colLetter(cIdx + 1)}${rowNum}`;
         const val = sanitizeCell(row[cIdx] ?? "");
         if (!val) return "";
+        const link = detectHyperlink(val, h);
+        if (link) {
+          const rId = `rId${hyperlinks.length + 1}`;
+          hyperlinks.push({ cellRef, rId, url: link.url });
+          return `<c r="${cellRef}" t="inlineStr" s="2"><is><t xml:space="preserve">${escapeXml(val)}</t></is></c>`;
+        }
         return `<c r="${cellRef}" t="inlineStr" s="0"><is><t xml:space="preserve">${escapeXml(val)}</t></is></c>`;
       })
       .filter(Boolean)
@@ -100,9 +114,10 @@ export function buildXlsx({ name = "Excel Tables", headers, rows }: XlsxSheet): 
 
   const stylesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="2">
+  <fonts count="3">
     <font><sz val="11"/><name val="Calibri"/></font>
     <font><b/><sz val="11"/><color rgb="FF101828"/><name val="Calibri"/></font>
+    <font><u/><sz val="11"/><color rgb="FF0563C1"/><name val="Calibri"/></font>
   </fonts>
   <fills count="3">
     <fill><patternFill patternType="none"/></fill>
@@ -121,19 +136,25 @@ export function buildXlsx({ name = "Excel Tables", headers, rows }: XlsxSheet): 
   <cellStyleXfs count="1">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
   </cellStyleXfs>
-  <cellXfs count="2">
+  <cellXfs count="3">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
     <xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1"/>
+    <xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1"/>
   </cellXfs>
 </styleSheet>`;
 
+  const hyperlinksXml = hyperlinks.length > 0
+    ? `<hyperlinks>${hyperlinks.map((h) => `<hyperlink ref="${h.cellRef}" r:id="${h.rId}"/>`).join("")}</hyperlinks>`
+    : "";
+
   const sheet1Xml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <cols>${colsXml}</cols>
   <sheetData>${sheetRowsXml.join("")}</sheetData>
+  ${hyperlinksXml}
 </worksheet>`;
 
-  const files = [
+  const files: { name: string; data: Uint8Array }[] = [
     { name: "[Content_Types].xml", data: Buffer.from(contentTypesXml, "utf8") },
     { name: "_rels/.rels", data: Buffer.from(rootRelsXml, "utf8") },
     { name: "xl/_rels/workbook.xml.rels", data: Buffer.from(workbookRelsXml, "utf8") },
@@ -141,6 +162,17 @@ export function buildXlsx({ name = "Excel Tables", headers, rows }: XlsxSheet): 
     { name: "xl/styles.xml", data: Buffer.from(stylesXml, "utf8") },
     { name: "xl/worksheets/sheet1.xml", data: Buffer.from(sheet1Xml, "utf8") },
   ];
+
+  if (hyperlinks.length > 0) {
+    const sheetRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  ${hyperlinks.map((h) => `<Relationship Id="${h.rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${escapeXml(h.url)}" TargetMode="External"/>`).join("\n  ")}
+</Relationships>`;
+    files.push({
+      name: "xl/worksheets/_rels/sheet1.xml.rels",
+      data: Buffer.from(sheetRelsXml, "utf8"),
+    });
+  }
 
   return zipStore(files);
 }
