@@ -27,9 +27,10 @@ const db = {
 const jobId = "m17bhyypymgftktd7cv3w7sjfh8gkyst";
 put("users", { _id: "shihab", email: "shihab@career141.com", isActive: true });
 put("jobs", { _id: jobId, title: "Senior Operations Executive" });
-put("taWorkdays", { _id: "day", userId: "shihab", date: "2026-10-20", finishedAt: 10, closureReason: "eod", completion: {}, jobs: [{ jobId }] });
+put("taWorkdays", { _id: "day", userId: "shihab", date: "2026-10-20", finishedAt: 10, closureReason: "eod", completion: {}, jobs: [{ jobId }, { jobId: "other-job" }] });
 put("dailyEmails", { _id: "email", userId: "shihab", jobId, date: "2026-10-20", submissionType: "eod", status: "accepted", finalizedAt: 10, acceptedAt: 9, receiptId: "receipt", roundId: "round", applicationIds: ["app"] });
 put("taWorkdayMail", { _id: "receipt", dailyEmailId: "email", workdayId: "day", userId: "shihab", jobId, status: "accepted", finalizedAt: 10, applicationIds: ["app"] });
+put("taWorkdayMail", { _id: "other-receipt", workdayId: "day", userId: "shihab", jobId: "other-job", status: "accepted", finalizedAt: 8, acceptedAt: 8, applicationIds: ["other-app"] });
 put("reviewRounds", { _id: "round", openingId: jobId, sentBy: "shihab", kind: "director", status: "awaiting", decisions: [], applicationIds: ["app"] });
 put("applications", { _id: "app", jobId, ownerTaId: "shihab", currentStage: "second_shortlist" });
 put("taWorkdayLeads", { _id: "lead", workdayId: "day", finishedAt: 10 });
@@ -39,6 +40,7 @@ const execute = (dryRun: boolean) => (run as any)._handler({ db }, { dryRun });
 const preview = await execute(true);
 assert.equal(preview.changed, false);
 assert.deepEqual(preview.summary.candidateIds, ["app"]);
+assert.deepEqual(preview.summary.otherAcceptedEods, [{ receiptId: "other-receipt", jobId: "other-job", acceptedAt: 8 }]);
 assert.equal(get("email")!.recoveryReopenedAt, undefined);
 const result = await execute(false);
 assert.equal(result.changed, true);
@@ -48,6 +50,7 @@ assert.equal(get("email")!.recoveryReopenedAt, get("round")!.recoveryReopenedAt)
 assert.equal(get("day")!.finishedAt, undefined);
 assert.equal(get("lead")!.finishedAt, undefined);
 assert.equal(get("request")!.status, "pending");
+assert.equal(get("other-receipt")!.recoveryReopenedAt, undefined, "The other opening's EOD stays final");
 const original = { status: "accepted" as const, submissionType: "eod" as const, parentId: undefined, recoveryReopenedAt: get("email")!.recoveryReopenedAt };
 assert.equal(dailySendProblem([original], "midday", true), null);
 assert.match(dailySendProblem([original], "eod", true)!, /midday email/);

@@ -18,7 +18,8 @@ Use the production release pipeline's `run_function` and `run_args` inputs:
    Director Review candidates appear in the EOD list. Shihab must send the
    midday email and then the new EOD manually.
 
-The function refuses to run after the Colombo calendar day changes, if another
-opening has a finalized EOD, if the original received a Director decision,
-or if any of its candidates changed owner or stage. A failed dry run needs a
-new review; do not bypass its guards.
+The function refuses to run after the Colombo calendar day changes, if the
+original received a Director decision, or if any of its candidates changed
+owner or stage. The dry-run summary lists other accepted EODs on the same
+workday; those records are preserved and do not stop this opening's repair.
+A failed dry run needs a new review; do not bypass its guards.
