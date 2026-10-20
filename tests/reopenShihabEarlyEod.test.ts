@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { run } from "../convex/admin/reopenShihabEarlyEod";
+import { dailySendProblem } from "../src/lib/dailyEmail";
 
 type Row = Record<string, any>;
 const data = new Map<string, Row[]>();
@@ -47,5 +48,9 @@ assert.equal(get("email")!.recoveryReopenedAt, get("round")!.recoveryReopenedAt)
 assert.equal(get("day")!.finishedAt, undefined);
 assert.equal(get("lead")!.finishedAt, undefined);
 assert.equal(get("request")!.status, "pending");
+const original = { status: "accepted" as const, submissionType: "eod" as const, parentId: undefined, recoveryReopenedAt: get("email")!.recoveryReopenedAt };
+assert.equal(dailySendProblem([original], "midday", true), null);
+assert.match(dailySendProblem([original], "eod", true)!, /midday email/);
+assert.equal(dailySendProblem([original, { status: "accepted", submissionType: "midday", parentId: undefined, recoveryReopenedAt: undefined }], "eod", true), null);
 await assert.rejects(() => execute(false), /Today's closed workday|Expected one finalized original EOD/);
 console.log("Shihab's early EOD recovery keeps the sent audit, previews, reopens and refuses a second write.");
