@@ -4,6 +4,7 @@ import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
 import { extractBlueprintFromFile, extractBlueprintFromText, type ReferenceCvBlueprint } from "@/lib/referenceCv";
 import { MAX_REFERENCE_CV_BYTES, referenceCvFileProblem } from "@/lib/referenceCvFile";
+import { safeErrorMessage } from "@/lib/userError";
 
 const MAX_BYTES = MAX_REFERENCE_CV_BYTES;
 const TYPES: Record<string, string> = {
@@ -100,6 +101,6 @@ export async function POST(req: NextRequest) {
     });
   } catch (err) {
     console.warn("[api/cv/reference]", err);
-    return answer({ ok: false, message: (err as Error).message || "Failed to parse the reference CV document." }, 500);
+    return answer({ ok: false, message: safeErrorMessage(err, "The reference CV could not be read. Try a PDF, DOCX or TXT file.") }, 500);
   }
 }

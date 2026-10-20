@@ -383,8 +383,9 @@ export interface Application {
    *  standard three are written to the candidate instead. */
   answers: Record<string, string>;
   /** Where the TA put the CAREER141 box on the Prepared CV, in PDF points from
-   *  page 1's top-left. Null or missing: placed automatically (29 Sep). */
-  preparedCvBox?: { x: number; y: number } | null;
+   *  page 1's top-left. Width is absent on positions saved before resizing was
+   *  added; those keep the standard width. Null or missing: automatic. */
+  preparedCvBox?: { x: number; y: number; width?: number } | null;
   /** Why a database match was picked, in one line, on its Database CVs row
    *  (5 Oct). Claude's when it wrote one, else the engine's. Not in `notes`,
    *  which the prepared CV prints. */

@@ -1,6 +1,7 @@
 import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { unstable_rethrow } from "next/navigation";
+import { safeErrorMessage } from "./userError";
 
 /**
  * A server action's answer, for forms that show it beside the button.
@@ -59,10 +60,7 @@ export async function inline(run: () => Promise<unknown>, fallback = "Saved."): 
     unstable_rethrow(e);
     // Anything else would have been the error page; beside the button it is
     // a sentence, and whatever was typed is still in the form.
-    const raw = e instanceof Error ? e.message : String(e);
-    const message = raw.startsWith("Your change was not saved")
-      ? raw
-      : `That did not save: ${raw.replace(/^Uncaught Error:\s*/, "").slice(0, 240)}`;
+    const message = safeErrorMessage(e, "That change could not be saved. Try again.");
     return { ok: false, message, tone: "error", at: Date.now() };
   }
 }

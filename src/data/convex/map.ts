@@ -183,10 +183,15 @@ function statusToPosition(status: string): Opening["positionStatus"] {
   return "active";
 }
 
-/** A saved Prepared CV box position, or null when it is not a usable one. */
-function validBox(v: unknown): { x: number; y: number } | null {
-  const b = v as { x?: unknown; y?: unknown } | null | undefined;
-  return b && Number.isFinite(b.x) && Number.isFinite(b.y) ? { x: Number(b.x), y: Number(b.y) } : null;
+/** A saved Prepared CV box position and optional width, or null when unusable. */
+function validBox(v: unknown): { x: number; y: number; width?: number } | null {
+  const b = v as { x?: unknown; y?: unknown; width?: unknown } | null | undefined;
+  if (!b || !Number.isFinite(b.x) || !Number.isFinite(b.y)) return null;
+  return {
+    x: Number(b.x),
+    y: Number(b.y),
+    ...(Number.isFinite(b.width) ? { width: Number(b.width) } : {}),
+  };
 }
 
 function numOrNull(v: unknown): number | null {

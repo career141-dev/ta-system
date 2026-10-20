@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { savePreparedCvBoxInline } from "@/app/actions";
 import { ActionNote, Spinner, useInline } from "./Submit";
 import { BOX } from "@/lib/career141Box";
+import { clampBox, clampBoxWidth, layoutBox, roughMeasure } from "@/lib/preparedCv";
 import { browserPdfJs } from "@/lib/pdfBrowser";
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
@@ -20,10 +21,15 @@ import type { PDFDocumentLoadingTask, PDFDocumentProxy } from "pdfjs-dist";
 
 type Line = { text: string; bold: boolean };
 type Layout = {
-  box: { x: number; y: number; width: number; height: number; lines: Line[] } | null;
+  box: { x: number; y: number; width: number; height: number; lines: Line[]; items: string[] } | null;
   page: { width: number; height: number };
   generated: boolean;
 };
+
+type EditorBox = { x: number; y: number; width: number };
+type Drag =
+  | { mode: "move"; dx: number; dy: number }
+  | { mode: "resize"; startClientX: number; startWidth: number };
 
 export function PreparedCvEditor({
   appId,
@@ -41,7 +47,7 @@ export function PreparedCvEditor({
 }) {
   const [layout, setLayout] = useState<Layout | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [at, setAt] = useState<EditorBox | null>(null);
   const [scale, setScale] = useState(1);
   const [version, setVersion] = useState(0);
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
@@ -51,8 +57,15 @@ export function PreparedCvEditor({
   const numPages = pdfDoc?.numPages ?? 1;
   const frame = useRef<HTMLDivElement | null>(null);
   const canvasMap = useRef<Map<number, HTMLCanvasElement>>(new Map());
-  const drag = useRef<{ dx: number; dy: number } | null>(null);
-  const save = useInline(savePreparedCvBoxInline, { refreshOnOk: false });
+  const drag = useRef<Drag | null>(null);
+  const reloadAfterSave = useRef(false);
+  const afterSave = useCallback(() => {
+    if (!reloadAfterSave.current) return;
+    reloadAfterSave.current = false;
+    setVersion((v) => v + 1);
+  }, []);
+  const saveOptions = useMemo(() => ({ refreshOnOk: false, onOk: afterSave }), [afterSave]);
+  const save = useInline(savePreparedCvBoxInline, saveOptions);
 
   const load = useCallback(async (signal: AbortSignal) => {
     setProblem(null);
@@ -63,7 +76,7 @@ export function PreparedCvEditor({
       const l = (await res.json()) as Layout;
       if (signal.aborted) return;
       setLayout(l);
-      setAt(l.box ? { x: l.box.x, y: l.box.y } : null);
+      setAt(l.box ? { x: l.box.x, y: l.box.y, width: l.box.width } : null);
     } catch {
       if (!signal.aborted) setProblem("The Prepared CV could not be loaded. Reload the page to try again.");
     }
@@ -168,37 +181,54 @@ export function PreparedCvEditor({
 
   const box = layout?.box ?? null;
   const page = layout?.page ?? { width: 595, height: 842 };
+  const shown = useMemo(() => {
+    if (!box || !at || at.width === box.width) return box;
+    const reflowed = layoutBox(box.items, roughMeasure, at.width);
+    return { ...box, width: reflowed.width, height: reflowed.height, lines: reflowed.lines };
+  }, [at, box]);
 
-  /** Keep the box on the page, in points. */
-  const clamp = (x: number, y: number) => ({
-    x: Math.round(Math.min(Math.max(10, x), Math.max(10, page.width - (box?.width ?? 0) - 10))),
-    y: Math.round(Math.min(Math.max(10, y), Math.max(10, page.height - (box?.height ?? 0) - 10))),
-  });
+  /** Keep the live preview on the page, in PDF points. */
+  const clamp = (x: number, y: number, width = shown?.width ?? 0, height = shown?.height ?? 0) =>
+    clampBox({ x, y }, { width, height }, page);
+
+  const submit = (next: EditorBox, reflow: boolean) => {
+    reloadAfterSave.current = reflow;
+    const fd = new FormData();
+    fd.set("appId", appId);
+    fd.set("openingId", openingId);
+    fd.set("x", String(next.x));
+    fd.set("y", String(next.y));
+    fd.set("width", String(next.width));
+    save.run(fd);
+  };
 
   const onDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!canEdit || !at) return;
     const page1 = canvasMap.current.get(1);
     if (!page1) return;
     const rect = page1.getBoundingClientRect();
-    drag.current = { dx: (e.clientX - rect.left) / scale - at.x, dy: (e.clientY - rect.top) / scale - at.y };
+    drag.current = { mode: "move", dx: (e.clientX - rect.left) / scale - at.x, dy: (e.clientY - rect.top) / scale - at.y };
     e.currentTarget.setPointerCapture(e.pointerId);
   };
   const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!drag.current) return;
+    const active = drag.current;
+    if (!active || !at || !box) return;
     const page1 = canvasMap.current.get(1);
     if (!page1) return;
-    const rect = page1.getBoundingClientRect();
-    setAt(clamp((e.clientX - rect.left) / scale - drag.current.dx, (e.clientY - rect.top) / scale - drag.current.dy));
+    if (active.mode === "move") {
+      const rect = page1.getBoundingClientRect();
+      setAt({ ...at, ...clamp((e.clientX - rect.left) / scale - active.dx, (e.clientY - rect.top) / scale - active.dy) });
+      return;
+    }
+    const width = clampBoxWidth(active.startWidth + (e.clientX - active.startClientX) / scale, page.width - at.x + 10);
+    const reflowed = layoutBox(box.items, roughMeasure, width);
+    setAt({ ...at, width, ...clamp(at.x, at.y, width, reflowed.height) });
   };
   const onUp = () => {
     if (!drag.current || !at) return;
+    const resized = drag.current.mode === "resize";
     drag.current = null;
-    const fd = new FormData();
-    fd.set("appId", appId);
-    fd.set("openingId", openingId);
-    fd.set("x", String(at.x));
-    fd.set("y", String(at.y));
-    save.run(fd);
+    submit(at, resized);
   };
   // Arrow keys move it too, 5 points a press — for a keyboard, or a fine nudge.
   const onKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -207,14 +237,26 @@ export function PreparedCvEditor({
     const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
     if (!d) return;
     e.preventDefault();
-    const next = clamp(at.x + d[0], at.y + d[1]);
+    const next = { ...at, ...clamp(at.x + d[0], at.y + d[1]) };
     setAt(next);
-    const fd = new FormData();
-    fd.set("appId", appId);
-    fd.set("openingId", openingId);
-    fd.set("x", String(next.x));
-    fd.set("y", String(next.y));
-    save.run(fd);
+    submit(next, false);
+  };
+  const onResizeDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!canEdit || !at) return;
+    e.stopPropagation();
+    drag.current = { mode: "resize", startClientX: e.clientX, startWidth: at.width };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+  const onResizeKey = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!canEdit || !at || !box || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const amount = e.shiftKey ? 40 : 10;
+    const width = clampBoxWidth(at.width + (e.key === "ArrowRight" ? amount : -amount), page.width - at.x + 10);
+    const reflowed = layoutBox(box.items, roughMeasure, width);
+    const next = { ...at, width, ...clamp(at.x, at.y, width, reflowed.height) };
+    setAt(next);
+    submit(next, true);
   };
   const reset = () => {
     const fd = new FormData();
@@ -233,7 +275,7 @@ export function PreparedCvEditor({
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <p className="max-w-[70ch] text-[12.5px] text-ink-soft">
           {canEdit
-            ? "Drag the green box to where it should sit on the CV. The download and the end-of-day email use this spot."
+            ? "Drag the green box to move it. Drag its right handle to change the width; the height adjusts to keep every detail readable."
             : "The CV as the Director and the client receive it."}
         </p>
         <div className="flex flex-wrap items-center gap-2">
@@ -241,7 +283,7 @@ export function PreparedCvEditor({
           <ActionNote result={save.result} />
           {canEdit && box && drawn && !previewProblem && (
             <button type="button" onClick={reset} className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-ink-soft hover:bg-paper">
-              Reset position
+              Reset position and size
             </button>
           )}
           <a href={href} target="_blank" rel="noreferrer" className="rounded-full border border-rule px-3.5 py-1.5 text-[12px] text-brand hover:bg-tag">
@@ -301,7 +343,7 @@ export function PreparedCvEditor({
                     }}
                     className="block mx-auto"
                   />
-                  {p === 1 && box && at && drawn && (
+                  {p === 1 && shown && at && drawn && (
                     <div
                       role={canEdit ? "button" : undefined}
                       tabIndex={canEdit ? 0 : undefined}
@@ -314,8 +356,8 @@ export function PreparedCvEditor({
                       style={{
                         left: at.x * scale,
                         top: at.y * scale,
-                        width: box.width * scale,
-                        height: box.height * scale,
+                        width: shown.width * scale,
+                        height: shown.height * scale,
                         padding: BOX.padding * scale,
                         paddingTop: (BOX.padding + 1) * scale,
                         background: "#fff",
@@ -324,7 +366,7 @@ export function PreparedCvEditor({
                         fontFamily: "Helvetica, Arial, sans-serif",
                       }}
                     >
-                      {box.lines.map((l, i) => (
+                      {shown.lines.map((l, i) => (
                         <div
                           key={i}
                           style={{
@@ -337,6 +379,16 @@ export function PreparedCvEditor({
                           {l.text}
                         </div>
                       ))}
+                      {canEdit && (
+                        <button
+                          type="button"
+                          aria-label="Resize CAREER141 box width"
+                          title="Drag left or right to resize · arrow keys resize precisely"
+                          onPointerDown={onResizeDown}
+                          onKeyDown={onResizeKey}
+                          className="absolute -right-2 top-1/2 h-5 w-3 -translate-y-1/2 cursor-ew-resize rounded-full border-2 border-brand bg-white shadow-sm focus:outline focus:outline-2 focus:outline-offset-2 focus:outline-brand"
+                        />
+                      )}
                     </div>
                   )}
                 </div>

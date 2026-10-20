@@ -11,6 +11,7 @@ import {
 } from "livekit-client";
 import { inputClass } from "@/components/form";
 import { startVoiceTest } from "@/app/voiceTestActions";
+import { safeErrorMessage } from "@/lib/userError";
 
 type OpeningOption = { id: string; label: string; companyName: string; jobTitle: string; jobDescription: string };
 type Line = { id: string; who: "agent" | "you"; text: string };
@@ -139,7 +140,7 @@ export function VoiceTestPanel({ openings }: { openings: OpeningOption[] }) {
       setPhase(lk.remoteParticipants.size > 0 ? "live" : "waiting");
     } catch (e) {
       setPhase("error");
-      setMessage(`Could not join the call: ${(e as Error).message}. Check that the microphone is allowed.`);
+      setMessage(safeErrorMessage(e, "The call could not start. Check microphone access and try again."));
       await lk.disconnect();
     }
   }

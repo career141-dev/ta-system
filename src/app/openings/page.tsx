@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { repo, stageCounts, setsForOpening } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { allows, isDeskWide } from "@/lib/auth";
+import { allows, isDeskWide, isTa } from "@/lib/auth";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 import { StatusMenu, type OpeningStatus } from "@/components/StatusMenu";
 import { WorkingStageMenu } from "@/components/WorkingStageMenu";
@@ -18,6 +18,14 @@ import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { BulkBar, BulkConfirm, RowCheck } from "@/components/BulkSelect";
 import { deleteOpenings } from "@/app/actions";
 import { OPENING_BUCKETS, statusMatchesBucket, type OpeningBucket } from "@/lib/openingStatus";
+import { isConvex } from "@/data/mode";
+import { convexQuery } from "@/lib/convexServer";
+import {
+  OpeningAccessApprovalQueue,
+  RequestOpeningAccess,
+  type AvailableOpening,
+  type PendingOpeningAccessRequest,
+} from "@/components/OpeningAccessRequests";
 
 const PAGE_SIZE = 20;
 
@@ -49,6 +57,7 @@ export default async function OpeningsPage({
     industry?: string;
     clientId?: string;
     taId?: string;
+    accessRequests?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -58,6 +67,16 @@ export default async function OpeningsPage({
     : "mine";
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
+  const [availableOpenings, pendingAccessRequests] = isConvex()
+    ? await Promise.all([
+        isTa(user)
+          ? convexQuery<AvailableOpening[]>("ta/openingAccess:listAvailable", { actorId: user.id })
+          : Promise.resolve([]),
+        user.role === "ta_lead" || user.role === "admin"
+          ? convexQuery<PendingOpeningAccessRequest[]>("ta/openingAccess:listPendingForApprover", { actorId: user.id })
+          : Promise.resolve([]),
+      ])
+    : [[], []];
   const clients = repo.clients();
   const users = repo.users();
   const mine = repo.openingsForUser(user);
@@ -167,6 +186,9 @@ export default async function OpeningsPage({
           New opening
         </Link>
       </div>
+
+      {isTa(user) && <RequestOpeningAccess openings={availableOpenings} />}
+      <OpeningAccessApprovalQueue requests={pendingAccessRequests} />
 
       <Suspense fallback={<div className="mb-6 h-[42px]" />}>
         <OpeningsToolbar

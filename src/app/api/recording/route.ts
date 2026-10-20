@@ -76,7 +76,7 @@ export async function POST(req: Request) {
   // A transcript without a stored copy is still worth handing back: the words
   // are what the person needs, and the notes are what gets saved.
   if (!stored.key && !transcript.ok) {
-    return NextResponse.json({ error: "upload_failed", detail: stored.error }, { status: 502 });
+    return NextResponse.json({ error: "upload_failed", detail: "The recording could not be saved. Try again." }, { status: 502 });
   }
   return NextResponse.json({
     key: stored.key,

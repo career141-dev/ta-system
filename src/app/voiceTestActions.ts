@@ -5,6 +5,7 @@ import { AccessToken, AgentDispatchClient, RoomServiceClient } from "livekit-ser
 import { primeStore } from "@/data/prime";
 import { getCurrentUser } from "@/lib/session";
 import { can } from "@/lib/auth";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Voice agent → a practice screening call, as the CV platform's "Aura voice
@@ -88,7 +89,7 @@ export async function startVoiceTest(input: VoiceTestInput): Promise<VoiceTestSt
       maxParticipants: 4,
     });
   } catch (e) {
-    return { ok: false, message: `Could not reach the voice server: ${(e as Error).message}` };
+    return { ok: false, message: safeErrorMessage(e, "The voice service could not be reached. Try again.") };
   }
   // For the TA System's own worker, which joins only rooms it is sent to. The
   // CV platform's agent joins every new room without it; a failure here is not

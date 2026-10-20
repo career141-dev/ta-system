@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Room, RoomEvent, Track, type RemoteTrack, type TranscriptionSegment, type Participant } from "livekit-client";
 import { endWebCall, startWebCall } from "@/app/voiceActions";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Start an AI screening call and hold it here, in the browser.
@@ -87,7 +88,7 @@ export function WebCallPanel({ applicationId, openingId }: { applicationId: stri
       setPhase(lk.remoteParticipants.size > 0 ? "live" : "waiting");
     } catch (e) {
       setPhase("error");
-      setMessage(`Could not join the call: ${(e as Error).message}. Is LiveKit running on this machine?`);
+      setMessage(safeErrorMessage(e, "The call could not start. Check microphone access and try again."));
       await finish("Browser could not join the room");
     }
   }

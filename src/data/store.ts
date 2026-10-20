@@ -1622,8 +1622,8 @@ const rawRepo = {
   },
 
   /** Spec §12.1 — an add-on notifies the TA and the lead. */
-  /** Where the TA put the CAREER141 box on the Prepared CV; null goes back to automatic. */
-  setPreparedCvBox(appId: Id, box: { x: number; y: number } | null) {
+  /** Where the TA put and sized the CAREER141 box; null goes back to automatic. */
+  setPreparedCvBox(appId: Id, box: { x: number; y: number; width?: number } | null) {
     mutate((db) => {
       const a = db.applications.find((x) => x.id === appId);
       if (a) a.preparedCvBox = box;

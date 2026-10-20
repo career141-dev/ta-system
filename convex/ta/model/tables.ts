@@ -280,7 +280,7 @@ export const TABLES: Record<string, TableModel> = {
         setNumber: nul(r.setNumber as number | null),
         rating: nul(r.rating as number | null),
         taNotes: r.notes ?? [],
-        taPreparedCvBox: u(r.preparedCvBox as { x: number; y: number } | null),
+        taPreparedCvBox: u(r.preparedCvBox as { x: number; y: number; width?: number } | null),
         taMatchReason: u(r.matchReason as string | null),
         taMatchScore: u(r.matchScore as number | null),
         reviewNotes: (r.reviewNotes as unknown[] | undefined) ?? [],

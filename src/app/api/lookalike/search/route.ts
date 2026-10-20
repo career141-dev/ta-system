@@ -3,6 +3,7 @@ import { primeStore } from "@/data/prime";
 import { currentUser } from "@/lib/session";
 import { searchLookalikes } from "@/lib/lookalikeMatch";
 import type { ReferenceCvBlueprint } from "@/lib/referenceCv";
+import { safeErrorMessage } from "@/lib/userError";
 
 export async function POST(req: NextRequest) {
   await primeStore({ allApplications: true });
@@ -25,6 +26,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, results });
   } catch (err) {
     console.error("[api/lookalike/search]", err);
-    return NextResponse.json({ ok: false, message: (err as Error).message || "Search failed." }, { status: 500 });
+    return NextResponse.json({ ok: false, message: safeErrorMessage(err, "The search could not run. Try again.") }, { status: 500 });
   }
 }
