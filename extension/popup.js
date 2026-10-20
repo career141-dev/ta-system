@@ -138,10 +138,10 @@ $("capture").addEventListener("click", async () => {
           ? ` Possibly ${m.fullName}, already in our database — check the row in Excel Tables.`
           : " Not in our database yet — a new person.";
     say(
-      (res.status === "updated"
-        ? `${res.name} is already in ${res.openingTitle}${res.addedByName ? ` — added by ${res.addedByName}` : ""}. Updated, not added again.`
-        : `${res.name} shortlisted in ${res.openingTitle}.`) + held,
-      "ok",
+      res.status === "updated"
+        ? "Already in L sheet can't add"
+        : "Added to L sheet",
+      res.status === "updated" ? "bad" : "ok",
     );
     paintHistory();
   } catch (e) {
