@@ -20,6 +20,7 @@ type Row = {
   state: "uploading" | "reading" | "done" | "held" | "failed" | "missing";
   name: string | null;
   note: string | null;
+  createdAt?: number;
 };
 
 const LINE: Record<Row["state"], string> = {
@@ -39,8 +40,67 @@ export function ScoopUpload({ openingId, senders }: { openingId: string; senders
   const input = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
   const seenDone = useRef(new Set<string>());
+  const loadedFromStorageRef = useRef(false);
+
+  // Restore queued uploads from localStorage on mount and recover interrupted state
+  useEffect(() => {
+    if (loadedFromStorageRef.current) return;
+    loadedFromStorageRef.current = true;
+    try {
+      const raw = localStorage.getItem(`scoop-upload-queue:${openingId}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+
+      const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+      const valid = parsed
+        .filter((r): r is Row => Boolean(r && typeof r === "object" && r.key && r.fileName))
+        .filter((r) => !r.createdAt || r.createdAt > oneDayAgo)
+        .map((r) => {
+          // If the page was closed during local file upload before receiving an ID, mark failed
+          if (r.state === "uploading" && !r.id) {
+            return {
+              ...r,
+              state: "failed" as const,
+              note: "Upload was interrupted before reaching the server. Please upload again.",
+            };
+          }
+          return r;
+        });
+
+      if (valid.length > 0) {
+        setRows(valid);
+        valid.forEach((r) => {
+          if ((r.state === "done" || r.state === "held") && r.id) {
+            seenDone.current.add(r.id);
+          }
+        });
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [openingId]);
+
+  // Keep queue synced to localStorage and notify sidebar
+  useEffect(() => {
+    if (!loadedFromStorageRef.current) return;
+    try {
+      if (rows.length > 0) {
+        localStorage.setItem(`scoop-upload-queue:${openingId}`, JSON.stringify(rows));
+      } else {
+        localStorage.removeItem(`scoop-upload-queue:${openingId}`);
+      }
+      window.dispatchEvent(new CustomEvent("scoop-upload-sync", { detail: { openingId } }));
+    } catch {
+      // Ignore storage errors
+    }
+  }, [rows, openingId]);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
+
+  const clearFinished = () => {
+    setRows((rs) => rs.filter((r) => r.state === "uploading" || r.state === "reading"));
+  };
 
   async function send(files: File[]) {
     setProblem(null);
@@ -53,6 +113,7 @@ export function ScoopUpload({ openingId, senders }: { openingId: string; senders
       state: "uploading",
       name: null,
       note: null,
+      createdAt: Date.now(),
     }));
     setRows((rs) => [...fresh, ...rs]);
     // One at a time: each is a stored file and a queued extraction.
@@ -173,25 +234,39 @@ export function ScoopUpload({ openingId, senders }: { openingId: string; senders
           {problem && <p className="mt-3 text-[12px] text-warn">{problem}</p>}
 
           {rows.length > 0 && (
-            <ul className="mt-3 divide-y divide-rule rounded-lg border border-rule">
-              {rows.map((r) => (
-                <li key={r.key} className="flex items-center justify-between gap-4 px-3 py-2 text-[12.5px]">
-                  <div className="min-w-0">
-                    <div className="truncate font-medium">{r.name ?? r.fileName}</div>
-                    {r.name && <div className="truncate text-[11.5px] text-ink-faint">{r.fileName}</div>}
-                    {r.note && <div className="text-[11.5px] text-ink-soft">{r.note}</div>}
-                  </div>
-                  <span
-                    className={`inline-flex shrink-0 items-center gap-1.5 ${
-                      r.state === "done" ? "text-brand" : r.state === "failed" || r.state === "held" || r.state === "missing" ? "text-danger" : "text-ink-soft"
-                    }`}
+            <div className="mt-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-[12px] font-semibold text-ink">Uploads & extractions</span>
+                {rows.some((r) => r.state !== "uploading" && r.state !== "reading") && (
+                  <button
+                    type="button"
+                    onClick={clearFinished}
+                    className="text-[11.5px] text-ink-faint hover:text-ink cursor-pointer"
                   >
-                    {(r.state === "uploading" || r.state === "reading") && <Spinner tone="dark" />}
-                    {LINE[r.state]}
-                  </span>
-                </li>
-              ))}
-            </ul>
+                    Clear finished
+                  </button>
+                )}
+              </div>
+              <ul className="divide-y divide-rule rounded-lg border border-rule">
+                {rows.map((r) => (
+                  <li key={r.key} className="flex items-center justify-between gap-4 px-3 py-2 text-[12.5px]">
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{r.name ?? r.fileName}</div>
+                      {r.name && <div className="truncate text-[11.5px] text-ink-faint">{r.fileName}</div>}
+                      {r.note && <div className="text-[11.5px] text-ink-soft">{r.note}</div>}
+                    </div>
+                    <span
+                      className={`inline-flex shrink-0 items-center gap-1.5 ${
+                        r.state === "done" ? "text-brand" : r.state === "failed" || r.state === "held" || r.state === "missing" ? "text-danger" : "text-ink-soft"
+                      }`}
+                    >
+                      {(r.state === "uploading" || r.state === "reading") && <Spinner tone="dark" />}
+                      {LINE[r.state]}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
         </div>
       </div>

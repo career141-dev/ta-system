@@ -1,12 +1,11 @@
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
-import { can, isDeskWide } from "@/lib/auth";
-import { scopeLinks } from "@/lib/visibility";
-import { interestOf } from "@/lib/linkViews";
-import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
+import { can } from "@/lib/auth";
+import type { LinkVaultEntry } from "@/data/types";
 import { matchesQuery } from "@/lib/paging";
-import { buildXlsx, formatLinkVaultExportRows, toTsv, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
+import { buildXlsx, toTsv, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
+import { getScopedLinkVaultEntries, formatExportRowsForEntries } from "@/lib/linkExport";
 
 export const dynamic = "force-dynamic";
 
@@ -38,11 +37,7 @@ export async function GET(
     return new Response("Opening not found.", { status: 404 });
   }
 
-  const users = repo.users();
-  const canSeeLeadNotes = can(user, "link.note").ok;
-  const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
-  const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
-  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
+  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user);
 
   const sp = new URL(req.url).searchParams;
   const q = sp.get("q") ?? "";
@@ -53,21 +48,11 @@ export async function GET(
   const imark = sp.get("imark") === "1";
   const exportAll = sp.get("all") === "1";
 
-  const facts = new Map(
-    everyRow.map(({ row: r }) => {
-      const found = r.candidateId
-        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId)
-        : undefined;
-      const app = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
-      return [r.id, { app, interest: interestOf(r, app) }] as const;
-    })
-  );
-
   type F = { status: string; level: number; addons: boolean; imark: boolean; by: string };
-  const pass = (r: (typeof everyRow)[number]["row"], f: F) => {
-    const x = facts.get(r.id)!;
+  const pass = (r: LinkVaultEntry, f: F) => {
+    const x = facts.get(r.id);
     return (
-      (!f.status || x.interest === f.status) &&
+      (!f.status || x?.interest === f.status) &&
       (!f.level || r.level === f.level) &&
       (!f.addons || !!r.isAddOn) &&
       (!f.imark || r.isEyeMarked) &&
@@ -76,30 +61,12 @@ export async function GET(
   };
 
   const rowsToExport = exportAll
-    ? everyRow.map((x) => x.row)
-    : everyRow
-        .filter(({ row: r }) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber))
-        .filter(({ row }) => pass(row, { status, level, addons, imark, by }))
-        .map((x) => x.row);
+    ? entries
+    : entries
+        .filter((r) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber))
+        .filter((r) => pass(r, { status, level, addons, imark, by }));
 
-  const formattedRows = formatLinkVaultExportRows(
-    rowsToExport.map((r) => {
-      const fact = facts.get(r.id);
-      const latestLeadNote = canSeeLeadNotes && r.leadNotes && r.leadNotes.length > 0
-        ? r.leadNotes[r.leadNotes.length - 1]?.note
-        : null;
-      const latestApproach =
-        r.conversationLog && r.conversationLog.length > 0 ? r.conversationLog[r.conversationLog.length - 1]?.note : null;
-      const noteText = latestLeadNote || latestApproach || "";
-
-      return {
-        ...r,
-        interest: fact?.interest,
-        addedByName: userNames[r.addedBy],
-        notes: noteText,
-      };
-    })
-  );
+  const formattedRows = formatExportRowsForEntries(rowsToExport, facts, userNames, canSeeLeadNotes);
 
   const format = sp.get("format") ?? "xlsx";
 

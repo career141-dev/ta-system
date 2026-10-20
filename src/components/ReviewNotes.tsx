@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { addReviewNoteInline, removeReviewNoteInline } from "@/app/actions";
 import { inputClass } from "./form";
@@ -34,10 +34,58 @@ export function ReviewNotes({
   const drop = useInline(removeReviewNoteInline);
   const form = useRef<HTMLFormElement>(null);
 
+  const [noteText, setNoteText] = useState("");
+  const [draftRestored, setDraftRestored] = useState(false);
+  const draftCheckedRef = useRef(false);
+
   useEffect(() => {
-    if (add.result?.tone === "ok") form.current?.reset();
+    if (draftCheckedRef.current) return;
+    draftCheckedRef.current = true;
+    try {
+      const raw = localStorage.getItem(`review-note-draft:${appId}`);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft && typeof draft.note === "string" && draft.note.trim().length > 0) {
+        setNoteText(draft.note);
+        setDraftRestored(true);
+      }
+    } catch {}
+  }, [appId]);
+
+  useEffect(() => {
+    if (!draftCheckedRef.current) return;
+    const timer = setTimeout(() => {
+      try {
+        if (noteText.trim().length > 0) {
+          localStorage.setItem(`review-note-draft:${appId}`, JSON.stringify({ note: noteText, updatedAt: Date.now() }));
+        } else {
+          localStorage.removeItem(`review-note-draft:${appId}`);
+          setDraftRestored(false);
+        }
+      } catch {}
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [noteText, appId]);
+
+  const discardDraft = () => {
+    try {
+      localStorage.removeItem(`review-note-draft:${appId}`);
+    } catch {}
+    setNoteText("");
+    setDraftRestored(false);
+  };
+
+  useEffect(() => {
+    if (add.result?.tone === "ok") {
+      try {
+        localStorage.removeItem(`review-note-draft:${appId}`);
+      } catch {}
+      setNoteText("");
+      setDraftRestored(false);
+      form.current?.reset();
+    }
     if (add.result?.ok || drop.result?.ok) router.refresh();
-  }, [add.result, drop.result, router]);
+  }, [add.result, drop.result, router, appId]);
 
   const shown = newestFirst(notes);
 
@@ -79,8 +127,25 @@ export function ReviewNotes({
         <form ref={form} onSubmit={(e) => add.run(submitted(e).formData)} className="mt-3">
           <input type="hidden" name="appId" value={appId} />
           <input type="hidden" name="openingId" value={openingId} />
+          {draftRestored && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-800 dark:text-amber-200">
+              <div className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+                <span>Draft note restored</span>
+              </div>
+              <button
+                type="button"
+                onClick={discardDraft}
+                className="font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
+              >
+                Discard
+              </button>
+            </div>
+          )}
           <textarea
             name="note"
+            value={noteText}
+            onChange={(e) => setNoteText(e.target.value)}
             rows={3}
             maxLength={2000}
             placeholder="Add a note for the Director review…"

@@ -118,39 +118,170 @@ export function ReviewDetailsForm({
     setCvOnFile(hasCv);
   }, [hasCv]);
 
+  const [draftRestored, setDraftRestored] = useState(false);
+  const draftCheckedRef = useRef(false);
+
+  const initialNp = noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : "");
+  const initialDesignation = currentDesignation ?? "";
+  const initialCompany = currentCompany ?? "";
+
+  // Check and restore draft on mount if differences exist
   useEffect(() => {
+    if (draftCheckedRef.current) return;
+    draftCheckedRef.current = true;
+    try {
+      const raw = localStorage.getItem(`candidate-details-draft:${applicationId}`);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (!draft || typeof draft !== "object") return;
+
+      const serverCustom = parseInitialDetails(notes);
+      const differs =
+        (draft.curCurrency !== undefined && draft.curCurrency !== cur) ||
+        (draft.curVal !== undefined && draft.curVal !== initialCurAmount) ||
+        (draft.expCurrency !== undefined && draft.expCurrency !== exp) ||
+        (draft.expVal !== undefined && draft.expVal !== initialExpAmount) ||
+        (draft.npVal !== undefined && draft.npVal !== initialNp) ||
+        (draft.designation !== undefined && draft.designation !== initialDesignation) ||
+        (draft.company !== undefined && draft.company !== initialCompany) ||
+        (Array.isArray(draft.customFields) && JSON.stringify(draft.customFields) !== JSON.stringify(serverCustom));
+
+      if (differs) {
+        if (typeof draft.curCurrency === "string") setCurCurrency(draft.curCurrency);
+        if (typeof draft.curVal === "string") setCurVal(draft.curVal);
+        if (typeof draft.expCurrency === "string") setExpCurrency(draft.expCurrency);
+        if (typeof draft.expVal === "string") setExpVal(draft.expVal);
+        if (typeof draft.npVal === "string") setNpVal(draft.npVal);
+        if (typeof draft.designation === "string") setDesignation(draft.designation);
+        if (typeof draft.company === "string") setCompany(draft.company);
+        if (Array.isArray(draft.customFields)) setCustomFields(draft.customFields);
+        setDraftRestored(true);
+      } else {
+        localStorage.removeItem(`candidate-details-draft:${applicationId}`);
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [applicationId, cur, initialCurAmount, exp, initialExpAmount, initialNp, initialDesignation, initialCompany, notes]);
+
+  // Debounced auto-save when user types
+  useEffect(() => {
+    if (!draftCheckedRef.current) return;
+
+    const timer = setTimeout(() => {
+      try {
+        const serverCustom = parseInitialDetails(notes);
+        const differs =
+          curCurrency !== cur ||
+          curVal !== initialCurAmount ||
+          expCurrency !== exp ||
+          expVal !== initialExpAmount ||
+          npVal !== initialNp ||
+          designation !== initialDesignation ||
+          company !== initialCompany ||
+          JSON.stringify(customFields) !== JSON.stringify(serverCustom);
+
+        if (differs) {
+          const draft = {
+            curCurrency,
+            curVal,
+            expCurrency,
+            expVal,
+            npVal,
+            designation,
+            company,
+            customFields,
+            updatedAt: Date.now(),
+          };
+          localStorage.setItem(`candidate-details-draft:${applicationId}`, JSON.stringify(draft));
+        } else {
+          localStorage.removeItem(`candidate-details-draft:${applicationId}`);
+          setDraftRestored(false);
+        }
+      } catch {
+        // Ignore quota/storage errors
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [
+    curCurrency,
+    curVal,
+    expCurrency,
+    expVal,
+    npVal,
+    designation,
+    company,
+    customFields,
+    applicationId,
+    cur,
+    initialCurAmount,
+    exp,
+    initialExpAmount,
+    initialNp,
+    initialDesignation,
+    initialCompany,
+    notes,
+  ]);
+
+  const discardDraft = () => {
+    try {
+      localStorage.removeItem(`candidate-details-draft:${applicationId}`);
+    } catch {}
+    setCurCurrency(cur);
+    setCurVal(initialCurAmount);
+    setExpCurrency(exp);
+    setExpVal(initialExpAmount);
+    setNpVal(initialNp);
+    setDesignation(initialDesignation);
+    setCompany(initialCompany);
+    setCustomFields(parseInitialDetails(notes));
+    setDraftRestored(false);
+  };
+
+  useEffect(() => {
+    if (draftRestored) return;
     const [c, ca] = split(currentSalary, defaultCurrency);
     setCurCurrency(c);
     setCurVal(ca);
-  }, [currentSalary, defaultCurrency]);
+  }, [currentSalary, defaultCurrency, draftRestored]);
 
   useEffect(() => {
+    if (draftRestored) return;
     const [e, ea] = split(expectedSalary, defaultCurrency);
     setExpCurrency(e);
     setExpVal(ea);
-  }, [expectedSalary, defaultCurrency]);
+  }, [expectedSalary, defaultCurrency, draftRestored]);
 
   useEffect(() => {
+    if (draftRestored) return;
     setNpVal(noticePeriod || (noticePeriodDays === 0 ? "Immediate" : noticePeriodDays != null ? `${noticePeriodDays} days` : ""));
-  }, [noticePeriod, noticePeriodDays]);
+  }, [noticePeriod, noticePeriodDays, draftRestored]);
 
   useEffect(() => {
+    if (draftRestored) return;
     setDesignation(currentDesignation ?? "");
-  }, [currentDesignation]);
+  }, [currentDesignation, draftRestored]);
 
   useEffect(() => {
+    if (draftRestored) return;
     setCompany(currentCompany ?? "");
-  }, [currentCompany]);
+  }, [currentCompany, draftRestored]);
 
   useEffect(() => {
+    if (draftRestored) return;
     setCustomFields(parseInitialDetails(notes));
-  }, [notes]);
+  }, [notes, draftRestored]);
 
   useEffect(() => {
     if (save.result?.ok) {
+      try {
+        localStorage.removeItem(`candidate-details-draft:${applicationId}`);
+      } catch {}
+      setDraftRestored(false);
       router.refresh();
     }
-  }, [save.result, router]);
+  }, [save.result, router, applicationId]);
 
   const hasCvNow = Boolean(hasCv || cvOnFile);
   const hasNotice = noticePeriodDays != null || Boolean(noticePeriod?.trim()) || Boolean(npVal.trim());
@@ -286,6 +417,21 @@ export function ReviewDetailsForm({
           {missing.length ? `Still needed: ${missing.join(", ")}` : "All details in — ready for Director review"}
         </span>
       </div>
+      {draftRestored && (
+        <div className="mt-2.5 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11.5px] text-amber-800 dark:text-amber-200">
+          <div className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            <span>Draft restored from unsubmitted changes</span>
+          </div>
+          <button
+            type="button"
+            onClick={discardDraft}
+            className="font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
+          >
+            Discard draft
+          </button>
+        </div>
+      )}
       <div className="mt-3 grid grid-cols-[minmax(0,1fr)] gap-3 sm:grid-cols-3">
         {money("currentSalary", curCurrency, setCurCurrency, curVal, setCurVal, "e.g. 250,000 / 250k / Not disclosed", "Current salary (optional)")}
         {money("expectedSalary", expCurrency, setExpCurrency, expVal, setExpVal, "e.g. 300,000 / 300k / Negotiable / Open to discuss", "Expected salary")}
