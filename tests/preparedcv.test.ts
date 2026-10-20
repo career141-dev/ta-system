@@ -2,10 +2,10 @@
  * The Prepared CV box and the replaced CV (29 Sep).
  *
  * The box prints only what the desk holds — no "NOT DISCLOSED" nobody typed —
- * at one font size, wrapped to one width, where the TA dragged it. A replaced
- * CV only fills what is empty.
+ * at one readable font size, wrapped to the TA's chosen width, where they
+ * placed it. A replaced CV only fills what is empty.
  */
-import { boxContent, boxItems, clampBox, layoutBox, noticeText, roughMeasure, BOX } from "@/lib/preparedCv";
+import { boxContent, boxItems, clampBox, clampBoxWidth, layoutBox, noticeText, roughMeasure, BOX } from "@/lib/preparedCv";
 import { annotationItems, stampCareer141Box } from "@/lib/pdf";
 import { fillBlanksOnly, CV_FILE_KEYS } from "../convex/lib/fillBlanks";
 import { TABLES, sameValue } from "../convex/ta/model/tables";
@@ -40,17 +40,22 @@ eq("notice from days", noticeText({ noticePeriodDays: 30 }), "30 Days");
 eq("zero days is Immediate", noticeText({ noticePeriodDays: 0 }), "Immediate");
 eq("words win over days", noticeText({ noticePeriodDays: 30, noticePeriod: "immediate" }), "Immediate");
 
-console.log("\none width, one font size");
+console.log("\nadjustable width, one readable font size");
 const long = ["CAREER141 CANDIDATE", `- ${"Handled the regional distributor network across the Western and Southern provinces ".repeat(4)}`];
 const lay = layoutBox(long, roughMeasure);
-eq("fixed width", lay.width, BOX.width);
+eq("standard width remains the default", lay.width, BOX.width);
 eq("long note wraps onto more lines", lay.lines.length > 4, true);
 eq("every line fits the width", lay.lines.every((l) => roughMeasure(l.text, l.bold ? BOX.headerSize : BOX.bodySize, l.bold) <= BOX.width - BOX.padding * 2), true);
 eq("taller, not smaller: height follows the lines", lay.height, BOX.padding * 2 + lay.lines.length * BOX.lineHeight + 4);
 eq("a word wider than the box is cut, not overflowed", layoutBox(["H", "x".repeat(200)], roughMeasure).lines.every((l) => roughMeasure(l.text, 8.5, false) <= BOX.width - 16), true);
+const narrow = layoutBox(long, roughMeasure, 200);
+eq("a narrower width is honoured", narrow.width, 200);
+eq("narrower makes the same text taller", narrow.height > lay.height, true);
+eq("width cannot make the text unreadably narrow", clampBoxWidth(20), BOX.minWidth);
+eq("width cannot grow beyond the controlled maximum", clampBoxWidth(900), BOX.maxWidth);
 eq("a dragged spot is kept on the page", clampBox({ x: 900, y: -40 }, { width: 260, height: 100 }, { width: 595, height: 842 }), { x: 325, y: 10 });
 
-console.log("\nthe stamp: the TA's spot, the fixed size");
+console.log("\nthe stamp: the TA's spot and chosen width");
 {
   const { PDFDocument } = await import("pdf-lib");
   const doc = await PDFDocument.create();
@@ -61,6 +66,9 @@ console.log("\nthe stamp: the TA's spot, the fixed size");
   const s = await stampCareer141Box(base, { currentSalary: "LKR 250,000", notes: ["x ".repeat(300)] }, { x: 40, y: 60 });
   eq("placed where the TA put it", [s.box?.x, s.box?.y], [40, 60]);
   eq("width stays fixed with long notes", s.box?.width, BOX.width);
+  const resized = await stampCareer141Box(base, { currentSalary: "LKR 250,000", notes: ["x ".repeat(300)] }, { x: 40, y: 60, width: 200 });
+  eq("download honours the TA's chosen width", resized.box?.width, 200);
+  eq("narrow download reflows and grows taller", (resized.box?.height ?? 0) > (s.box?.height ?? 0), true);
   const short = await stampCareer141Box(base, { currentSalary: "LKR 250,000", notes: [] }, { x: 40, y: 60 });
   eq("more text is a taller box", (s.box?.height ?? 0) > (short.box?.height ?? 0), true);
 }
@@ -95,14 +103,14 @@ console.log("\nthe end-of-day attachment says what the email says");
   eq("a company corrected on the email reaches the box", boxOverrides(eodDetailChanges(row, moved)), { currentDesignation: "Brand Manager", currentCompany: "Hayleys PLC" });
 }
 
-console.log("\nthe saved spot is stored and read back");
+console.log("\nthe saved spot and width are stored and read back");
 {
   const m = TABLES.applications;
-  const row = { id: "a1", openingId: "o1", candidateId: "c1", stage: "ta_follow_up", answers: {}, notes: [], sourcingChannel: "E", preparedCvBox: { x: 40, y: 60 }, lastStageChangedAt: 1 };
+  const row = { id: "a1", openingId: "o1", candidateId: "c1", stage: "ta_follow_up", answers: {}, notes: [], sourcingChannel: "E", preparedCvBox: { x: 40, y: 60, width: 220 }, lastStageChangedAt: 1 };
   const doc = await m.toDoc(row as never, { get: async () => null, now: 1 } as never, false);
-  eq("stored", doc.taPreparedCvBox, { x: 40, y: 60 });
+  eq("stored", doc.taPreparedCvBox, { x: 40, y: 60, width: 220 });
   const back = m.fromDoc({ ...doc, _id: "a1", _creationTime: 1 } as never) as Record<string, unknown>;
-  eq("read back", sameValue(back.preparedCvBox, { x: 40, y: 60 }), true);
+  eq("read back", sameValue(back.preparedCvBox, { x: 40, y: 60, width: 220 }), true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed\n`);

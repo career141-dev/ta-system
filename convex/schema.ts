@@ -248,6 +248,28 @@ export default defineSchema({
     .index("by_jobId_assignmentRole", ["jobId", "assignmentRole"])
     .index("by_userId_isActive", ["userId", "isActive"]),
 
+  // A TA can ask to join an opening without becoming a member of its team.
+  // Approval is the only operation that creates/reactivates jobAssignments.
+  openingAccessRequests: defineTable({
+    jobId: v.id("jobs"),
+    requesterId: v.id("users"),
+    leadId: v.id("users"),
+    status: v.union(
+      v.literal("pending"),
+      v.literal("approved"),
+      v.literal("rejected"),
+    ),
+    requestReason: v.optional(v.string()),
+    requestedAt: v.number(),
+    decidedAt: v.optional(v.number()),
+    decidedBy: v.optional(v.id("users")),
+    decisionReason: v.optional(v.string()),
+  })
+    .index("by_requester_job_status", ["requesterId", "jobId", "status"])
+    .index("by_requester_job", ["requesterId", "jobId"])
+    .index("by_lead_status", ["leadId", "status"])
+    .index("by_job", ["jobId"]),
+
   // ■■ ROLE_AUDIT_LOG ■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
   roleAuditLog: defineTable({
     targetUserId: v.id("users"),
@@ -1262,9 +1284,10 @@ export default defineSchema({
     // TA System — a recruiter's rating and running notes on this application.
     rating: v.optional(v.union(v.number(), v.null())),
     taNotes: v.optional(v.array(v.string())),
-    // Where the TA dragged the CAREER141 box on the Prepared CV, in PDF points
-    // from page 1's top-left (29 Sep). Absent: placed automatically.
-    taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number() })),
+    // Where the TA dragged and resized the CAREER141 box on the Prepared CV, in
+    // PDF points from page 1's top-left. Old rows have no width and use the
+    // standard one; the optional field avoids a production data migration.
+    taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number(), width: v.optional(v.number()) })),
     // Why a database match was picked, one line, shown on its Database CVs
     // row (5 Oct). Written by Claude when it is on, else the reverse-match
     // engine's own reason.
@@ -2125,6 +2148,9 @@ export default defineSchema({
       v.literal("candidate_replied"),
       v.literal("candidate_unresponsive"),
       v.literal("opening_assigned"),
+      v.literal("opening_access_requested"),
+      v.literal("opening_access_approved"),
+      v.literal("opening_access_rejected"),
       v.literal("scoop_received"),
       v.literal("strategy_assigned"),
       v.literal("workday_started"), v.literal("workday_finished"),

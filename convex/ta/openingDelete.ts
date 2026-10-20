@@ -48,6 +48,7 @@ const APPLICATION_CHILDREN: [table: string, index: string][] = [
 /** Rows belonging to the opening itself, by the index that finds them. */
 const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   ["jobAssignments", "by_jobId", "jobId"],
+  ["openingAccessRequests", "by_job", "jobId"],
   ["jobChannels", "by_job", "jobId"],
   ["pipelineEvents", "by_job_time", "jobId"],
   ["aiCalls", "by_job", "jobId"],

@@ -140,7 +140,7 @@ $("capture").addEventListener("click", async () => {
     say(
       (res.status === "updated"
         ? `${res.name} is already in ${res.openingTitle}${res.addedByName ? ` — added by ${res.addedByName}` : ""}. Updated, not added again.`
-        : `${res.name} shortlisted in ${res.openingTitle}.`) + held,
+        : `${res.name} added to ${res.openingTitle}.`) + held,
       "ok",
     );
     paintHistory();

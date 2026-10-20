@@ -29,6 +29,8 @@ import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 import { isEodCandidateEligible } from "@/lib/eodEligibility";
 import { makeReviewToken } from "@/lib/reviewToken";
 import { masterSheetStatusFields, type MasterSheetPositionStatus } from "@/lib/masterSheet";
+import { BOX } from "@/lib/career141Box";
+import { safeErrorMessage } from "@/lib/userError";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -358,8 +360,7 @@ function reasonInWords(reason: string | undefined): string {
 
 /** The backend's own reason, without the transport's wrapping. */
 function backendMessage(e: unknown, fallback: string): string {
-  const raw = (e as Error)?.message ?? "";
-  return raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200) || fallback;
+  return safeErrorMessage(e, fallback);
 }
 
 /** The primed copy is behind a backend write; drop it so the next read is fresh. */
@@ -1521,15 +1522,23 @@ export async function savePreparedCvBox(formData: FormData) {
   } else {
     const x = Number(formData.get("x"));
     const y = Number(formData.get("y"));
+    const width = Number(formData.get("width"));
     // A page is at most a few thousand points; anything else is not a drag.
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 5000 || y > 5000) {
+    if (
+      !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) ||
+      x < 0 || y < 0 || x > 5000 || y > 5000 || width < 80 || width > 5000
+    ) {
       await fail("That position could not be read. Drag the box again.");
     }
-    repo.setPreparedCvBox(appId, { x: Math.round(x), y: Math.round(y) });
+    repo.setPreparedCvBox(appId, {
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(Math.min(Math.max(BOX.minWidth, width), BOX.maxWidth)),
+    });
   }
   revalidatePath(`/openings/${openingId}/candidate/${appId}`);
   revalidatePath(`/openings/${openingId}/eod`);
-  await done(String(formData.get("reset")) === "1" ? "Box back in its automatic place." : "Box position saved.");
+  await done(String(formData.get("reset")) === "1" ? "Box back to its automatic position and size." : "Box position and size saved.");
 }
 
 export async function savePreparedCvBoxInline(_: ActionResult | null, formData: FormData) {
@@ -1949,6 +1958,62 @@ export async function moveBackToTables(formData: FormData) {
 }
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
+
+/** Ask the responsible lead to add this TA to an opening. No opening access is
+ * granted here; the backend records only a pending request and notification. */
+export async function requestOpeningAccess(formData: FormData) {
+  await primeStore({});
+  const user = await getCurrentUser();
+  if (!isTa(user)) await fail("Only a TA can request access to an opening.");
+  const openingId = String(formData.get("openingId") ?? "");
+  const reason = String(formData.get("reason") ?? "");
+  if (!openingId) await fail("Select an opening first.");
+  if (!isConvex()) await fail("Access requests need the connected system.");
+  let result: { ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean } | null = null;
+  try {
+    result = await convexMutation<{ ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean }>(
+      "ta/openingAccess:request",
+      { actorId: user.id, openingId, reason: reason || undefined },
+    );
+  } catch (error) {
+    await fail(backendMessage(error, "The access request could not be sent."));
+  }
+  if (!result) await fail("The access request could not be sent.");
+  const outcome = result!;
+  revalidatePath("/openings");
+  revalidatePath("/api/notifications");
+  if (outcome.alreadyAssigned) await note("You already have access to that opening.");
+  if (outcome.alreadyPending) await note("Your access request is already waiting for approval.");
+  await done("Access request sent to the TA Lead.");
+}
+
+/** Approving and assigning happen in one backend transaction, so a requester
+ * cannot gain partial access if a notification or audit write fails. */
+export async function decideOpeningAccess(formData: FormData) {
+  await primeStore({});
+  const user = await getCurrentUser();
+  const requestId = String(formData.get("requestId") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  if (decision !== "approve" && decision !== "reject") await fail("Choose Approve or Reject.");
+  const approve = decision === "approve";
+  const reason = String(formData.get("reason") ?? "");
+  if (!requestId) await fail("That access request no longer exists.");
+  if (!isConvex()) await fail("Access requests need the connected system.");
+  try {
+    await convexMutation("ta/openingAccess:decide", {
+      actorId: user.id,
+      requestId,
+      approve,
+      reason: reason || undefined,
+    });
+  } catch (error) {
+    await fail(backendMessage(error, "The access request could not be decided."));
+  }
+  markTablesStale();
+  revalidatePath("/openings", "layout");
+  revalidatePath("/api/notifications");
+  await done(approve ? "Access approved. The TA was added as a supporting recruiter." : "Access request rejected.");
+}
 
 export async function setOpeningStatus(formData: FormData) {
   await primeStore({ allApplications: true });
@@ -2925,10 +2990,7 @@ async function saveRoster(run: () => Promise<unknown>, done: string): Promise<ne
   try {
     await run();
   } catch (e) {
-    // The backend's own message ("last active admin", "already has an account").
-    const raw = (e as Error).message ?? "";
-    const why = raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160);
-    await fail(why || "That change could not be saved.");
+    await fail(safeErrorMessage(e, "That change could not be saved."));
   }
   const { refreshUsers } = await import("@/data/prime");
   await refreshUsers();
@@ -3013,8 +3075,7 @@ export async function inviteUser(formData: FormData) {
       await freshAfter(convexMutation)("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
     }
   } catch (e) {
-    const raw = (e as Error).message ?? "";
-    await fail(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
+    await fail(safeErrorMessage(e, "Could not save the role."));
   }
   const { refreshUsers } = await import("@/data/prime");
   await refreshUsers();
@@ -3080,7 +3141,7 @@ export async function runDatabaseSearch(formData: FormData) {
       if (!said) said = "Find candidates similar to this reference CV.";
     } catch (err) {
       console.warn("[runDatabaseSearch] CV document extraction fallback:", err);
-      await back((err as Error).message || "Could not read that CV. Try a PDF, DOCX or TXT file.", "error");
+      await back(safeErrorMessage(err, "Could not read that CV. Try a PDF, DOCX or TXT file."), "error");
     }
   }
 
@@ -5492,7 +5553,7 @@ export async function syncEodReplies(formData: FormData) {
     const { fetchMailboxMessages } = await import("@/lib/graphInbox");
     messages = await fetchMailboxMessages(mailboxes, 25);
   } catch (e) {
-    go(`Could not check mailbox: ${(e as Error).message}`);
+    go(safeErrorMessage(e, "Could not check the mailbox. Try again."));
   }
 
   if (!messages || messages.length === 0) {

@@ -9,6 +9,7 @@ import { isConvex } from "@/data/mode";
 import { getCurrentUser } from "@/lib/session";
 import { can } from "@/lib/auth";
 import { convexMutation } from "@/lib/convexServer";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * The AI screening call in a browser room — no SIP trunk needed.
@@ -43,8 +44,7 @@ function livekitConfig() {
 }
 
 function backendMessage(e: unknown, fallback: string): string {
-  const raw = (e as Error)?.message ?? "";
-  return raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200) || fallback;
+  return safeErrorMessage(e, fallback);
 }
 
 export async function startWebCall(applicationId: string, openingId: string): Promise<WebCallStart> {
@@ -99,7 +99,7 @@ export async function startWebCall(applicationId: string, openingId: string): Pr
       aiCallId: prepared.aiCallId,
       reason: "LiveKit room could not be created",
     }).catch(() => undefined);
-    return { ok: false, message: `Could not reach LiveKit: ${(e as Error).message}` };
+    return { ok: false, message: safeErrorMessage(e, "The call service could not be reached. Try again.") };
   }
 }
 

@@ -667,6 +667,8 @@
           hasMoved = true;
           isDragging = true;
           bar.classList.add("dragging");
+          const note = root?.querySelector(".note");
+          if (note) note.hidden = true;
         }
 
         if (isDragging) {
@@ -768,8 +770,8 @@
         .bar:hover { box-shadow: 0 8px 28px rgba(0,0,0,.36); }
         .bar.dragging { cursor: grabbing; transition: none; opacity: .94; box-shadow: 0 12px 32px rgba(0,0,0,.45); }
         .bar[disabled] { opacity: .75; cursor: default; }
-        .bar.ok { background: #14663f; }
-        .bar.bad { background: #b3261e; }
+        .bar.ok { background: rgba(20, 102, 63, 0.90); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+        .bar.bad { background: rgba(179, 38, 30, 0.90); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
         .drag-icon {
           display: inline-flex; align-items: center; justify-content: center;
           opacity: .6; font-size: 11px; margin-right: 2px; cursor: grab;
@@ -779,14 +781,37 @@
         .dot { width: 7px; height: 7px; border-radius: 50%; background: #ffffff; opacity: .85; flex-shrink: 0; }
         .note {
           position: fixed; z-index: 2147483647; max-width: 320px;
-          padding: 10px 12px; border-radius: 10px; background: #ffffff; color: #1c241f;
+          padding: 10px 14px; border-radius: 10px; background: rgba(255, 255, 255, 0.95); color: #1c241f;
           border: 1px solid #d6dcd8; box-shadow: 0 6px 24px rgba(0,0,0,.18);
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
           font-size: 12.5px; line-height: 1.45; cursor: pointer;
+          backdrop-filter: blur(8px);
+          -webkit-backdrop-filter: blur(8px);
+          transition: opacity .15s ease, background-color .15s ease;
         }
         .note[hidden] { display: none; }
         .note p { margin: 0; }
         .note p + p { margin-top: 4px; }
+        .note.ok {
+          background: rgba(20, 102, 63, 0.88);
+          color: #ffffff;
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+        }
+        .note.ok p {
+          color: #ffffff;
+          font-weight: 500;
+        }
+        .note.bad {
+          background: rgba(179, 38, 30, 0.88);
+          color: #ffffff;
+          border: 1px solid rgba(255, 255, 255, 0.25);
+          box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+        }
+        .note.bad p {
+          color: #ffffff;
+          font-weight: 500;
+        }
         .note .found { color: #14663f; font-weight: 600; }
         .note .check { color: #8a5a00; font-weight: 600; }
         .note .tip { color: #5b6660; }
@@ -812,10 +837,12 @@
    * only read with LinkedIn's Contact info open.
    */
   let noteTimer = null;
-  function showNote(lines) {
+  function showNote(lines, tone) {
     if (!root) return;
     const note = root.querySelector(".note");
     const bar = root.querySelector(".bar");
+    note.classList.remove("ok", "bad");
+    if (tone) note.classList.add(tone);
     note.replaceChildren(
       ...lines.map(([cls, text]) => {
         const p = document.createElement("p");
@@ -824,13 +851,37 @@
         return p;
       }),
     );
-    const r = bar.getBoundingClientRect();
-    note.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
-    note.style.bottom = `${Math.max(8, window.innerHeight - r.top + 8)}px`;
+    // Reset positioning styles
+    note.style.top = "";
+    note.style.bottom = "";
+    note.style.left = "";
+    note.style.right = "";
+
+    // Make visible so dimensions can be measured accurately
     note.hidden = false;
+
+    const r = bar.getBoundingClientRect();
+    const noteRect = note.getBoundingClientRect();
+    const noteHeight = noteRect.height || 42;
+    const noteWidth = noteRect.width || 220;
+
+    // Vertical positioning: If the button is near the top and doesn't have enough room
+    // above it (at least noteHeight + 16px), position the note below the bar.
+    if (r.top < noteHeight + 16) {
+      note.style.top = `${Math.min(window.innerHeight - noteHeight - 8, Math.max(8, r.bottom + 8))}px`;
+    } else {
+      note.style.bottom = `${Math.max(8, window.innerHeight - r.top + 8)}px`;
+    }
+
+    // Horizontal positioning: Align with the bar while keeping inside viewport bounds
+    if (r.left + r.width / 2 > window.innerWidth / 2) {
+      const rightDist = window.innerWidth - r.right;
+      note.style.right = `${Math.max(8, Math.min(window.innerWidth - noteWidth - 8, rightDist))}px`;
+    } else {
+      note.style.left = `${Math.max(8, Math.min(window.innerWidth - noteWidth - 8, r.left))}px`;
+    }
+
     note.onclick = () => (note.hidden = true);
-    clearTimeout(noteTimer);
-    noteTimer = setTimeout(() => (note.hidden = true), 12000);
   }
 
   function setState(text, tone) {
@@ -860,6 +911,7 @@
     busy = true;
     const bar = root.querySelector(".bar");
     bar.disabled = true;
+    if (root) root.querySelector(".note").hidden = true;
     setState("Reading the page…");
 
     try {
@@ -879,33 +931,39 @@
       }
       if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
-      setState(res.status === "updated" ? "Already in the table — updated" : "Saved to the table", "ok");
+      setState(res.status === "updated" ? "Already in Excel Tables — updated" : "Added to Excel Tables", "ok");
       const m = res.match;
       showNote([
         res.status === "updated"
           ? ["", `Already in Excel Tables${res.addedByName ? `, added by ${res.addedByName}` : ""}. Updated, not added again.`]
-          : ["", "Saved to Excel Tables."],
+          : ["", "Added to Excel Tables."],
         m && m.strength === "same"
           ? ["found", `In our database: ${m.fullName}${m.hasCv ? " — CV on file" : " — no CV yet"}.`]
           : m && m.strength === "possible"
-            ? ["check", `Possibly ${m.fullName}, already in our database. Check on the row in Excel Tables.`]
+            ? ["check", `Possibly ${m.fullName}, already in our database. Check the row in Excel Tables.`]
             : ["", "Not in our database yet — a new person. Use Find CV on the row if you think we have them."],
         !contactOpen && profile.connectionDegree === "1st" && !profile.email && !profile.phone
           ? ["tip", "Tip: open their Contact info before saving, to include their email and phone."]
           : null,
-      ].filter(Boolean));
+      ].filter(Boolean), "ok");
     } catch (err) {
       const msg = /context invalidated/i.test(err?.message || "")
         ? "Extension reloaded — refresh (F5)"
         : err.message.slice(0, 60);
       setState(msg, "bad");
+      showNote([["", err.message || msg]], "bad");
     } finally {
-      setTimeout(() => {
+      clearTimeout(noteTimer);
+      noteTimer = setTimeout(() => {
         busy = false;
         bar.disabled = false;
         setState("Add to Career141");
         paintTarget();
-      }, 2600);
+        if (root) {
+          const note = root.querySelector(".note");
+          if (note) note.hidden = true;
+        }
+      }, 3000);
     }
   }
 

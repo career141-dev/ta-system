@@ -14,6 +14,7 @@ import { isConvex } from "@/data/mode";
 import { unmatchedCvs, type UnmatchedCv } from "@/data/convex/backend";
 import { isDeskWide } from "@/lib/auth";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { safeErrorMessage } from "@/lib/userError";
 
 const PAGE_SIZE = 25;
 
@@ -155,7 +156,7 @@ export default async function IntakePage({
     try {
       unmatched = await unmatchedCvs(14);
     } catch (e) {
-      unmatchedProblem = (e as Error).message;
+      unmatchedProblem = safeErrorMessage(e, "Unmatched CVs could not be loaded. Try again.");
     }
   }
   const counts = repo.intakeCounts();

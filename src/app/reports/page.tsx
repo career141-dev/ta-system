@@ -17,7 +17,7 @@ import type { AiFailure } from "@/lib/ai";
 import { primeStore } from "@/data/prime";
 import { can, isDeskWide, isTa } from "@/lib/auth";
 import { MasterSheetTable } from "./MasterSheetTable";
-import { notFound } from "next/navigation";
+import { ProblemState } from "@/components/ProblemState";
 
 /**
  * Reports — rebuilt 12 September.
@@ -77,7 +77,16 @@ export default async function ReportsPage({
   }
 
   const isMasterSheet = (title === "Master Sheet" || title === "My Master Sheet") && spec.dataset === "openings";
-  if (isMasterSheet && !canUseMasterSheet) notFound();
+  if (isMasterSheet && !canUseMasterSheet) {
+    return (
+      <ProblemState
+        title="This report is unavailable"
+        message="Your role does not include access to the Master Sheet. Choose another report."
+        primaryHref="/reports"
+        primaryLabel="Go to Reports"
+      />
+    );
+  }
   // This is an operational sheet rather than a free-form report. Keeping it
   // row-based prevents a saved/grouped URL from escaping the TA's personal
   // scope or producing a grid with no opening identity to link and save.

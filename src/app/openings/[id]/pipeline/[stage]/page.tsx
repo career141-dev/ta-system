@@ -14,6 +14,7 @@ import { HhUpload } from "@/components/HhUpload";
 import { PIPELINE_STAGES, CLOSED_STAGES, EARLY_STAGES, STAGE_LABEL, type Stage } from "@/data/types";
 import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
+import { ProblemState } from "@/components/ProblemState";
 
 export default async function StagePage({
   params,
@@ -47,7 +48,16 @@ export default async function StagePage({
   const assignment = repo.assignmentFor(id, user.id) ?? null;
   const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
   const seat = seatFor(user, assignment?.role ?? null, onStrategy);
-  if (seat.stages !== null && !seat.stages.includes(s)) notFound();
+  if (seat.stages !== null && !seat.stages.includes(s)) {
+    return (
+      <ProblemState
+        title="This stage is unavailable"
+        message="Your role does not include this part of the pipeline. Return to the opening and choose an available stage."
+        primaryHref={`/openings/${id}`}
+        primaryLabel="Go to opening"
+      />
+    );
+  }
 
   // A TA's stage page is their own candidates and the unclaimed ones; the
   // other TA's are not on it. A lead's shows both (2 Oct).

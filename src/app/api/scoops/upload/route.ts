@@ -6,6 +6,7 @@ import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Scoops on an opening (29 Sep): the CVs a lead sent the TA, uploaded here
@@ -84,8 +85,7 @@ export async function POST(req: NextRequest) {
     return answer({ ok: true, id: cvUploadId, fileName: file.name });
   } catch (e) {
     console.warn("[scoop upload]", (e as Error).message);
-    const why = (e as Error).message.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200);
-    return refuse(`${file.name} could not be queued: ${why}`, 500);
+    return refuse(safeErrorMessage(e, `${file.name} could not be queued. Try again.`), 500);
   }
 }
 

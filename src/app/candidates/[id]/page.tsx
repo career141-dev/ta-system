@@ -16,6 +16,7 @@ import * as backend from "@/data/convex/backend";
 import { fileSize, previewsInline, type CandidateProfile } from "@/lib/candidateProfile";
 import { isWordFile } from "@/lib/wordToPdf";
 import { ageHint, ageText, experienceText } from "@/lib/ageExperience";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * A person, on their own — not through an opening.
@@ -57,7 +58,7 @@ export default async function CandidatePage({
       backend.cvLink({ id: null }, c.id),
     ]);
     if (p.status === "fulfilled") profile = p.value;
-    else profileProblem = `The full record could not be loaded (${(p.reason as Error).message}).`;
+    else profileProblem = safeErrorMessage(p.reason, "The full record could not be loaded. Try again.");
     if (link.status === "fulfilled") cvLink = link.value;
   }
 

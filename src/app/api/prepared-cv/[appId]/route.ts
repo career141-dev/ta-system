@@ -40,7 +40,10 @@ export async function GET(
   // the file is what the desk holds, with the box where the TA last put it.
   const ox = Number(q.get("x"));
   const oy = Number(q.get("y"));
-  const at = q.has("x") && q.has("y") && Number.isFinite(ox) && Number.isFinite(oy) ? { x: ox, y: oy } : undefined;
+  const ow = Number(q.get("width"));
+  const at = q.has("x") && q.has("y") && Number.isFinite(ox) && Number.isFinite(oy)
+    ? { x: ox, y: oy, ...(q.has("width") && Number.isFinite(ow) ? { width: ow } : {}) }
+    : undefined;
   const asked = ["designation", "company", "current", "expected", "notice", "notes"].some((k) => q.has(k));
   const held = boxContent(app, c, repo.opening(app.openingId));
   const annotation = asked

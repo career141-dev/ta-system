@@ -9,6 +9,7 @@ import { relDays } from "@/lib/format";
 import { BIN_DAYS, daysLeft, purgeDateLabel } from "@/lib/bin";
 import { Confirm } from "@/components/Confirm";
 import { deleteFromBinNow, restoreFromBin } from "@/app/actions";
+import { ProblemState } from "@/components/ProblemState";
 
 /**
  * The Bin (28 Sep): clients and openings someone deleted, kept seven days so a
@@ -20,8 +21,12 @@ export default async function BinPage() {
   const user = await getCurrentUser();
   // Clients and viewers see the desk's work, not its deletes.
   if (isReadOnly(user) || user.role === "client") {
-    const { notFound } = await import("next/navigation");
-    notFound();
+    return (
+      <ProblemState
+        title="You cannot open the Bin"
+        message="The Bin is available only to the internal recruitment team. Return to the dashboard to continue."
+      />
+    );
   }
   const items: BinItem[] = isConvex() ? await binItems({ id: user.id }) : repo.bin();
   const openings = items.filter((i) => i.kind === "opening");

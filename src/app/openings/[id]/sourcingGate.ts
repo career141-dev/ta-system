@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { redirect } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { seatFor } from "@/lib/visibility";
@@ -15,6 +15,6 @@ export async function requireSourcingSeat(openingId: string) {
   const user = await getCurrentUser();
   const assignment = repo.assignmentFor(openingId, user.id) ?? null;
   const onStrategy = repo.strategyAssignments(openingId).some((r) => r.doneBy.includes(user.id));
-  if (!seatFor(user, assignment?.role ?? null, onStrategy).canSeeSourcing) notFound();
+  if (!seatFor(user, assignment?.role ?? null, onStrategy).canSeeSourcing) redirect("/unavailable");
   return user;
 }

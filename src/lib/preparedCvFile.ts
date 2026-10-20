@@ -44,8 +44,8 @@ export async function preparedCvFile(
   opts: {
     /** Replaces what the desk holds — the old query-string preview. */
     annotation?: CvAnnotation;
-    /** Replaces the saved position — for a one-off preview. */
-    at?: { x: number; y: number };
+    /** Replaces the saved position and optional width — for a one-off preview. */
+    at?: { x: number; y: number; width?: number };
   } = {},
 ): Promise<PreparedCvFile> {
   const annotation = opts.annotation ?? boxContent(app, c, opening);

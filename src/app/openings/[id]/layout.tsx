@@ -5,13 +5,15 @@ import { ProjectSidebar } from "@/components/ProjectSidebar";
 import { ContextBar } from "@/components/ContextBar";
 import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
-import { allows } from "@/lib/auth";
+import { allows, isTa } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
 import { levelLabel } from "@/lib/linkViews";
 import { isConvex } from "@/data/mode";
 import { convexQuery } from "@/lib/convexServer";
 import type { DailyEmail } from "@/lib/dailyEmail";
 import { workdayDate } from "@/lib/workday";
+import { OpeningAccessNeeded, type AvailableOpening } from "@/components/OpeningAccessRequests";
+import { ProblemState } from "@/components/ProblemState";
 
 export default async function OpeningLayout({
   children,
@@ -22,14 +24,30 @@ export default async function OpeningLayout({
 }) {
   const { id } = await params;
   await primeStore({ openingId: id });
-  if (!repo.opening(id)) notFound();
+  const opening = repo.opening(id);
+  if (!opening) notFound();
 
   const user = await getCurrentUser();
-  // Every page under an opening passes through here, so reading is refused
-  // here once: somebody not on it gets a 404, not a page with buttons hidden.
+  // Every page under an opening passes through here. A requestable opening
+  // explains how a TA can get access; protected openings stay undisclosed.
   const assignment = repo.assignmentFor(id, user.id) ?? null;
   const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
-  if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
+  if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) {
+    const available = isTa(user) && isConvex()
+      ? await convexQuery<AvailableOpening[]>("ta/openingAccess:listAvailable", { actorId: user.id })
+          .then((rows) => rows.find((row) => row.id === id) ?? null)
+          .catch(() => null)
+      : null;
+    if (available) return <OpeningAccessNeeded opening={available} />;
+    return (
+      <ProblemState
+        title="Opening unavailable"
+        message="You may not have access to this opening, or it is no longer available. Choose an opening from your assigned list."
+        primaryHref="/openings"
+        primaryLabel="Go to Openings"
+      />
+    );
+  }
   // What this person is on this opening decides what the rail even offers.
   const seat = seatFor(user, assignment?.role ?? null, onStrategy);
   // Strategy-only access includes sourcing, but not the recruiter's Midday/EOD
