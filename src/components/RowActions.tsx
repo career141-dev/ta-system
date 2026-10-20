@@ -81,7 +81,7 @@ export function RowActions({
 
   return (
     <div className="flex flex-col items-start gap-2 sm:items-end">
-    <div className="relative flex flex-wrap items-center gap-2 sm:flex-nowrap">
+    <div className="relative flex flex-wrap items-center gap-2 sm:justify-end">
       <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
         <input type="hidden" name="appId" value={appId} />
         <input type="hidden" name="openingId" value={openingId} />
