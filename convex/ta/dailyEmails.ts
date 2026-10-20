@@ -145,7 +145,7 @@ export const begin = internalMutation({
     const snapshot = args.snapshot as DailyEmailSnapshot;
     const entry = day?.jobs.find(j => j.jobId === args.jobId);
     if (day?.finishedAt !== undefined && entry?.workType === "100%") {
-      const already = emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId);
+      const already = emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId && !e.recoveryReopenedAt);
       if (!already) throw new Error("The workday clock has stopped. Change this unfinished position to Follow-up or Add-on before sending.");
     }
     const selectedMode = parent?.workType ?? parent?.snapshot?.workType ?? entry?.workType ?? "100%";
@@ -169,8 +169,8 @@ export const begin = internalMutation({
       if (!sameCandidateList(parent.applicationIds, args.applicationIds) || !parent.applicationIds.every((id, i) => id === args.applicationIds[i])) throw new Error("A correction must keep the original candidates and their order.");
     } else {
       const rounds = await ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", args.jobId)).collect();
-      const sent = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds));
-      for (const e of all.filter(e => e.status === "accepted")) for (const id of e.applicationIds) sent.add(id);
+      const sent = new Set(rounds.filter(r => r.kind === "director" && !r.recoveryReopenedAt).flatMap(r => r.applicationIds));
+      for (const e of all.filter(e => e.status === "accepted" && !e.recoveryReopenedAt)) for (const id of e.applicationIds) sent.add(id);
       const apps = await ctx.db.query("applications").withIndex("by_jobId", q => q.eq("jobId", args.jobId)).collect();
       const entry = day?.jobs.find(j => j.jobId === args.jobId);
       const currentWorkType = entry?.workType ?? "100%";
@@ -197,7 +197,7 @@ export const begin = internalMutation({
     if (day) {
       const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
       if (receipts.some(r => ["sending", "uncertain"].includes(r.status) || (r.status === "accepted" && !r.finalizedAt))) throw new Error("An earlier email needs reconciliation before sending.");
-      if (!parent && receipts.some(r => r.status === "accepted" && !r.revised && (r.submissionType ?? "eod") === "eod")) throw new Error("The end-of-day email has already been sent today.");
+      if (!parent && receipts.some(r => r.status === "accepted" && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")) throw new Error("The end-of-day email has already been sent today.");
     }
     const draft = args.draftId ? await ctx.db.get(args.draftId) : null;
     if (args.draftId && args.submissionType !== "midday") throw new Error("Only a midday email can use this draft.");

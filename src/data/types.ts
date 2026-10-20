@@ -606,6 +606,7 @@ export interface PipelineEvent {
  * headers match normal replies without changing the recipient-facing subject.
  */
 export interface ReviewRound {
+  recoveryReopenedAt?: number;
   submissionType?: "midday" | "eod";
   id: Id;
   openingId: Id;

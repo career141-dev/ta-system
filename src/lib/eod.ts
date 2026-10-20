@@ -47,7 +47,7 @@ export function shortlistRows(
   // put decided candidates back in front of them (audit finding 27).
   const stage = kind === "director" ? "director_review" : "director_shortlist";
   const alreadySent = new Set(
-    repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds),
+    repo.reviewRounds(openingId).filter((r) => r.kind === kind && !r.recoveryReopenedAt).flatMap((r) => r.applicationIds),
   );
   // Only people actually in Director Review go in the Director's email (29 Sep).
   // A finished follow-up used to pull a TA Shortlisted candidate in as well
@@ -146,7 +146,7 @@ export function sentToDirectorToday(openingId: Id, taId: Id, since: number): App
   const ids = new Set(
     repo
       .reviewRounds(openingId)
-      .filter((r) => r.kind === "director" && r.sentBy === taId && r.sentAt >= since)
+      .filter((r) => r.kind === "director" && r.sentBy === taId && r.sentAt >= since && !r.recoveryReopenedAt)
       .flatMap((r) => r.applicationIds),
   );
   for (const r of shortlistRows(openingId, taId, "director")) ids.add(r.applicationId);

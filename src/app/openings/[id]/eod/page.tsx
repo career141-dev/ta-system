@@ -78,7 +78,7 @@ export default async function EodPage({
   const selectedDaily = dailyHistory.find(e => e._id === sp.mail || (!!e.legacyCopyId && (e.legacyCopyId === sp.resend || e.legacyCopyId === sp.view)));
   const draft = midday && selectedDaily && selectedDaily.userId === user.id && selectedDaily.date === workdayDate(Date.now()) && ["draft", "failed"].includes(selectedDaily.status) ? selectedDaily : undefined;
   const correction = !midday && (sp.revise === "yes" || !!sp.resend) && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && selectedDaily.snapshot ? selectedDaily : undefined;
-  const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId);
+  const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt);
   await primeEyeMarked(id, user);
   const o = repo.opening(id);
   if (!o) notFound();
