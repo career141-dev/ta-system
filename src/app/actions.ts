@@ -1950,6 +1950,62 @@ export async function moveBackToTables(formData: FormData) {
 
 // ─── Opening admin (spec §4.2) ───────────────────────────────────────────────
 
+/** Ask the responsible lead to add this TA to an opening. No opening access is
+ * granted here; the backend records only a pending request and notification. */
+export async function requestOpeningAccess(formData: FormData) {
+  await primeStore({});
+  const user = await getCurrentUser();
+  if (!isTa(user)) await fail("Only a TA can request access to an opening.");
+  const openingId = String(formData.get("openingId") ?? "");
+  const reason = String(formData.get("reason") ?? "");
+  if (!openingId) await fail("Select an opening first.");
+  if (!isConvex()) await fail("Access requests need the connected system.");
+  let result: { ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean } | null = null;
+  try {
+    result = await convexMutation<{ ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean }>(
+      "ta/openingAccess:request",
+      { actorId: user.id, openingId, reason: reason || undefined },
+    );
+  } catch (error) {
+    await fail(backendMessage(error, "The access request could not be sent."));
+  }
+  if (!result) await fail("The access request could not be sent.");
+  const outcome = result!;
+  revalidatePath("/openings");
+  revalidatePath("/api/notifications");
+  if (outcome.alreadyAssigned) await note("You already have access to that opening.");
+  if (outcome.alreadyPending) await note("Your access request is already waiting for approval.");
+  await done("Access request sent to the TA Lead.");
+}
+
+/** Approving and assigning happen in one backend transaction, so a requester
+ * cannot gain partial access if a notification or audit write fails. */
+export async function decideOpeningAccess(formData: FormData) {
+  await primeStore({});
+  const user = await getCurrentUser();
+  const requestId = String(formData.get("requestId") ?? "");
+  const decision = String(formData.get("decision") ?? "");
+  if (decision !== "approve" && decision !== "reject") await fail("Choose Approve or Reject.");
+  const approve = decision === "approve";
+  const reason = String(formData.get("reason") ?? "");
+  if (!requestId) await fail("That access request no longer exists.");
+  if (!isConvex()) await fail("Access requests need the connected system.");
+  try {
+    await convexMutation("ta/openingAccess:decide", {
+      actorId: user.id,
+      requestId,
+      approve,
+      reason: reason || undefined,
+    });
+  } catch (error) {
+    await fail(backendMessage(error, "The access request could not be decided."));
+  }
+  markTablesStale();
+  revalidatePath("/openings", "layout");
+  revalidatePath("/api/notifications");
+  await done(approve ? "Access approved. The TA was added as a supporting recruiter." : "Access request rejected.");
+}
+
 export async function setOpeningStatus(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });

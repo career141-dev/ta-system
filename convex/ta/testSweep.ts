@@ -123,6 +123,7 @@ async function removeApplication(ctx: Ctx, id: Id<"applications">, del: (t: stri
 async function removeOpening(ctx: Ctx, id: Id<"jobs">, del: (t: string, id: string) => Promise<void>) {
   for (const a of await ctx.db.query("applications").withIndex("by_jobId", (q) => q.eq("jobId", id)).collect()) await removeApplication(ctx, a._id, del);
   for (const r of await ctx.db.query("jobAssignments").withIndex("by_jobId", (q) => q.eq("jobId", id)).collect()) await del("jobAssignments", r._id);
+  for (const r of await ctx.db.query("openingAccessRequests").withIndex("by_job", (q) => q.eq("jobId", id)).collect()) await del("openingAccessRequests", r._id);
   for (const r of await ctx.db.query("placements").withIndex("by_jobId", (q) => q.eq("jobId", id)).collect()) await del("placements", r._id);
   for (const r of await ctx.db.query("pipelineEvents").withIndex("by_job_time", (q) => q.eq("jobId", id as never)).collect()) await del("pipelineEvents", r._id);
   for (const table of ["jobPosts", "reviewRounds", "linkVault", "profileSuggestions", "matchRuns", "matchExclusions", "sourcingChat", "jdChat", "benchmarks", "researchReports", "briefs", "eodEmailCopies", "strategyAssignments"]) {

@@ -17,6 +17,9 @@ const NOTIFICATION_TYPE = v.union(
   v.literal("candidate_replied"),
   v.literal("candidate_unresponsive"),
   v.literal("opening_assigned"),
+  v.literal("opening_access_requested"),
+  v.literal("opening_access_approved"),
+  v.literal("opening_access_rejected"),
   // CVs the Director, a TA Lead or Ops mailed to the TA (mailIntake, 27 Sep).
   v.literal("scoop_received"),
   // A TA Lead gave the TA strategies on a job (Strategy Planner, 8 Oct).
@@ -69,7 +72,12 @@ export const listForUser = internalQuery({
         body: n.body,
         jobId: (n.jobId ?? null) as string | null,
         href: n.type === "workday_exception" && n.workdayId && n.taskKey
-          ? `/openings?checks=open&checkDay=${encodeURIComponent(n.workdayId)}&checkJob=${encodeURIComponent(n.jobId ?? "")}&checkTask=${encodeURIComponent(n.taskKey)}` : null,
+          ? `/openings?checks=open&checkDay=${encodeURIComponent(n.workdayId)}&checkJob=${encodeURIComponent(n.jobId ?? "")}&checkTask=${encodeURIComponent(n.taskKey)}`
+          : n.type === "opening_access_requested"
+            ? "/openings?accessRequests=open"
+            : n.type === "opening_access_rejected"
+              ? "/openings"
+              : null,
         read: n.read,
         createdAt: n.createdAt,
       })),

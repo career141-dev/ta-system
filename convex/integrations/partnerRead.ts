@@ -7,7 +7,7 @@ import { internal } from "../_generated/api";
 // Keep this list aligned with convex/schema.ts. A test enforces that contract.
 export const PARTNER_READ_TABLES = [
   "dailyEmailPolicy", "dailyEmails", "dailyEmailAttachments",
-  "users", "teams", "teamMembers", "jobAssignments", "roleAuditLog",
+  "users", "teams", "teamMembers", "jobAssignments", "openingAccessRequests", "roleAuditLog",
   "candidateLocks", "candidateInquiries", "jobs", "jobChannels", "job_assets",
   "custom_filters", "saved_filters", "match_scores", "pipeline_health_reports",
   "cvUploads", "partnerCvFiles", "folderImportProgress", "candidateResumes", "referees", "candidates",
