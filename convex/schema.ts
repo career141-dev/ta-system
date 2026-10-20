@@ -1284,9 +1284,10 @@ export default defineSchema({
     // TA System — a recruiter's rating and running notes on this application.
     rating: v.optional(v.union(v.number(), v.null())),
     taNotes: v.optional(v.array(v.string())),
-    // Where the TA dragged the CAREER141 box on the Prepared CV, in PDF points
-    // from page 1's top-left (29 Sep). Absent: placed automatically.
-    taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number() })),
+    // Where the TA dragged and resized the CAREER141 box on the Prepared CV, in
+    // PDF points from page 1's top-left. Old rows have no width and use the
+    // standard one; the optional field avoids a production data migration.
+    taPreparedCvBox: v.optional(v.object({ x: v.number(), y: v.number(), width: v.optional(v.number()) })),
     // Why a database match was picked, one line, shown on its Database CVs
     // row (5 Oct). Written by Claude when it is on, else the reverse-match
     // engine's own reason.

@@ -12,7 +12,7 @@
  */
 
 import { blockSize, findPlacement, type Box } from "./placement";
-import { BOX, boxItems, clampBox, layoutBox, noticeText, roughMeasure } from "./preparedCv";
+import { BOX, boxItems, clampBox, clampBoxWidth, layoutBox, noticeText, roughMeasure } from "./preparedCv";
 import { stripNoteFormatting } from "./eod-format";
 
 const GREEN = { r: 0.047, g: 0.478, b: 0.047 }; // #0C7A0C
@@ -327,7 +327,7 @@ export function printedBoxExtent(items: TextItem[], at: number): { width: number
 export async function stampPdfWithCareer141Box(
   basePdfBuffer: ArrayBuffer | Buffer,
   annotation: CvAnnotation,
-  override?: { x: number; y: number },
+  override?: { x: number; y: number; width?: number },
   fileName?: string | null,
 ): Promise<Uint8Array> {
   return (await stampCareer141Box(basePdfBuffer, annotation, override, fileName)).bytes;
@@ -340,6 +340,8 @@ export interface StampedBox {
   width: number;
   height: number;
   lines: { text: string; bold: boolean }[];
+  /** Unwrapped values let the editor reflow the preview while width is dragged. */
+  items: string[];
 }
 
 /**
@@ -350,7 +352,7 @@ export interface StampedBox {
 export async function stampCareer141Box(
   basePdfBuffer: ArrayBuffer | Buffer,
   annotation: CvAnnotation,
-  override?: { x: number; y: number },
+  override?: { x: number; y: number; width?: number },
   fileName?: string | null,
 ): Promise<{ bytes: Uint8Array; box: StampedBox | null; page: { width: number; height: number } }> {
   const { PDFDocument, rgb, StandardFonts } = await import("pdf-lib");
@@ -477,12 +479,20 @@ export async function stampCareer141Box(
     page.node.set(doc.context.obj("Annots"), doc.context.obj(remainingRefs));
   }
 
-  // One width and one font size (lib/preparedCv BOX): more text makes the box
-  // taller, never the text smaller or bigger. Wrapped with the font's metrics.
-  const layout = layoutBox(items, (t, size, bold) => (bold ? fontBold : font).widthOfTextAtSize(t, size));
+  // The TA may choose a useful width, but the font never shrinks. A narrower
+  // box simply wraps into more lines and becomes taller.
+  const requestedWidth = Number.isFinite(override?.width)
+    ? clampBoxWidth(Number(override?.width), pageWidth)
+    : null;
+  const layout = layoutBox(
+    items,
+    (t, size, bold) => (bold ? fontBold : font).widthOfTextAtSize(t, size),
+    requestedWidth ?? BOX.width,
+  );
   const { padding, lineHeight } = BOX;
-  // Wide enough to cover a box already on the CV, never narrower than ours.
-  const boxWidth = Math.max(foundBoxWidth ?? 0, layout.width);
+  // A deliberately resized box wins. Legacy automatic placement remains wide
+  // enough to cover a CAREER141 block already printed in the source CV.
+  const boxWidth = requestedWidth ?? Math.max(foundBoxWidth ?? 0, layout.width);
   const boxHeight = Math.max(foundBoxHeight ?? 0, layout.height);
 
   let x: number;
@@ -532,7 +542,7 @@ export async function stampCareer141Box(
 
   return {
     bytes: await doc.save(),
-    box: { x, y: pageHeight - y - boxHeight, width: boxWidth, height: boxHeight, lines: layout.lines },
+    box: { x, y: pageHeight - y - boxHeight, width: boxWidth, height: boxHeight, lines: layout.lines, items },
     page: pageSize,
   };
 }
@@ -564,7 +574,7 @@ export function buildPreparedCv(
   subject: CvSubject,
   annotation: CvAnnotation,
   /** Override from the draggable preview — a TA's judgement beats the solver. */
-  override?: { x: number; y: number },
+  override?: { x: number; y: number; width?: number },
 ): { pdf: Buffer; placement: ReturnType<typeof findPlacement> } {
   const lines = buildAnnotationLines(annotation);
 

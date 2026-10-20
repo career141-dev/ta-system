@@ -11,8 +11,8 @@
  * copy added "Total Experience" and "Currently at" lines nobody typed. A value
  * the TA typed — "Not disclosed" included — is an answer and prints.
  *
- * How it is laid out: one fixed width and one font size. More text makes the
- * box taller, never the text smaller or bigger.
+ * How it is laid out: one readable font size and a width the TA can adjust.
+ * More text (or a narrower box) makes the box taller, never the text smaller.
  */
 
 import type { Application, Candidate, Opening } from "@/data/types";
@@ -107,9 +107,17 @@ export interface BoxLayout {
   height: number;
 }
 
-/** Wrap every item to the fixed width, at the one font size. */
-export function layoutBox(items: string[], measure: Measure): BoxLayout {
-  const inner = BOX.width - BOX.padding * 2;
+/** A saved or dragged width, kept useful and inside the page when it is known. */
+export function clampBoxWidth(width: number, pageWidth = Number.POSITIVE_INFINITY): number {
+  const pageLimit = Number.isFinite(pageWidth) ? Math.max(80, pageWidth - 20) : BOX.maxWidth;
+  const upper = Math.min(BOX.maxWidth, pageLimit);
+  return Math.round(Math.min(Math.max(BOX.minWidth, width), upper));
+}
+
+/** Wrap every item to the chosen width, at the one readable font size. */
+export function layoutBox(items: string[], measure: Measure, requestedWidth: number = BOX.width): BoxLayout {
+  const width = clampBoxWidth(requestedWidth);
+  const inner = width - BOX.padding * 2;
   const lines: BoxLayout["lines"] = [];
   items.forEach((item, i) => {
     const bold = i === 0;
@@ -135,7 +143,7 @@ export function layoutBox(items: string[], measure: Measure): BoxLayout {
     }
     if (line.trim()) lines.push({ text: line, bold });
   });
-  return { lines, width: BOX.width, height: BOX.padding * 2 + lines.length * BOX.lineHeight + 4 };
+  return { lines, width, height: BOX.padding * 2 + lines.length * BOX.lineHeight + 4 };
 }
 
 /**

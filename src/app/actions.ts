@@ -29,6 +29,7 @@ import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 import { isEodCandidateEligible } from "@/lib/eodEligibility";
 import { makeReviewToken } from "@/lib/reviewToken";
 import { masterSheetStatusFields, type MasterSheetPositionStatus } from "@/lib/masterSheet";
+import { BOX } from "@/lib/career141Box";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -1521,15 +1522,23 @@ export async function savePreparedCvBox(formData: FormData) {
   } else {
     const x = Number(formData.get("x"));
     const y = Number(formData.get("y"));
+    const width = Number(formData.get("width"));
     // A page is at most a few thousand points; anything else is not a drag.
-    if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > 5000 || y > 5000) {
+    if (
+      !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(width) ||
+      x < 0 || y < 0 || x > 5000 || y > 5000 || width < 80 || width > 5000
+    ) {
       await fail("That position could not be read. Drag the box again.");
     }
-    repo.setPreparedCvBox(appId, { x: Math.round(x), y: Math.round(y) });
+    repo.setPreparedCvBox(appId, {
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(Math.min(Math.max(BOX.minWidth, width), BOX.maxWidth)),
+    });
   }
   revalidatePath(`/openings/${openingId}/candidate/${appId}`);
   revalidatePath(`/openings/${openingId}/eod`);
-  await done(String(formData.get("reset")) === "1" ? "Box back in its automatic place." : "Box position saved.");
+  await done(String(formData.get("reset")) === "1" ? "Box back to its automatic position and size." : "Box position and size saved.");
 }
 
 export async function savePreparedCvBoxInline(_: ActionResult | null, formData: FormData) {
