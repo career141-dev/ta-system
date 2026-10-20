@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { logCall } from "@/app/actions";
 import { inputClass } from "./form";
 import { SubmitButton } from "./Submit";
@@ -38,17 +39,96 @@ export function CallLogForm({
   openingId: string;
   defaultKind?: string;
 }) {
+  const [kind, setKind] = useState(defaultKind);
+  const [outcome, setOutcome] = useState("reached");
+  const [body, setBody] = useState("");
+  const [draftRestored, setDraftRestored] = useState(false);
+  const draftCheckedRef = useRef(false);
+
+  useEffect(() => {
+    if (draftCheckedRef.current) return;
+    draftCheckedRef.current = true;
+    try {
+      const raw = localStorage.getItem(`call-log-draft:${applicationId}`);
+      if (!raw) return;
+      const draft = JSON.parse(raw);
+      if (draft && typeof draft === "object") {
+        if (typeof draft.body === "string" && draft.body.trim().length > 0) {
+          setBody(draft.body);
+          if (typeof draft.kind === "string") setKind(draft.kind);
+          if (typeof draft.outcome === "string") setOutcome(draft.outcome);
+          setDraftRestored(true);
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [applicationId]);
+
+  useEffect(() => {
+    if (!draftCheckedRef.current) return;
+    const timer = setTimeout(() => {
+      try {
+        if (body.trim().length > 0 || kind !== defaultKind || outcome !== "reached") {
+          localStorage.setItem(
+            `call-log-draft:${applicationId}`,
+            JSON.stringify({ kind, outcome, body, updatedAt: Date.now() })
+          );
+        } else {
+          localStorage.removeItem(`call-log-draft:${applicationId}`);
+          setDraftRestored(false);
+        }
+      } catch {
+        // Ignore storage errors
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [body, kind, outcome, applicationId, defaultKind]);
+
+  const discardDraft = () => {
+    try {
+      localStorage.removeItem(`call-log-draft:${applicationId}`);
+    } catch {}
+    setKind(defaultKind);
+    setOutcome("reached");
+    setBody("");
+    setDraftRestored(false);
+  };
+
   const selectClass = `${inputClass} cursor-pointer appearance-none pr-10`;
   return (
-    <form action={logCall} className="rounded-xl border border-rule bg-paper/50 p-5">
+    <form
+      action={logCall}
+      onSubmit={() => {
+        try {
+          localStorage.removeItem(`call-log-draft:${applicationId}`);
+        } catch {}
+      }}
+      className="rounded-xl border border-rule bg-paper/50 p-5"
+    >
       <input type="hidden" name="appId" value={applicationId} />
       <input type="hidden" name="openingId" value={openingId} />
-      <p className="mb-3.5 text-[13px] font-semibold">Log a call</p>
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-3.5 sm:grid-cols-2">
+      <div className="flex items-center justify-between">
+        <p className="text-[13px] font-semibold">Log a call</p>
+        {draftRestored && (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] text-amber-800 dark:text-amber-200">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500 animate-pulse" />
+            <span>Draft restored</span>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="ml-1 font-medium underline hover:text-amber-950 dark:hover:text-amber-100 cursor-pointer"
+            >
+              Discard
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="mt-3.5 grid grid-cols-[minmax(0,1fr)] gap-3.5 sm:grid-cols-2">
         <label>
           <span className="mb-1.5 block text-[11.5px] text-ink-soft">Which call</span>
           <div className="relative">
-            <select name="kind" defaultValue={defaultKind} className={selectClass}>
+            <select name="kind" value={kind} onChange={(e) => setKind(e.target.value)} className={selectClass}>
               {KINDS.map((k) => (
                 <option key={k.value} value={k.value}>{k.label}</option>
               ))}
@@ -59,7 +139,7 @@ export function CallLogForm({
         <label>
           <span className="mb-1.5 block text-[11.5px] text-ink-soft">Outcome</span>
           <div className="relative">
-            <select name="outcome" defaultValue="reached" className={selectClass}>
+            <select name="outcome" value={outcome} onChange={(e) => setOutcome(e.target.value)} className={selectClass}>
               {OUTCOMES.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
@@ -72,6 +152,8 @@ export function CallLogForm({
         <span className="mb-1.5 block text-[11.5px] text-ink-soft">What they said</span>
         <textarea
           name="body"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
           rows={3}
           required
           placeholder="In their words where you can — it goes in the end-of-day email as written"

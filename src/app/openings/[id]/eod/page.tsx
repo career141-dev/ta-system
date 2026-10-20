@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/session";
 import { EodComposer } from "@/components/EodComposer";
 import { effortRow, shortlistRows, subjectLine } from "@/lib/eod";
 import { EOD_CC_DEFAULTS, EOD_TO, eodEmailHtml, needsResearchLink, revisedSubject, validateResearchLink } from "@/lib/eod-format";
+import { getScopedLinkVaultEntries } from "@/lib/linkExport";
 import type { EodEmailCopy, User } from "@/data/types";
 import { readEodReply, readInboundReply, addMiddayEmail } from "@/app/actions";
 import { DailyEmailHistory, DailyEmailView } from "@/components/DailyEmailHistory";
@@ -96,6 +97,7 @@ export default async function EodPage({
   );
   const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user) : [];
   const effort = effortRow(id, user);
+  const excelLinksCount = getScopedLinkVaultEntries(id, user).entries.length;
 
   // This TA's own sets — each recruiter numbers their own.
   const sets = setsForOpening(id, user.id);
@@ -375,6 +377,8 @@ export default async function EodPage({
       <EodComposer
         key={draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}
         submissionType={midday ? "midday" : "eod"}
+        excelLinksCount={excelLinksCount}
+        openingTitle={o.title}
         dailyDraft={draft ? { id: draft._id, revision: draft.revision, fields: draft.fields } : undefined}
         dailyParentId={correction?._id}
         useDailyEmail={isConvex() && isTa(user)}

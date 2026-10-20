@@ -5377,7 +5377,20 @@ async function emailEod(input: {
   // EOD is all-or-nothing: preparation happens before the durable send
   // reservation, then Graph's draft/upload-session path carries every PDF.
   if (preparationFailures.length && !isMidday) return { ok: false, error: `Not sent: could not prepare the CV attachment for ${preparationFailures.join(", ")}. No candidates have been marked as sent.` };
-  if (!attachments.length && !input.activityOnly && !isMidday) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the email." };
+  if (!rows.length && !input.activityOnly && !isMidday) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the email." };
+
+  let excelAttachment: import("@/lib/linkExport").ExcelExportAttachment | null = null;
+  if (!isMidday && !input.skipAttachments) {
+    const { buildOpeningExcelAttachment } = await import("@/lib/linkExport");
+    excelAttachment = buildOpeningExcelAttachment(openingId, user, opening.title);
+    if (excelAttachment && excelAttachment.rowCount > 0) {
+      attachments.push({
+        name: excelAttachment.filename,
+        contentType: excelAttachment.contentType,
+        base64: excelAttachment.base64,
+      });
+    }
+  }
 
   const html = eodEmailHtml({
     rows,
@@ -5431,11 +5444,16 @@ async function emailEod(input: {
   // Everyone it actually went to: the added To were left out of this line, so
   // it read as if only the first address got the email (1 Oct).
   const sentTo = [result.to, ...(result.alsoTo ?? [])].join(", ");
+  const cvCount = rows.length;
+  const attachmentSummaryParts = [
+    cvCount > 0 ? `${cvCount} CV${cvCount === 1 ? "" : "s"}` : null,
+    excelAttachment ? `1 Excel Tables sheet (${excelAttachment.rowCount} link${excelAttachment.rowCount === 1 ? "" : "s"})` : null,
+  ].filter(Boolean);
   return {
     ok: true,
     workdayMailId,
     dailyEmailId,
-    note: `Sent from ${result.from} to ${sentTo}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ", no cc"}, with ${attachments.length} CV${attachments.length === 1 ? "" : "s"} attached.${result.note ? ` ${result.note.trim()}` : ""}`,
+    note: `Sent from ${result.from} to ${sentTo}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ", no cc"}, with ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}${attachmentSummaryParts.length ? ` (${attachmentSummaryParts.join(", ")})` : ""}.${result.note ? ` ${result.note.trim()}` : ""}`,
   };
 }
 

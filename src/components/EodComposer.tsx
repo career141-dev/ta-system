@@ -394,9 +394,13 @@ export function EodComposer({
   dailyParentId,
   savedAttachments,
   useDailyEmail = false,
+  excelLinksCount,
+  openingTitle,
 }: {
   useDailyEmail?: boolean;
   savedAttachments?: import("@/lib/dailyEmail").SavedEmailAttachment[];
+  excelLinksCount?: number;
+  openingTitle?: string;
   submissionType?: SubmissionType;
   dailyDraft?: { id: string; revision: number; fields: Record<string, string> };
   dailyParentId?: string;
@@ -1072,64 +1076,101 @@ export function EodComposer({
         </div>
       </section>
 
-      <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="text-[13.5px] font-semibold">
-            Attachments <span className="ml-1.5 font-normal text-[12px] text-ink-faint">{skipAttachments ? 0 : effectiveRows.length}</span>
-          </h2>
-          {midday && (
-            <label className="flex items-center gap-2 cursor-pointer text-[12.5px] text-ink select-none">
-              <input
-                type="checkbox"
-                checked={skipAttachments}
-                onChange={(e) => setSkipAttachments(e.target.checked)}
-                className="h-4 w-4 rounded border-rule text-brand focus:ring-brand"
-              />
-              <span className="font-medium">Send without CV attachments</span>
-            </label>
-          )}
-        </div>
-        {midday && (
-          <input type="hidden" form="eod-send" name="skipAttachments" value={skipAttachments ? "yes" : "no"} />
-        )}
-        {skipAttachments ? (
-          <div className="mt-3 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-3.5 text-[12px] leading-relaxed text-ink-soft">
-            <span className="font-semibold text-ink">CV attachments skipped:</span> This midday email will be sent with no PDF attachments. The candidate table and effort summary will still be included. Explain the reason in the email body or notes.
-          </div>
-        ) : effectiveRows.length === 0 ? (
-          <p className="mt-2 text-[12.5px] text-ink-faint">Nothing to attach.</p>
-        ) : (
-          <div className="mt-3 flex flex-col gap-2">
-            {effectiveRows.map((r) => {
-              const saved = !regenerateAttachments && savedAttachments?.find(a => a.applicationId === r.applicationId);
-              if (saved && dailyParentId) return <a key={r.applicationId} href={previewHref(r)} target="_blank" rel="noreferrer" className="rounded-xl border border-rule px-3.5 py-2.5 text-sm text-brand underline">View saved PDF · {saved.name}</a>;
-              return (
-                <button
-                  key={r.applicationId}
-                  type="button"
-                  onClick={() => setEditingBoxAppId(r.applicationId)}
-                  className="group flex w-full items-center justify-between gap-3 rounded-xl border border-rule/70 bg-paper/40 px-3.5 py-2.5 hover:border-brand/40 hover:bg-brand/5 transition-all text-left cursor-pointer"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-faint border border-rule group-hover:border-brand/30 group-hover:text-brand transition-colors">
-                      PDF
-                    </span>
-                    <span className="text-[12.5px] font-medium text-brand group-hover:underline">
-                      {r.name} - Career141.pdf
-                    </span>
+      {(() => {
+        const hasExcelAttachment = submissionType === "eod" && !skipAttachments && (excelLinksCount ?? 0) > 0;
+        const safeJobTitle = (openingTitle || "").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+        const stamp = new Date().toISOString().slice(0, 10);
+        const excelFilename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
+        const totalAttachments = (skipAttachments ? 0 : effectiveRows.length) + (hasExcelAttachment ? 1 : 0);
+
+        return (
+          <section className="rounded-2xl border border-rule bg-surface p-7 shadow-[0_1px_2px_rgba(23,28,24,0.04)]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h2 className="text-[13.5px] font-semibold">
+                Attachments <span className="ml-1.5 font-normal text-[12px] text-ink-faint">{totalAttachments}</span>
+              </h2>
+              {midday && (
+                <label className="flex items-center gap-2 cursor-pointer text-[12.5px] text-ink select-none">
+                  <input
+                    type="checkbox"
+                    checked={skipAttachments}
+                    onChange={(e) => setSkipAttachments(e.target.checked)}
+                    className="h-4 w-4 rounded border-rule text-brand focus:ring-brand"
+                  />
+                  <span className="font-medium">Send without CV attachments</span>
+                </label>
+              )}
+            </div>
+            {midday && (
+              <input type="hidden" form="eod-send" name="skipAttachments" value={skipAttachments ? "yes" : "no"} />
+            )}
+            {skipAttachments ? (
+              <div className="mt-3 rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-3.5 text-[12px] leading-relaxed text-ink-soft">
+                <span className="font-semibold text-ink">CV attachments skipped:</span> This midday email will be sent with no PDF attachments. The candidate table and effort summary will still be included. Explain the reason in the email body or notes.
+              </div>
+            ) : effectiveRows.length === 0 && !hasExcelAttachment ? (
+              <p className="mt-2 text-[12.5px] text-ink-faint">Nothing to attach.</p>
+            ) : (
+              <div className="mt-3 flex flex-col gap-2">
+                {effectiveRows.map((r) => {
+                  const saved = !regenerateAttachments && savedAttachments?.find(a => a.applicationId === r.applicationId);
+                  if (saved && dailyParentId) return <a key={r.applicationId} href={previewHref(r)} target="_blank" rel="noreferrer" className="rounded-xl border border-rule px-3.5 py-2.5 text-sm text-brand underline">View saved PDF · {saved.name}</a>;
+                  return (
+                    <button
+                      key={r.applicationId}
+                      type="button"
+                      onClick={() => setEditingBoxAppId(r.applicationId)}
+                      className="group flex w-full items-center justify-between gap-3 rounded-xl border border-rule/70 bg-paper/40 px-3.5 py-2.5 hover:border-brand/40 hover:bg-brand/5 transition-all text-left cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] font-semibold text-ink-faint border border-rule group-hover:border-brand/30 group-hover:text-brand transition-colors">
+                          PDF
+                        </span>
+                        <span className="text-[12.5px] font-medium text-brand group-hover:underline">
+                          {r.name} - Career141.pdf
+                        </span>
+                      </div>
+                      <span className="text-[11px] text-ink-faint group-hover:text-brand transition-colors">
+                        Click to view &amp; position box →
+                      </span>
+                    </button>
+                  );
+                })}
+                {hasExcelAttachment && (
+                  <div className="flex w-full items-center justify-between gap-3 rounded-xl border border-rule/70 bg-paper/40 px-3.5 py-2.5">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className="shrink-0 rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-400 border border-emerald-500/20">
+                        XLSX
+                      </span>
+                      <span className="truncate text-[12.5px] font-medium text-ink">
+                        {excelFilename}
+                      </span>
+                      <span className="hidden sm:inline text-[11.5px] text-ink-faint">
+                        ({excelLinksCount} candidate link{excelLinksCount === 1 ? "" : "s"} with clickable LinkedIn URLs)
+                      </span>
+                    </div>
+                    <a
+                      href={`/api/openings/${openingId}/links/export?all=1`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 text-[11.5px] font-medium text-brand hover:underline"
+                    >
+                      Preview sheet →
+                    </a>
                   </div>
-                  <span className="text-[11px] text-ink-faint group-hover:text-brand transition-colors">
-                    Click to view &amp; position box →
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {!skipAttachments && effectiveRows.length > 0 && <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
-          Each one carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top.
-        </p>}
-      </section>
+                )}
+              </div>
+            )}
+            {!skipAttachments && (effectiveRows.length > 0 || hasExcelAttachment) && (
+              <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
+                {effectiveRows.length > 0 && "Each CV carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top."}
+                {effectiveRows.length > 0 && hasExcelAttachment && " "}
+                {hasExcelAttachment && "The attached Excel Tables sheet includes your candidate profiles with live, clickable LinkedIn hyperlinks."}
+              </p>
+            )}
+          </section>
+        );
+      })()}
 
       {needsResearchLink && !midday && !dailyParentId && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
         extraReasons={[

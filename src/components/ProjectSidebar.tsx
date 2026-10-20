@@ -86,6 +86,37 @@ export function ProjectSidebar({
   const [railOpen, setRailOpen] = useState(false);
   useEffect(() => setRailOpen(false), [path, search]);
 
+  const [hasActiveScoops, setHasActiveScoops] = useState(false);
+  useEffect(() => {
+    const checkActiveScoops = () => {
+      try {
+        const raw = localStorage.getItem(`scoop-upload-queue:${openingId}`);
+        if (!raw) {
+          setHasActiveScoops(false);
+          return;
+        }
+        const items = JSON.parse(raw);
+        if (Array.isArray(items)) {
+          const active = items.some((r: any) => r && (r.state === "uploading" || r.state === "reading"));
+          setHasActiveScoops(active);
+        } else {
+          setHasActiveScoops(false);
+        }
+      } catch {
+        setHasActiveScoops(false);
+      }
+    };
+
+    checkActiveScoops();
+    const onSync = () => checkActiveScoops();
+    window.addEventListener("storage", onSync);
+    window.addEventListener("scoop-upload-sync" as any, onSync);
+    return () => {
+      window.removeEventListener("storage", onSync);
+      window.removeEventListener("scoop-upload-sync" as any, onSync);
+    };
+  }, [openingId]);
+
   const row = (active: boolean) =>
     `rounded-lg px-3.5 py-2.5 text-[13.5px] transition-colors ${
       active
@@ -273,8 +304,17 @@ export function ProjectSidebar({
             {/* The CVs a lead sent the TA, uploaded here (29 Sep) — this
                 replaced reading each TA's mailbox for them. */}
             {canSeeSourcing && (
-              <Link href={`${base}/scoops`} className={row(path.startsWith(`${base}/scoops`))}>
-                Scoops
+              <Link
+                href={`${base}/scoops`}
+                className={row(path.startsWith(`${base}/scoops`)) + " flex items-center justify-between"}
+              >
+                <span>Scoops</span>
+                {hasActiveScoops && (
+                  <span className="flex items-center gap-1.5 rounded-full bg-brand/10 px-2 py-0.5 text-[11px] font-medium text-brand dark:bg-brand/20">
+                    <span className="h-1.5 w-1.5 rounded-full bg-brand animate-pulse" />
+                    <span>Processing</span>
+                  </span>
+                )}
               </Link>
             )}
 
