@@ -33,4 +33,3 @@ export function safeErrorMessage(error: unknown, fallback: string): string {
   if (!clean || isTechnicalMessage(clean)) return fallback;
   return clean.slice(0, 200);
 }
-

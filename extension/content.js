@@ -931,13 +931,21 @@
       }
       if (!res?.ok) throw new Error(res?.error || "The platform refused it");
 
-      if (res.status === "updated") {
-        setState("Already in L sheet can't add", "bad");
-        showNote([["", "Already in L sheet can't add"]], "bad");
-      } else {
-        setState("Added to L sheet", "ok");
-        showNote([["", "Added to L sheet"]], "ok");
-      }
+      setState(res.status === "updated" ? "Already in Excel Tables — updated" : "Added to Excel Tables", "ok");
+      const m = res.match;
+      showNote([
+        res.status === "updated"
+          ? ["", `Already in Excel Tables${res.addedByName ? `, added by ${res.addedByName}` : ""}. Updated, not added again.`]
+          : ["", "Added to Excel Tables."],
+        m && m.strength === "same"
+          ? ["found", `In our database: ${m.fullName}${m.hasCv ? " — CV on file" : " — no CV yet"}.`]
+          : m && m.strength === "possible"
+            ? ["check", `Possibly ${m.fullName}, already in our database. Check the row in Excel Tables.`]
+            : ["", "Not in our database yet — a new person. Use Find CV on the row if you think we have them."],
+        !contactOpen && profile.connectionDegree === "1st" && !profile.email && !profile.phone
+          ? ["tip", "Tip: open their Contact info before saving, to include their email and phone."]
+          : null,
+      ].filter(Boolean), "ok");
     } catch (err) {
       const msg = /context invalidated/i.test(err?.message || "")
         ? "Extension reloaded — refresh (F5)"

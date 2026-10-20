@@ -11,4 +11,3 @@ export function BackButton({ label = "Go back" }: { label?: string }) {
     </button>
   );
 }
-
