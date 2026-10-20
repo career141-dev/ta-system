@@ -4913,7 +4913,7 @@ export async function sendEod(formData: FormData) {
 
   // Anybody already sent to this reviewer is dropped, and so is anybody who is
   // not on this opening — the list came from the browser.
-  const sent = new Set(repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds));
+  const sent = new Set(repo.reviewRounds(openingId).filter((r) => r.kind === kind && !r.recoveryReopenedAt).flatMap((r) => r.applicationIds));
   const holdKey = (id: string) => `${openingId}:${kind}:${id}`;
   // A TA sends only the people they shortlisted on this opening (the desk, 2 Oct): the list
   // came from the browser, so it is checked here, not only when the page is drawn. A lead or

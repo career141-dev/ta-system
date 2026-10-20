@@ -20,6 +20,7 @@ export default defineSchema({
     finalizedAt: v.optional(v.number()), expiresAt: v.optional(v.number()),
     snapshot: v.optional(v.any()), trackedAt: v.optional(v.string()),
     reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
+    recoveryReopenedAt: v.optional(v.number()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
     .index("by_job", ["jobId"]).index("by_expires", ["expiresAt"])
     .index("by_user_accepted", ["userId", "acceptedAt"]),
@@ -92,6 +93,7 @@ export default defineSchema({
     reconciledAt: v.optional(v.number()),
     reconciledBy: v.optional(v.id("users")),
     reconciliationReason: v.optional(v.string()),
+    recoveryReopenedAt: v.optional(v.number()),
   }).index("by_workday_job", ["workdayId", "jobId"]),
   taWorkdayActivity: defineTable({
     workdayId: v.id("taWorkdays"),
@@ -2981,6 +2983,7 @@ export default defineSchema({
     /** Each time the TA sent this email again, corrected (8 Oct). The copies
      *  are cleared after a month (eodEmailCopies); this keeps the fact. */
     revisedAt: v.optional(v.array(v.number())),
+    recoveryReopenedAt: v.optional(v.number()),
     decisions: v.array(v.object({
       applicationId: v.id("applications"),
       outcome: v.union(

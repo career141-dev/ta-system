@@ -32,10 +32,10 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const suggestionEvidence = provenance.filter(p => p.table === "profileSuggestions" && latest.some(s => s._id === p.recordId && s.status === p.version)).sort((a,b) => b.at-a.at)[0];
   const unique = [...new Map(links.filter(l => !!linkKey(l.linkedinUrl)).sort((a,b) => b.createdAt-a.createdAt)
     .map(l => [linkKey(l.linkedinUrl) ?? l.linkedinUrl, l])).values()].sort((a,b) => a.createdAt-b.createdAt);
-  const sentIds = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds as string[]));
+  const sentIds = new Set(rounds.filter(r => r.kind === "director" && !r.recoveryReopenedAt).flatMap(r => r.applicationIds as string[]));
   const since = workSessionStart(entry);
-  const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt && (entry.workType !== "Add-on" || r.startedAt >= since));
-  const dailyEod = receipts.filter(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod" && workdayDate(r.startedAt) === day.date);
+  const accepted = receipts.filter(r => r.status === "accepted" && r.finalizedAt && !r.recoveryReopenedAt && (entry.workType !== "Add-on" || r.startedAt >= since));
+  const dailyEod = receipts.filter(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod" && workdayDate(r.startedAt) === day.date);
   const inDirectorReview = apps.filter(a => !sentIds.has(a._id) && isEodCandidateEligible({
     stage: a.currentStage,
     ownerTaId: a.ownerTaId,

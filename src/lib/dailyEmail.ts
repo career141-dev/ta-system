@@ -36,6 +36,7 @@ export interface DailyEmail {
   fields: Record<string, string>;
   applicationIds: string[];
   parentId?: string;
+  recoveryReopenedAt?: number;
   roundId?: string;
   legacyCopyId?: string;
   snapshot?: DailyEmailSnapshot;
@@ -51,7 +52,7 @@ export const DAILY_EMAIL_LABEL: Record<DailyEmailStatus, string> = {
 
 /** Check accepted submissions, not candidate timestamps or browser state. */
 export function dailySendProblem(
-  emails: Pick<DailyEmail, "status" | "submissionType" | "parentId">[],
+  emails: Pick<DailyEmail, "status" | "submissionType" | "parentId" | "recoveryReopenedAt">[],
   type: SubmissionType,
   requireMidday: boolean,
   revised = false,
@@ -59,7 +60,7 @@ export function dailySendProblem(
   if (emails.some(e => e.status === "sending" || e.status === "uncertain"))
     return "An email is still sending or needs reconciliation. Ask the TA Lead to check it before retrying.";
   if (revised) return null;
-  if (emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId))
+  if (emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId && !e.recoveryReopenedAt))
     return "The end-of-day email has already been sent. You can correct that email; new submissions resume tomorrow.";
   if (type === "eod" && requireMidday && !emails.some(e => e.status === "accepted" && e.submissionType === "midday"))
     return "Send at least one midday email for this opening today before sending end of day.";

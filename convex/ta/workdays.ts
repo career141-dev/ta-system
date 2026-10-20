@@ -124,7 +124,7 @@ export async function recordActiveMode(
   const sent = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
   if (sent.some(r => ["sending", "uncertain"].includes(r.status) || (r.status === "accepted" && !r.finalizedAt)))
     throw new Error("Wait for this position's email result or ask the lead to reconcile it before changing work type.");
-  if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod"))
+  if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod"))
     throw new Error("This position's EOD has been sent. Its recorded work type cannot change today.");
   if (day.finishedAt !== undefined && stage === "100%") throw new Error("The workday clock has stopped. Choose Follow-up or Add-on.");
   await ctx.db.patch(day._id, {
@@ -440,7 +440,7 @@ async function jobView(
       "/workday",
     );
   const accepted = rounds.filter(
-    (r) => r.kind === "director" && r.dispatch === "sent",
+    (r) => r.kind === "director" && r.dispatch === "sent" && !r.recoveryReopenedAt,
   );
   // Historical rounds are the roster the existing composer already excludes.
   // Today's completion still requires a confirmed transport acknowledgement.
@@ -448,20 +448,20 @@ async function jobView(
     rounds
       .filter(
         (r) =>
-          r.kind === "director" &&
+          r.kind === "director" && !r.recoveryReopenedAt &&
           (r.dispatch === "sent" || r.sentAt < day.startedAt),
       )
       .flatMap((r) => r.applicationIds as string[]),
   );
   for (const receipt of receipts.filter(
-    (r) => r.status === "accepted" && r.finalizedAt,
+    (r) => r.status === "accepted" && r.finalizedAt && !r.recoveryReopenedAt,
   ))
     for (const id of receipt.applicationIds) sentIds.add(id);
   const today = accepted.filter(
     (r) => r.sentBy === day.userId && r.sentAt >= day.startedAt,
   );
   const completedReceipts = receipts.filter(
-    (r) => r.status === "accepted" && r.finalizedAt,
+    (r) => r.status === "accepted" && r.finalizedAt && !r.recoveryReopenedAt,
   );
   for (const receipt of receipts.filter(
     (r) =>
@@ -749,7 +749,7 @@ async function jobView(
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
     eodSentAt: (await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect())
-      .find(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod")?.acceptedAt,
+      .find(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")?.acceptedAt,
     checks: await withTaskHistory(ctx, day, entry.jobId, resolved, entry.workType === "100%"),
     eodChecks: await withTaskHistory(ctx, day, entry.jobId, eodChecks, false),
     shortlist,
@@ -861,7 +861,7 @@ export async function autoCompleteWorkday(ctx: MutationCtx, id: Id<"taWorkdays">
   const entries = await availableWorkdayEntries(ctx, day.jobs);
   const receipts = (await Promise.all(entries.map(j => ctx.db.query("taWorkdayMail")
     .withIndex("by_workday_job", q => q.eq("workdayId", id).eq("jobId", j.jobId)).collect()))).flat()
-    .filter(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod");
+    .filter(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod");
   const primary = receipts.filter(r => {
     const entry = entries.find(j => j.jobId === r.jobId);
     const recorded = entry?.modeHistory.filter(m => m.at <= r.startedAt).at(-1)?.workType;
@@ -1308,13 +1308,13 @@ export const beginMail = internalMutation({
       throw new Error(
         "This job has a send in progress or an uncertain result. Ask the lead to reconcile it before retrying.",
       );
-    if (!args.applicationIds.length && previous.some(r => r.status === "accepted"))
+    if (!args.applicationIds.length && previous.some(r => r.status === "accepted" && !r.recoveryReopenedAt))
       throw new Error("This activity email has already been sent in this workday.");
-    if (previous.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod"))
+    if (previous.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod"))
       throw new Error("The end-of-day email has already been sent. Edit and resend the saved email.");
     const sentToday = new Set(
       previous
-        .filter((r) => r.status === "accepted")
+        .filter((r) => r.status === "accepted" && !r.recoveryReopenedAt)
         .flatMap((r) => r.applicationIds as string[]),
     );
     if (args.applicationIds.some((id) => sentToday.has(id)))
@@ -1692,7 +1692,7 @@ export const markReviewed = internalMutation({
     )
       throw new Error("This CV is not on an active workday.");
     const sent = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", app.jobId)).collect();
-    if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod")) throw new Error("This CV is not on an active workday; its position's EOD has been sent.");
+    if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")) throw new Error("This CV is not on an active workday; its position's EOD has been sent.");
     if (
       lead &&
       roleOf(user) !== "admin" &&
@@ -1727,7 +1727,7 @@ export const taskException = internalMutation({
     requireWorker(user);
     const day = await ownedActive(ctx, user, args.workdayId);
     const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
-    if (receipts.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod")) throw new Error("This position is already finished by its EOD email.");
+    if (receipts.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")) throw new Error("This position is already finished by its EOD email.");
     if (day.date !== workdayDate(Date.now())) throw new Error("Record reasons on today's workday.");
     const job = await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId);
