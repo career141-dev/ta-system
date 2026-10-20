@@ -1,17 +1,24 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { reviewDecisions, reviewJobs, reviewList } from "@/lib/review";
 import { primeStore } from "@/data/prime";
 import { matchesQuery } from "@/lib/paging";
+import { ProblemState } from "@/components/ProblemState";
 
 export default async function ReviewIndex({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const { q = "" } = await searchParams;
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
   const jobs = reviewJobs();
-  if (jobs.length === 0) notFound();
+  if (jobs.length === 0) {
+    return (
+      <ProblemState
+        title="Nothing to review"
+        message="There are no recruiter-review items available right now. Return to the dashboard and try again later."
+      />
+    );
+  }
   const openings = repo.openings();
 
   return (

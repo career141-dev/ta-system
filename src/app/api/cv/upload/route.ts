@@ -6,6 +6,7 @@ import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
 import { allows } from "@/lib/auth";
 import { convexMutation, internalUploadUrl } from "@/lib/convexServer";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * A CV added from the candidate sheet (21 Sep: "uploading one from here is not
@@ -96,6 +97,6 @@ export async function POST(req: NextRequest) {
     return answer(true, res.replaced ? `CV replaced with ${file.name}.` : `CV added: ${file.name}.`);
   } catch (e) {
     console.warn("[cv upload]", (e as Error).message);
-    return answer(false, `The CV could not be saved: ${(e as Error).message.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200)}`, 500);
+    return answer(false, safeErrorMessage(e, "The CV could not be saved. Try again."), 500);
   }
 }

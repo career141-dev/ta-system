@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Room, RoomEvent, Track, type Participant, type RemoteParticipant, type RemoteTrack, type TranscriptionSegment } from "livekit-client";
 import { completeWebCall, startWebCall, type CallLine } from "@/app/voiceActions";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Call a candidate with Aura, the screening voice agent, in a pop-up.
@@ -162,7 +163,7 @@ function AuraCallDialog({
       await lk.localParticipant.setMicrophoneEnabled(true);
       setPhase(lk.remoteParticipants.size > 0 ? "live" : "waiting");
     } catch (e) {
-      setMessage(`Could not join the call: ${(e as Error).message}. Is LiveKit running?`);
+      setMessage(safeErrorMessage(e, "The call could not start. Check microphone access and try again."));
       await finish("The browser could not join the call room", true);
     }
   }

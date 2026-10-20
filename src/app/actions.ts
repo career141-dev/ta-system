@@ -30,6 +30,7 @@ import { isEodCandidateEligible } from "@/lib/eodEligibility";
 import { makeReviewToken } from "@/lib/reviewToken";
 import { masterSheetStatusFields, type MasterSheetPositionStatus } from "@/lib/masterSheet";
 import { BOX } from "@/lib/career141Box";
+import { safeErrorMessage } from "@/lib/userError";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
 function freshAfter<A extends unknown[], R>(write: (...args: A) => Promise<R>) {
@@ -359,8 +360,7 @@ function reasonInWords(reason: string | undefined): string {
 
 /** The backend's own reason, without the transport's wrapping. */
 function backendMessage(e: unknown, fallback: string): string {
-  const raw = (e as Error)?.message ?? "";
-  return raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 200) || fallback;
+  return safeErrorMessage(e, fallback);
 }
 
 /** The primed copy is behind a backend write; drop it so the next read is fresh. */
@@ -2990,10 +2990,7 @@ async function saveRoster(run: () => Promise<unknown>, done: string): Promise<ne
   try {
     await run();
   } catch (e) {
-    // The backend's own message ("last active admin", "already has an account").
-    const raw = (e as Error).message ?? "";
-    const why = raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160);
-    await fail(why || "That change could not be saved.");
+    await fail(safeErrorMessage(e, "That change could not be saved."));
   }
   const { refreshUsers } = await import("@/data/prime");
   await refreshUsers();
@@ -3078,8 +3075,7 @@ export async function inviteUser(formData: FormData) {
       await freshAfter(convexMutation)("ta/users:adminSetUserActive", { actorId: actor.id, userId: existing.id, isActive: true });
     }
   } catch (e) {
-    const raw = (e as Error).message ?? "";
-    await fail(raw.replace(/^.*?Uncaught Error:\s*/s, "").split("\n")[0].slice(0, 160) || "Could not save the role.");
+    await fail(safeErrorMessage(e, "Could not save the role."));
   }
   const { refreshUsers } = await import("@/data/prime");
   await refreshUsers();
@@ -3145,7 +3141,7 @@ export async function runDatabaseSearch(formData: FormData) {
       if (!said) said = "Find candidates similar to this reference CV.";
     } catch (err) {
       console.warn("[runDatabaseSearch] CV document extraction fallback:", err);
-      await back((err as Error).message || "Could not read that CV. Try a PDF, DOCX or TXT file.", "error");
+      await back(safeErrorMessage(err, "Could not read that CV. Try a PDF, DOCX or TXT file."), "error");
     }
   }
 
@@ -5557,7 +5553,7 @@ export async function syncEodReplies(formData: FormData) {
     const { fetchMailboxMessages } = await import("@/lib/graphInbox");
     messages = await fetchMailboxMessages(mailboxes, 25);
   } catch (e) {
-    go(`Could not check mailbox: ${(e as Error).message}`);
+    go(safeErrorMessage(e, "Could not check the mailbox. Try again."));
   }
 
   if (!messages || messages.length === 0) {

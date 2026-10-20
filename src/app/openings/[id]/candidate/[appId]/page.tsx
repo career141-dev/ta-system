@@ -40,6 +40,8 @@ import { primeStore } from "@/data/prime";
 import { PreparedCvEditor } from "@/components/PreparedCvEditor";
 import { cameFromTables } from "@/lib/pipeline";
 import { CompanyReferenceSection } from "@/components/CompanyReferenceSection";
+import { ProblemState } from "@/components/ProblemState";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Finding 23 — Chat Log was a tab that explained why it was empty. A TA clicks
@@ -143,10 +145,37 @@ export default async function CandidateDrawer({
   const assignment = repo.assignmentFor(id, user.id) ?? null;
   const onStrategy = repo.strategyAssignments(id).some((r) => r.doneBy.includes(user.id));
   const seat = seatFor(user, assignment?.role ?? null, onStrategy);
-  if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) notFound();
-  if (seat.stages !== null && !seat.stages.includes(app.stage)) notFound();
+  if (!allows(user, "opening.read", { openingId: id, assignment, onStrategy })) {
+    return (
+      <ProblemState
+        title="Candidate unavailable"
+        message="You do not have access to this candidate through this opening."
+        primaryHref={`/openings/${id}`}
+        primaryLabel="Go to opening"
+      />
+    );
+  }
+  if (seat.stages !== null && !seat.stages.includes(app.stage)) {
+    return (
+      <ProblemState
+        title="Candidate unavailable"
+        message="This candidate is outside the pipeline stages available to your role."
+        primaryHref={`/openings/${id}`}
+        primaryLabel="Go to opening"
+      />
+    );
+  }
   // Another TA's candidate is not a page this TA can open, whatever the address.
-  if (visibleToSeat([app], seat).length === 0) notFound();
+  if (visibleToSeat([app], seat).length === 0) {
+    return (
+      <ProblemState
+        title="Candidate unavailable"
+        message="This candidate belongs to another recruiter on this opening. Return to your pipeline."
+        primaryHref={`/openings/${id}`}
+        primaryLabel="Go to opening"
+      />
+    );
+  }
   const c = repo.candidate(app.candidateId);
   const client = repo.client(opening.clientId);
   if (!c || !client) notFound();
@@ -315,7 +344,7 @@ export default async function CandidateDrawer({
       ? await backend.cvFile(c.id).catch((e) => ({
           ok: false as const,
           reason: "storage_unavailable" as const,
-          detail: `The CV could not be looked up (${(e as Error).message}).`,
+          detail: safeErrorMessage(e, "The CV could not be loaded. Try again."),
           fileName: null,
         }))
       : null;

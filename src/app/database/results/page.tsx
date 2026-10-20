@@ -38,6 +38,7 @@ import {
 } from "@/lib/engineSearch";
 import type { SearchCriteria } from "@/data/types";
 import { parseReferenceProfile, type ReferenceSearchProfile } from "@/lib/referenceSearchProfile";
+import { safeErrorMessage } from "@/lib/userError";
 
 const PAGE = 25;
 const ENGINE_LIMIT = 400;
@@ -214,7 +215,7 @@ async function EngineResults({ full, ...view }: ViewProps & { full: Promise<Engi
   try {
     return <ResultsView {...view} engine={await full} />;
   } catch (e) {
-    return <ResultsView {...view} engineError={(e as Error).message} />;
+    return <ResultsView {...view} engineError={safeErrorMessage(e, "The search could not run. Try again.")} />;
   }
 }
 
@@ -309,7 +310,7 @@ async function ResultsView({
       const hits = await keywordRetrieve(terms, 150);
       await primeStore({ candidateIds: hits });
     } catch (inner) {
-      retrievalProblem = `The database could not be searched (${(inner as Error).message}).`;
+      retrievalProblem = safeErrorMessage(inner, "The database could not be searched. Try again.");
     }
   }
 
@@ -328,7 +329,7 @@ async function ResultsView({
         const hits = await keywordRetrieve(terms, 1200);
         await primeStore({ candidateIds: hits });
       } catch (e) {
-        retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+        retrievalProblem = safeErrorMessage(e, "The database could not be searched. Try again.");
       }
     }
   }
@@ -354,7 +355,7 @@ async function ResultsView({
           const hits = await keywordRetrieve([conversationText(q), ...criteria.titles], 150);
           await primeStore({ candidateIds: hits });
         } catch (e) {
-          retrievalProblem = `The database could not be searched (${(e as Error).message}).`;
+          retrievalProblem = safeErrorMessage(e, "The database could not be searched. Try again.");
         }
       }
     }
@@ -643,7 +644,7 @@ async function ResultsView({
   if (activeCandidate && isConvex()) {
     const found = await backend
       .cvFile(activeCandidate.id)
-      .catch((e) => ({ ok: false as const, detail: `The CV could not be looked up (${(e as Error).message}).`, fileName: null }));
+      .catch((e) => ({ ok: false as const, detail: safeErrorMessage(e, "The CV could not be loaded. Try again."), fileName: null }));
     const fileName = (found.ok ? found.fileName : null) ?? activeCandidate.cvFileName;
     const isPdf =
       found.ok &&

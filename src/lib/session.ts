@@ -96,18 +96,17 @@ export async function getCurrentUser(): Promise<User> {
 }
 
 /**
- * The signed-in user, allowed to see a page — or a 404.
+ * The signed-in user, allowed to see a page — or the neutral unavailable page.
  *
  * Top-level pages were reachable by anybody signed in: a client account could
- * open the whole database or the reports. A refused page is a 404 rather than
- * a "not allowed", so a page's existence is not itself disclosed.
+ * open the whole database or the reports. The neutral page does not disclose
+ * protected content, but tells the user what to do instead of showing a 404.
  */
 export async function pageUser(capability: import("./auth").Capability): Promise<User> {
   const user = await getCurrentUser();
   const { can } = await import("./auth");
   if (!can(user, capability).ok) {
-    const { notFound } = await import("next/navigation");
-    notFound();
+    redirect("/unavailable");
   }
   return user;
 }

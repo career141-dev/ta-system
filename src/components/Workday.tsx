@@ -18,6 +18,7 @@ import {
 } from "@/lib/workday";
 import { HEADER_H } from "@/lib/chrome";
 import { RESEARCH_FIELDS, RESEARCH_LABELS } from "@/lib/workdayRequirements";
+import { safeErrorMessage } from "@/lib/userError";
 import { validateResearchLink } from "@/lib/eod-format";
 import { sidebarChecks } from "@/lib/workdaySidebar";
 import { canReviewWorkdays } from "@/lib/workdayRoles";
@@ -49,9 +50,7 @@ function useWorkday(detail: boolean, enabled = true, query = "") {
       setError("");
     } catch (error) {
       if (current.signal.aborted || request.current !== current) return;
-      setError(
-        error instanceof Error ? error.message : "Could not load workday.",
-      );
+      setError(safeErrorMessage(error, "The workday could not be loaded. Try again."));
     }
   }, [detail, enabled, query]);
   useEffect(() => {

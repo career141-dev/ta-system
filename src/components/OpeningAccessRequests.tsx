@@ -1,4 +1,5 @@
 import { decideOpeningAccess, requestOpeningAccess } from "@/app/actions";
+import { ProblemState } from "./ProblemState";
 
 export interface AvailableOpening {
   id: string;
@@ -90,6 +91,46 @@ export function RequestOpeningAccess({ openings }: { openings: AvailableOpening[
         </div>
       )}
     </section>
+  );
+}
+
+/** The direct-link state for an opening a TA can discover but cannot read yet. */
+export function OpeningAccessNeeded({ opening }: { opening: AvailableOpening }) {
+  if (opening.requestStatus === "pending") {
+    return (
+      <ProblemState
+        title="Access request waiting for approval"
+        message={`Your request for ${opening.clientName} — ${opening.title} is waiting for ${opening.leadName}. You can open it after approval.`}
+        primaryHref="/openings"
+        primaryLabel="Go to Openings"
+      />
+    );
+  }
+
+  return (
+    <ProblemState
+      title="You don’t have access to this opening yet"
+      message={`Request access to ${opening.clientName} — ${opening.title}. The responsible TA Lead must approve you before you can see its candidates or work on it.`}
+      primaryHref="/openings"
+      primaryLabel="Go to Openings"
+    >
+      <form action={requestOpeningAccess} className="mt-5 grid max-w-xl gap-3">
+        <input type="hidden" name="openingId" value={opening.id} />
+        <label className="grid gap-1.5 text-[12px] font-medium text-ink-soft">
+          Reason <span className="font-normal text-ink-faint">(optional)</span>
+          <textarea
+            name="reason"
+            maxLength={1000}
+            rows={2}
+            placeholder="Why do you need access?"
+            className="resize-y rounded-lg border border-rule bg-white px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-brand"
+          />
+        </label>
+        <button className="w-fit rounded-lg bg-brand px-4 py-2 text-[12.5px] font-semibold text-white hover:opacity-90">
+          Request access
+        </button>
+      </form>
+    </ProblemState>
   );
 }
 

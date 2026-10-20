@@ -7,6 +7,7 @@ import { mailIntakeStatus, type MailIntakeStatus } from "@/data/convex/backend";
 import { setMailboxEnabled, syncMailboxNow } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { AutoRefresh } from "./AutoRefresh";
+import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Settings — the admin panel's switches for the platform's background work.
@@ -51,7 +52,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     try {
       status = await mailIntakeStatus();
     } catch (e) {
-      problem = `The mailbox status could not be read: ${(e as Error).message}`;
+      problem = safeErrorMessage(e, "The mailbox status could not be read. Try again.");
     }
   }
   const openings = new Map(repo.openings().map((o) => [o.id, o]));
