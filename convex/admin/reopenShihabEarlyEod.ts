@@ -29,8 +29,9 @@ export const run = internalMutation({
       throw new Error("Today's closed workday does not contain the expected EOD opening.");
     const allReceipts = (await Promise.all(day.jobs.map(entry => ctx.db.query("taWorkdayMail")
       .withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect()))).flat();
-    if (allReceipts.some(r => r.jobId !== job._id && r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod"))
-      throw new Error("Another opening has a finalized EOD on this workday.");
+    // A TA can finish several openings in one workday. Their other accepted
+    // EODs remain final; only this opening's mistaken send is reopened.
+    const otherAcceptedEods = allReceipts.filter(r => r.jobId !== job._id && r.status === "accepted" && r.finalizedAt && !r.revised && (r.submissionType ?? "eod") === "eod");
     const emails = await ctx.db.query("dailyEmails").withIndex("by_user_job_date", q => q.eq("userId", user._id).eq("jobId", job._id).eq("date", DATE)).collect();
     const originals = emails.filter(e => e.submissionType === "eod" && !e.parentId && e.status === "accepted" && e.finalizedAt && !e.recoveryReopenedAt);
     if (originals.length !== 1 || emails.some(e => e.parentId || e.status === "sending" || e.status === "uncertain"))
@@ -53,7 +54,8 @@ export const run = internalMutation({
       .filter(r => r.status === "denied" && r.reason === "Workday closed before approval" && r.decidedAt === day.finishedAt);
     const summary = { userId: user._id, jobId: job._id, workdayId: day._id, emailId: email._id,
       receiptId: receipt._id, roundId: round?._id ?? null, candidateIds: email.applicationIds,
-      leadsToReopen: leads.length, requestsToRestore: requests.length, acceptedAt: email.acceptedAt ?? null };
+      leadsToReopen: leads.length, requestsToRestore: requests.length, acceptedAt: email.acceptedAt ?? null,
+      otherAcceptedEods: otherAcceptedEods.map(r => ({ receiptId: r._id, jobId: r.jobId, acceptedAt: r.acceptedAt ?? null })) };
     if (dryRun) return { dryRun: true, changed: false, summary };
     const at = Date.now();
     await ctx.db.patch(email._id, { recoveryReopenedAt: at });
