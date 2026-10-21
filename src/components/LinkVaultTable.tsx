@@ -111,13 +111,15 @@ export function LinkVaultTable({
   const adders = [...new Set(everyRow.map(({ row }) => row.addedBy))].sort((a, b) =>
     a === user.id ? -1 : b === user.id ? 1 : (userNames[a] ?? "").localeCompare(userNames[b] ?? ""),
   );
+  // Adders in recent activity order (most recent first, matching linkVault order)
+  const recentAdders = [...new Set(everyRow.map(({ row }) => row.addedBy))];
   // The sheets: All, then the relevant L's (started with + in the
   // sidebar). For a TA, their own L's; for a lead/admin or when filtered by TA ("by"),
   // all L's present in the current view so the lead can segregate by L1, L2, etc.
   const levelOwners = by
     ? [by]
     : isDeskWide(user) || seesEveryTaRow(user)
-      ? [...new Set([user.id, ...adders])]
+      ? [...new Set([user.id, ...recentAdders])]
       : [user.id];
 
   const levelsMap = new Map<number, { n: number; at: number; name?: string }>();
@@ -125,10 +127,6 @@ export function LinkVaultTable({
     for (const l of repo.linkLevels(openingId, uid)) {
       if (!levelsMap.has(l.n)) {
         levelsMap.set(l.n, { ...l });
-      } else {
-        const existing = levelsMap.get(l.n)!;
-        if (!existing.name && l.name) existing.name = l.name;
-        if (!existing.at || (l.at && l.at < existing.at)) existing.at = l.at;
       }
     }
   }
@@ -137,13 +135,15 @@ export function LinkVaultTable({
   const rowsToCheck = by ? everyRow.filter(({ row }) => row.addedBy === by) : everyRow;
   for (const { row } of rowsToCheck) {
     if (typeof row.level === "number" && row.level > 0 && !levelsMap.has(row.level)) {
-      levelsMap.set(row.level, { n: row.level, at: 0 });
+      const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u)).find((l) => l.n === row.level);
+      levelsMap.set(row.level, { n: row.level, at: known?.at ?? 0, name: known?.name });
     }
   }
 
   // An L number from query params still gets a tab
   if (level && !levelsMap.has(level)) {
-    levelsMap.set(level, { n: level, at: 0 });
+    const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u)).find((l) => l.n === level);
+    levelsMap.set(level, { n: level, at: known?.at ?? 0, name: known?.name });
   }
 
   const sheets = Array.from(levelsMap.values()).sort((a, b) => a.n - b.n);
@@ -171,7 +171,8 @@ export function LinkVaultTable({
         </div>
       )}
 
-      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-rule">
+      {/* Sheet tabs row */}
+      <div className="border-b border-rule">
         <nav aria-label="Sheets" className="flex min-w-0 flex-wrap items-end gap-0.5">
           {[{ n: 0, at: 0 } as { n: number; at: number; name?: string }, ...sheets].map((l) => (
             <a key={l.n} href={keep({ level: l.n })} aria-current={level === l.n ? "page" : undefined} className={tab(level === l.n)}>
@@ -180,25 +181,27 @@ export function LinkVaultTable({
             </a>
           ))}
         </nav>
-        <div className="flex flex-wrap items-center gap-3 pb-2">
-          {/* For leads and TA Support, who see every TA's rows. A TA's table
-              is their own (scopeLinks), so the filter would only repeat it (1 Oct). */}
-          {(isDeskWide(user) || seesEveryTaRow(user)) && adders.length > 1 && (
-            <nav aria-label="Added by" className="flex flex-wrap items-center gap-1 text-[12px]">
-              <span className="text-ink-faint">Added by</span>
-              {["", ...adders].map((id) => (
-                <a
-                  key={id || "all"}
-                  href={keep({ by: id })}
-                  aria-current={by === id ? "true" : undefined}
-                  className={`rounded-full border px-2.5 py-0.5 ${by === id ? "border-ink bg-ink text-white" : "border-rule text-ink-soft hover:bg-tag"}`}
-                >
-                  {id === "" ? "Everyone" : id === user.id ? "Me" : (userNames[id] ?? "Someone")}{" "}
-                  <span className={by === id ? "text-white/70" : "text-ink-faint"}>{count({ by: id })}</span>
-                </a>
-              ))}
-            </nav>
-          )}
+      </div>
+
+      {/* Filter and search toolbar row */}
+      <div className="flex flex-wrap items-center justify-between gap-3 py-2.5">
+        {(isDeskWide(user) || seesEveryTaRow(user)) && adders.length > 1 && (
+          <nav aria-label="Added by" className="flex flex-wrap items-center gap-1 text-[12px]">
+            <span className="text-ink-faint">Added by</span>
+            {["", ...adders].map((id) => (
+              <a
+                key={id || "all"}
+                href={keep({ by: id })}
+                aria-current={by === id ? "true" : undefined}
+                className={`rounded-full border px-2.5 py-0.5 ${by === id ? "border-ink bg-ink text-white" : "border-rule text-ink-soft hover:bg-tag"}`}
+              >
+                {id === "" ? "Everyone" : id === user.id ? "Me" : (userNames[id] ?? "Someone")}{" "}
+                <span className={by === id ? "text-white/70" : "text-ink-faint"}>{count({ by: id })}</span>
+              </a>
+            ))}
+          </nav>
+        )}
+        <div className="flex flex-wrap items-center gap-3 ml-auto">
           <LinkSearch
             openingId={openingId}
             q={q}
@@ -218,7 +221,7 @@ export function LinkVaultTable({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-b-xl border border-t-0 border-rule bg-surface">
+      <div className="overflow-hidden rounded-xl border border-rule bg-surface">
         {rows.length === 0 && (q || status || level || addons || imark || by) && everyRow.length > 0 ? (
           <p className="px-8 py-16 text-center text-[13px] leading-relaxed text-ink-faint">
             {q
