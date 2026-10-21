@@ -5,7 +5,7 @@ import { ProjectSidebar } from "@/components/ProjectSidebar";
 import { ContextBar } from "@/components/ContextBar";
 import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
-import { allows, isTa } from "@/lib/auth";
+import { allows, isDeskWide, isTa, seesEveryTaRow } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
 import { levelLabel } from "@/lib/linkViews";
 import { isConvex } from "@/data/mode";
@@ -66,15 +66,46 @@ export default async function OpeningLayout({
     count: apps.filter((a) => a.jobPostId === p.id).length,
   }));
   // The L's this person started under Excel Tables, with how many rows each holds.
-  const mine = seat.canSeeSourcing ? repo.linkVault(id).filter((r) => r.addedBy === user.id) : [];
-  const levels = seat.canSeeSourcing
-    ? repo.linkLevels(id, user.id).map((l) => ({
+  const isLeadViewer = isDeskWide(user) || seesEveryTaRow(user);
+  const myLevels = seat.canSeeSourcing ? repo.linkLevels(id, user.id) : [];
+  const vaultRows = seat.canSeeSourcing ? repo.linkVault(id) : [];
+  const mine = vaultRows.filter((r) => r.addedBy === user.id);
+
+  let levels: { n: number; label: string; name: string; count: number; canManage?: boolean }[] = [];
+  if (seat.canSeeSourcing) {
+    if (myLevels.length > 0 || !isLeadViewer) {
+      levels = myLevels.map((l) => ({
         n: l.n,
         label: levelLabel(l),
         name: l.name ?? "",
         count: mine.filter((r) => r.level === l.n).length,
-      }))
-    : [];
+        canManage: true,
+      }));
+    } else {
+      // For leads/admin who haven't started their own L's, show the opening's L's so they can navigate them
+      const allLevelsMap = new Map<number, { n: number; at: number; name?: string }>();
+      const adders = [...new Set(vaultRows.map((r) => r.addedBy))];
+      for (const uid of adders) {
+        for (const l of repo.linkLevels(id, uid)) {
+          if (!allLevelsMap.has(l.n)) allLevelsMap.set(l.n, { ...l });
+        }
+      }
+      for (const r of vaultRows) {
+        if (typeof r.level === "number" && r.level > 0 && !allLevelsMap.has(r.level)) {
+          allLevelsMap.set(r.level, { n: r.level, at: 0 });
+        }
+      }
+      levels = Array.from(allLevelsMap.values())
+        .sort((a, b) => a.n - b.n)
+        .map((l) => ({
+          n: l.n,
+          label: l.at ? levelLabel(l) : `L${l.n}`,
+          name: l.name ?? "",
+          count: vaultRows.filter((r) => r.level === l.n).length,
+          canManage: false,
+        }));
+    }
+  }
 
   return (
     <>
