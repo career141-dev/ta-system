@@ -20,11 +20,12 @@ export function LinkLevelItem({
 }: {
   openingId: string;
   href: string;
-  level: { n: number; label: string; name: string; count: number };
+  level: { n: number; label: string; name: string; count: number; canManage?: boolean };
   active: boolean;
   /** The sidebar's sub-row look. */
   className: string;
 }) {
+  const canManage = level.canManage !== false;
   const [menu, setMenu] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -75,18 +76,20 @@ export function LinkLevelItem({
         <span className="truncate">{level.label}</span>
         <span className="tabular-nums text-ink-faint">{level.count}</span>
       </Link>
-      <button
-        type="button"
-        onClick={() => setMenu((v) => !v)}
-        aria-label={`More for L${level.n}`}
-        aria-expanded={menu}
-        title="Rename or delete"
-        className={`ml-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md text-[14px] leading-none text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink ${
-          active || menu ? "" : "opacity-60 group-hover:opacity-100"
-        }`}
-      >
-        ⋯
-      </button>
+      {canManage && (
+        <button
+          type="button"
+          onClick={() => setMenu((v) => !v)}
+          aria-label={`More for L${level.n}`}
+          aria-expanded={menu}
+          title="Rename or delete"
+          className={`ml-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-md text-[14px] leading-none text-ink-faint transition-colors hover:bg-rule/40 hover:text-ink ${
+            active || menu ? "" : "opacity-60 group-hover:opacity-100"
+          }`}
+        >
+          ⋯
+        </button>
+      )}
       {menu && (
         <div className="absolute right-0 top-7 z-20 w-32 overflow-hidden rounded-lg border border-rule bg-surface py-1 text-[12.5px] shadow-lg">
           <button

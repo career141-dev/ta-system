@@ -56,7 +56,7 @@ export function ProjectSidebar({
   openingId: string;
   posts: SidebarPost[];
   /** The viewer's L's under Excel Tables, started with its + (29 Sep). */
-  levels?: { n: number; label: string; name: string; count: number }[];
+  levels?: { n: number; label: string; name: string; count: number; canManage?: boolean }[];
   /** What the + starts next — numbers are not reused after a delete. */
   nextLevel?: number;
   /** A client contact gets the pipeline from their shortlist on, and none of

@@ -111,10 +111,42 @@ export function LinkVaultTable({
   const adders = [...new Set(everyRow.map(({ row }) => row.addedBy))].sort((a, b) =>
     a === user.id ? -1 : b === user.id ? 1 : (userNames[a] ?? "").localeCompare(userNames[b] ?? ""),
   );
-  // The sheets: All, then the viewer's own L's (started with + in the
-  // sidebar). An L number from someone else's link still gets a tab.
-  const sheets = repo.linkLevels(openingId, user.id);
-  if (level && !sheets.some((l) => l.n === level)) sheets.push({ n: level, at: 0 });
+  // The sheets: All, then the relevant L's (started with + in the
+  // sidebar). For a TA, their own L's; for a lead/admin or when filtered by TA ("by"),
+  // all L's present in the current view so the lead can segregate by L1, L2, etc.
+  const levelOwners = by
+    ? [by]
+    : isDeskWide(user) || seesEveryTaRow(user)
+      ? [...new Set([user.id, ...adders])]
+      : [user.id];
+
+  const levelsMap = new Map<number, { n: number; at: number; name?: string }>();
+  for (const uid of levelOwners) {
+    for (const l of repo.linkLevels(openingId, uid)) {
+      if (!levelsMap.has(l.n)) {
+        levelsMap.set(l.n, { ...l });
+      } else {
+        const existing = levelsMap.get(l.n)!;
+        if (!existing.name && l.name) existing.name = l.name;
+        if (!existing.at || (l.at && l.at < existing.at)) existing.at = l.at;
+      }
+    }
+  }
+
+  // Include any L number present on rows in the table
+  const rowsToCheck = by ? everyRow.filter(({ row }) => row.addedBy === by) : everyRow;
+  for (const { row } of rowsToCheck) {
+    if (typeof row.level === "number" && row.level > 0 && !levelsMap.has(row.level)) {
+      levelsMap.set(row.level, { n: row.level, at: 0 });
+    }
+  }
+
+  // An L number from query params still gets a tab
+  if (level && !levelsMap.has(level)) {
+    levelsMap.set(level, { n: level, at: 0 });
+  }
+
+  const sheets = Array.from(levelsMap.values()).sort((a, b) => a.n - b.n);
   const pages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
   const current = Math.min(Math.max(1, page), pages);
   const rows = slicePage(matching, current, PAGE_SIZE).map((x) => x.row);
