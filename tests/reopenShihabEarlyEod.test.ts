@@ -2,6 +2,11 @@ import assert from "node:assert/strict";
 import { run } from "../convex/admin/reopenShihabEarlyEod";
 import { dailySendProblem } from "../src/lib/dailyEmail";
 
+// This recovery was deliberately valid only on 20 October. Keep its safety
+// check covered without making the suite depend on the day CI happens to run.
+const realDateNow = Date.now;
+Date.now = () => Date.parse("2026-10-20T06:00:00.000Z");
+
 type Row = Record<string, any>;
 const data = new Map<string, Row[]>();
 const rows = (name: string) => data.get(name) ?? (data.set(name, []), data.get(name)!);
@@ -56,4 +61,5 @@ assert.equal(dailySendProblem([original], "midday", true), null);
 assert.match(dailySendProblem([original], "eod", true)!, /midday email/);
 assert.equal(dailySendProblem([original, { status: "accepted", submissionType: "midday", parentId: undefined, recoveryReopenedAt: undefined }], "eod", true), null);
 await assert.rejects(() => execute(false), /Today's closed workday|Expected one finalized original EOD/);
+Date.now = realDateNow;
 console.log("Shihab's early EOD recovery keeps the sent audit, previews, reopens and refuses a second write.");
