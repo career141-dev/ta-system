@@ -895,22 +895,46 @@ export const clearOrphanedUploads = internalMutation({
 export const updateCvUpload = internalMutation({
   args: {
     cvUploadId: v.id("cvUploads"),
-    status: v.string(),
+    status: v.optional(v.string()),
     fileHash: v.optional(v.string()),
     candidateId: v.optional(v.id("candidates")),
     errorMessage: v.optional(v.string()),
     processingStartedAt: v.optional(v.number()),
+    processingStage: v.optional(v.union(
+      v.literal("queued"),
+      v.literal("downloading"),
+      v.literal("extracting_text"),
+      v.literal("ocr"),
+      v.literal("structuring"),
+      v.literal("validating"),
+      v.literal("saving"),
+      v.literal("filing"),
+      v.literal("completed"),
+      v.literal("needs_review"),
+      v.literal("failed"),
+    )),
+    queuedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    textExtractionMethod: v.optional(v.string()),
     isHealAttempted: v.optional(v.boolean()),
     /** Unlink the candidate — for a document found not to be a CV after its row was made. */
     clearCandidate: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    const updates: Record<string, unknown> = { status: args.status };
+    const updates: Record<string, unknown> = {};
+    if (args.status !== undefined) updates.status = args.status;
     if (args.clearCandidate) updates.candidateId = undefined;
     if (args.fileHash !== undefined) updates.fileHash = args.fileHash;
     if (args.candidateId !== undefined) updates.candidateId = args.candidateId;
     if (args.errorMessage !== undefined) updates.errorMessage = args.errorMessage;
     if (args.processingStartedAt !== undefined) updates.processingStartedAt = args.processingStartedAt;
+    if (args.processingStage !== undefined) {
+      updates.processingStage = args.processingStage;
+      updates.stageChangedAt = Date.now();
+    }
+    if (args.queuedAt !== undefined) updates.queuedAt = args.queuedAt;
+    if (args.completedAt !== undefined) updates.completedAt = args.completedAt;
+    if (args.textExtractionMethod !== undefined) updates.textExtractionMethod = args.textExtractionMethod;
     if (args.isHealAttempted !== undefined) updates.isHealAttempted = args.isHealAttempted;
     await ctx.db.patch(args.cvUploadId, updates);
     const upload = await ctx.db.get(args.cvUploadId);

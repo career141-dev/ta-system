@@ -804,6 +804,29 @@ export default defineSchema({
     replacedByUploadId: v.optional(v.id("cvUploads")),
     /** An extraction is reading this upload right now (cvs/cvUploads.ts lockExtraction, 2 Oct). */
     extractionLockedAt: v.optional(v.number()),
+    /**
+     * The real step currently being performed. `status` remains the durable
+     * coarse result used by the older intake paths; this field lets an upload
+     * screen distinguish a queued file from OCR, AI reading and database
+     * filing without guessing from elapsed time (21 Oct).
+     */
+    processingStage: v.optional(v.union(
+      v.literal("queued"),
+      v.literal("downloading"),
+      v.literal("extracting_text"),
+      v.literal("ocr"),
+      v.literal("structuring"),
+      v.literal("validating"),
+      v.literal("saving"),
+      v.literal("filing"),
+      v.literal("completed"),
+      v.literal("needs_review"),
+      v.literal("failed"),
+    )),
+    queuedAt: v.optional(v.number()),
+    stageChangedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    textExtractionMethod: v.optional(v.string()),
     /** Set when a TA uploads a scoop CV from the opening's Scoops page
      *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
      *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`
