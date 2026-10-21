@@ -2737,6 +2737,13 @@ export default defineSchema({
       by: v.id("users"),
       byRole: v.string(),
     }))),
+    /** Notes recorded by the TA next to a candidate profile. */
+    taNotes: v.optional(v.array(v.object({
+      id: v.string(),
+      at: v.number(),
+      note: v.string(),
+      by: v.id("users"),
+    }))),
   })
     .index("by_opening", ["openingId"])
     .index("by_addedBy", ["addedBy"])

@@ -643,6 +643,43 @@ export async function removeLeadNote(formData: FormData) {
 }
 
 /**
+ * A note recorded by the TA on an Excel Tables candidate profile.
+ */
+export async function addLinkTaNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const text = String(formData.get("note") ?? "").trim();
+  if (!text) await fail("Write the note first.");
+  if (text.length > LEAD_NOTE_MAX) {
+    await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
+  }
+  if (!repo.addLinkTaNote(entryId, user.id, text)) {
+    await fail("That row no longer exists — it may have been removed.");
+  }
+  revalidateLinks(openingId);
+  await done("Note saved.");
+}
+
+export async function removeLinkTaNote(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { link: "entryId", opening: "openingId" });
+  const entryId = String(formData.get("entryId"));
+  const noteId = String(formData.get("noteId") ?? "");
+  const row = repo.linkVault(openingId).find((l) => l.id === entryId);
+  const target = row?.taNotes?.find((n) => n.id === noteId);
+  if (!target) await fail("That note is already gone.");
+  if (target!.by !== user.id && !isDeskWide(user)) {
+    await fail("Only the author can remove this note.");
+  }
+  repo.removeLinkTaNote(entryId, noteId);
+  revalidateLinks(openingId);
+  await done("Note removed.");
+}
+
+/**
  * A note on a person in Director review. Anyone on the opening may leave one:
  * the TA, the lead, the director, an admin (29 Sep). The byline shows whose it is.
  */
@@ -5923,6 +5960,14 @@ export async function removeReviewNoteInline(_: ActionResult | null, formData: F
 
 export async function removeLeadNoteInline(_: ActionResult | null, formData: FormData) {
   return inline(() => removeLeadNote(formData));
+}
+
+export async function addLinkTaNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLinkTaNote(formData));
+}
+
+export async function removeLinkTaNoteInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => removeLinkTaNote(formData));
 }
 
 export async function addLinkToPipelineInline(_: ActionResult | null, formData: FormData) {

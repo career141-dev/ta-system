@@ -787,6 +787,16 @@ export interface LinkVaultEntry {
   /** Feedback for the TA from a lead, director, admin or ops. Absent on rows
    *  nobody has left a note on. */
   leadNotes?: LeadNote[];
+  /** Notes recorded by the TA on the profile. */
+  taNotes?: TaNote[];
+}
+
+/** A note recorded by the TA next to a candidate profile. */
+export interface TaNote {
+  id: Id;
+  at: number;
+  note: string;
+  by: Id;
 }
 
 /** A LinkedIn row matched to a candidate we already hold (28 Sep). */
