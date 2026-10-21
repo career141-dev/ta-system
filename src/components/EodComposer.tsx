@@ -611,21 +611,67 @@ export function EodComposer({
   }, [restored, draftKey, subject, initialSubject, introText, outroText, researchLink, shortlistDraft, extraTo, extraCc, removed, skipAttachments]);
 
   const updateCandidateField = (appId: string, field: keyof ShortlistRow, value: any) => {
-    setShortlistDraft((prev) => ({
-      ...prev,
-      [appId]: {
-        ...prev[appId],
-        [field]: value,
-      },
-    }));
+    const baseRow = initialRows.find((b) => b.applicationId === appId);
+    setShortlistDraft((prev) => {
+      const existing = prev[appId] || {};
+      const existingBase = ((existing as any)._base || {}) as Partial<ShortlistRow>;
+      return {
+        ...prev,
+        [appId]: {
+          ...existing,
+          [field]: value,
+          _base: {
+            ...existingBase,
+            // Remember the base server value when first modified so we can detect profile updates
+            ...(baseRow && existingBase[field] === undefined ? { [field]: baseRow[field] } : {}),
+          },
+        },
+      };
+    });
   };
 
   const getCandidateRow = (r: ShortlistRow): ShortlistRow => {
-    const override = shortlistDraft[r.applicationId] || {};
+    const override = shortlistDraft[r.applicationId];
+    if (!override) return r;
+
+    const base = (override as any)._base as Partial<ShortlistRow> | undefined;
+    const effective: Partial<ShortlistRow> = {};
+
+    for (const [k, v] of Object.entries(override)) {
+      if (k === "_base") continue;
+      const key = k as keyof ShortlistRow;
+      const baseVal = base?.[key];
+
+      if (baseVal !== undefined) {
+        // If the server data r[key] has changed from what the draft was based on,
+        // it means the TA updated the candidate profile (e.g. in the candidate drawer).
+        // Discard the stale draft for this field so fresh profile details appear.
+        if (JSON.stringify(r[key]) !== JSON.stringify(baseVal)) {
+          continue;
+        }
+      } else {
+        // Handling legacy drafts where _base was not recorded yet:
+        // For notes: check if any line in current server r.notes does not exist in the draft.
+        // If the server has new note lines (e.g. added in TA follow-up), the draft is stale.
+        if (key === "notes" && Array.isArray(v) && Array.isArray(r.notes)) {
+          const draftText = (v as string[]).join("\n").toLowerCase();
+          const serverHasNewNotes = (r.notes as string[]).some((n) => {
+            const clean = n.replace(/^[->•*]\s*/, "").trim().toLowerCase();
+            return clean.length > 3 && !draftText.includes(clean);
+          });
+          if (serverHasNewNotes) {
+            continue;
+          }
+        }
+      }
+
+      (effective as any)[key] = v;
+    }
+
     return {
       ...r,
-      ...override,
-      notes: override.notes !== undefined ? override.notes : r.notes,
+      ...effective,
+      notes: effective.notes !== undefined ? effective.notes : r.notes,
     };
   };
 
