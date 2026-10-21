@@ -172,22 +172,24 @@ export default async function OpeningsPage({
 
   return (
     <main className="mx-auto max-w-[1180px] px-4 sm:px-8 py-6 sm:py-9">
-      <div className="mb-7 flex items-end justify-between gap-6">
+      <div className="mb-7 flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-end sm:gap-6">
         <div>
           <h1 className="text-[24px] font-semibold tracking-tight">Openings</h1>
           <p className="mt-1.5 text-[13px] text-ink-soft">
             One commercial requirement, many posts, one candidate pool.
           </p>
         </div>
-        <Link
-          href="/openings/new"
-          className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white hover:opacity-90"
-        >
-          New opening
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          {isTa(user) && <RequestOpeningAccess openings={availableOpenings} />}
+          <Link
+            href="/openings/new"
+            className="rounded-full bg-brand px-4 py-2 text-[13px] font-medium text-white hover:opacity-90"
+          >
+            New opening
+          </Link>
+        </div>
       </div>
 
-      {isTa(user) && <RequestOpeningAccess openings={availableOpenings} />}
       <OpeningAccessApprovalQueue requests={pendingAccessRequests} />
 
       <Suspense fallback={<div className="mb-6 h-[42px]" />}>
