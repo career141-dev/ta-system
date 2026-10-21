@@ -1,4 +1,5 @@
 "use client";
+import { excelFilename as buildExcelFilename } from "@/lib/excelFilename";
 import { EodJobChecks } from "./Workday";
 import { useChatgptResearch } from "./useChatgptResearch";
 
@@ -396,6 +397,8 @@ export function EodComposer({
   useDailyEmail = false,
   excelLinksCount,
   openingTitle,
+  clientName,
+  workLocationName,
   workLocationId,
   actorId,
   allowActivityOnly = false,
@@ -409,6 +412,8 @@ export function EodComposer({
   savedAttachments?: import("@/lib/dailyEmail").SavedEmailAttachment[];
   excelLinksCount?: number;
   openingTitle?: string;
+  clientName?: string;
+  workLocationName?: string;
   submissionType?: SubmissionType;
   dailyDraft?: { id: string; revision: number; fields: Record<string, string> };
   dailyParentId?: string;
@@ -1085,9 +1090,7 @@ export function EodComposer({
 
       {(() => {
         const hasExcelAttachment = submissionType === "eod" && !skipAttachments && (excelLinksCount ?? 0) > 0;
-        const safeJobTitle = (openingTitle || "").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-        const stamp = new Date().toISOString().slice(0, 10);
-        const excelFilename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
+        const excelFilename = buildExcelFilename(clientName || "Client", openingTitle || "Position", workLocationName);
         const totalAttachments = (skipAttachments ? 0 : effectiveRows.length) + (hasExcelAttachment ? 1 : 0);
 
         return (

@@ -52,7 +52,7 @@ assert.equal(repo.application(mApp.applicationId)?.workLocationId, "m");
 assert.equal(repo.application(dApp.applicationId)?.workLocationId, "d");
 assert.equal(getScopedLinkVaultEntries(opening.id, ta, "m").entries.length, 2);
 assert.equal(getScopedLinkVaultEntries(opening.id, ta, "d").entries.map(r => r.id).join(), dRow);
-assert.ok(buildOpeningExcelAttachment(opening.id, ta, "Engineer", "m")!.filename.includes("mumbai"));
+assert.ok(buildOpeningExcelAttachment(opening.id, ta, "Engineer", "m")!.filename.includes(" - Mumbai - "));
 assert.equal(effortRow(opening.id, ta, new Date(), "d").lEffort, 1);
 assert.equal(shortlistRows(opening.id, ta.id, "director", undefined, "m").some(r => r.applicationId === dApp.applicationId), false);
 repo.deleteLinkLevel(opening.id, ta.id, 1, "m");
