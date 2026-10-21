@@ -6,6 +6,7 @@ import type { LinkVaultEntry } from "@/data/types";
 import { matchesQuery } from "@/lib/paging";
 import { buildXlsx, toTsv, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
 import { getScopedLinkVaultEntries, buildLinkExportLayout } from "@/lib/linkExport";
+import { workLocationView } from "@/lib/workLocations";
 
 export const dynamic = "force-dynamic";
 
@@ -51,9 +52,11 @@ export async function GET(
     return new Response("Not allowed.", { status: 403 });
   }
 
-  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user);
-
   const sp = new URL(req.url).searchParams;
+  let location: string | undefined;
+  try { location = workLocationView(opening, sp.get("location") ?? undefined); }
+  catch { return new Response("Invalid work location.", { status: 400 }); }
+  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user, location);
   const q = sp.get("q") ?? "";
   const status = sp.get("status") ?? "";
   const level = Math.max(0, Math.floor(Number(sp.get("level"))) || 0);
@@ -105,7 +108,8 @@ export async function GET(
     });
   }
 
-  const safeJobTitle = opening.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const city = opening.workLocations?.find(l => l.id === location)?.name;
+  const safeJobTitle = `${opening.title}${city ? `-${city}` : ""}`.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 150);
   const stamp = new Date().toISOString().slice(0, 10);
   const filename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
 

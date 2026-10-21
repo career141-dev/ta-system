@@ -7,6 +7,7 @@ import { rowIsAnotherTas } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
 import { revalidatePath } from "next/cache";
 import { matchLink } from "@/lib/cvMatch";
+import { requireWorkLocation } from "@/lib/workLocations";
 
 export const dynamic = "force-dynamic";
 
@@ -97,7 +98,15 @@ export async function POST(req: Request) {
       message: `${existing.name ?? capture.fullName ?? "That profile"} is already in the table, added by ${owner}. It is theirs to work — leave this one alone.`,
     }, 409);
   }
-  const id = existing?.id ?? repo.addLink(openingId, url, userId);
+  // Old extension copies omit a location: keep these captures visibly
+  // unassigned on multi-location jobs until the TA reviews them.
+  const requestedLocation = String(body.workLocationId ?? "") || undefined;
+  let workLocationId: string | undefined;
+  try {
+    if (requestedLocation || opening.workLocations?.filter(l => !l.archived).length === 1) workLocationId = requireWorkLocation(opening, requestedLocation)?.id;
+  } catch { return reply({ error: "invalid_location", message: "Choose an active work location for this job in the extension." }, 400); }
+  if (existing && workLocationId && existing.workLocationId !== workLocationId) return reply({ error: "different_location", message: "This profile already exists on this job under another location or Location not assigned. Review and assign its existing row in Excel Tables." }, 409);
+  const id = existing?.id ?? repo.addLink(openingId, url, userId, null, "shortlisted", workLocationId);
 
   // A capture fills what the row is missing and refreshes what it already has,
   // but it never clears a value a TA typed by hand.

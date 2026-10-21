@@ -30,6 +30,7 @@ import { isEodCandidateEligible } from "@/lib/eodEligibility";
 import { makeReviewToken } from "@/lib/reviewToken";
 import { masterSheetStatusFields, type MasterSheetPositionStatus } from "@/lib/masterSheet";
 import { BOX } from "@/lib/career141Box";
+import { validateWorkLocations, requireWorkLocation, inWorkLocation } from "@/lib/workLocations";
 import { safeErrorMessage } from "@/lib/userError";
 
 /** A direct Convex write, after which the loaded tables are re-read (primeState.markTablesStale). */
@@ -576,7 +577,8 @@ export async function addLink(formData: FormData) {
     await note(`${said} Your note was added to that row.`);
   }
   const name = String(formData.get("name") ?? "").trim() || guessedName;
-  const id = repo.addLink(openingId, url, user.id, name);
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
+  const id = repo.addLink(openingId, url, user.id, name, "shortlisted", location?.id, Number(formData.get("level")) || undefined);
   if (leadNote) repo.addLeadNote(id, user.id, user.role, leadNote);
   // Is this someone we already hold? (lib/cvMatch, 28 Sep.) Asked now, so
   // the row says so the moment it appears.
@@ -738,6 +740,62 @@ export async function toggleEyeMark(formData: FormData) {
 }
 
 
+function readWorkLocations(form: FormData, previous: import("@/lib/workLocations").WorkLocation[] = []) {
+  if (!form.has("workLocations")) return undefined;
+  return validateWorkLocations(JSON.parse(String(form.get("workLocations"))), previous);
+}
+
+export async function assignWorkLocation(form: FormData) {
+  const openingId = String(form.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorize(form, "opening.sourcing", { opening: "openingId" });
+  try {
+    if (isConvex()) await convexMutation("ta/workLocations:assign", { actorId: user.id, jobId: openingId,
+      locationId: String(form.get("workLocationId") ?? ""), linkId: String(form.get("linkId") ?? "") || undefined,
+      applicationId: String(form.get("applicationId") ?? "") || undefined });
+    else {
+      const location = requireWorkLocation(repo.opening(openingId)!, String(form.get("workLocationId") ?? ""))!;
+      const row = repo.linkEntry(String(form.get("linkId") ?? ""));
+      const app = repo.application(String(form.get("applicationId") ?? ""));
+      if (!isDeskWide(user) && (row && row.addedBy !== user.id || app && app.ownerTaId !== user.id)) throw new Error("You can only assign your own candidates.");
+      repo.assignWorkLocation(openingId, location.id, row?.id, app?.id);
+    }
+  } catch (e) { return fail(backendMessage(e, "Could not assign the work location.")); }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  return back("Work location saved.");
+}
+
+/** A reviewed page of selected rows; each candidate and its links move atomically. */
+export async function assignSelectedWorkLocations(form: FormData) {
+  const openingId = String(form.get("openingId") ?? "");
+  await primeStore({ openingId });
+  const user = await authorize(form, "opening.sourcing", { opening: "openingId" });
+  let location: ReturnType<typeof requireWorkLocation>;
+  try { location = requireWorkLocation(repo.opening(openingId)!, String(form.get("targetWorkLocationId") ?? "")); }
+  catch (e) { return fail(backendMessage(e, "Select a work location first.")); }
+  if (!location) return fail("Set up the job's work locations first.");
+  const entries = [...new Set(form.getAll("entryId").map(String))];
+  const apps = [...new Set(form.getAll("appId").map(String))];
+  if (!entries.length && !apps.length) return fail("Select candidates first.");
+  if (entries.length + apps.length > 25) return fail("Assign up to 25 candidates at a time.");
+  let saved = 0;
+  const problems: string[] = [];
+  for (const item of [...entries.map(linkId => ({ linkId })), ...apps.map(applicationId => ({ applicationId }))]) {
+    try {
+      if (isConvex()) await convexMutation("ta/workLocations:assign", { actorId: user.id, jobId: openingId, locationId: location.id, ...item });
+      else {
+        const row = "linkId" in item ? repo.linkEntry(item.linkId) : undefined;
+        const app = "applicationId" in item ? repo.application(item.applicationId) : undefined;
+        if (!isDeskWide(user) && (row && row.addedBy !== user.id || app && app.ownerTaId !== user.id)) throw new Error("You can only assign your own candidates.");
+        repo.assignWorkLocation(openingId, location.id, row?.id, app?.id);
+      }
+      saved++;
+    } catch (e) { problems.push(backendMessage(e, "A candidate could not be assigned.")); }
+  }
+  revalidatePath(`/openings/${openingId}`, "layout");
+  return back(`Assigned ${saved} to ${location.name}.${problems.length ? ` ${problems.length} could not be assigned: ${[...new Set(problems)].slice(0, 2).join(" ")}` : ""}`, problems.length ? "note" : "ok");
+}
+
 // ─── Intake (spec §5) ────────────────────────────────────────────────────────
 
 function readExtract(f: FormData): ExtractedBrief {
@@ -848,6 +906,7 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
   const hiringFor = String(formData.get("hiringFor") ?? "local");
   const gender = String(formData.get("targetGender") ?? "").trim() || null;
   const autoFollowUp = formData.get("autoFollowUp") === "on";
+  const workLocations = readWorkLocations(formData);
 
   const isLead = user.role === "ta_lead" || user.role === "admin";
   // A lead assigns from the active TAs only (lib/assignable); anyone else sent
@@ -873,6 +932,7 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
         clientId,
         title,
         country,
+        workLocations,
         hiringFor,
         targetGender: gender,
         jdMarkdown: "",
@@ -914,6 +974,7 @@ async function saveNewOpening(formData: FormData, user: User): Promise<string | 
     openingId = repo.createOpeningFromBrief(briefId, {
       clientId,
       country,
+      workLocations,
       hiringFor,
       targetGender: gender,
       jdMarkdown: "",
@@ -1905,9 +1966,10 @@ export async function addLinkLevel(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
-  const n = repo.addLinkLevel(openingId, user.id);
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
+  const n = repo.addLinkLevel(openingId, user.id, location?.id);
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}/hh/links?level=${n}`);
+  redirect(`/openings/${openingId}/hh/links?level=${n}${location ? `&location=${location.id}` : ""}`);
 }
 
 /** A name for one of your L's on Excel Tables; blank puts the date back. */
@@ -1917,7 +1979,8 @@ export async function renameLinkLevel(formData: FormData) {
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const n = Math.floor(Number(formData.get("level")));
   const name = String(formData.get("name") ?? "");
-  if (!repo.renameLinkLevel(openingId, user.id, n, name)) return fail(`L${n} is not one of yours here.`);
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
+  if (!repo.renameLinkLevel(openingId, user.id, n, name, location?.id)) return fail(`L${n} is not one of yours here.`);
   revalidatePath(`/openings/${openingId}`, "layout");
   return done(name.trim() ? `Renamed L${n} to ${name.trim().slice(0, 40)}.` : `L${n} shows its date again.`);
 }
@@ -1931,11 +1994,12 @@ export async function deleteLinkLevel(formData: FormData) {
   await primeStore({ openingId });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const n = Math.floor(Number(formData.get("level")));
-  const moved = repo.deleteLinkLevel(openingId, user.id, n);
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
+  const moved = repo.deleteLinkLevel(openingId, user.id, n, location?.id);
   if (moved === null) return fail(`L${n} is not one of yours here.`);
   revalidatePath(`/openings/${openingId}`, "layout");
   const msg = moved ? `Deleted L${n}. Its ${moved === 1 ? "row is" : `${moved} rows are`} still here, under All.` : `Deleted L${n}.`;
-  redirect(`/openings/${openingId}/hh/links?msg=${encodeURIComponent(msg)}&tone=ok`);
+  redirect(`/openings/${openingId}/hh/links?msg=${encodeURIComponent(msg)}&tone=ok${location ? `&location=${location.id}` : ""}`);
 }
 
 export async function renameLinkLevelInline(_: ActionResult | null, formData: FormData) {
@@ -2395,15 +2459,17 @@ export async function updateOpening(formData: FormData) {
   const currency = String(formData.get("salaryCurrency") ?? "LKR");
   if (!/^[A-Z]{3}$/.test(currency)) await fail("Pick a currency from the list.");
 
+  const workLocations = readWorkLocations(formData, repo.opening(openingId)?.workLocations);
   repo.updateOpening(openingId, {
+    ...(workLocations ? { workLocations } : {}),
     title,
     salaryMin,
     salaryMax,
     salaryCurrency: currency,
     packageNotes: String(formData.get("packageNotes") ?? "").trim(),
-    locations: list(formData.get("locations")),
+    locations: workLocations ? workLocations.filter(l => !l.archived).map(l => l.name) : list(formData.get("locations")),
     targetNationalities: list(formData.get("targetNationalities")),
-    headcount: Math.max(1, Number(formData.get("headcount") ?? 1) || 1),
+    headcount: workLocations ? workLocations.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0) : Math.max(1, Number(formData.get("headcount") ?? 1) || 1),
     priorityTier: String(formData.get("priorityTier") ?? "P3") as PriorityTier,
   });
   revalidatePath(`/openings/${openingId}`, "layout");
@@ -4801,6 +4867,7 @@ async function eodResearchSubmission(user: User, openingId: string, kind: "direc
       const check = await convexMutation<{ ok: boolean; blockers: string[]; workType: WorkingStage }>("ta/workdays:emailPreflight", {
         actorId: user.id,
         jobId: openingId,
+        workLocationId: String(formData.get("workLocationId") ?? "") || undefined,
         link,
         confirmed,
         revised,
@@ -4831,10 +4898,10 @@ export async function addMiddayEmail(formData: FormData) {
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
   let id: string;
   try {
-    id = await convexMutation<string>("ta/dailyEmails:createDraft", { actorId: user.id, jobId: openingId });
+    id = await convexMutation<string>("ta/dailyEmails:createDraft", { actorId: user.id, jobId: openingId, workLocationId: String(formData.get("workLocationId") ?? "") || undefined });
   } catch (e) { return fail(backendMessage(e, "Could not create the midday email.")); }
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}/midday?mail=${id}`);
+  redirect(`/openings/${openingId}/midday?mail=${id}&location=${encodeURIComponent(String(formData.get("workLocationId") ?? ""))}`);
 }
 
 export async function saveMiddayDraft(openingId: string, id: string, revision: number, fields: Record<string, string>) {
@@ -4866,6 +4933,7 @@ export async function sendDailyEmail(formData: FormData) {
   const type: SubmissionType = formData.get("submissionType") === "midday" ? "midday" : "eod";
   const draftId = String(formData.get("dailyDraftId") ?? "");
   const parentId = String(formData.get("dailyParentId") ?? "");
+  let workLocationId = String(formData.get("workLocationId") ?? "") || undefined;
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, parentId ? "opening.read" : "opening.act", { opening: "openingId" });
   const permission = can(user, "opening.act", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
@@ -4879,12 +4947,14 @@ export async function sendDailyEmail(formData: FormData) {
     const emails = await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: openingId });
     const parent = parentId ? emails.find(e => e._id === parentId && e.userId === user.id && e.submissionType === "eod" && e.status === "accepted") : undefined;
     if (parentId && !parent?.snapshot) throw new Error("That original EOD email is no longer available to correct.");
+    if (parent) workLocationId = parent.workLocationId;
+    else workLocationId = requireWorkLocation(repo.opening(openingId)!, workLocationId)?.id;
     if (parent && formData.get("previewConfirmed") !== "on") throw new Error("Review and confirm the revised email preview before sending.");
     const context = parent ? null : await eodWorkContext(user, openingId);
-    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined);
+    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined, workLocationId);
     const ids = parent ? parent.applicationIds : String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
     const rows = shortlistRowsFromForm(formData, baseRows);
-    const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user));
+    const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user, new Date(), workLocationId));
     const submittedMode = parent?.workType ?? parent?.snapshot?.workType ?? context?.workType;
     if (submittedMode) effort.hundredOrFollowUp = submittedMode;
     const extraTo = parseAddressList(String(formData.get("extraTo") ?? ""));
@@ -4908,7 +4978,7 @@ export async function sendDailyEmail(formData: FormData) {
     const rawSubject = String(formData.get("subject") ?? "").trim();
     const subject = parent ? revisedSubject(rawSubject) : rawSubject;
     const skipAttachments = formData.get("skipAttachments") === "yes";
-    const result = await emailEod({ openingId, user, applicationIds: ids, to: recipients.to[0], extraTo: recipients.to.slice(1),
+    const result = await emailEod({ openingId, user, workLocationId, applicationIds: ids, to: recipients.to[0], extraTo: recipients.to.slice(1),
       cc: recipients.cc, subject, effort, rows, baseRows, researchLink: research.url,
       introText: String(formData.get("introText") ?? ""), outroText: String(formData.get("outroText") ?? ""),
       activityOnly: ids.length === 0, skipAttachments: type === "midday" && skipAttachments, daily: { submissionType: type, draftId: draftId || undefined,
@@ -4931,7 +5001,7 @@ export async function sendDailyEmail(formData: FormData) {
   }
   revalidatePath(`/openings/${openingId}`, "layout");
   const mail = sentId || draftId || parentId;
-  redirect(`${baseUrl}?${mail ? `mail=${encodeURIComponent(mail)}&` : ""}${sentId ? `sent=${encodeURIComponent(sentId)}&` : ""}msg=${encodeURIComponent(message)}`);
+  redirect(`${baseUrl}?${workLocationId ? `location=${encodeURIComponent(workLocationId)}&` : ""}${mail ? `mail=${encodeURIComponent(mail)}&` : ""}${sentId ? `sent=${encodeURIComponent(sentId)}&` : ""}msg=${encodeURIComponent(message)}`);
 }
 
 export async function sendEod(formData: FormData) {
@@ -4940,6 +5010,7 @@ export async function sendEod(formData: FormData) {
   const kind = String(formData.get("kind") ?? "director") as "director" | "client";
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
   const ids = String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
   const context = kind === "director" ? await eodWorkContext(user, openingId) : null;
   const activityOnly = kind === "director" && formData.get("activityOnly") === "yes" && ids.length === 0;
@@ -4960,7 +5031,7 @@ export async function sendEod(formData: FormData) {
   const fresh = ids.filter((id) => {
     const app = repo.application(id);
     if (!app) return false;
-    return mine(id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && app.openingId === openingId && (
+    return mine(id) && inWorkLocation(app, location?.id) && !sent.has(id) && !eodInFlight.has(holdKey(id)) && app.openingId === openingId && (
       kind !== "director" || !context || isEodCandidateEligible({
         stage: app.stage,
         ownerTaId: app.ownerTaId,
@@ -5115,6 +5186,8 @@ export async function sendEod(formData: FormData) {
 
   const round = repo.openReviewRound({
     openingId,
+    workLocationId: location?.id,
+    workLocationName: location?.name,
     kind,
     applicationIds: fresh,
     setNumber: sets.length ? Math.min(...sets) : null,
@@ -5302,6 +5375,7 @@ async function saveEodEdits(editedRows: ShortlistRow[], baseRows: ShortlistRow[]
  */
 async function emailEod(input: {
   openingId: string;
+  workLocationId?: string;
   user: User;
   applicationIds: string[];
   to: string;
@@ -5419,7 +5493,7 @@ async function emailEod(input: {
   let excelAttachment: import("@/lib/linkExport").ExcelExportAttachment | null = null;
   if (!isMidday && !input.skipAttachments) {
     const { buildOpeningExcelAttachment } = await import("@/lib/linkExport");
-    excelAttachment = buildOpeningExcelAttachment(openingId, user, opening.title);
+    excelAttachment = buildOpeningExcelAttachment(openingId, user, opening.title, opening.workLocations?.length ? input.workLocationId ?? "" : undefined);
     if (excelAttachment && excelAttachment.rowCount > 0) {
       attachments.push({
         name: excelAttachment.filename,
@@ -5447,12 +5521,14 @@ async function emailEod(input: {
   try {
     if (input.daily) {
       const snapshot: DailyEmailSnapshot = { subject: input.subject.trim(), html, from: user.email,
+        workbookLinkIds: excelAttachment?.linkIds,
         to: [to, ...(input.extraTo ?? [])], cc: input.cc, attachmentNames: attachments.map(a => a.name), rows,
         attachments: savedAttachments,
         workType: input.workType,
         effort: input.effort ?? effortRow(openingId, user), introText: input.introText ?? "", outroText: input.outroText ?? "",
         researchLink: input.researchLink ?? "", extraTo: input.daily.extraTo, extraCc: input.daily.extraCc, removed: input.daily.removed };
       const reservation = await convexMutation<{ id: string }>("ta/dailyEmails:begin", { actorId: user.id, jobId: openingId,
+        workLocationId: input.workLocationId,
         submissionType: input.daily.submissionType, draftId: input.daily.draftId, revision: input.daily.revision,
         parentId: input.daily.parentId, applicationIds: input.applicationIds, snapshot, confirmed: input.daily.confirmed, previewConfirmed: !!input.daily.parentId, trackedAt: repo.shortlistInbox() ?? undefined });
       dailyEmailId = reservation.id;

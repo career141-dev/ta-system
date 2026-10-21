@@ -1,4 +1,13 @@
 import type { ShortlistRow } from "./eod-format";
+import { workdayDate } from "./workday";
+
+export function eodDraftKeys(openingId: string, kind: string, effortDate: string, actorId?: string, workLocationId?: string, parentId?: string, date = workdayDate(Date.now())) {
+  const scope = workLocationId ? `${openingId}:${actorId}:${workLocationId}:${date}` : openingId;
+  return {
+    composer: `eod-composer-draft:${scope}:${kind}${parentId ? `:resend:${parentId}` : ""}`,
+    effort: `eod-effort:${scope}:${parentId ? `resend:${parentId}` : effortDate}`,
+  };
+}
 
 /** Every client-side edit that must survive navigation and a rejected send. */
 export interface EodBrowserDraft {

@@ -15,6 +15,8 @@ import { PIPELINE_STAGES, CLOSED_STAGES, EARLY_STAGES, STAGE_LABEL, type Stage }
 import { relDays } from "@/lib/format";
 import { primeStore } from "@/data/prime";
 import { ProblemState } from "@/components/ProblemState";
+import { workLocationView, inWorkLocation } from "@/lib/workLocations";
+import { WorkLocationTabs } from "@/components/WorkLocationTabs";
 
 export default async function StagePage({
   params,
@@ -61,10 +63,11 @@ export default async function StagePage({
 
   // A TA's stage page is their own candidates and the unclaimed ones; the
   // other TA's are not on it. A lead's shows both (2 Oct).
-  const everyone = visibleToSeat(repo.applications(id), seat).filter((a) => a.stage === s);
-  const apps = applyFilters(everyone, filters, user.id);
   const opening = repo.opening(id);
   if (!opening) notFound();
+  const workLocationId = workLocationView(opening, filters.workLocation);
+  const everyone = visibleToSeat(repo.applications(id), seat).filter((a) => a.stage === s && inWorkLocation(a, workLocationId));
+  const apps = applyFilters(everyone, filters, user.id);
   // Each TA numbers their own sets, so a TA sees theirs; a lead sees both.
   const sets = setsForOpening(id, seat.ownDeskOf ?? undefined);
   const oldest = [...everyone].sort((a, b) => a.lastStageChangedAt - b.lastStageChangedAt)[0];
@@ -77,6 +80,7 @@ export default async function StagePage({
     <>
       <h1 className="text-[21px] font-semibold tracking-tight">{STAGE_LABEL[s]}</h1>
       <ProjectHeader openingId={id} />
+      <WorkLocationTabs locations={opening.workLocations} selected={workLocationId} basePath={`/openings/${id}/pipeline/${s}`} paramKey="workLocation" />
 
       <StatRow
         items={[
@@ -179,7 +183,7 @@ export default async function StagePage({
         </div>
       )}
 
-      {s === "ta_follow_up" && canAct && <HhUpload openingId={id} />}
+      {s === "ta_follow_up" && canAct && workLocationId !== "" && <HhUpload key={workLocationId} openingId={id} workLocationId={workLocationId} />}
 
       {s === "ta_follow_up" && (
         <AskQuestion

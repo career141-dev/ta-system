@@ -22,6 +22,7 @@ import { channelOf, mapApplication, mapCandidateDoc, mapJobPost, mapOpening, map
 import { toBackendStage, toTaStage } from "../stages";
 import { projectApplication, projectOpening } from "./projections";
 import { answersByLabel, questionLabels } from "../../lib/followUpScope";
+import { activeWorkLocationIds, requireWorkLocation, type WorkLocation } from "../../../src/lib/workLocations";
 
 export type Row = Record<string, unknown>;
 type Doc = Record<string, unknown> & { _id: string; _creationTime?: number };
@@ -170,7 +171,8 @@ export const TABLES: Record<string, TableModel> = {
     },
     toDoc: async (r, cx, insert) => {
       const client = r.clientId ? await cx.get(String(r.clientId)) : null;
-      const locations = (r.locations as string[]) ?? [];
+      const structured = r.workLocations as WorkLocation[] | undefined;
+      const locations = structured?.length ? structured.filter(l => !l.archived).map(l => l.name) : (r.locations as string[]) ?? [];
       const current = insert ? null : await cx.get(String(r.id));
       const backendStatus =
         r.status === "on_hold" ? "on_hold"
@@ -197,7 +199,8 @@ export const TABLES: Record<string, TableModel> = {
         targetGender: nul(r.targetGender as string | null),
         location: locations[0] ?? "",
         taLocations: locations,
-        headcount: r.headcount,
+        workLocations: r.workLocations,
+        headcount: structured?.length ? structured.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0) : r.headcount,
         priorityTier: r.priorityTier,
         positionStatus: r.positionStatus,
         assignedTaIds: r.assignedTaIds ?? [],
@@ -256,6 +259,13 @@ export const TABLES: Record<string, TableModel> = {
     fromDoc: (d) => mapApplication(projectApplication(d as never) as never) as unknown as Row,
     toDoc: async (r, _cx, insert) => {
       const stage = String(r.stage);
+      let workLocationId = r.workLocationId as string | undefined;
+      if (insert) {
+        const opening = await _cx.get(String(r.openingId));
+        const job = opening as { workLocations?: WorkLocation[] } | null;
+        if (workLocationId) workLocationId = requireWorkLocation(job ?? {}, workLocationId)?.id;
+        else if (activeWorkLocationIds(job ?? {}).length === 1) workLocationId = activeWorkLocationIds(job ?? {})[0];
+      }
       // The same answers where the CV pipeline's follow-up looks for them: by
       // question wording, merged over what its reply reading already stored.
       const answers = (r.answers as Record<string, string>) ?? {};
@@ -270,6 +280,7 @@ export const TABLES: Record<string, TableModel> = {
       }
       const doc: Record<string, unknown> = {
         jobId: r.openingId,
+        workLocationId,
         candidateId: r.candidateId,
         jobPostId: u(r.jobPostId as string | null),
         currentStage: toBackendStage(stage),

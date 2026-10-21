@@ -7,6 +7,7 @@ import { ASSIGNMENT_LABEL, ASSIGNMENT_NOTE, type AssignmentRole } from "@/data/t
 import { Confirm } from "@/components/Confirm";
 import { SubmitButton } from "@/components/Submit";
 import { PRIORITY_TARGET, type PriorityTier } from "@/data/types";
+import { WorkLocationsEditor } from "@/components/WorkLocationsEditor";
 
 /**
  * Everything about the opening that is not the work itself — findings 02 and 08.
@@ -27,6 +28,7 @@ export function OpeningAdmin({
   salaryCurrency,
   packageNotes,
   locations,
+  workLocations,
   targetNationalities,
   headcount,
   priorityTier,
@@ -43,6 +45,7 @@ export function OpeningAdmin({
   salaryCurrency: string;
   packageNotes: string;
   locations: string[];
+  workLocations?: import("@/lib/workLocations").WorkLocation[];
   targetNationalities: string[];
   headcount: number;
   priorityTier: PriorityTier;
@@ -53,6 +56,7 @@ export function OpeningAdmin({
   counts: { applications: number; posts: number; links: number };
 }) {
   const [pane, setPane] = useState<null | "record" | "team">(null);
+  const [setupLocations, setSetupLocations] = useState(false);
   if (!canEdit) return null;
 
   const field = (label: string, node: React.ReactNode) => (
@@ -75,11 +79,15 @@ export function OpeningAdmin({
           </div>
           {field("Currency", <input name="salaryCurrency" defaultValue={salaryCurrency} className={inputClass} />)}
           {field("Package notes", <input name="packageNotes" defaultValue={packageNotes} placeholder="+ fuel, negotiable" className={inputClass} />)}
-          {field("Locations", <input name="locations" defaultValue={locations.join(", ")} placeholder="Colombo, Gampaha" className={inputClass} />)}
+          {workLocations ? <WorkLocationsEditor initial={workLocations} /> : <>
+            {field("Locations", <input name="locations" defaultValue={locations.join(", ")} placeholder="Colombo, Gampaha" className={inputClass} />)}
+            <button type="button" className="text-left text-[12px] text-brand" onClick={() => setSetupLocations(!setupLocations)}>{setupLocations ? "Cancel location setup" : "Set up location L-sheets and EOD emails"}</button>
+            {setupLocations && <><p className="text-[12px] text-ink-soft">Enter confirmed cities and vacancy counts. Existing candidates stay unassigned until reviewed.</p><WorkLocationsEditor /></>}
+          </>}
           {field("Nationality", <input name="targetNationalities" defaultValue={targetNationalities.join(", ")} placeholder="Leave empty for open" className={inputClass} />)}
 
           <div className="grid grid-cols-2 gap-2.5">
-            {field("Headcount", <input name="headcount" type="number" min={1} defaultValue={headcount} className={inputClass} />)}
+            {!workLocations && field("Headcount", <input name="headcount" type="number" min={1} defaultValue={headcount} className={inputClass} />)}
             {field(
               "Priority",
               <select name="priorityTier" defaultValue={priorityTier} className={`${inputClass} cursor-pointer`}>

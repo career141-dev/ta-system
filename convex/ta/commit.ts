@@ -29,6 +29,7 @@ import { assertWorkdayScope } from "../lib/workdayScope";
 import { refreshWorkdayChecks } from "./workdays";
 import { invalidateJdReviews, recordJdReview } from "../lib/workdayChecks";
 import type { Doc, Id } from "../_generated/dataModel";
+import { validateWorkLocations, requireWorkLocation } from "../../src/lib/workLocations";
 
 const opValidator = v.object({
   table: v.string(),
@@ -118,7 +119,12 @@ export const apply = internalMutation({
       if (model.noInsert) throw new Error(model.noInsert);
       // The row's own temporary id is not a reference to resolve; it is what is being created.
       const { id: _own, ...fields } = ready.after as Row;
-      const row = { ...(rename(fields) as Row), id: ready.key };
+      const row: Row = { ...(rename(fields) as Row), id: ready.key };
+      if (["applications", "linkVault"].includes(ready.table) && row.workLocationId) {
+        const job = await ctx.db.get(row.openingId as Id<"jobs">);
+        if (!job) throw new Error("Opening not found.");
+        requireWorkLocation(job, String(row.workLocationId));
+      }
       const doc = await model.toDoc(row, cx, true);
       // One application per person per opening (2 Oct). The app checks against the rows it
       // loaded, which can be 30 seconds old; two TAs adding the same candidate, or an add
@@ -131,6 +137,7 @@ export const apply = internalMutation({
           .withIndex("by_candidate_job", (q) => q.eq("candidateId", doc.candidateId as never).eq("jobId", doc.jobId as never))
           .first();
         if (held) {
+          if (doc.workLocationId && held.workLocationId !== doc.workLocationId) throw new Error("This candidate already exists on the job under another location or Location not assigned. Review their existing application first.");
           if (temp.has(ready.key)) ids[ready.key] = held._id;
           continue;
         }
@@ -148,6 +155,17 @@ export const apply = internalMutation({
       const current = model.fromDoc(doc);
       const before = op.before as Row;
       const after = rename(op.after) as Row;
+      if (op.table === "openings" && op.changed?.includes("workLocations")) {
+        const locations = validateWorkLocations(after.workLocations, (doc as Doc<"jobs">).workLocations);
+        after.workLocations = locations;
+        after.locations = locations.filter(l => !l.archived).map(l => l.name);
+        after.headcount = locations.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0);
+        const archived = locations.filter(l => l.archived && !(doc as Doc<"jobs">).workLocations?.find(old => old.id === l.id)?.archived).map(l => l.id);
+        if (archived.length) {
+          const days = await ctx.db.query("taWorkdays").withIndex("by_finished", q => q.eq("finishedAt", undefined)).collect();
+          if (days.some(d => d.jobs.some(j => j.jobId === doc._id && j.workLocationIds?.some(id => archived.includes(id))))) throw new Error("Finish today's work before archiving one of its locations.");
+        }
+      }
       for (const field of op.changed ?? []) {
         if (!looselySame(current[field], before[field])) {
           // If the database already holds what this action wants to write, continue

@@ -1,4 +1,5 @@
 "use client";
+import { WorkLocationsEditor } from "./WorkLocationsEditor";
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { BriefRecorder, type SavedRecording } from "./BriefRecorder";
@@ -262,6 +263,7 @@ export function CaptureForm({
         </div>
       </section>
 
+      <section className={card}><div className={inline ? "px-6 py-5" : "px-7 py-6"}><WorkLocationsEditor /></div></section>
       {!isLead && (
         <section className={card}>
           <div className={head}>

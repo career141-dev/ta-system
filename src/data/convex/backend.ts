@@ -119,6 +119,7 @@ export async function createOpening(
     clientId: string;
     title: string;
     country?: string;
+    workLocations?: import("@/lib/workLocations").WorkLocation[];
     hiringFor?: string;
     targetGender?: string | null;
     jdMarkdown?: string;

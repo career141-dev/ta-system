@@ -41,7 +41,7 @@ eq("and only for a headhunted upload", (ex.match(/if \(cvUpload\?\.headhuntedBy\
 
 console.log("\nthe button");
 const page = read("src/app/openings/[id]/pipeline/[stage]/page.tsx");
-eq("shown on TA Follow-up only", page.includes('s === "ta_follow_up" && canAct && <HhUpload'), true);
+eq("shown on TA Follow-up only after selecting a work location", page.includes('s === "ta_follow_up" && canAct && workLocationId !== "" && <HhUpload'), true);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

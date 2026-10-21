@@ -11,7 +11,7 @@ export function DailyEmailHistory({ emails, openingId }: { emails: DailyEmail[];
       <ul className="mt-3 space-y-2">{emails.slice().sort((a, b) => (b.acceptedAt ?? 0) - (a.acceptedAt ?? 0) || b.date.localeCompare(a.date)).map(e =>
         <li key={e._id} className="flex flex-wrap justify-between gap-2 text-sm">
           <Link className="text-brand underline" href={`/openings/${openingId}/${e.submissionType === "midday" ? "midday" : "eod"}?mail=${e._id}`}>
-            {e.date} · {e.submissionType === "midday" ? `Email ${e.number}` : e.parentId ? "Revised EOD" : "End of day"} · {DAILY_EMAIL_LABEL[e.status]}
+            {e.date}{e.workLocationName ? ` · ${e.workLocationName}` : ""} · {e.submissionType === "midday" ? `Email ${e.number}` : e.parentId ? "Revised EOD" : "End of day"} · {DAILY_EMAIL_LABEL[e.status]}
           </Link>
           <span className="text-ink-soft">{e.applicationIds.length} candidates{e.acceptedAt ? ` · ${timeAt(e.acceptedAt)}` : ""}</span>
         </li>)}</ul>}

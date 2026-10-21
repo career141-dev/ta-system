@@ -30,6 +30,7 @@ export async function finalizeDailyEmail(ctx: MutationCtx, email: Doc<"dailyEmai
     const sets = apps.map(a => a?.setNumber).filter((n): n is number => typeof n === "number");
     roundId = await ctx.db.insert("reviewRounds", {
       openingId: email.jobId, kind: "director", submissionType: email.submissionType,
+      workLocationId: email.workLocationId, workLocationName: email.workLocationName,
       token: `C141-MAIL-${email._id}`, applicationIds: email.applicationIds,
       sentBy: email.userId, sentAt: at, sentTo: snapshot.to[0],
       trackedAt: email.trackedAt, subject: snapshot.subject, researchLink: snapshot.researchLink,

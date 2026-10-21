@@ -5,6 +5,7 @@ import { scopeLinks } from "@/lib/visibility";
 import { interestOf } from "@/lib/linkViews";
 import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 import { buildXlsx, formatLinkVaultExportRows, uniqueSheetNames, EXCEL_TABLES_EXPORT_HEADERS, type XlsxSheet } from "@/lib/xlsx";
+import { inWorkLocation } from "./workLocations";
 
 export interface ExcelExportAttachment {
   filename: string;
@@ -12,6 +13,7 @@ export interface ExcelExportAttachment {
   buffer: Buffer;
   base64: string;
   rowCount: number;
+  linkIds: string[];
 }
 
 /**
@@ -21,6 +23,7 @@ export interface ExcelExportAttachment {
 export function getScopedLinkVaultEntries(
   openingId: string,
   user: User,
+  workLocationId?: string,
 ): {
   entries: LinkVaultEntry[];
   facts: Map<string, { app: ReturnType<typeof repo.application>; interest: string }>;
@@ -32,12 +35,12 @@ export function getScopedLinkVaultEntries(
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
   const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
   const scoped = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
-  const entries = scoped.map((s) => s.row);
+  const entries = scoped.map((s) => s.row).filter(r => inWorkLocation(r, workLocationId));
 
   const facts = new Map(
     entries.map((r) => {
       const found = r.candidateId
-        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId)
+        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId && inWorkLocation(a, r.workLocationId ?? ""))
         : undefined;
       const app = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
       return [r.id, { app, interest: interestOf(r, app) }] as const;
@@ -141,13 +144,15 @@ export function buildOpeningExcelAttachment(
   openingId: string,
   user: User,
   openingTitle: string,
+  workLocationId?: string,
 ): ExcelExportAttachment | null {
-  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user);
+  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user, workLocationId);
   if (!entries.length) return null;
 
   const layout = buildLinkExportLayout(entries, facts, userNames, canSeeLeadNotes);
 
-  const safeJobTitle = openingTitle.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const location = repo.opening(openingId)?.workLocations?.find(l => l.id === workLocationId);
+  const safeJobTitle = `${openingTitle}${location ? `-${location.name}` : ""}`.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 150);
   const stamp = new Date().toISOString().slice(0, 10);
   const filename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
 
@@ -159,5 +164,6 @@ export function buildOpeningExcelAttachment(
     buffer,
     base64: buffer.toString("base64"),
     rowCount: layout.rowCount,
+    linkIds: entries.map(r => r.id),
   };
 }
