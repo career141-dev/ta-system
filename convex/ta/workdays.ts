@@ -18,7 +18,8 @@ import { isGone } from "../../src/lib/bin";
 import { workingStageKey } from "../../src/lib/workingStage";
 import { colomboDayStart } from "../../src/lib/calendar";
 import { assertWorkdayScope } from "../lib/workdayScope";
-import { finalizeDailyEmail } from "../lib/dailyEmail";
+import { finalizeDailyEmail, dailyEmailsFor, middayRequired } from "../lib/dailyEmail";
+import { dailySendProblem } from "../../src/lib/dailyEmail";
 import { requiredChecks, withTaskHistory } from "../lib/workdayChecks";
 import { researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
 import { validateResearchLink } from "../../src/lib/eod-format";
@@ -36,6 +37,8 @@ import {
   type WorkType,
 } from "../../src/lib/workday";
 import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
+import { activeWorkLocationIds, inWorkLocation, requireWorkLocation } from "../../src/lib/workLocations";
+import { acceptedEod, jobEodComplete } from "../lib/workLocationEmails";
 
 type Ctx = QueryCtx | MutationCtx;
 const workType = v.union(
@@ -744,12 +747,13 @@ async function jobView(
   }
   const resolved = checksForWorkType(entry.workType, applyCarryForwards(checks, carries, now).map(c => ({ ...c, status: c.waiting ? "waiting" as const : c.status })));
   const eodChecks = checksForWorkType(entry.workType, required.eodChecks);
+  const locationReceipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect();
+  const allLocationEodsSent = await jobEodComplete(ctx, entry, locationReceipts);
   return {
     jobId: entry.jobId,
     title: job?.title ?? "Unavailable job",
     workType: entry.workType,
-    eodSentAt: (await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", entry.jobId)).collect())
-      .find(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")?.acceptedAt,
+    eodSentAt: allLocationEodsSent ? Math.max(...locationReceipts.filter(acceptedEod).map(r => r.acceptedAt ?? r.finalizedAt!)) : undefined,
     checks: await withTaskHistory(ctx, day, entry.jobId, resolved, entry.workType === "100%"),
     eodChecks: await withTaskHistory(ctx, day, entry.jobId, eodChecks, false),
     shortlist,
@@ -862,13 +866,17 @@ export async function autoCompleteWorkday(ctx: MutationCtx, id: Id<"taWorkdays">
   const receipts = (await Promise.all(entries.map(j => ctx.db.query("taWorkdayMail")
     .withIndex("by_workday_job", q => q.eq("workdayId", id).eq("jobId", j.jobId)).collect()))).flat()
     .filter(r => r.status === "accepted" && !!r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod");
+  const completedJobs = new Set((await Promise.all(entries.map(async j => await jobEodComplete(ctx, j, receipts.filter(r => r.jobId === j.jobId)) ? j.jobId : null))).filter(Boolean));
+  // A city submission cannot close attendance while another city's EOD is outstanding.
+  if (entries.some(j => j.workLocationIds?.length && !completedJobs.has(j.jobId))) return;
   const primary = receipts.filter(r => {
+    if (!completedJobs.has(r.jobId)) return false;
     const entry = entries.find(j => j.jobId === r.jobId);
     const recorded = entry?.modeHistory.filter(m => m.at <= r.startedAt).at(-1)?.workType;
     return (r.workType ?? recorded ?? entry?.workType) === "100%";
   });
-  const allSent = entries.length > 0 && entries.every(j => receipts.some(r => r.jobId === j.jobId));
-  const finishedAt = primary.length ? Math.min(...primary.map(r => r.acceptedAt ?? r.finalizedAt!))
+  const allSent = entries.length > 0 && entries.every(j => completedJobs.has(j.jobId));
+  const finishedAt = primary.length ? (entries.some(j => j.workLocationIds?.length) ? Math.max : Math.min)(...primary.map(r => r.acceptedAt ?? r.finalizedAt!))
     : !entries.some(j => j.workType === "100%") && allSent ? Math.max(...receipts.map(r => r.acceptedAt ?? r.finalizedAt!)) : null;
   if (finishedAt === null) return;
   await closeWorkday(ctx, day, finishedAt, "eod");
@@ -1042,7 +1050,7 @@ export const eodContext = internalQuery({
 });
 
 export const emailPreflight = internalMutation({
-  args: { actorId: v.string(), jobId: v.id("jobs"), link: v.string(), confirmed: v.boolean(), revised: v.optional(v.boolean()) },
+  args: { actorId: v.string(), jobId: v.id("jobs"), link: v.string(), confirmed: v.boolean(), revised: v.optional(v.boolean()), workLocationId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     if (!["ta", "ta_support"].includes(roleOf(user))) return { ok: true, blockers: [], workType: "100%" as const };
@@ -1063,8 +1071,15 @@ export const emailPreflight = internalMutation({
     }
     await refreshWorkdayChecks(ctx, args.jobId, user._id);
     const result = await jobView(ctx, day, entry, Date.now());
-    const blockers = emailBlockers([result]);
-    return { ok: !blockers.length, blockers: blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`), workType: entry.workType };
+    const location = requireWorkLocation((await ctx.db.get(args.jobId))!, args.workLocationId);
+    const blockers = emailBlockers([result]).filter(c => !location || !["director_cv", "midday_email", "mail"].includes(c.key.split(":")[0]));
+    const reasons = blockers.map(c => `${c.label}: ${c.progress ?? "needs action"}`);
+    if (location) {
+      const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, day.date)).filter(e => inWorkLocation(e, location.id));
+      const problem = dailySendProblem(emails, "eod", await middayRequired(ctx, day.date));
+      if (problem) reasons.push(problem);
+    }
+    return { ok: !reasons.length, blockers: reasons, workType: entry.workType };
   },
 });
 
@@ -1280,6 +1295,7 @@ export const beginMail = internalMutation({
   },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
+    if ((await ctx.db.get(args.jobId))?.workLocations?.length) throw new Error("Use the location's EOD composer to send this job's email.");
     const day = await activeFor(ctx, user._id);
     if (!day || !day.jobs.some((j) => j.jobId === args.jobId))
       return { id: null };
@@ -1515,9 +1531,10 @@ export const start = internalMutation({
           workType: mode,
           addedAt: now,
           leadId: job.taLeadId,
+          workLocationIds: activeWorkLocationIds(job),
           modeHistory: [{ at: now, workType: mode }],
         },
-        ...carry.map(j => ({ jobId: j._id, workType: "Follow-up" as const, addedAt: now, leadId: j.taLeadId, carried: true, modeHistory: [{ at: now, workType: "Follow-up" }] })),
+        ...carry.map(j => ({ jobId: j._id, workType: "Follow-up" as const, addedAt: now, leadId: j.taLeadId, workLocationIds: activeWorkLocationIds(j), carried: true, modeHistory: [{ at: now, workType: "Follow-up" }] })),
       ],
     });
     await setMode(ctx, user._id, args.jobId, mode);
@@ -1565,6 +1582,7 @@ export const addPosition = internalMutation({
           workType: mode,
           addedAt: now,
           leadId: job.taLeadId,
+          workLocationIds: activeWorkLocationIds(job),
           modeHistory: [{ at: now, workType: mode }],
         },
       ],
@@ -1643,6 +1661,7 @@ export const decide = internalMutation({
               workType: mode,
               addedAt: now,
               leadId: job.taLeadId,
+              workLocationIds: activeWorkLocationIds(job),
               modeHistory: [{ at: now, workType: mode }],
             },
           ],
@@ -1692,7 +1711,7 @@ export const markReviewed = internalMutation({
     )
       throw new Error("This CV is not on an active workday.");
     const sent = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", app.jobId)).collect();
-    if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")) throw new Error("This CV is not on an active workday; its position's EOD has been sent.");
+    if (sent.some(r => inWorkLocation(r, app.workLocationId ?? "") && acceptedEod(r))) throw new Error("This CV is not on an active workday; its location's EOD has been sent.");
     if (
       lead &&
       roleOf(user) !== "admin" &&
@@ -1727,7 +1746,8 @@ export const taskException = internalMutation({
     requireWorker(user);
     const day = await ownedActive(ctx, user, args.workdayId);
     const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
-    if (receipts.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")) throw new Error("This position is already finished by its EOD email.");
+    const workEntry = day.jobs.find(j => j.jobId === args.jobId);
+    if (workEntry && await jobEodComplete(ctx, workEntry, receipts)) throw new Error("This position is already finished by its EOD emails.");
     if (day.date !== workdayDate(Date.now())) throw new Error("Record reasons on today's workday.");
     const job = await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId);

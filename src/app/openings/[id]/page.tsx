@@ -288,6 +288,7 @@ export default async function OverviewPage({
                 locations={o.locations}
                 targetNationalities={o.targetNationalities}
                 headcount={o.headcount}
+                workLocations={o.workLocations}
                 priorityTier={o.priorityTier}
                 team={repo.assignments(id).map((a) => ({ userId: a.userId, role: a.role }))}
                 people={users

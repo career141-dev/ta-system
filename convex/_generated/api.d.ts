@@ -161,6 +161,7 @@ import type * as lib_webhookSecurity from "../lib/webhookSecurity.js";
 import type * as mailIntake_decisions from "../mailIntake/decisions.js";
 import type * as lib_within from "../lib/within.js";
 import type * as lib_workdayChecks from "../lib/workdayChecks.js";
+import type * as lib_workLocationEmails from "../lib/workLocationEmails.js";
 import type * as lib_workdayScope from "../lib/workdayScope.js";
 import type * as mailIntake_model from "../mailIntake/model.js";
 import type * as mailIntake_process from "../mailIntake/process.js";
@@ -239,6 +240,7 @@ import type * as ta_users from "../ta/users.js";
 import type * as ta_voice from "../ta/voice.js";
 import type * as ta_voiceExtract from "../ta/voiceExtract.js";
 import type * as ta_workdays from "../ta/workdays.js";
+import type * as ta_workLocations from "../ta/workLocations.js";
 import type * as templates_messageTemplates from "../templates/messageTemplates.js";
 import type * as users_users from "../users/users.js";
 
@@ -402,6 +404,7 @@ declare const fullApi: ApiFromModules<{
   "mailIntake/decisions": typeof mailIntake_decisions;
   "lib/within": typeof lib_within;
   "lib/workdayChecks": typeof lib_workdayChecks;
+  "lib/workLocationEmails": typeof lib_workLocationEmails;
   "lib/workdayScope": typeof lib_workdayScope;
   "mailIntake/model": typeof mailIntake_model;
   "mailIntake/process": typeof mailIntake_process;
@@ -480,6 +483,7 @@ declare const fullApi: ApiFromModules<{
   "ta/voice": typeof ta_voice;
   "ta/voiceExtract": typeof ta_voiceExtract;
   "ta/workdays": typeof ta_workdays;
+  "ta/workLocations": typeof ta_workLocations;
   "templates/messageTemplates": typeof templates_messageTemplates;
   "users/users": typeof users_users;
 }>;

@@ -1491,6 +1491,7 @@ const rawRepo = {
     directorId: Id | null;
     /** Where the job is. Sourcing searches this market's LinkedIn. */
     country?: string;
+    workLocations?: import("@/lib/workLocations").WorkLocation[];
     /** "local" for that country's own nationals, or a nationality to send there. */
     hiringFor?: string;
     targetGender?: string | null;
@@ -1530,12 +1531,13 @@ const rawRepo = {
               : input.country
                 ? [localNationalityOf(input.country)]
                 : [],
-        locations: e?.locations?.length
+        workLocations: input.workLocations,
+        locations: input.workLocations?.length ? input.workLocations.filter(l => !l.archived).map(l => l.name) : e?.locations?.length
           ? e.locations
           : input.country
             ? [input.country]
             : [],
-        headcount: e?.headcount ?? 1,
+        headcount: input.workLocations?.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0) ?? e?.headcount ?? 1,
         priorityTier: e?.priorityTier ?? "P3",
         positionStatus: "active",
         assignedTaIds: input.assignedTaIds,
@@ -1883,6 +1885,21 @@ const rawRepo = {
     mutate((db) => {
       const o = db.openings.find((x) => x.id === id);
       if (o) Object.assign(o, patch);
+    });
+  },
+
+  /** Local synthetic-data counterpart; production uses ta/workLocations:assign. */
+  assignWorkLocation(openingId: Id, locationId: string, linkId?: Id, applicationId?: Id) {
+    mutate(db => {
+      const link = db.linkVault.find(l => l.id === linkId && l.openingId === openingId);
+      const app = db.applications.find(a => a.openingId === openingId && (a.id === applicationId || link?.candidateId && a.candidateId === link.candidateId));
+      if (app && db.reviewRounds.some(r => r.applicationIds.includes(app.id))) throw new Error("This candidate has already been sent for review.");
+      if (app) app.workLocationId = locationId;
+      for (const row of db.linkVault.filter(l => l.openingId === openingId && (l.id === linkId || app && l.candidateId === app.candidateId))) {
+        if (row.workLocationId === locationId) continue;
+        row.workLocationId = locationId;
+        row.level = null;
+      }
     });
   },
 
@@ -2398,6 +2415,7 @@ const rawRepo = {
     }
     const onOpening = db.applications.find((a) => a.candidateId === candidateId && a.openingId === e.openingId);
     if (onOpening) {
+      if (e.workLocationId && onOpening.workLocationId !== e.workLocationId) return { ok: false, message: "This candidate already exists on the job under another location or Location not assigned. Review their existing application first." };
       if (e.candidateId !== candidateId) mutate((d) => { const row = d.linkVault.find((l) => l.id === entryId); if (row) row.candidateId = candidateId; });
       return { ok: true, applicationId: onOpening.id, stage: onOpening.stage };
     }
@@ -2440,6 +2458,7 @@ const rawRepo = {
       d.applications.push({
         id: applicationId,
         openingId: e.openingId,
+        ...(e.workLocationId ? { workLocationId: e.workLocationId } : {}),
         jobPostId: null,
         candidateId,
         stage: targetStage,
@@ -2479,7 +2498,7 @@ const rawRepo = {
    * and "Not contacted" made every saved profile look untouched (21 September).
    * Shortlisted also marks the row as this TA's, so a colleague sees it is taken.
    */
-  addLink(openingId: Id, url: string, addedBy: Id, name: string | null = null, outcome: LinkOutcome = "shortlisted"): Id {
+  addLink(openingId: Id, url: string, addedBy: Id, name: string | null = null, outcome: LinkOutcome = "shortlisted", workLocationId?: string, selectedLevel?: number): Id {
     const id = `lv_${Math.random().toString(36).slice(2, 10)}`;
     // Added on an Add-on day, it is an add-on — the TA filters for them
     // rather than hunting through the whole table (the desk, 28 Sep).
@@ -2488,13 +2507,17 @@ const rawRepo = {
     // All before noticing the small + in the sidebar, which used to leave the
     // first rows in no L. Start the next available L for them when none is
     // active; otherwise keep using their latest active L (15 Oct).
-    const level = this.linkLevels(openingId, addedBy).at(-1)?.n ?? this.addLinkLevel(openingId, addedBy);
+    const locations = this.opening(openingId)?.workLocations?.filter(l => !l.archived) ?? [];
+    workLocationId = workLocationId || (locations.length === 1 ? locations[0].id : undefined);
+    const levels = this.linkLevels(openingId, addedBy, workLocationId);
+    const level = selectedLevel && levels.some(l => l.n === selectedLevel) ? selectedLevel : levels.at(-1)?.n ?? this.addLinkLevel(openingId, addedBy, workLocationId);
     mutate((db) => {
       db.linkVault.push({
         id,
         openingId,
         addedBy,
         linkedinUrl: url,
+        ...(workLocationId ? { workLocationId } : {}),
         name,
         title: null,
         company: null,
@@ -2646,6 +2669,8 @@ const rawRepo = {
    */
   openReviewRound(input: {
     openingId: Id;
+    workLocationId?: string;
+    workLocationName?: string;
     kind: ReviewRound["kind"];
     applicationIds: Id[];
     setNumber: number | null;
@@ -2664,6 +2689,8 @@ const rawRepo = {
     const round: ReviewRound = {
       id: `rr_${Math.random().toString(36).slice(2, 10)}`,
       openingId: input.openingId,
+      workLocationId: input.workLocationId,
+      workLocationName: input.workLocationName,
       kind: input.kind,
       token,
       // Filled when a mailbox is connected and the mail actually leaves.
@@ -4084,9 +4111,9 @@ const rawRepo = {
    * so deleting L2 leaves L1 and L3 as they were and the next + is L4.
    * Rows they add go into their latest L that is still there.
    */
-  allLinkLevels(openingId: Id, userId: Id): LinkLevel[] {
+  allLinkLevels(openingId: Id, userId: Id, workLocationId?: string): LinkLevel[] {
     try {
-      const arr: unknown = JSON.parse(this.setting(`link_levels:${openingId}:${userId}`, "[]"));
+      const arr: unknown = JSON.parse(this.setting(`link_levels:${openingId}:${userId}${workLocationId ? `:${workLocationId}` : ""}`, "[]"));
       if (!Array.isArray(arr)) return [];
       // The first release stored only the time each was started.
       return arr.map((x, i) => (typeof x === "number" ? { n: i + 1, at: x } : { ...(x as LinkLevel), n: i + 1 }));
@@ -4096,28 +4123,28 @@ const rawRepo = {
   },
 
   /** The L's still there — what the sidebar lists. */
-  linkLevels(openingId: Id, userId: Id): LinkLevel[] {
-    return this.allLinkLevels(openingId, userId).filter((l) => !l.deleted);
+  linkLevels(openingId: Id, userId: Id, workLocationId?: string): LinkLevel[] {
+    return this.allLinkLevels(openingId, userId, workLocationId).filter((l) => !l.deleted);
   },
 
-  saveLinkLevels(openingId: Id, userId: Id, levels: LinkLevel[]) {
-    this.setSetting(`link_levels:${openingId}:${userId}`, JSON.stringify(levels.map(({ n: _n, ...rest }) => rest)));
+  saveLinkLevels(openingId: Id, userId: Id, levels: LinkLevel[], workLocationId?: string) {
+    this.setSetting(`link_levels:${openingId}:${userId}${workLocationId ? `:${workLocationId}` : ""}`, JSON.stringify(levels.map(({ n: _n, ...rest }) => rest)));
   },
 
   /** A new L for this TA on this opening; returns its number. */
-  addLinkLevel(openingId: Id, userId: Id): number {
-    const levels = [...this.allLinkLevels(openingId, userId), { n: 0, at: Date.now() }];
-    this.saveLinkLevels(openingId, userId, levels);
+  addLinkLevel(openingId: Id, userId: Id, workLocationId?: string): number {
+    const levels = [...this.allLinkLevels(openingId, userId, workLocationId), { n: 0, at: Date.now() }];
+    this.saveLinkLevels(openingId, userId, levels, workLocationId);
     return levels.length;
   },
 
   /** A name for one of this TA's L's ("Banks"); blank puts the date back. */
-  renameLinkLevel(openingId: Id, userId: Id, n: number, name: string): boolean {
-    const levels = this.allLinkLevels(openingId, userId);
+  renameLinkLevel(openingId: Id, userId: Id, n: number, name: string, workLocationId?: string): boolean {
+    const levels = this.allLinkLevels(openingId, userId, workLocationId);
     const l = levels[n - 1];
     if (!l || l.deleted) return false;
     l.name = name.trim().slice(0, 40) || undefined;
-    this.saveLinkLevels(openingId, userId, levels);
+    this.saveLinkLevels(openingId, userId, levels, workLocationId);
     return true;
   },
 
@@ -4125,16 +4152,16 @@ const rawRepo = {
    * One of this TA's L's gone from the sidebar. Its rows are not deleted:
    * they stay in the table, under All, in no L. Returns how many were in it.
    */
-  deleteLinkLevel(openingId: Id, userId: Id, n: number): number | null {
-    const levels = this.allLinkLevels(openingId, userId);
+  deleteLinkLevel(openingId: Id, userId: Id, n: number, workLocationId?: string): number | null {
+    const levels = this.allLinkLevels(openingId, userId, workLocationId);
     const l = levels[n - 1];
     if (!l || l.deleted) return null;
     l.deleted = true;
-    this.saveLinkLevels(openingId, userId, levels);
+    this.saveLinkLevels(openingId, userId, levels, workLocationId);
     let moved = 0;
     mutate((db) => {
       for (const r of db.linkVault) {
-        if (r.openingId === openingId && r.addedBy === userId && r.level === n) {
+        if (r.openingId === openingId && r.addedBy === userId && r.level === n && (r.workLocationId ?? "") === (workLocationId ?? "")) {
           r.level = null;
           moved++;
         }

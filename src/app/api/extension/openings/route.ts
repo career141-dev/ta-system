@@ -51,6 +51,7 @@ export async function GET(req: Request) {
           title: o.title,
           client: repo.client(o.clientId)?.name ?? "—",
           locations: o.locations,
+          workLocations: o.workLocations?.filter(l => !l.archived),
         }))
     : [];
 

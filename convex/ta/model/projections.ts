@@ -32,6 +32,7 @@ export function projectOpening(job: Doc<"jobs">) {
     keyword: job.keyword,
     // Several places can be written; the backend's single `location` is the first.
     locations: j.taLocations ?? (job.location ? [job.location] : []),
+    workLocations: job.workLocations,
     targetNationalities: job.targetNationalities ?? [],
     targetGender: job.targetGender ?? null,
     headcount: job.headcount ?? 1,
@@ -84,6 +85,7 @@ export function projectApplication(a: Doc<"applications">) {
   return {
     id: a._id as string,
     openingId: a.jobId as string,
+    workLocationId: a.workLocationId,
     candidateId: a.candidateId as string,
     jobPostId: (a.jobPostId ?? null) as string | null,
     stage: toTaStage(a.currentStage),

@@ -17,6 +17,7 @@ export function LinkLevelItem({
   level,
   active,
   className,
+  workLocationId,
 }: {
   openingId: string;
   href: string;
@@ -24,6 +25,7 @@ export function LinkLevelItem({
   active: boolean;
   /** The sidebar's sub-row look. */
   className: string;
+  workLocationId?: string;
 }) {
   const canManage = level.canManage !== false;
   const [menu, setMenu] = useState(false);
@@ -51,6 +53,7 @@ export function LinkLevelItem({
       <form className="flex flex-wrap items-center gap-1 py-1" onSubmit={(e) => save.run(submitted(e).formData)}>
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="level" value={level.n} />
+        <input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
         <span className="text-[12px] font-semibold">L{level.n}</span>
         <input
           name="name"
@@ -113,6 +116,7 @@ export function LinkLevelItem({
           >
             <input type="hidden" name="openingId" value={openingId} />
             <input type="hidden" name="level" value={level.n} />
+            <input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
             <button type="submit" className="block w-full px-3 py-1.5 text-left text-danger hover:bg-danger-soft">
               Delete
             </button>

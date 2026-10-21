@@ -52,6 +52,7 @@ export function ProjectSidebar({
   canUseDailyEmail = true,
   middayEmails = [],
   dailyEmailClosed = false,
+  locationSheets = false,
 }: {
   openingId: string;
   posts: SidebarPost[];
@@ -67,6 +68,7 @@ export function ProjectSidebar({
   canUseDailyEmail?: boolean;
   middayEmails?: { id: string; number: number; status: DailyEmailStatus }[];
   dailyEmailClosed?: boolean;
+  locationSheets?: boolean;
 }) {
   const path = usePathname();
   const search = useSearchParams();
@@ -76,6 +78,14 @@ export function ProjectSidebar({
   const inPipeline = path.startsWith(`${base}/pipeline`);
   const inJob = path.startsWith(jobBase);
   const activePost = inJob ? search.get("post") : null;
+  const selectedLocation = search.get("location") ?? search.get("workLocation");
+  const scopedHref = (href: string) => {
+    if (!locationSheets || !selectedLocation) return href;
+    const [pathname, query = ""] = href.split("?");
+    const params = new URLSearchParams(query);
+    params.set(pathname.includes("/pipeline/") ? "workLocation" : "location", selectedLocation);
+    return `${pathname}?${params}`;
+  };
 
   const [pipeOpen, setPipeOpen] = useState(inPipeline);
   const [jobOpen, setJobOpen] = useState(inJob);
@@ -213,7 +223,7 @@ export function ProjectSidebar({
             </Link>
             {hhItems.map((i) =>
               i.label !== "Excel Tables" ? (
-                <Link key={i.href} href={i.href} className={row(path.startsWith(i.href))}>
+                <Link key={i.href} href={scopedHref(i.href)} className={row(path.startsWith(i.href))}>
                   {i.label}
                 </Link>
               ) : (
@@ -221,10 +231,10 @@ export function ProjectSidebar({
                   {/* Excel Tables, with + to start the TA's next L (L1, then
                       L2…) and their L's listed under it (the desk, 29 Sep). */}
                   <div className={row(path.startsWith(i.href) && !search.get("level")) + " flex items-center justify-between"}>
-                    <Link href={i.href} className="flex-1">
+                    <Link href={scopedHref(i.href)} className="flex-1">
                       {i.label}
                     </Link>
-                    <form action={addLinkLevel}>
+                    {!locationSheets && <form action={addLinkLevel}>
                       <input type="hidden" name="openingId" value={openingId} />
                       <SubmitButton
                         title={`Start L${nextLevel}`}
@@ -238,9 +248,9 @@ export function ProjectSidebar({
                       >
                         +
                       </SubmitButton>
-                    </form>
+                    </form>}
                   </div>
-                  {levels.length > 0 && (
+                  {!locationSheets && levels.length > 0 && (
                     <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                       {levels.map((l) => {
                         const on = path.startsWith(i.href) && search.get("level") === String(l.n);
@@ -280,7 +290,7 @@ export function ProjectSidebar({
             {pipeOpen && (
               <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                 {PIPELINE_STAGES.map((s) => (
-                  <Link key={s} href={`${base}/pipeline/${s}`} className={sub(path === `${base}/pipeline/${s}`)}>
+                  <Link key={s} href={scopedHref(`${base}/pipeline/${s}`)} className={sub(path === `${base}/pipeline/${s}`)}>
                     {STAGE_LABEL[s]}
                   </Link>
                 ))}
@@ -288,7 +298,7 @@ export function ProjectSidebar({
                 {CLOSED_STAGES.map((s) => (
                   <Link
                     key={s}
-                    href={`${base}/pipeline/${s}`}
+                    href={scopedHref(`${base}/pipeline/${s}`)}
                     className={`rounded-md px-2.5 py-[7px] text-[12.5px] ${
                       path === `${base}/pipeline/${s}`
                         ? "font-semibold text-ink"
@@ -477,11 +487,11 @@ export function ProjectSidebar({
 
             {atsItems.map((i) => i.label === "Midday email" ? <Fragment key={i.href}>
               <div className={row(path.startsWith(i.href)) + " flex items-center gap-2"}>
-                <Link href={i.href} className="flex-1" onClick={() => setMiddayOpen(true)}>Midday email</Link>
-                <form action={addMiddayEmail}>
+                <Link href={scopedHref(i.href)} className="flex-1" onClick={() => setMiddayOpen(true)}>Midday email</Link>
+                {!locationSheets && <form action={addMiddayEmail}>
                   <input type="hidden" name="openingId" value={openingId} />
                   <SubmitButton disabled={dailyEmailClosed} title={dailyEmailClosed ? "EOD has been sent for today" : "Add midday email"} aria-label="Add midday email" pendingLabel="…" className="rounded border border-rule px-1.5 disabled:opacity-40">+</SubmitButton>
-                </form>
+                </form>}
                 <button type="button" aria-label="Expand midday emails" aria-expanded={middayOpen} onClick={() => setMiddayOpen(v => !v)}><Chevron open={middayOpen} /></button>
               </div>
               {middayOpen && <div className="ml-3.5 border-l border-rule pl-3">
@@ -491,7 +501,7 @@ export function ProjectSidebar({
                 {!middayEmails.length && <span className="text-xs text-ink-soft">Use + to start Email 1</span>}
               </div>}
             </Fragment> : (
-              <Link key={i.href} href={i.href} className={row(path.startsWith(i.href))}>
+              <Link key={i.href} href={scopedHref(i.href)} className={row(path.startsWith(i.href))}>
                 {i.label}
               </Link>
             ))}

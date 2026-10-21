@@ -16,7 +16,7 @@ export default async function LinksPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ q?: string; view?: string; status?: string; level?: string; addons?: string; imark?: string; by?: string; page?: string }>;
+  searchParams: Promise<{ location?: string; q?: string; view?: string; status?: string; level?: string; addons?: string; imark?: string; by?: string; page?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -32,7 +32,7 @@ export default async function LinksPage({
       <h1 className="text-[21px] font-semibold tracking-tight">Excel Tables</h1>
       <ProjectHeader openingId={id} />
       <CaptureSetup />
-      <LinkVaultTable openingId={id} user={user} q={sp.q} {...readLinkFilters(sp)} page={Math.floor(Number(sp.page)) || 1} />
+      <LinkVaultTable openingId={id} user={user} q={sp.q} location={sp.location} {...readLinkFilters(sp)} page={Math.floor(Number(sp.page)) || 1} />
     </>
   );
 }

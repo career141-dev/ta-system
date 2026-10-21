@@ -7,6 +7,7 @@ export default defineSchema({
   // Drafts and transport acknowledgements share an id. A retry cannot create
   // a second original after Graph has accepted the first (16 Oct).
   dailyEmails: defineTable({
+    workLocationId: v.optional(v.string()), workLocationName: v.optional(v.string()),
     jobId: v.id("jobs"), userId: v.id("users"), date: v.string(),
     submissionType: v.union(v.literal("midday"), v.literal("eod")),
     number: v.number(), revision: v.number(),
@@ -44,6 +45,7 @@ export default defineSchema({
       leadId: v.optional(v.id("users")),
       modeHistory: v.array(v.object({ at: v.number(), workType: v.string() })),
       carried: v.optional(v.boolean()),
+      workLocationIds: v.optional(v.array(v.string())),
     })),
     completion: v.optional(v.any()),
   }).index("by_user", ["userId"]).index("by_user_finished", ["userId", "finishedAt"]).index("by_date", ["date"]).index("by_finished", ["finishedAt"]),
@@ -75,6 +77,7 @@ export default defineSchema({
     evidenceAt: v.number(),
   }).index("by_user_job", ["userId", "jobId"]),
   taWorkdayMail: defineTable({
+    workLocationId: v.optional(v.string()),
     dailyEmailId: v.optional(v.id("dailyEmails")),
     submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
     revised: v.optional(v.boolean()),
@@ -630,6 +633,7 @@ export default defineSchema({
     // place it can be worked from (`location` holds the first, for the engines).
     packageNotes: v.optional(v.string()),
     taLocations: v.optional(v.array(v.string())),
+    workLocations: v.optional(v.array(v.object({ id: v.string(), name: v.string(), vacancies: v.number(), archived: v.optional(v.boolean()) }))),
   })
     .index("by_keyword", ["keyword"])
     .index("by_status", ["status"])
@@ -767,6 +771,7 @@ export default defineSchema({
     .index("by_job_date", ["jobId", "reportDate"]),
 
   cvUploads: defineTable({
+    workLocationId: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
     s3Key: v.optional(v.string()), // Added for Cloudflare R2
     storageProvider: v.optional(v.string()), // 'convex' | 'r2'
@@ -1151,6 +1156,7 @@ export default defineSchema({
     }),
 
   applications: defineTable({
+    workLocationId: v.optional(v.string()),
     workdayReviewedAt: v.optional(v.number()),
     workdayReviewedBy: v.optional(v.id("users")),
     candidateId: v.id("candidates"),
@@ -2710,6 +2716,7 @@ export default defineSchema({
 
   /** LinkedIn profiles worth approaching — people we do not hold a CV for. */
   linkVault: defineTable({
+    workLocationId: v.optional(v.string()),
     openingId: v.id("jobs"),
     addedBy: v.id("users"),
     linkedinUrl: v.string(),
@@ -2984,6 +2991,7 @@ export default defineSchema({
    * replies are matched from Microsoft 365 thread and reply headers.
    */
   reviewRounds: defineTable({
+    workLocationId: v.optional(v.string()), workLocationName: v.optional(v.string()),
     submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
     openingId: v.id("jobs"),
     kind: v.union(v.literal("director"), v.literal("client")),
