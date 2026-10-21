@@ -7,6 +7,7 @@ export interface SavedEmailAttachment { id: string; name: string; applicationId:
 export type SubmissionType = "midday" | "eod";
 export type DailyEmailStatus = "draft" | "sending" | "accepted" | "failed" | "uncertain";
 export interface DailyEmailSnapshot {
+  workbookLinkIds?: string[];
   subject: string;
   html: string;
   from: string;
@@ -25,6 +26,8 @@ export interface DailyEmailSnapshot {
   removed: string[];
 }
 export interface DailyEmail {
+  workLocationId?: string;
+  workLocationName?: string;
   _id: string;
   jobId: string;
   userId: string;

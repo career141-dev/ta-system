@@ -6,6 +6,8 @@ import { workdayDate } from "../src/lib/workday";
 import { requiredChecks } from "../convex/lib/workdayChecks";
 import { matchReviewReply } from "../src/lib/routing";
 import { normalizeRetention, purgeExpired } from "../convex/ta/eodCopies";
+import { assign as assignLocation } from "../convex/ta/workLocations";
+import { emailPreflight } from "../convex/ta/workdays";
 
 // Real internal handlers, synthetic database, no transport or credentials.
 type Row = Record<string, any>;
@@ -168,4 +170,79 @@ try {
   await (purgeExpired as any)._handler(ctx, {});
   assert.deepEqual(deletedFiles, ["original-pdf"], "Independent PDFs are removed only after every backup reference expires");
   console.log("Daily email drafts, ordering, ownership, candidates, failures, reconciliation, corrections and retention passed.");
+  // One job, two locations: exact candidate rosters, independent send locks,
+  // and one attendance clock closed only by the final location's accepted EOD.
+  tables.clear();
+  seedUser("ta"); seedUser("other"); seedUser("lead", "ta_lead");
+  const workLocations = [{ id: "mumbai", name: "Mumbai", vacancies: 2 }, { id: "delhi", name: "Delhi", vacancies: 1 }];
+  put("jobs", { _id: "job", title: "Engineer", taLeadId: "lead", assignedTaIds: ["ta", "other"], workLocations });
+  put("taWorkdays", { _id: "day", userId: "ta", date: workdayDate(now), startedAt: now, jobs: [{ jobId: "job", workType: "100%", addedAt: now, leadId: "lead", modeHistory: [], workLocationIds: ["mumbai", "delhi"] }] });
+  put("dailyEmailPolicy", { _id: "policy", key: "midday", requiredFrom: workdayDate(now) });
+  candidate("m"); candidate("d"); candidate("unknown");
+  await db.patch("m", { workLocationId: "mumbai" }); await db.patch("d", { workLocationId: "delhi" });
+  await assert.rejects(() => run("createDraft", { actorId: "ta", jobId: "job" }), /Select an active work location/);
+  const mDraft = await run("createDraft", { actorId: "ta", jobId: "job", workLocationId: "mumbai" });
+  const dDraft = await run("createDraft", { actorId: "ta", jobId: "job", workLocationId: "delhi" });
+  assert.equal((await db.get(mDraft))!.number, 1);
+  assert.equal((await db.get(dDraft))!.number, 1, "Midday numbering starts independently in Delhi");
+  await assert.rejects(() => begin(["m"], dDraft, { workLocationId: "mumbai" }), /draft changed/);
+  await assert.rejects(() => begin(["m", "d"], mDraft, { workLocationId: "mumbai" }), /candidate list changed/);
+  await begin(["m"], mDraft, { workLocationId: "mumbai" }); await run("result", { id: mDraft, status: "accepted" });
+  await assert.rejects(() => begin([], undefined, { workLocationId: "delhi" }), /midday/);
+  await begin(["d"], dDraft, { workLocationId: "delhi" }); await run("result", { id: dDraft, status: "accepted" });
+  candidate("m-eod"); candidate("d-eod");
+  await db.patch("m-eod", { workLocationId: "mumbai" }); await db.patch("d-eod", { workLocationId: "delhi" });
+  checks = await requiredChecks(ctx, await db.get("day") as any, (await db.get("day"))!.jobs[0]);
+  for (const check of checks.eodChecks.filter(c => c.exceptionVersion)) put("taWorkdayExceptions", { _id: `exception:${check.key}`, workdayId: "day", jobId: "job", key: check.key,
+    version: check.exceptionVersion, action: "submit", at: now, by: "ta", reason: "Synthetic setup exception" });
+  await assert.rejects(() => begin(["m-eod", "d-eod"], undefined, { workLocationId: "mumbai" }), /candidate list changed/);
+  put("linkVault", { _id: "delhi-link", openingId: "job", addedBy: "ta", workLocationId: "delhi" });
+  await assert.rejects(() => begin(["m-eod"], undefined, { workLocationId: "mumbai", snapshot: { ...snapshot(["m-eod"]), workbookLinkIds: ["delhi-link"] } }), /workbook row changed location/);
+  const mEod = await begin(["m-eod"], undefined, { workLocationId: "mumbai" });
+  await assert.rejects(() => begin(["m-eod"], undefined, { workLocationId: "mumbai" }), /reconciliation|still sending/);
+  const dEod = await begin(["d-eod"], undefined, { workLocationId: "delhi" });
+  await run("result", { id: dEod.id, status: "accepted" });
+  assert.equal((await db.get("day"))!.finishedAt, undefined, "Delhi sent; attendance remains open for Mumbai");
+  checks = await requiredChecks(ctx, await db.get("day") as any, (await db.get("day"))!.jobs[0]);
+  assert.equal(checks.checks.find(c => c.key.startsWith("daily_email:"))?.status, "incomplete");
+  await run("result", { id: mEod.id, status: "uncertain" });
+  await assert.rejects(() => begin([], undefined, { workLocationId: "delhi" }), /already been sent/);
+  now += 600000;
+  await run("reconcile", { actorId: "lead", id: mEod.id, accepted: true, reason: "Verified synthetic Mumbai message" });
+  assert.equal((await db.get("day"))!.finishedAt, now, "Final location closes the single attendance clock");
+  assert.equal((await db.get(mEod.id))!.workLocationName, "Mumbai");
+  assert.equal(rows("reviewRounds").find(r => r.workLocationId === "mumbai" && r.submissionType === "eod")!.applicationIds.join(), "m-eod");
+  await assert.rejects(() => begin(["m-eod"], undefined, { parentId: mEod.id, workLocationId: "delhi" }), /original work location/);
+  const revisedMumbai = await begin(["m-eod"], undefined, { parentId: mEod.id, workLocationId: "mumbai" });
+  await run("result", { id: revisedMumbai.id, status: "accepted" });
+  // A new date with no CVs supports activity-only reports for configured locations.
+  now += 86400000;
+  put("taWorkdays", { _id: "next-day", userId: "ta", date: workdayDate(now), startedAt: now, jobs: [{ jobId: "job", workType: "100%", addedAt: now, modeHistory: [], workLocationIds: ["mumbai", "delhi"] }] });
+  await db.delete("policy");
+  put("dailyEmails", { _id: "legacy-pending", jobId: "job", userId: "ta", date: "2020-01-01", submissionType: "eod", status: "uncertain", applicationIds: [] });
+  await assert.rejects(() => begin([], undefined, { workLocationId: "mumbai" }), /reconciliation/);
+  await db.delete("legacy-pending");
+  checks = await requiredChecks(ctx, await db.get("next-day") as any, (await db.get("next-day"))!.jobs[0]);
+  for (const check of checks.eodChecks.filter(c => c.exceptionVersion)) put("taWorkdayExceptions", { _id: `next-exception:${check.key}`, workdayId: "next-day", jobId: "job", key: check.key,
+    version: check.exceptionVersion, action: "submit", at: now, by: "ta", reason: "Synthetic next-day setup exception" });
+  const activity = await begin([], undefined, { workLocationId: "mumbai" });
+  await run("result", { id: activity.id, status: "accepted" });
+  assert.equal((await db.get("next-day"))!.finishedAt, undefined);
+  const preflight = await (emailPreflight as any)._handler(ctx, { actorId: "ta", jobId: "job", workLocationId: "delhi", link, confirmed: true });
+  assert.equal(preflight.ok, true, "The real EOD preflight leaves Delhi sendable after Mumbai's activity-only report");
+  put("linkVault", { _id: "unknown-link", openingId: "job", addedBy: "ta", candidateId: "c:unknown", level: 1 });
+  const assign = (actorId: string, extra: Row = {}) => (assignLocation as any)._handler(ctx, { actorId, jobId: "job", locationId: "delhi", linkId: "unknown-link", ...extra });
+  await assert.rejects(() => assign("other"), /own sourcing/);
+  await assert.rejects(() => assign("ta", { locationId: "forged" }), /Select an active/);
+  await assign("ta");
+  assert.equal((await db.get("unknown"))!.workLocationId, "delhi", "Assignment updates the existing application atomically");
+  assert.equal((await db.get("unknown-link"))!.workLocationId, "delhi");
+  assert.equal((await db.get("unknown-link"))!.level, 1);
+  assert.equal(rows("applications").filter(a => a.candidateId === "c:unknown").length, 1);
+  await assert.rejects(() => assign("ta", { linkId: undefined, applicationId: "m-eod" }), /already been sent/);
+  put("linkVault", { _id: "unknown-link-2", openingId: "job", addedBy: "ta", level: 1 });
+  await assign("ta", { linkId: "unknown-link-2" });
+  assert.equal((await db.get("unknown-link-2"))!.level, 1, "Moving the same legacy batch reuses its imported level");
+  assert.equal(rows("activityLog").filter(r => r.action === "work_location_assigned").length, 2);
+  console.log("Location rosters, independent drafts/send guards, uncertainty, corrections and activity-only EOD passed.");
 } finally { Date.now = originalNow; }

@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
     const { cvUploadId } = await convexMutation<{ cvUploadId: string }>("ta/hhUpload:queue", {
       actorId: user.id,
       openingId,
+      workLocationId: String(form.get("workLocationId") ?? "") || undefined,
       storageId,
       fileName: file.name,
       fileSize: file.size,

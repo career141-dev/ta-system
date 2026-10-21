@@ -1,6 +1,7 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+let openings = [];
 const say = (text, tone) => {
   $("status").textContent = text;
   $("status").className = `status ${tone || ""}`;
@@ -47,6 +48,9 @@ async function load() {
     res.openings.map((o) => [o.id, `${o.client} — ${o.title}`]),
     s.openingId,
   );
+  openings = res.openings;
+  fillLocations(s.openingId === $("openingId").value ? s.workLocationId : "");
+  await remember();
   if (!chosen) say("Choose who you are to see your jobs.");
   else if (res.openings.length === 0) say("You are not on any open job yet. Ask your lead to add you to the job on the desk.", "bad");
   paintHistory();
@@ -61,7 +65,14 @@ function fill(select, pairs, chosen) {
     if (value === chosen) opt.selected = true;
     select.appendChild(opt);
   }
-  remember();
+}
+
+function fillLocations(chosen) {
+  const locations = openings.find(o => o.id === $("openingId").value)?.workLocations || [];
+  $("location-label").hidden = locations.length === 0;
+  fill($("workLocationId"), locations.length > 1
+    ? [["", "Choose a work location"], ...locations.map(l => [l.id, `${l.name} — ${l.vacancies} vacancies`])]
+    : locations.map(l => [l.id, l.name]), chosen);
 }
 
 /** The label is stored too, so the button on the LinkedIn page can name the
@@ -71,7 +82,8 @@ async function remember() {
   await chrome.storage.sync.set({
     userId: $("userId").value,
     openingId: openingSelect.value,
-    openingLabel: openingSelect.selectedOptions[0]?.textContent ?? "",
+    workLocationId: $("workLocationId").value,
+    openingLabel: `${openingSelect.selectedOptions[0]?.textContent ?? ""}${$("workLocationId").value ? ` · ${$("workLocationId").selectedOptions[0]?.textContent}` : ""}`,
   });
 }
 
@@ -113,12 +125,14 @@ $("userId").addEventListener("change", async () => {
   await remember();
   load();
 });
-$("openingId").addEventListener("change", remember);
+$("openingId").addEventListener("change", async () => { fillLocations(""); await remember(); });
+$("workLocationId").addEventListener("change", remember);
 
 $("capture").addEventListener("click", async () => {
   $("capture").disabled = true;
   say("Reading the page…");
   try {
+    if (!$("location-label").hidden && !$("workLocationId").value) throw new Error("Choose a work location first.");
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!/^https:\/\/(?:[a-z0-9\-]+\.)?linkedin\.com\//i.test(tab?.url || "")) {
       throw new Error("Open a LinkedIn profile first");

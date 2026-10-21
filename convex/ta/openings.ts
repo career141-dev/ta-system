@@ -23,6 +23,7 @@ import { recordActiveMode, refreshWorkdayChecks } from "./workdays";
 import { invalidateJdReviews, recordJdReview } from "../lib/workdayChecks";
 import { isGone } from "../../src/lib/bin";
 import { masterSheetStatusFields } from "../../src/lib/masterSheet";
+import { validateWorkLocations } from "../../src/lib/workLocations";
 
 
 export const list = internalQuery({
@@ -142,6 +143,7 @@ export const updateTaFields = internalMutation({
       if (value !== undefined) patch[k] = value;
     }
     if (clientId !== undefined) patch.clientId = clientId as Id<"clients">;
+    if (job.workLocations?.length) patch.headcount = job.workLocations.filter(l => !l.archived).reduce((sum, l) => sum + l.vacancies, 0);
 
     await ctx.db.patch(jobId, patch);
     return { ok: true };
@@ -344,6 +346,7 @@ export const create = internalMutation({
     clientId: v.string(),
     title: v.string(),
     country: v.optional(v.string()),
+    workLocations: v.optional(v.any()),
     hiringFor: v.optional(v.string()),
     targetGender: v.optional(v.union(v.string(), v.null())),
     jdMarkdown: v.optional(v.string()),
@@ -389,6 +392,7 @@ export const create = internalMutation({
       attempts++;
     }
 
+    const locations = args.workLocations ? validateWorkLocations(args.workLocations) : undefined;
     const now = new Date().toISOString();
     const primaryRecruiterId = (args.assignedTaIds[0] ?? user._id) as Id<"users">;
     const tier = (["P1", "P2", "P3", "P4", "P5"].includes(args.priorityTier ?? "")
@@ -414,7 +418,9 @@ export const create = internalMutation({
       targetGender: args.targetGender ?? null,
       targetNationalities: args.hiringFor ? [args.hiringFor] : [],
       priorityTier: tier,
-      headcount: 1,
+      workLocations: locations,
+      taLocations: locations?.filter(l => !l.archived).map(l => l.name),
+      headcount: locations?.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0) ?? 1,
       primaryRecruiterId,
       assignedTaIds: args.assignedTaIds.map((id) => id as Id<"users">),
       taLeadId: (args.taLeadId ?? user._id) as Id<"users">,

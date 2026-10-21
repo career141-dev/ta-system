@@ -4,6 +4,7 @@ import { isDeskWide, isTa } from "@/lib/auth";
 import { scopeLinks } from "@/lib/visibility";
 import { eyeMarkedItems } from "./eyeMarked";
 import { primeStore } from "@/data/prime";
+import { inWorkLocation } from "./workLocations";
 
 function eyeMarkedRows(openingId: string, user: User) {
   const desk = new Set(repo.users().filter(isDeskWide).map((u) => u.id));
@@ -26,9 +27,9 @@ export function visibleEyeMarked(openingId: string, user: User) {
 }
 
 /** A TA answers for their own sheet; another TA's unfinished work cannot block them. */
-export function eyeMarkedForEmail(openingId: string, user: User) {
+export function eyeMarkedForEmail(openingId: string, user: User, workLocationId?: string) {
   if (!isTa(user)) return [];
   const { rows, items } = visibleEyeMarked(openingId, user);
-  const mine = new Set(rows.filter((r) => r.addedBy === user.id).map((r) => r.id));
+  const mine = new Set(rows.filter((r) => r.addedBy === user.id && inWorkLocation(r, workLocationId)).map((r) => r.id));
   return items.filter((item) => mine.has(item.id));
 }

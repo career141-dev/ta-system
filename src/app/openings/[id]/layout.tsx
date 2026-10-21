@@ -114,9 +114,9 @@ export default async function OpeningLayout({
       <div className="flex flex-col lg:flex-row">
         {/* The rail reads ?post= to know which job post is showing. */}
         <Suspense fallback={<div className="hidden w-[238px] shrink-0 border-r border-rule lg:block" />}>
-          <ProjectSidebar openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing} canUseDailyEmail={canUseDailyEmail}
+          <ProjectSidebar locationSheets={!!opening.workLocations?.length} openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing} canUseDailyEmail={canUseDailyEmail}
             middayEmails={todayEmails.filter(e => e.submissionType === "midday").map(e => ({ id: e._id, number: e.number, status: e.status }))}
-            dailyEmailClosed={todayEmails.some(e => e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt)} />
+            dailyEmailClosed={opening.workLocations?.length ? opening.workLocations.filter(l => !l.archived).every(l => todayEmails.some(e => e.workLocationId === l.id && e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt)) : todayEmails.some(e => e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt)} />
         </Suspense>
         <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-7">{children}</main>
       </div>

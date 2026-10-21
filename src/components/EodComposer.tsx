@@ -18,7 +18,7 @@ import { resendEod, sendEod, sendDailyEmail, saveMiddayDraft } from "@/app/actio
 import type { SubmissionType } from "@/lib/dailyEmail";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
-import { decodeEodBrowserDraft, encodeEodBrowserDraft } from "@/lib/eodDraft";
+import { decodeEodBrowserDraft, encodeEodBrowserDraft, eodDraftKeys } from "@/lib/eodDraft";
 import type { WorkingStage } from "@/data/types";
 
 function noteLineToHtml(line: string): string {
@@ -396,7 +396,15 @@ export function EodComposer({
   useDailyEmail = false,
   excelLinksCount,
   openingTitle,
+  workLocationId,
+  actorId,
+  allowActivityOnly = false,
+  draftDate,
 }: {
+  draftDate?: string;
+  workLocationId?: string;
+  actorId?: string;
+  allowActivityOnly?: boolean;
   useDailyEmail?: boolean;
   savedAttachments?: import("@/lib/dailyEmail").SavedEmailAttachment[];
   excelLinksCount?: number;
@@ -441,9 +449,8 @@ export function EodComposer({
 }) {
   const savedFields = dailyDraft?.fields ?? {};
   const midday = submissionType === "midday";
-  const draftKey = dailyDraft ? `midday-composer:${dailyDraft.id}` : resend
-    ? `eod-composer-draft:${openingId}:${kind}:resend:${resend.copyId}`
-    : `eod-composer-draft:${openingId}:${kind}`;
+  const browserKeys = eodDraftKeys(openingId, kind, effort.date, actorId, workLocationId, resend?.copyId, draftDate);
+  const draftKey = dailyDraft ? `midday-composer:${dailyDraft.id}` : browserKeys.composer;
   const defaultIntro = initialRows.length
     ? "Dear Sir,\n\nPlease find the attached Shortlisted CV for the above-mentioned position"
     : "Dear Sir,\n\nPlease find today's activity for the above-mentioned position.";
@@ -1053,7 +1060,7 @@ export function EodComposer({
               savedFields={dailyDraft?.fields}
               effort={effort}
               formId="eod-send"
-              draftKey={dailyDraft ? `midday-effort:${dailyDraft.id}` : resend ? `eod-effort:${openingId}:resend:${resend.copyId}` : `eod-effort:${openingId}:${effort.date}`}
+              draftKey={dailyDraft ? `midday-effort:${dailyDraft.id}` : browserKeys.effort}
               openingId={openingId}
             />
           </div>
@@ -1150,7 +1157,7 @@ export function EodComposer({
                       </span>
                     </div>
                     <a
-                      href={`/api/openings/${openingId}/links/export?all=1`}
+                      href={`/api/openings/${openingId}/links/export?all=1${workLocationId ? `&location=${encodeURIComponent(workLocationId)}` : ""}`}
                       target="_blank"
                       rel="noreferrer"
                       className="shrink-0 text-[11.5px] font-medium text-brand hover:underline"
@@ -1172,7 +1179,7 @@ export function EodComposer({
         );
       })()}
 
-      {needsResearchLink && !midday && !dailyParentId && <EodJobChecks jobId={openingId} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
+      {needsResearchLink && !midday && !dailyParentId && <EodJobChecks jobId={openingId} locationScoped={allowActivityOnly} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
         extraReasons={[
           ...(nobodyOnTo ? [{ key: "recipient", message: "Add a valid email address on the To line." }] : []),
           ...(researchBlocked ? [{ key: "chatgpt", message: "Add a valid ChatGPT share link and confirm it, or submit a reason in Today’s Checks." }] : []),
@@ -1217,6 +1224,7 @@ export function EodComposer({
         {dailyParentId && <input type="hidden" name="dailyParentId" value={dailyParentId} />}
         {!resend && kind === "director" && initialRows.length === 0 && <input type="hidden" name="activityOnly" value="yes" />}
         <input type="hidden" name="openingId" value={openingId} />
+        <input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
         {resend && <input type="hidden" name="copyId" value={resend.copyId} />}
         <input type="hidden" name="kind" value={kind} />
         <input type="hidden" name="to" value={toEmail} />

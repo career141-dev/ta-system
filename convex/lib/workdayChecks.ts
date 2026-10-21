@@ -6,6 +6,7 @@ import { isEodSendCheck, canExcuseCheck, applyTaskExceptions, workdayDate } from
 import { linkKey } from "../../src/lib/url";
 import { middayRequired, dailyEmailsFor } from "./dailyEmail";
 import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
+import { jobEodComplete, workdayLocationIds } from "./workLocationEmails";
 
 export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWorkdays">, entry: Doc<"taWorkdays">["jobs"][number]) {
   const [notes, research, posts, links, suggestions, runs, apps, receipts, rounds, provenance, job] = await Promise.all([
@@ -63,7 +64,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     noCandidateAt: ownNotes?.noCandidateAt,
     chatgptLink: ownNotes?.chatgptLink ?? accepted.at(-1)?.researchLink,
     confirmedAt: ownNotes?.confirmedAt ?? accepted.at(-1)?.acceptedAt,
-    emailAt: dailyEod.length ? Math.min(...dailyEod.map(r => r.finalizedAt!)) : undefined,
+    emailAt: await jobEodComplete(ctx, entry, dailyEod) ? Math.max(...dailyEod.map(r => r.finalizedAt!)) : undefined,
   };
   // Version the underlying evidence, not the exception or a rendered progress label.
   const versions: Record<string, unknown> = {
@@ -78,10 +79,16 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
   const decorate = (rows: WorkdayCheck[]) => applyTaskExceptions(rows.map(c => canExcuseCheck(c)
     ? { ...c, exceptionVersion: JSON.stringify([since, versions[c.key.split(":")[0]]]) } : c), exceptions, day.date === workdayDate(Date.now()));
   const checks = decorate(setupChecks(setup, true));
+  if (job?.workLocations?.length && setup.emailAt) {
+    const cv = checks.find(c => c.key.startsWith("director_cv:"));
+    if (cv && cv.status !== "complete") Object.assign(cv, { status: "complete", completedAt: setup.emailAt, completedBy: day.userId, progress: "All location EODs sent, including activity-only reports" });
+  }
   const eodChecks = checks.filter(isEodSendCheck);
   if (await middayRequired(ctx, day.date)) {
     const emails = await dailyEmailsFor(ctx, day.userId, entry.jobId, day.date);
-    const sent = emails.find(e => e.submissionType === "midday" && e.status === "accepted" && e.finalizedAt);
+    const requiredLocations = await workdayLocationIds(ctx, entry);
+    const midday = emails.filter(e => e.submissionType === "midday" && e.status === "accepted" && e.finalizedAt);
+    const sent = (!requiredLocations.length || requiredLocations.every(id => midday.some(e => e.workLocationId === id))) ? midday.at(-1) : undefined;
     const check: WorkdayCheck = { key: `midday_email:${entry.jobId}`, jobId: entry.jobId,
       label: "Midday email sent", href: `/openings/${entry.jobId}/midday`, kind: "email", canCarry: false,
       evidenceAt: sent?.acceptedAt ?? 0, status: sent ? "complete" : "incomplete",
