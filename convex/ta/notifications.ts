@@ -77,7 +77,9 @@ export const listForUser = internalQuery({
             ? "/openings?accessRequests=open"
             : n.type === "opening_access_rejected"
               ? "/openings"
-              : null,
+              : n.type === "strategy_assigned" && n.jobId
+                ? `/openings/${n.jobId}/strategies`
+                : null,
         read: n.read,
         createdAt: n.createdAt,
       })),

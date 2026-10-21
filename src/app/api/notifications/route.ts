@@ -3,6 +3,9 @@ import { currentUser } from "@/lib/session";
 import { primeStore } from "@/data/prime";
 import { convexMutation, convexQuery } from "@/lib/convexServer";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 interface NotificationsPayload {
   unreadCount: number;
   notifications: {
@@ -32,7 +35,11 @@ export async function GET() {
     userId: user.id,
     limit: 30,
   });
-  return NextResponse.json(payload);
+  return NextResponse.json(payload, {
+    headers: {
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+    },
+  });
 }
 
 /** Mark one notification read (`{id}`), or all of them (`{all: true}`). */

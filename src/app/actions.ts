@@ -6151,12 +6151,11 @@ function strategyRowOf(formData: FormData, field = "rowId") {
 }
 
 /**
- * One bell per TA per job in ten minutes. A lead working down the table puts
- * a TA on five strategies in a row, and five notifications for one sitting is
- * noise. (In this process only: a restart forgets, which just allows one more.)
+ * Debounces bells per key within 30 seconds. A lead clicking multiple strategies
+ * rapidly generates one chime, while assignments made moments later are not silenced.
  */
 const lastBell = new Map<string, number>();
-function bellDue(key: string, ms = 10 * 60_000): boolean {
+function bellDue(key: string, ms = 30_000): boolean {
   const now = Date.now();
   if (now - (lastBell.get(key) ?? 0) < ms) return false;
   lastBell.set(key, now);
