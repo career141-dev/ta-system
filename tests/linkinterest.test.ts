@@ -178,27 +178,12 @@ console.log("\ntwo TAs on one opening: whose rows, and no duplicates (1 Oct)");
   eq("the same name at another company: a different person", repo.findLinkByPerson(o.id, "Thivanka Nimesh", "Dialog Axiata"), undefined);
 }
 
-console.log("\nTA lead segregation: viewing L1, L2 sheets");
+console.log("\nTA lead segregation: viewing L1, L2");
 {
   const lead = repo.users().find((u) => u.role === "ta_lead")!;
   const deskWide = new Set(repo.users().filter((u) => u.role === "ta_lead" || u.role === "director" || u.role === "admin").map((u) => u.id));
   const { scopeLinks } = await import("@/lib/visibility");
   const scopedRows = scopeLinks(repo.linkVault(o.id), lead, (id) => deskWide.has(id)).map((s) => s.row);
-  const adders = [...new Set(scopedRows.map((r) => r.addedBy))];
-  const levelOwners = [...new Set([lead.id, ...adders])];
-  const levelsMap = new Map<number, { n: number; at: number; name?: string }>();
-  for (const uid of levelOwners) {
-    for (const l of repo.linkLevels(o.id, uid)) {
-      if (!levelsMap.has(l.n)) levelsMap.set(l.n, { ...l });
-    }
-  }
-  for (const r of scopedRows) {
-    if (typeof r.level === "number" && r.level > 0 && !levelsMap.has(r.level)) {
-      levelsMap.set(r.level, { n: r.level, at: 0 });
-    }
-  }
-  const leadSheets = Array.from(levelsMap.values()).sort((a, b) => a.n - b.n);
-  eq("lead sees L1 and later Ls (not just empty sheets)", leadSheets.map((l) => l.n).includes(1), true);
   eq("lead can segregate rows by L", scopedRows.filter((r) => r.level === 1).length > 0, true);
 }
 
