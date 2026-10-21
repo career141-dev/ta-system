@@ -144,14 +144,14 @@ export function LinkVaultTable({
   const rowsToCheck = by ? everyRow.filter(({ row }) => row.addedBy === by) : everyRow;
   for (const { row } of rowsToCheck) {
     if (typeof row.level === "number" && row.level > 0 && !levelsMap.has(row.level)) {
-      const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u)).find((l) => l.n === row.level);
+      const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u, workLocationId || undefined)).find((l) => l.n === row.level);
       levelsMap.set(row.level, { n: row.level, at: known?.at ?? 0, name: known?.name });
     }
   }
 
   // An L number from query params still gets a tab
   if (level && !levelsMap.has(level)) {
-    const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u)).find((l) => l.n === level);
+    const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u, workLocationId || undefined)).find((l) => l.n === level);
     levelsMap.set(level, { n: level, at: known?.at ?? 0, name: known?.name });
   }
 
