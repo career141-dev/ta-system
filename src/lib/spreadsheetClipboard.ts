@@ -92,7 +92,7 @@ export function detectHyperlink(rawVal: string, header?: string): { url: string 
  * Format headers and rows as HTML <table> for rich clipboard copy into Excel.
  */
 export function toHtmlTable(headers: string[], rows: string[][]): string {
-  const ths = headers.map((h) => `<th style="background-color:#f2f4f7;font-weight:bold;border:1px solid #d0d5dd;padding:6px 10px;">${escapeXml(h)}</th>`).join("");
+  const ths = headers.map((h) => `<th style="font-weight:bold;border:1px solid #d0d5dd;padding:6px 10px;">${escapeXml(h)}</th>`).join("");
   const trs = rows
     .map((r) => {
       const tds = headers
@@ -103,7 +103,8 @@ export function toHtmlTable(headers: string[], rows: string[][]): string {
           const inner = link
             ? `<a href="${escapeXml(link.url)}" style="color:#0563c1;text-decoration:underline;">${escapeXml(val)}</a>`
             : escapeXml(val);
-          return `<td style="border:1px solid #eaecf0;padding:5px 8px;">${inner}</td>`;
+          const color = h === "Status" ? ({ Interested: "#e2f0d9", Pending: "#fff2cc", "Not Interested": "#ffe2e2" } as Record<string, string>)[val] : null;
+          return `<td style="border:1px solid #eaecf0;padding:5px 8px;${color ? `background-color:${color};` : ""}">${inner}</td>`;
         })
         .join("");
       return `<tr>${tds}</tr>`;

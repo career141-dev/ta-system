@@ -1155,7 +1155,7 @@ export function EodComposer({
                       rel="noreferrer"
                       className="shrink-0 text-[11.5px] font-medium text-brand hover:underline"
                     >
-                      Preview sheet →
+                      Preview workbook →
                     </a>
                   </div>
                 )}
@@ -1165,7 +1165,7 @@ export function EodComposer({
               <p className="mt-3 text-[11.5px] leading-relaxed text-ink-faint">
                 {effectiveRows.length > 0 && "Each CV carries the green CAREER141 block on page one with your edited remuneration and notes stamped on top."}
                 {effectiveRows.length > 0 && hasExcelAttachment && " "}
-                {hasExcelAttachment && "The attached Excel Tables sheet includes your candidate profiles with live, clickable LinkedIn hyperlinks."}
+                {hasExcelAttachment && "The attached Excel Tables workbook separates each TA’s levels into tabs, with Interested, Pending and Not Interested sections and clickable profile links."}
               </p>
             )}
           </section>
