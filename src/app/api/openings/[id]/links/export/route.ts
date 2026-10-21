@@ -1,7 +1,7 @@
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
-import { can } from "@/lib/auth";
+import { can, isDeskWide } from "@/lib/auth";
 import type { LinkVaultEntry } from "@/data/types";
 import { matchesQuery } from "@/lib/paging";
 import { buildXlsx, toTsv, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
@@ -28,13 +28,27 @@ export async function GET(
     return new Response("Sign in first.", { status: 401 });
   }
 
-  if (!can(user, "opening.sourcing").ok) {
-    return new Response("Not allowed.", { status: 403 });
-  }
-
   const opening = repo.opening(openingId);
   if (!opening) {
     return new Response("Opening not found.", { status: 404 });
+  }
+
+  if (user.role === "client") {
+    return new Response("Not allowed.", { status: 403 });
+  }
+
+  const assignment = repo.assignmentFor(openingId, user.id) ?? null;
+  const onStrategy = repo.strategyAssignments(openingId).some((r) => r.doneBy.includes(user.id));
+
+  const allowed =
+    isDeskWide(user) ||
+    can(user, "opening.sourcing", { openingId, assignment, onStrategy }).ok ||
+    can(user, "opening.read", { openingId, assignment, onStrategy }).ok ||
+    (opening.assignedTaIds ?? []).includes(user.id) ||
+    repo.linkVault(openingId).some((r) => r.addedBy === user.id);
+
+  if (!allowed) {
+    return new Response("Not allowed.", { status: 403 });
   }
 
   const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user);
@@ -102,7 +116,7 @@ export async function GET(
     rows: formattedRows,
   });
 
-  return new Response(buffer as unknown as BodyInit, {
+  return new Response(new Uint8Array(buffer), {
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
