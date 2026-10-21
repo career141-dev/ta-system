@@ -5447,7 +5447,7 @@ async function emailEod(input: {
   const cvCount = rows.length;
   const attachmentSummaryParts = [
     cvCount > 0 ? `${cvCount} CV${cvCount === 1 ? "" : "s"}` : null,
-    excelAttachment ? `1 Excel Tables sheet (${excelAttachment.rowCount} link${excelAttachment.rowCount === 1 ? "" : "s"})` : null,
+    excelAttachment ? `1 Excel Tables workbook (${excelAttachment.rowCount} link${excelAttachment.rowCount === 1 ? "" : "s"})` : null,
   ].filter(Boolean);
   return {
     ok: true,
