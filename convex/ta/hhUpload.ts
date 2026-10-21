@@ -22,6 +22,7 @@ import { toTaStage } from "./stages";
 import { assertWorkdayScope } from "../lib/workdayScope";
 import { profileSlug } from "../lib/samePerson";
 import { refreshWorkdayChecks } from "./workdays";
+import { uploadProgress } from "../lib/cvUploadProgress";
 
 /** The channel the pipeline records; the TA System reads it as HH (src/data/convex/map.ts). */
 export const HEADHUNT_CHANNEL = "headhunting";
@@ -55,7 +56,12 @@ export const queue = internalMutation({
       assignToJob: job._id as string,
       uploadedBy: user._id as string,
       headhuntedBy: user._id,
+      // Keep the coarse status as uploaded so the two-minute recovery queue can
+      // still claim this file if the immediate scheduled action is interrupted.
       status: "uploaded",
+      processingStage: "queued",
+      queuedAt: Date.now(),
+      stageChangedAt: Date.now(),
     });
     const logId = await ctx.db.insert("ingestionLog", {
       jobId: job._id,
@@ -192,23 +198,17 @@ export const status = internalQuery({
               .filter((q) => q.eq(q.field("jobId"), jobId))
               .first()
           : null;
-      const failed = upload.status === "failed";
       const mine = !!app && app.ownerTaId === upload.headhuntedBy;
-      const state = failed
-        ? ("failed" as const)
-        : mine
-          ? ("done" as const)
-          : app && upload.routeNote
-            ? ("held" as const)
-            : ("reading" as const);
+      const businessState = mine ? ("done" as const) : app && upload.routeNote ? ("held" as const) : null;
+      const progress = uploadProgress(upload, businessState);
       out.push({
         id: raw,
-        state,
+        ...progress,
         fileName: upload.fileName,
         name: candidate?.fullName ?? null,
         applicationId: app ? (app._id as string) : null,
         stage: app ? toTaStage(app.currentStage) : null,
-        note: failed ? (upload.errorMessage ?? "The CV could not be read.") : (upload.routeNote ?? null),
+        note: progress.state === "failed" ? (upload.errorMessage ?? "The CV could not be read.") : (upload.routeNote ?? null),
       });
     }
     return out;
