@@ -38,6 +38,7 @@ import type {
   BinItem,
   Id,
   LeadNote,
+  TaNote,
   LinkVaultEntry,
   LinkOutcome,
   Role,
@@ -2280,6 +2281,30 @@ const rawRepo = {
       const e = db.linkVault.find((l) => l.id === entryId);
       if (!e?.leadNotes) return;
       e.leadNotes = e.leadNotes.filter((n) => n.id !== noteId);
+    });
+  },
+
+  /**
+   * Notes on a candidate profile recorded by the TA.
+   */
+  addLinkTaNote(entryId: Id, by: Id, note: string): Id | null {
+    const id = `tn_${Math.random().toString(36).slice(2, 10)}`;
+    let found = false;
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (!e) return;
+      found = true;
+      const added: TaNote = { id, at: Date.now(), note, by };
+      e.taNotes = [...(e.taNotes ?? []), added];
+    });
+    return found ? id : null;
+  },
+
+  removeLinkTaNote(entryId: Id, noteId: Id) {
+    mutate((db) => {
+      const e = db.linkVault.find((l) => l.id === entryId);
+      if (!e?.taNotes) return;
+      e.taNotes = e.taNotes.filter((n) => n.id !== noteId);
     });
   },
 

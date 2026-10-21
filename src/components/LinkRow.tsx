@@ -4,11 +4,13 @@ import { externalUrl, profileLink } from "@/lib/url";
 import { useEffect, useRef, useState } from "react";
 import {
   addLeadNoteInline,
+  addLinkTaNoteInline,
   addLinkToPipelineInline,
   decideCvMatchInline,
   deleteLinkInline,
   logOutreachInline,
   removeLeadNoteInline,
+  removeLinkTaNoteInline,
   setLinkInterestInline,
   toggleEyeMarkInline,
   toggleLinkAddOnInline,
@@ -149,9 +151,20 @@ export function LinkRow({
       setNoteOpen(false);
     }
   }, [sendNote.result]);
+  const [taNoteOpen, setTaNoteOpen] = useState(false);
+  const [allTaNotes, setAllTaNotes] = useState(false);
+  const sendTaNote = useInline(addLinkTaNoteInline);
+  const dropTaNote = useInline(removeLinkTaNoteInline);
+  const taNoteForm = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (sendTaNote.result?.tone === "ok") {
+      taNoteForm.current?.reset();
+      setTaNoteOpen(false);
+    }
+  }, [sendTaNote.result]);
   const busy =
-    eye.pending || addOn.pending || save.pending || toPipeline.pending || setInterest.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending;
-  const answer = latest(eye.result, addOn.result, save.result, toPipeline.result, setInterest.result, logIt.result, del.result, sendNote.result, dropNote.result);
+    eye.pending || addOn.pending || save.pending || toPipeline.pending || setInterest.pending || logIt.pending || del.pending || sendNote.pending || dropNote.pending || sendTaNote.pending || dropTaNote.pending;
+  const answer = latest(eye.result, addOn.result, save.result, toPipeline.result, setInterest.result, logIt.result, del.result, sendNote.result, dropNote.result, sendTaNote.result, dropTaNote.result);
 
   useEffect(() => {
     setIsEyeMarked(r.isEyeMarked);
@@ -171,8 +184,10 @@ export function LinkRow({
   const why = log.find((c) => c.channel === "Not interested");
   const shown = allLog ? log : log.slice(0, 2);
   const outcome = OUTCOMES.find((o) => o.value === r.outcome)?.label ?? r.outcome;
-  const notes = newestFirst(r.leadNotes);
-  const shownNotes = allNotes ? notes : notes.slice(0, 2);
+  const leadNotes = newestFirst(r.leadNotes);
+  const shownLeadNotes = allNotes ? leadNotes : leadNotes.slice(0, 2);
+  const taNotesList = r.taNotes ?? [];
+  const shownTaNotes = allTaNotes ? taNotesList : taNotesList.slice(0, 5);
 
   if (removed || del.result?.tone === "ok") return null;
 
@@ -231,9 +246,9 @@ export function LinkRow({
                     {addedByName}&rsquo;s · view only
                   </span>
                 )}
-                {notes.length > 0 && (
+                {leadNotes.length > 0 && (
                   <span className="rounded bg-brand-soft px-1.5 py-[3px] text-[10.5px] font-medium text-brand">
-                    Note from {noteByline(notes[0], userNames).role}
+                    Note from {noteByline(leadNotes[0], userNames).role}
                   </span>
                 )}
               </div>
@@ -390,6 +405,25 @@ export function LinkRow({
                 )}
                 {!readOnly && (
                 <>
+                <button
+                  type="button"
+                  onClick={() => setTaNoteOpen((v) => !v)}
+                  aria-expanded={taNoteOpen}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-1.5 text-[12.5px] font-medium transition-colors cursor-pointer ${
+                    taNotesList.length > 0
+                      ? "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                      : "border-brand-line text-brand hover:bg-brand-soft"
+                  }`}
+                >
+                  {taNotesList.length > 0 ? (
+                    <>
+                      <span>📝</span>
+                      <span>Notes ({taNotesList.length})</span>
+                    </>
+                  ) : (
+                    <span>Add note</span>
+                  )}
+                </button>
                 <form onSubmit={(e) => addOn.run(submitted(e).formData)}>
                   <input type="hidden" name="openingId" value={openingId} />
                   <input type="hidden" name="entryId" value={r.id} />
@@ -503,12 +537,87 @@ export function LinkRow({
             </form>
           )}
 
+          {!readOnly && taNoteOpen && (
+            <form
+              ref={taNoteForm}
+              onSubmit={(e) => sendTaNote.run(submitted(e).formData)}
+              className="mt-3 flex flex-col gap-2.5 rounded-xl border border-rule bg-paper/50 p-3.5 shadow-2xs text-left"
+            >
+              <input type="hidden" name="openingId" value={openingId} />
+              <input type="hidden" name="entryId" value={r.id} />
+              <div className="flex items-center justify-between">
+                <span className="text-[11.5px] font-semibold text-ink-soft">
+                  {taNotesList.length > 0 ? `Notes (${taNotesList.length})` : "Add note"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTaNoteOpen(false)}
+                  className="text-[12px] text-ink-faint hover:text-ink cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+              {taNotesList.length > 0 && (
+                <div className="flex flex-col gap-1.5 rounded-lg border border-rule bg-surface p-2.5">
+                  <span className="text-[11px] font-semibold text-ink-soft">Current notes:</span>
+                  {taNotesList.map((n) => (
+                    <div key={n.id} className="flex items-start justify-between gap-2 text-[12px]">
+                      <p className="whitespace-pre-line text-ink">{n.note}</p>
+                      {(n.by === viewerId || !readOnly) && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            if (!window.confirm("Remove this note?")) return;
+                            const fd = new FormData();
+                            fd.set("openingId", openingId);
+                            fd.set("entryId", r.id);
+                            fd.set("noteId", n.id);
+                            dropTaNote.run(fd);
+                          }}
+                          className="shrink-0 text-[11px] font-medium text-danger hover:underline cursor-pointer disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <textarea
+                name="note"
+                rows={3}
+                maxLength={2000}
+                autoFocus
+                placeholder="e.g. Requested to call back at 4, Not interested, Already interviewed"
+                className={`${inputClass} leading-relaxed`}
+              />
+              <div className="flex items-center gap-2.5">
+                <SubmitButton
+                  busy={sendTaNote.pending}
+                  locked={busy}
+                  pendingLabel="Saving…"
+                  className="rounded-full bg-brand px-4 py-1.5 text-[12px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60 cursor-pointer shadow-xs"
+                >
+                  Save note
+                </SubmitButton>
+                <button
+                  type="button"
+                  onClick={() => setTaNoteOpen(false)}
+                  className="text-[12px] text-ink-faint transition-colors hover:text-ink cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            </form>
+          )}
+
           <dl className="mt-3 grid grid-cols-[80px_minmax(0,1fr)] gap-x-3 gap-y-1.5 break-words text-[12.5px] leading-relaxed sm:grid-cols-[96px_minmax(0,1fr)] sm:gap-x-4">
-            {notes.length > 0 && (
+            {leadNotes.length > 0 && (
               <>
-                <dt className="font-medium text-ink-soft">Notes</dt>
+                <dt className="font-medium text-ink-soft">Lead Notes</dt>
                 <dd className="flex flex-col gap-1.5">
-                  {shownNotes.map((n) => {
+                  {shownLeadNotes.map((n) => {
                     const { role, name } = noteByline(n, userNames);
                     return (
                       <div key={n.id} className="rounded-lg border border-brand-line bg-brand-soft px-3 py-2">
@@ -541,12 +650,69 @@ export function LinkRow({
                       </div>
                     );
                   })}
-                  {notes.length > 2 && (
+                  {leadNotes.length > 2 && (
                     <button
                       onClick={() => setAllNotes((v) => !v)}
                       className="self-start text-[12px] text-accent hover:underline"
                     >
-                      {allNotes ? "Show less" : `Show all (${notes.length})`}
+                      {allNotes ? "Show less" : `Show all (${leadNotes.length})`}
+                    </button>
+                  )}
+                </dd>
+              </>
+            )}
+            {taNotesList.length > 0 && (
+              <>
+                <dt className="font-medium text-ink-soft">
+                  <button
+                    type="button"
+                    onClick={() => setTaNoteOpen((v) => !v)}
+                    className="hover:text-ink hover:underline cursor-pointer text-left font-medium"
+                    title="Click to add another note"
+                  >
+                    Notes
+                  </button>
+                </dt>
+                <dd className="flex flex-col gap-1">
+                  {shownTaNotes.map((n) => (
+                    <div key={n.id} className="group flex items-start justify-between gap-2">
+                      <p className="whitespace-pre-line text-ink">{n.note}</p>
+                      {(n.by === viewerId || !readOnly) && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            if (!window.confirm("Remove this note?")) return;
+                            const fd = new FormData();
+                            fd.set("openingId", openingId);
+                            fd.set("entryId", r.id);
+                            fd.set("noteId", n.id);
+                            dropTaNote.run(fd);
+                          }}
+                          className="shrink-0 text-[11px] font-medium text-ink-faint hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer disabled:opacity-50"
+                          title="Remove note"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {taNotesList.length > 5 && (
+                    <button
+                      type="button"
+                      onClick={() => setAllTaNotes((v) => !v)}
+                      className="self-start text-[12px] text-accent hover:underline cursor-pointer"
+                    >
+                      {allTaNotes ? "Show less" : `Show all (${taNotesList.length})`}
+                    </button>
+                  )}
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      onClick={() => setTaNoteOpen(true)}
+                      className="self-start text-[11.5px] text-ink-faint hover:text-ink hover:underline cursor-pointer mt-0.5"
+                    >
+                      + Add another note
                     </button>
                   )}
                 </dd>

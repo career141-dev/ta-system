@@ -63,11 +63,15 @@ export function formatExportRowsForEntries(
         canSeeLeadNotes && r.leadNotes && r.leadNotes.length > 0
           ? r.leadNotes[r.leadNotes.length - 1]?.note
           : null;
+      const latestTaNote =
+        r.taNotes && r.taNotes.length > 0
+          ? r.taNotes[r.taNotes.length - 1]?.note
+          : null;
       const latestApproach =
         r.conversationLog && r.conversationLog.length > 0
           ? r.conversationLog[r.conversationLog.length - 1]?.note
           : null;
-      const noteText = latestLeadNote || latestApproach || "";
+      const noteText = latestLeadNote || latestTaNote || latestApproach || "";
 
       return {
         ...r,
