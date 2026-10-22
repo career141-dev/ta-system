@@ -1,5 +1,6 @@
 import { repo, setsForOpening, stageCounts } from "@/data/store";
-import { CLOSED_STAGES, PIPELINE_STAGES, PRIORITY_TARGET, STAGE_LABEL, URGENT_ALERTS } from "@/data/types";
+import { ASSIGNMENT_LABEL, CLOSED_STAGES, PIPELINE_STAGES, PRIORITY_TARGET, STAGE_LABEL, URGENT_ALERTS } from "@/data/types";
+import { ASSIGNMENT_ROLES } from "@/lib/openings/admin";
 import type { Application, Opening, Stage, User } from "@/data/types";
 import { openingFacts } from "@/lib/openingFacts";
 import { toCountry } from "@/lib/openingCountry";
@@ -14,6 +15,7 @@ import { seatFor, visiblePosts, visibleToSeat, type Seat } from "@/lib/visibilit
 import type {
   AvailableOpening,
   MatchingSnapshot,
+  OpeningAdminPayload,
   OpeningOverview,
   OpeningRow,
   OpeningSection,
@@ -341,5 +343,34 @@ export function mobileOpeningOverview(
     },
     // The TA running the role can correct its details (OpeningAdmin canEdit).
     canEdit: o.assignedTaIds.includes(user.id) || !isTa(user),
+  };
+}
+
+/** The Overview's edit-details and change-the-team forms (OpeningAdmin), filled. */
+export function mobileOpeningAdmin(user: User, openingId: string): OpeningAdminPayload | null {
+  const o = repo.opening(openingId);
+  if (!o) return null;
+  const live = (o.workLocations ?? []).filter((l) => !l.archived);
+  return {
+    apiVersion: 1,
+    canManage: allows(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null }),
+    details: {
+      title: o.title,
+      salaryMin: o.salaryMin ?? null,
+      salaryMax: o.salaryMax ?? null,
+      salaryCurrency: o.salaryCurrency ?? "LKR",
+      packageNotes: o.packageNotes ?? "",
+      locations: o.locations,
+      targetNationalities: o.targetNationalities,
+      headcount: o.headcount ?? 1,
+      priorityTier: o.priorityTier,
+      workLocations: live.length ? live.map((l) => ({ id: l.id, name: l.name, vacancies: l.vacancies })) : null,
+    },
+    team: repo.assignments(openingId).map((a) => ({ userId: a.userId, role: a.role })),
+    people: repo
+      .users()
+      .filter((u) => u.isActive)
+      .map((u) => ({ id: u.id, name: u.name, role: u.role })),
+    roles: ASSIGNMENT_ROLES.map((value) => ({ value, label: ASSIGNMENT_LABEL[value] })),
   };
 }
