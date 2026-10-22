@@ -524,6 +524,8 @@ export { SET_SIZE };
  * month of history). 31 days, so no month is ever short.
  */
 export const EOD_COPY_KEPT_MS = 31 * 24 * 60 * 60 * 1000;
+/** How long a deleted L can still be put back with Undo (22 Oct). */
+export const LINK_LEVEL_UNDO_MS = 10 * 60 * 1000;
 
 /**
  * The set a newly shortlisted person joins — the rule is in convex/lib/sets.ts
@@ -2521,7 +2523,7 @@ const rawRepo = {
     const locations = this.opening(openingId)?.workLocations?.filter(l => !l.archived) ?? [];
     workLocationId = workLocationId || (locations.length === 1 ? locations[0].id : undefined);
     const levels = this.linkLevels(openingId, addedBy, workLocationId);
-    const level = selectedLevel && levels.some(l => l.n === selectedLevel) ? selectedLevel : levels.at(-1)?.n ?? this.addLinkLevel(openingId, addedBy, workLocationId);
+    const level = selectedLevel && levels.some(l => l.n === selectedLevel) ? selectedLevel : this.latestLinkLevel(openingId, addedBy, workLocationId)?.n ?? this.addLinkLevel(openingId, addedBy, workLocationId);
     mutate((db) => {
       db.linkVault.push({
         id,
@@ -4142,11 +4144,38 @@ const rawRepo = {
     this.setSetting(`link_levels:${openingId}:${userId}${workLocationId ? `:${workLocationId}` : ""}`, JSON.stringify(levels.map(({ n: _n, ...rest }) => rest)));
   },
 
+  /**
+   * The number the TA's next L takes: the lowest one free (22 Oct). The desk
+   * deleted L1, pressed + and got L2 with no L1 anywhere. A deleted number is
+   * free only once none of this TA's rows here still hold it.
+   */
+  nextLinkLevel(openingId: Id, userId: Id, workLocationId?: string): number {
+    const levels = this.allLinkLevels(openingId, userId, workLocationId);
+    const held = new Set(load().linkVault
+      .filter((r) => r.openingId === openingId && r.addedBy === userId && (r.workLocationId ?? "") === (workLocationId ?? ""))
+      .map((r) => r.level));
+    const free = levels.find((l) => l.deleted && !held.has(l.n));
+    return free ? free.n : levels.length + 1;
+  },
+
   /** A new L for this TA on this opening; returns its number. */
   addLinkLevel(openingId: Id, userId: Id, workLocationId?: string): number {
-    const levels = [...this.allLinkLevels(openingId, userId, workLocationId), { n: 0, at: Date.now() }];
+    const levels = this.allLinkLevels(openingId, userId, workLocationId);
+    const n = this.nextLinkLevel(openingId, userId, workLocationId);
+    if (n <= levels.length) levels[n - 1] = { n, at: Date.now() };
+    else levels.push({ n, at: Date.now() });
     this.saveLinkLevels(openingId, userId, levels, workLocationId);
-    return levels.length;
+    return n;
+  },
+
+  /**
+   * Where a row goes when no L is chosen: the L the TA started most recently,
+   * not the highest number — with numbers taken again, the newest L1 can
+   * come after L3.
+   */
+  latestLinkLevel(openingId: Id, userId: Id, workLocationId?: string): LinkLevel | undefined {
+    return this.linkLevels(openingId, userId, workLocationId).reduce<LinkLevel | undefined>(
+      (best, l) => (!best || l.at > best.at || (l.at === best.at && l.n > best.n) ? l : best), undefined);
   },
 
   /** A name for one of this TA's L's ("Banks"); blank puts the date back. */
@@ -4161,24 +4190,49 @@ const rawRepo = {
 
   /**
    * One of this TA's L's gone from the sidebar. Its rows are not deleted:
-   * they stay in the table, under All, in no L. Returns how many were in it.
+   * they move to Not in a sheet, and which ones is kept so Undo can put them
+   * back (22 Oct). Returns how many were in it.
    */
   deleteLinkLevel(openingId: Id, userId: Id, n: number, workLocationId?: string): number | null {
     const levels = this.allLinkLevels(openingId, userId, workLocationId);
     const l = levels[n - 1];
     if (!l || l.deleted) return null;
-    l.deleted = true;
-    this.saveLinkLevels(openingId, userId, levels, workLocationId);
-    let moved = 0;
+    const moved: Id[] = [];
     mutate((db) => {
       for (const r of db.linkVault) {
         if (r.openingId === openingId && r.addedBy === userId && r.level === n && (r.workLocationId ?? "") === (workLocationId ?? "")) {
           r.level = null;
-          moved++;
+          moved.push(r.id);
         }
       }
     });
-    return moved;
+    levels[n - 1] = { ...l, deleted: true, deletedAt: Date.now(), movedRows: moved };
+    this.saveLinkLevels(openingId, userId, levels, workLocationId);
+    return moved.length;
+  },
+
+  /**
+   * Undo a delete within LINK_LEVEL_UNDO_MS: the L comes back with its rows,
+   * unless its number has been taken again. Rows put in another L since stay
+   * there. Returns how many came back, or null when it cannot be undone.
+   */
+  restoreLinkLevel(openingId: Id, userId: Id, n: number, workLocationId?: string, now = Date.now()): number | null {
+    const levels = this.allLinkLevels(openingId, userId, workLocationId);
+    const l = levels[n - 1];
+    if (!l?.deleted || !l.deletedAt || now - l.deletedAt > LINK_LEVEL_UNDO_MS) return null;
+    const back = new Set(l.movedRows ?? []);
+    let restored = 0;
+    mutate((db) => {
+      for (const r of db.linkVault) {
+        if (back.has(r.id) && r.addedBy === userId && (r.level ?? null) === null) {
+          r.level = n;
+          restored++;
+        }
+      }
+    });
+    levels[n - 1] = { n, at: l.at, ...(l.name ? { name: l.name } : {}), ...(l.importedFrom ? { importedFrom: l.importedFrom } : {}) };
+    this.saveLinkLevels(openingId, userId, levels, workLocationId);
+    return restored;
   },
 
   readAlertIds(userId: Id): Set<string> {

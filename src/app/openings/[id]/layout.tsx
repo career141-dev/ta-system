@@ -7,7 +7,7 @@ import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
 import { allows, isDeskWide, isTa, seesEveryTaRow } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
-import { levelLabel } from "@/lib/linkViews";
+import { NO_SHEET, levelLabel } from "@/lib/linkViews";
 import { isConvex } from "@/data/mode";
 import { convexQuery } from "@/lib/convexServer";
 import type { DailyEmail } from "@/lib/dailyEmail";
@@ -65,47 +65,24 @@ export default async function OpeningLayout({
     status: p.status,
     count: apps.filter((a) => a.jobPostId === p.id).length,
   }));
-  // The L's this person started under Excel Tables, with how many rows each holds.
+  // The L's this person started under Excel Tables, with how many rows each
+  // holds — the same sheets and counts as the table's tabs (22 Oct). A lead's
+  // are their own, opened under their name; every TA's L's together were
+  // several people's L1 under one number.
   const isLeadViewer = isDeskWide(user) || seesEveryTaRow(user);
   const myLevels = seat.canSeeSourcing ? repo.linkLevels(id, user.id) : [];
-  const vaultRows = seat.canSeeSourcing ? repo.linkVault(id) : [];
-  const mine = vaultRows.filter((r) => r.addedBy === user.id);
-
-  let levels: { n: number; label: string; name: string; count: number; canManage?: boolean }[] = [];
-  if (seat.canSeeSourcing) {
-    if (myLevels.length > 0 || !isLeadViewer) {
-      levels = myLevels.map((l) => ({
-        n: l.n,
-        label: levelLabel(l),
-        name: l.name ?? "",
-        count: mine.filter((r) => r.level === l.n).length,
-        canManage: true,
-      }));
-    } else {
-      // For leads/admin who haven't started their own L's, show the opening's L's so they can navigate them
-      const allLevelsMap = new Map<number, { n: number; at: number; name?: string }>();
-      const adders = [...new Set(vaultRows.map((r) => r.addedBy))];
-      for (const uid of adders) {
-        for (const l of repo.linkLevels(id, uid)) {
-          if (!allLevelsMap.has(l.n)) allLevelsMap.set(l.n, { ...l });
-        }
-      }
-      for (const r of vaultRows) {
-        if (typeof r.level === "number" && r.level > 0 && !allLevelsMap.has(r.level)) {
-          allLevelsMap.set(r.level, { n: r.level, at: 0 });
-        }
-      }
-      levels = Array.from(allLevelsMap.values())
-        .sort((a, b) => a.n - b.n)
-        .map((l) => ({
-          n: l.n,
-          label: l.at ? levelLabel(l) : `L${l.n}`,
-          name: l.name ?? "",
-          count: vaultRows.filter((r) => r.level === l.n).length,
-          canManage: false,
-        }));
-    }
-  }
+  const mine = seat.canSeeSourcing ? repo.linkVault(id).filter((r) => r.addedBy === user.id && !r.workLocationId) : [];
+  const own = isLeadViewer ? `by=${encodeURIComponent(user.id)}&` : "";
+  const levels: { n: number; label: string; name: string; count: number; canManage?: boolean; query: string }[] = myLevels.map((l) => ({
+    n: l.n,
+    label: levelLabel(l),
+    name: l.name ?? "",
+    count: mine.filter((r) => r.level === l.n).length,
+    canManage: true,
+    query: `${own}level=${l.n}`,
+  }));
+  const noSheet = mine.filter((r) => !(r.level && r.level > 0)).length;
+  if (noSheet > 0) levels.push({ n: NO_SHEET, label: "Not in a sheet", name: "", count: noSheet, canManage: false, query: `${own}level=none` });
 
   return (
     <>
@@ -114,7 +91,7 @@ export default async function OpeningLayout({
       <div className="flex flex-col lg:flex-row">
         {/* The rail reads ?post= to know which job post is showing. */}
         <Suspense fallback={<div className="hidden w-[238px] shrink-0 border-r border-rule lg:block" />}>
-          <ProjectSidebar locationSheets={!!opening.workLocations?.length} openingId={id} posts={posts} levels={levels} nextLevel={repo.allLinkLevels(id, user.id).length + 1} canSeeSourcing={seat.canSeeSourcing} canUseDailyEmail={canUseDailyEmail}
+          <ProjectSidebar locationSheets={!!opening.workLocations?.length} openingId={id} posts={posts} levels={levels} nextLevel={repo.nextLinkLevel(id, user.id)} canSeeSourcing={seat.canSeeSourcing} canUseDailyEmail={canUseDailyEmail}
             middayEmails={todayEmails.filter(e => e.submissionType === "midday").map(e => ({ id: e._id, number: e.number, status: e.status }))}
             dailyEmailClosed={opening.workLocations?.length ? opening.workLocations.filter(l => !l.archived).every(l => todayEmails.some(e => e.workLocationId === l.id && e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt)) : todayEmails.some(e => e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt)} />
         </Suspense>

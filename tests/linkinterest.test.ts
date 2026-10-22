@@ -128,16 +128,20 @@ console.log("\nL1 auto-starts; + starts each later sourcing batch");
   eq("in no L now", repo.linkEntry(one)!.level ?? null, null);
   eq("L3 keeps its number and its row", repo.linkEntry(two)!.level, 3);
   eq("deleting it twice does nothing", repo.deleteLinkLevel(o.id, other.id, 2), null);
-  eq("the next + is L4, not a second L2", repo.addLinkLevel(o.id, other.id), 4);
+  // The lowest free number is taken again (22 Oct): L1 and L3 are there, L2 is free.
+  eq("the next + is L2 again, not L4", repo.addLinkLevel(o.id, other.id), 2);
+  eq("L1 and L3 keep their numbers", repo.linkLevels(o.id, other.id).map((l) => l.n), [1, 2, 3]);
+  eq("the new L2 has a new start date and no old name", repo.linkLevels(o.id, other.id)[1].name, undefined);
   const three = repo.addLink(o.id, "https://linkedin.com/in/in-l-four", other.id, "In Four");
-  eq("new rows go into it", repo.linkEntry(three)!.level, 4);
-  repo.deleteLinkLevel(o.id, other.id, 4);
+  eq("new rows go into the L started last, though L3 is higher", repo.linkEntry(three)!.level, 2);
+  eq("the old L2's row stays in Not in a sheet", repo.linkEntry(one)!.level ?? null, null);
+  repo.deleteLinkLevel(o.id, other.id, 2);
   const after = repo.addLink(o.id, "https://linkedin.com/in/after-delete", other.id, "After Delete");
   eq("with the latest deleted, rows go into the latest still there", repo.linkEntry(after)!.level, 3);
   repo.deleteLinkLevel(o.id, other.id, 1);
   repo.deleteLinkLevel(o.id, other.id, 3);
   const restart = repo.addLink(o.id, "https://linkedin.com/in/after-all-delete", other.id, "After All Delete");
-  eq("with no active L, a new row starts the next number", repo.linkEntry(restart)!.level, 5);
+  eq("with no active L, a new row starts the lowest free number", repo.linkEntry(restart)!.level, 1);
   eq("a row from a deleted L remains unlevelled", repo.linkEntry(one)!.level ?? null, null);
 
   // All Ls → Interested gathers every L's; L2 + Interested only L2's.
@@ -156,7 +160,7 @@ console.log("\nL1 auto-starts; + starts each later sourcing batch");
 }
 
 console.log("\nthe address bar");
-eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, imark: false, addons: false, by: "" });
+eq("status and L are read", readLinkFilters({ status: "not_interested", level: "2" }), { status: "not_interested", level: 2, imark: false, addons: false, by: "", day: "" });
 eq("iMark filter is read", readLinkFilters({ imark: "1" }).imark, true);
 eq("other iMark values do not enable the filter", readLinkFilters({ imark: "false" }).imark, false);
 eq("a made-up status is All", readLinkFilters({ status: "maybe" }).status, "");

@@ -18,6 +18,7 @@
 // Clerk token, so these accounts are reachable through `actorId` and through
 // nothing else — which is exactly right for someone who has no Clerk login.
 
+import { readWorkCountry } from "../../src/lib/countries";
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { Doc } from "../_generated/dataModel";
@@ -186,10 +187,13 @@ export const adminSaveUser = internalMutation({
     phone: v.optional(v.union(v.string(), v.null())),
     routingEmail: v.optional(v.union(v.string(), v.null())),
     taRole: deskRole,
+    /** Sri Lanka, India or Pakistan (src/lib/countries); null clears it, absent leaves it. */
+    workCountry: v.optional(v.union(v.string(), v.null())),
   },
   handler: async (ctx, args) => {
     const actor = await requireActor(ctx, args.actorId);
     if (!isActiveAdmin(actor)) throw new Error("[403] Only an admin can manage people and roles.");
+    if (args.workCountry && !readWorkCountry(args.workCountry)) throw new Error("Pick Sri Lanka, India or Pakistan.");
 
     const email = args.email.trim().toLowerCase();
     const fullName = args.fullName.trim();
@@ -205,6 +209,7 @@ export const adminSaveUser = internalMutation({
       taRole: args.taRole,
       role: (ROLE_MAP[args.taRole] ?? "viewer") as Doc<"users">["role"],
       initials: initialsOf(fullName),
+      ...(args.workCountry !== undefined ? { workCountry: readWorkCountry(args.workCountry) ?? undefined } : {}),
       updatedAt: now,
     };
 

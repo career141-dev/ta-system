@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { toHtmlTable, toTsv } from "@/lib/spreadsheetClipboard";
+import { levelParam } from "@/lib/linkViews";
 
 interface LinkExportMenuProps {
   openingId: string;
@@ -12,6 +13,7 @@ interface LinkExportMenuProps {
     addons?: boolean;
     imark?: boolean;
     by?: string;
+    day?: string;
     location?: string;
   };
   matchingCount: number;
@@ -43,10 +45,11 @@ export function LinkExportMenu({ openingId, filters, matchingCount }: LinkExport
     const p: Record<string, string> = {};
     if (filters.q) p.q = filters.q;
     if (filters.status) p.status = filters.status;
-    if (filters.level) p.level = String(filters.level);
+    if (filters.level) p.level = levelParam(filters.level);
     if (filters.addons) p.addons = "1";
     if (filters.imark) p.imark = "1";
     if (filters.by) p.by = filters.by;
+    if (filters.day) p.day = filters.day;
     if (filters.location) p.location = filters.location;
     for (const [k, v] of Object.entries(extra)) p[k] = v;
     return new URLSearchParams(p).toString();
