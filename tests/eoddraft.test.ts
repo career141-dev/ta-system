@@ -93,7 +93,14 @@ eq("returning to review resets edits even if the source notes are identical", ap
 const reviewSaved = { ...form, ...candidateDraftBases([firstReview], form) };
 eq("server drafts preserve deletions in the same review visit", applyCandidateDraft(firstReview, candidateDraftsFromFields([firstReview], reviewSaved).app1).notes, [">Available for interviews"]);
 eq("server drafts expire when the candidate returns to review", applyCandidateDraft(nextReview, candidateDraftsFromFields([nextReview], reviewSaved).app1).notes, nextReview.notes);
-eq("unversioned edits cannot override a new review visit", applyCandidateDraft(nextReview, legacy).notes, nextReview.notes);
+// Drafts saved before visits were recorded are kept (22 Oct): releasing
+// #243 during the day must not throw away TAs' unsent EOD box edits.
+eq("a draft saved before visits were recorded keeps the TA's notes", applyCandidateDraft(nextReview, legacy).notes, legacy.notes);
+eq("an older server draft keeps its edits after the release", applyCandidateDraft(firstReview, candidateDraftsFromFields([firstReview], form).app1).notes, [">Available for interviews"]);
+const adopted = editCandidateDraft(legacy, firstReview, "age", "33");
+eq("editing an older draft keeps its notes", applyCandidateDraft(firstReview, adopted).notes, legacy.notes);
+eq("and stamps it with this visit", adopted._reviewStageChangedAt, 100);
+eq("so a later return to review starts fresh", applyCandidateDraft(nextReview, adopted).notes, nextReview.notes);
 const nextEdit = editCandidateDraft(firstEdit, nextReview, "age", "32");
 eq("editing another field does not revive earlier notes", applyCandidateDraft(nextReview, nextEdit).notes, nextReview.notes);
 eq("new review edits are preserved", applyCandidateDraft(nextReview, nextEdit).age, "32");
