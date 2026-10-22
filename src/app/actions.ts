@@ -16,6 +16,8 @@ import {
   type OpeningStatusValue,
   type OpeningWriteDeps,
 } from "@/lib/openings/writes";
+import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
+import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
@@ -24,12 +26,12 @@ import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
 import { BACK_TO_TABLES_REASON, movedBackToTables, awaitingShortlist } from "@/lib/pipeline";
 import { BULK_STAGES } from "@/lib/bulkStages";
 import { linkedinPostUrl } from "@/lib/workdayRequirements";
-import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
+import { extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
 import { invalidateCandidate, markTablesStale, resetStore, withRealIds } from "@/data/primeState";
-import { assignableTas } from "@/lib/assignable";
-import { maxModelCost, modelCost, reserve } from "@/lib/spend";
+import { contextFor, draftJd, extractJobDetails, jdBriefsFor } from "@/lib/openings/jdDraft";
+import { saveNewClient as sharedSaveNewClient, saveNewOpening as sharedSaveNewOpening } from "@/lib/openings/create";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
 import type { DailyEmail, DailyEmailSnapshot, SubmissionType } from "@/lib/dailyEmail";
@@ -58,12 +60,7 @@ function redirect(url: string): never {
   return nextRedirect(withRealIds(url)) as never;
 }
 import { after } from "next/server";
-import {
-  generateJdText,
-  reviseJdText,
-  type JdBrief,
-  type OpeningContext,
-} from "@/lib/headhunt";
+import { reviseJdText } from "@/lib/headhunt";
 import { FAILURE_MESSAGE, gemini, modelFor } from "@/lib/ai";
 import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
@@ -78,7 +75,7 @@ import { isTicked } from "@/lib/strategyPlanner";
 import { dateAt } from "@/lib/format";
 import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
-import { clearMatching, markMatching, matchFailureText } from "@/lib/matchingNow";
+import { markMatching } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexAction, convexActorForEmail, convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
@@ -924,141 +921,26 @@ export async function createOpeningInline(
 }
 
 /** Screen one's write. Returns the new opening's id, or null when something required is missing. */
-async function saveNewOpening(formData: FormData, user: User): Promise<string | null> {
-  const clientId = String(formData.get("clientId") ?? "");
-  const title = String(formData.get("title") ?? "").trim();
-  const notes = String(formData.get("notes") ?? "");
-  const recordingKey = String(formData.get("recordingKey") ?? "") || null;
-  const consentText = String(formData.get("consentText") ?? "") || null;
-  const durationMs = Number(formData.get("durationMs") ?? 0) || null;
-
-  // Where the job is, whose passport the client wants, and — only where they
-  // said so — which gender. These three decide where sourcing looks, so they are
-  // asked at intake rather than inferred from the address later (§8A.2).
-  const country = String(formData.get("country") ?? "").trim();
-  const hiringFor = String(formData.get("hiringFor") ?? "local");
-  const gender = String(formData.get("targetGender") ?? "").trim() || null;
-  const autoFollowUp = formData.get("autoFollowUp") === "on";
-  const workLocations = readWorkLocations(formData);
-
-  const isLead = user.role === "ta_lead" || user.role === "admin";
-  // A lead assigns from the active TAs only (lib/assignable); anyone else sent
-  // is dropped rather than trusted from the form.
-  const tas = new Set(assignableTas(repo.users()).map((u) => u.id));
-  const assigned = isLead
-    ? formData.getAll("assignedTaIds").map(String).filter((id) => tas.has(id))
-    : [user.id];
-
-  // No TA is fine: it is assigned later, by workload (plan 4.1).
-  if (!clientId || !title) return null;
-
-  const users = repo.users();
-  const taLeadId = isLead ? user.id : (users.find((u) => u.role === "ta_lead")?.id ?? user.id);
-  const directorId = users.find((u) => u.role === "director")?.id ?? null;
-
-  let openingId: string;
-
-  if (isConvex()) {
-    openingId = await backend.createOpening(
-      { id: user.id },
-      {
-        clientId,
-        title,
-        country,
-        workLocations,
-        hiringFor,
-        targetGender: gender,
-        jdMarkdown: "",
-        assignedTaIds: assigned,
-        taLeadId,
-        directorId,
-        notesMarkdown: notes,
-        briefKind: isLead ? "management_to_lead" : "lead_to_ta",
-        briefExtracted: notes.trim() ? { ...extractFromText(notes), title } : undefined,
-        autoFollowUp,
-      },
-    );
-    const { resetStore } = await import("@/data/prime");
-    resetStore();
-  } else {
-    const extracted = notes.trim()
-      ? { ...extractFromText(notes), title }
-      : { ...EMPTY_EXTRACT, title };
-
-    const briefId = repo.createBrief({
-      clientId,
-      openingId: null,
-      kind: isLead ? "management_to_lead" : "lead_to_ta",
-      capturedBy: user.id,
-      capturedAt: Date.now(),
-      method: recordingKey ? (notes.trim() ? "both" : "recording") : "notes",
-      notesMarkdown: notes,
-      transcriptStatus: recordingKey ? "unavailable" : "none",
-      transcript: null,
-      recordingKey,
-      recordingDurationMs: durationMs,
-      consentAcknowledgedBy: consentText ? user.id : null,
-      consentAcknowledgedAt: consentText ? Date.now() : null,
-      consentText,
-      extracted,
-    });
-
-    // The JD stays empty here. It is written on screen two, by the TA.
-    openingId = repo.createOpeningFromBrief(briefId, {
-      clientId,
-      country,
-      workLocations,
-      hiringFor,
-      targetGender: gender,
-      jdMarkdown: "",
-      taLeadId,
-      assignedTaIds: assigned,
-      directorId,
-      autoFollowUp,
-    });
-  }
-
-  revalidatePath("/openings", "layout");
-  revalidatePath("/alerts");
-  revalidatePath("/api/notifications");
-
-  const notifyTaIds = assigned.filter((id) => id !== user.id);
-  if (notifyTaIds.length) {
-    await Promise.all(
-      notifyTaIds.map((taId) =>
-        convexMutation("ta/notifications:create", {
-          userId: taId,
-          type: "opening_assigned",
-          title: "You were assigned to an opening",
-          body: `${user.name} assigned you to ${title}.`,
-          jobId: openingId,
-        }).catch((e) => console.error("[notifications] opening_assigned failed:", e)),
-      ),
-    );
-  }
-
-  // The groundwork starts the moment the job exists, not when somebody finds
-  // the button: the JD draft for the TA to read, after the response is sent so
-  // creating the opening is not held up.
-  //
-  // Research and the first round of Suggestions ran here too from 24 Sep, on
-  // the first draft. Since 25 Sep the TA works the JD out with the AI in the
-  // JD chat, so they wait for the approved JD and start from approveJd,
-  // searching with the words the TA agreed.
-  after(async () => {
-    const step = async (what: string, work: () => Promise<unknown>) => {
-      try {
-        await work();
-      } catch (err) {
-        console.error(`[prepare ${openingId}] ${what}`, err);
-      }
-    };
-    if (isConvex()) await step("load", () => primeStore({ openingId }));
-    await step("JD draft", () => draftJd(openingId));
-    revalidatePath(`/openings/${openingId}`, "layout");
-  });
-
-  return openingId;
+/** Screen one's fields, for the shared save (lib/openings/create, 22 Oct). Null when something required is missing. */
+function saveNewOpening(formData: FormData, user: User): Promise<string | null> {
+  return sharedSaveNewOpening(
+    user,
+    {
+      clientId: String(formData.get("clientId") ?? ""),
+      title: String(formData.get("title") ?? ""),
+      notes: String(formData.get("notes") ?? ""),
+      recordingKey: String(formData.get("recordingKey") ?? "") || null,
+      consentText: String(formData.get("consentText") ?? "") || null,
+      durationMs: Number(formData.get("durationMs") ?? 0) || null,
+      country: String(formData.get("country") ?? "").trim(),
+      hiringFor: String(formData.get("hiringFor") ?? "local"),
+      targetGender: String(formData.get("targetGender") ?? "").trim() || null,
+      autoFollowUp: formData.get("autoFollowUp") === "on",
+      workLocations: readWorkLocations(formData),
+      assignedTaIds: formData.getAll("assignedTaIds").map(String),
+    },
+    { ...OPENING_DEPS, after },
+  );
 }
 
 /** Screen two — the TA saves their notes before generating from them. */
@@ -1111,19 +993,6 @@ function saveOwnNotes(openingId: string, userId: string, notes: string): boolean
     extracted,
   });
   return true;
-}
-
-/** Everyone's details about an opening, for the JD: the lead's brief and each TA's notes. */
-function jdBriefsFor(openingId: string): JdBrief[] {
-  return repo.briefsForOpening(openingId).map((b) => {
-    const author = repo.user(b.capturedBy);
-    const transcript = b.transcriptStatus === "ready" && b.transcript ? `\n\nFrom the recording:\n${b.transcript}` : "";
-    return {
-      author: author?.name ?? "someone on the desk",
-      role: isTa(author) ? ("ta" as const) : ("lead" as const),
-      notes: `${b.notesMarkdown ?? ""}${transcript}`,
-    };
-  });
 }
 
 /**
@@ -1381,26 +1250,9 @@ function salaryNoteOf(o: import("@/data/types").Opening): string {
  * approval), then run matching against the result. Bounded: if extraction is
  * slow or failed, matching still runs on what the opening has.
  */
-async function rematchWhenRequirementsSettle(openingId: string, actorId: string, trigger: "jd_approved" | "manual" = "jd_approved") {
-  // Marked before the response by the caller (lib/matchingNow); cleared here
-  // however the run ends, so the page never says "running" for a dead run.
-  let failure: string | null = null;
-  try {
-    for (let i = 0; i < 30; i++) {
-      const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
-      const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
-      if (status !== "extracting") break;
-      await new Promise((res) => setTimeout(res, 3_000));
-    }
-    const { resetStore } = await import("@/data/prime");
-    resetStore();
-    await primeStore({ openingId });
-    const r = await findDatabaseMatches(openingId, trigger).catch((e: unknown) => ({ ok: false as const, reason: (e as Error).message }));
-    if (!r.ok) failure = matchFailureText(r.reason);
-  } finally {
-    clearMatching(openingId, failure);
-    revalidatePath(`/openings/${openingId}`, "layout");
-  }
+/** The matching run, shared with the mobile API (lib/openings/matching, 22 Oct). */
+function rematchWhenRequirementsSettle(openingId: string, actorId: string, trigger: "jd_approved" | "manual" = "jd_approved") {
+  return rematchShared(openingId, actorId, trigger, revalidatePath);
 }
 
 // Split the same way the backend does, so a comma inside brackets
@@ -2126,27 +1978,9 @@ export async function moveBackToTables(formData: FormData) {
 export async function requestOpeningAccess(formData: FormData) {
   await primeStore({});
   const user = await getCurrentUser();
-  if (!isTa(user)) await fail("Only a TA can request access to an opening.");
-  const openingId = String(formData.get("openingId") ?? "");
-  const reason = String(formData.get("reason") ?? "");
-  if (!openingId) await fail("Select an opening first.");
-  if (!isConvex()) await fail("Access requests need the connected system.");
-  let result: { ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean } | null = null;
-  try {
-    result = await convexMutation<{ ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean }>(
-      "ta/openingAccess:request",
-      { actorId: user.id, openingId, reason: reason || undefined },
-    );
-  } catch (error) {
-    await fail(backendMessage(error, "The access request could not be sent."));
-  }
-  if (!result) await fail("The access request could not be sent.");
-  const outcome = result!;
-  revalidatePath("/openings");
-  revalidatePath("/api/notifications");
-  if (outcome.alreadyAssigned) await note("You already have access to that opening.");
-  if (outcome.alreadyPending) await note("Your access request is already waiting for approval.");
-  await done("Access request sent to the TA Lead.");
+  // Shared with the mobile API (lib/openings/admin, 22 Oct).
+  const r = await requestAccess(user, String(formData.get("openingId") ?? ""), String(formData.get("reason") ?? ""), OPENING_DEPS);
+  await (r.ok ? (r.tone === "note" ? note : done) : fail)(r.message);
 }
 
 /** Approving and assigning happen in one backend transaction, so a requester
@@ -2154,27 +1988,15 @@ export async function requestOpeningAccess(formData: FormData) {
 export async function decideOpeningAccess(formData: FormData) {
   await primeStore({});
   const user = await getCurrentUser();
-  const requestId = String(formData.get("requestId") ?? "");
-  const decision = String(formData.get("decision") ?? "");
-  if (decision !== "approve" && decision !== "reject") await fail("Choose Approve or Reject.");
-  const approve = decision === "approve";
-  const reason = String(formData.get("reason") ?? "");
-  if (!requestId) await fail("That access request no longer exists.");
-  if (!isConvex()) await fail("Access requests need the connected system.");
-  try {
-    await convexMutation("ta/openingAccess:decide", {
-      actorId: user.id,
-      requestId,
-      approve,
-      reason: reason || undefined,
-    });
-  } catch (error) {
-    await fail(backendMessage(error, "The access request could not be decided."));
-  }
-  markTablesStale();
-  revalidatePath("/openings", "layout");
-  revalidatePath("/api/notifications");
-  await done(approve ? "Access approved. The TA was added as a supporting recruiter." : "Access request rejected.");
+  // Shared with the mobile API (lib/openings/admin, 22 Oct).
+  const r = await decideAccess(
+    user,
+    String(formData.get("requestId") ?? ""),
+    String(formData.get("decision") ?? ""),
+    String(formData.get("reason") ?? ""),
+    OPENING_DEPS,
+  );
+  await (r.ok ? done : fail)(r.message);
 }
 
 export async function setOpeningStatus(formData: FormData) {
@@ -2207,53 +2029,9 @@ export async function setOpeningTeam(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("memberId").map(String);
   const roles = formData.getAll("memberRole").map(String);
-
-  const rows = ids
-    .map((userId, i) => ({
-      userId,
-      role: roles[i] as import("@/data/types").AssignmentRole,
-    }))
-    .filter((r) => r.userId && r.role);
-
-  // One person, one seat: the last row wins if somebody is listed twice.
-  const unique = [...new Map(rows.map((r) => [r.userId, r])).values()];
-  const recruiters = unique.filter(
-    (r) => r.role === "primary_recruiter" || r.role === "supporting_recruiter",
-  );
-  if (recruiters.length === 0) {
-    redirect(
-      `/openings/${openingId}?msg=${encodeURIComponent(
-        "A team needs at least one recruiter on it. Nothing was changed.",
-      )}`,
-    );
-  }
-
-  // Whoever is newly on the recruiting seats — not the reviewers alongside
-  // them — gets a bell notification. Captured before the write, since after
-  // it the old team is gone.
-  const previousTeam = new Set(repo.assignments(openingId).map((a) => a.userId));
-  const newlyAssigned = recruiters.filter((r) => r.userId !== user.id && !previousTeam.has(r.userId));
-
-  repo.setAssignments(openingId, unique, user.id);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  revalidatePath("/alerts");
-  revalidatePath("/api/notifications");
-
-  if (newlyAssigned.length) {
-    const opening = repo.opening(openingId);
-    const title = opening?.title ?? "an opening";
-    await Promise.all(
-      newlyAssigned.map((r) =>
-        convexMutation("ta/notifications:create", {
-          userId: r.userId,
-          type: "opening_assigned",
-          title: "You were assigned to an opening",
-          body: `${user.name} added you to ${title} as ${ASSIGNMENT_LABEL[r.role]}.`,
-          jobId: openingId,
-        }).catch((e) => console.error("[notifications] opening_assigned failed:", e)),
-      ),
-    );
-  }
+  // Shared with the mobile API (lib/openings/admin, 22 Oct).
+  const r = await writeOpeningTeam(user, openingId, ids.map((userId, i) => ({ userId, role: roles[i] })), OPENING_DEPS);
+  if (!r.ok) redirect(`/openings/${openingId}?msg=${encodeURIComponent(r.message)}`);
 }
 
 export async function addClient(formData: FormData) {
@@ -2286,43 +2064,14 @@ export async function createClientInline(
   }
 }
 
-async function saveNewClient(formData: FormData, user: User): Promise<{ id: string; name: string; industry: string } | null> {
-  const name = String(formData.get("name") ?? "").trim();
-  const industry = String(formData.get("industry") ?? "").trim() || "Other";
-  if (!name) return null;
-
-  // The form has always asked for the main contact. Until the 12 Sep sweep it
-  // was read off the request and thrown away.
-  const contactName = String(formData.get("contactName") ?? "").trim();
-  const contacts = contactName
-    ? [
-        {
-          name: contactName,
-          title: String(formData.get("contactTitle") ?? "").trim(),
-          email: String(formData.get("contactEmail") ?? "").trim(),
-          isPrimary: true,
-        },
-      ]
-    : [];
-
-  let newId: string;
-  const { isConvex } = await import("@/data/mode");
-  if (isConvex()) {
-    const { convexActorForEmail, convexMutation } = await import("@/lib/convexServer");
-    const actor = await convexActorForEmail(user.email);
-    newId = (await freshAfter(convexMutation<string>)("ta/clients:add", {
-      actorId: actor?._id,
-      name,
-      industry,
-      contacts,
-    })) ?? "";
-  } else {
-    newId = repo.addClient({ name, industry, contacts });
-  }
-
-  revalidatePath("/clients");
-  revalidatePath("/openings/new");
-  return { id: withRealIds(newId), name, industry };
+/** The client forms' fields, for the shared save (lib/openings/create, 22 Oct). */
+function saveNewClient(formData: FormData, user: User) {
+  const field = (k: string) => String(formData.get(k) ?? "");
+  return sharedSaveNewClient(
+    user,
+    { name: field("name"), industry: field("industry"), contactName: field("contactName"), contactTitle: field("contactTitle"), contactEmail: field("contactEmail") },
+    OPENING_DEPS,
+  );
 }
 
 export async function updateClient(formData: FormData) {
@@ -2468,40 +2217,26 @@ export async function updateOpening(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const list = (v: FormDataEntryValue | null) =>
-    String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  // Commas and currency go; a minus sign does not. Stripping it turned "-5000"
-  // into 5000 (audit finding 40). A negative or zero amount is no amount.
-  const num = (v: FormDataEntryValue | null) => {
-    const n = Number(String(v ?? "").replace(/[^\d.\-]/g, ""));
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-  const title = String(formData.get("title") ?? "").trim();
-  if (!title) await fail("An opening needs a title.");
-  const salaryMin = num(formData.get("salaryMin"));
-  const salaryMax = num(formData.get("salaryMax"));
-  if (salaryMin !== null && salaryMax !== null && salaryMin > salaryMax) {
-    await fail("The salary 'from' is higher than the 'to'.");
-  }
-  const tier = String(formData.get("priorityTier") ?? "P3");
-  if (!["P1", "P2", "P3", "P4", "P5"].includes(tier)) await fail("Pick a priority from the list.");
-  const currency = String(formData.get("salaryCurrency") ?? "LKR");
-  if (!/^[A-Z]{3}$/.test(currency)) await fail("Pick a currency from the list.");
-
+  const field = (name: string, fallback = "") => String(formData.get(name) ?? fallback);
   const workLocations = readWorkLocations(formData, repo.opening(openingId)?.workLocations);
-  repo.updateOpening(openingId, {
-    ...(workLocations ? { workLocations } : {}),
-    title,
-    salaryMin,
-    salaryMax,
-    salaryCurrency: currency,
-    packageNotes: String(formData.get("packageNotes") ?? "").trim(),
-    locations: workLocations ? workLocations.filter(l => !l.archived).map(l => l.name) : list(formData.get("locations")),
-    targetNationalities: list(formData.get("targetNationalities")),
-    headcount: workLocations ? workLocations.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0) : Math.max(1, Number(formData.get("headcount") ?? 1) || 1),
-    priorityTier: String(formData.get("priorityTier") ?? "P3") as PriorityTier,
-  });
-  revalidatePath(`/openings/${openingId}`, "layout");
+  // Checked and saved by the code the mobile API uses too (lib/openings/admin, 22 Oct).
+  const r = writeOpeningDetails(
+    openingId,
+    {
+      title: field("title"),
+      salaryMin: field("salaryMin"),
+      salaryMax: field("salaryMax"),
+      salaryCurrency: field("salaryCurrency", "LKR"),
+      packageNotes: field("packageNotes"),
+      locations: field("locations"),
+      targetNationalities: field("targetNationalities"),
+      headcount: field("headcount", "1"),
+      priorityTier: field("priorityTier", "P3"),
+    },
+    workLocations,
+    OPENING_DEPS,
+  );
+  if (!r.ok) await fail(r.message);
   await back("Opening saved.");
 }
 
@@ -3479,23 +3214,6 @@ export async function placeUnmatchedInline(_: ActionResult | null, formData: For
 // ─── Headhunting intelligence (spec §8A) ─────────────────────────────────────
 
 
-function contextFor(openingId: string): OpeningContext | null {
-  const o = repo.opening(openingId);
-  if (!o) return null;
-  const client = repo.client(o.clientId);
-  const brief = o.briefId ? repo.brief(o.briefId) : null;
-  return {
-    title: o.title,
-    clientName: client?.name ?? "the client",
-    industry: client?.industry ?? "",
-    locations: o.locations,
-    packageNotes: o.packageNotes,
-    mustHaves: brief?.extracted?.mustHaves ?? [],
-    nationalities: o.targetNationalities,
-    gender: o.targetGender,
-  };
-}
-
 export async function runResearch(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
@@ -3837,152 +3555,6 @@ export async function dismissSuggestion(formData: FormData) {
   await authorize(formData, "opening.sourcing", { suggestion: "suggestionId", opening: "openingId" });
   repo.setSuggestionStatus(String(formData.get("suggestionId")), "dismissed", "not_relevant");
   revalidatePath(`/openings/${String(formData.get("openingId"))}/hh/suggestions`);
-}
-
-/** Spec §5.2 — the model writes it, the TA still approves it. */
-/**
- * Write the JD draft for an opening, from its brief. The TA reads and approves
- * it; nothing here approves anything. Used by the button, and automatically the
- * moment an opening is created.
- */
-async function draftJd(openingId: string, actorId?: string): Promise<{ ok: boolean; reason?: string } | null> {
-  const opening = repo.opening(openingId);
-  const c = contextFor(openingId);
-  if (!opening || !c) return null;
-  const client = repo.client(opening.clientId);
-
-  // The lead's brief and every TA's notes, together. On Convex a brief written
-  // by the backend in this same request may not be in the loaded tables yet,
-  // so its joined notes stand in when the store has none.
-  let briefs = jdBriefsFor(openingId);
-  if (isConvex() && !briefs.some((b) => b.notes.trim())) {
-    const notes = await convexQuery<string>("ta/openings:briefNotes", { openingId }).catch(() => "");
-    const lead = repo.user(opening.taLeadId ?? "");
-    if (notes.trim()) briefs = [{ author: lead?.name ?? "the TA lead", role: "lead", notes }];
-  }
-  const allNotes = briefs.map((b) => b.notes).filter((n) => n.trim()).join("\n\n");
-  const extracted = allNotes.trim() ? { ...extractFromText(allNotes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
-  const template = buildJd(extracted, client?.name ?? "the client");
-  const context = { ...c, mustHaves: extracted.mustHaves?.length ? extracted.mustHaves : c.mustHaves };
-
-  // Once the TA has started asking the AI for changes, the Job details stay
-  // as they were until the JD is approved, and are then read from it (25 Sep).
-  const followNotes = detailsFollowNotes(repo.jdChat(openingId));
-
-  if (isConvex()) {
-    // The draft is saved in the backend. Nothing is approved here — the TA reads it first.
-    // The Job details are read from the same notes at the same time.
-    const [res] = await Promise.all([
-      generateJdText(context, briefs, template, opening.jdMarkdown ?? ""),
-      followNotes ? extractJobDetails(openingId, context, briefs).catch((e) => console.error(`[details ${openingId}]`, e)) : null,
-    ]);
-    // The backend is the only writer here. It stamps the row's updatedAt, so
-    // a second write through the store (repo.updateJd) arrived with an older
-    // updatedAt and the commit read it as somebody else's edit — the
-    // "Someone else changed this record" every regeneration showed, which also
-    // threw away the new draft until the page was reloaded (22 September).
-    const writer = actorId ?? opening.assignedTaIds[0] ?? opening.taLeadId ?? null;
-    const jd = res.ok ? res.text : template;
-    if (!writer) {
-      repo.updateJd(openingId, jd);
-      return res.ok ? { ok: true } : { ok: false, reason: res.reason };
-    }
-    try {
-      await convexMutation("ta/openings:saveJd", { actorId: writer, openingId, jdMarkdown: jd });
-    } catch (e) {
-      console.error(`[draftJd ${openingId}]`, e);
-      return { ok: false, reason: "The draft could not be saved. Try again." };
-    }
-    // The loaded copy is now behind the backend; the next read fetches it.
-    const { resetStore } = await import("@/data/prime");
-    resetStore();
-    return res.ok ? { ok: true } : { ok: false, reason: res.reason };
-  }
-
-  if (followNotes) repo.applyExtractedToOpening(openingId, extracted);
-  const res = await generateJdText(context, briefs, template, opening.jdMarkdown ?? "");
-  // The template is not a failure state — it is what the desk has always had.
-  repo.updateJd(openingId, res.ok ? res.text : template);
-  return res.ok ? { ok: true } : { ok: false, reason: res.reason };
-}
-
-/**
- * The Job details — skills, nice-to-haves, seniority, years, location,
- * education, salary, languages, industry — read from the opening and from what
- * the lead and the TA wrote, before any JD is approved.
- *
- * Uses the backend's own JD extractor and normalisation (convex/lib/jdParser —
- * DeepSeek through OpenRouter; convex/lib/jobRequirements — skills split on
- * commas, salary "450k LKR" into numbers, seniority onto the schema's levels),
- * so a value read here is one the panel can show and save back. A field a
- * person corrected is never overwritten. Approving the JD later reads the JD
- * too, filling only what is still blank.
- */
-async function extractJobDetails(openingId: string, c: OpeningContext, briefs: JdBrief[]): Promise<void> {
-  const given = briefs.filter((b) => b.notes.trim());
-  if (given.length === 0) return;
-  const text = [
-    `Job title: ${c.title}`,
-    `Client: ${c.clientName}${c.industry ? ` (${c.industry})` : ""}`,
-    c.locations.length ? `Location: ${c.locations.join(", ")}` : null,
-    c.nationalities?.length ? `Hiring: ${c.nationalities.join(", ")} nationals` : null,
-    "",
-    ...given.map((b) => `${b.role === "lead" ? "TA lead's brief" : "TA's notes"} (${b.author}):\n${b.notes.trim()}\n`),
-    given.some((b) => b.role === "ta") && given.some((b) => b.role === "lead")
-      ? "Where the TA's notes and the lead's brief disagree, the TA's notes are later and are correct."
-      : null,
-    // 16 September: without this the package and hybrid working came back as
-    // nice-to-have "skills" — "vehicle allowance management".
-    "Salary, allowances, benefits and working arrangements are not skills: leave them out of the skill lists.",
-  ]
-    .filter((l) => l !== null)
-    .join("\n");
-
-  const [{ extractSearchRequirements }, { valuesFromExtraction, mapSeniority, SENIORITY_LEVELS }] = await Promise.all([
-    import("../../convex/lib/jdParser"),
-    import("../../convex/lib/jobRequirements"),
-  ]);
-  const model = "deepseek/deepseek-v4-flash";
-  const settle = reserve("job details from notes", maxModelCost(model, text.length + 3000, 1400));
-  let result: Awaited<ReturnType<typeof extractSearchRequirements>>;
-  try {
-    result = await extractSearchRequirements(text, "job_description");
-    settle(modelCost(model, result.usage.promptTokens, result.usage.completionTokens));
-  } catch (e) {
-    settle(0);
-    throw e;
-  }
-  // Every model failed and the parser split words instead: not an extraction.
-  if (result.usage.model === "regex-fallback") return;
-  const values = valuesFromExtraction(result.requirements);
-  // The extractor guesses a level from the duties ("mid", "senior"); a title
-  // that names one ("Finance Manager") is the client's own word for it, so the
-  // title wins wherever it names a higher level (16 September: a Finance
-  // Manager managing four accountants came back Mid-Level, then Senior Executive).
-  const byTitle = mapSeniority(c.title);
-  const rank = (level: string | undefined) =>
-    !level || level === "other" ? -1 : SENIORITY_LEVELS.indexOf(level as (typeof SENIORITY_LEVELS)[number]);
-  if (byTitle && byTitle !== "other" && rank(byTitle) > rank(values.seniorityLevel)) {
-    values.seniorityLevel = byTitle;
-  }
-  // A language is asked for once, under Languages — "fluent English" as a
-  // skill as well only matches CVs that repeat the phrase.
-  const languages = (values.languagesRequired ?? []).map((l) => l.toLowerCase());
-  const notLanguage = (skill: string) => !languages.some((l) => skill.toLowerCase().includes(l));
-  if (values.requiredSkills) values.requiredSkills = values.requiredSkills.filter(notLanguage);
-  if (values.niceToHaveSkills) values.niceToHaveSkills = values.niceToHaveSkills.filter(notLanguage);
-  if (values.requiredSkills?.length === 0) delete values.requiredSkills;
-  if (values.niceToHaveSkills?.length === 0) delete values.niceToHaveSkills;
-  const args = { jobId: openingId, values, model: result.usage.model };
-  try {
-    await convexMutation("ta/requirements:applyExtraction", { ...args, mode: "replace", keepLocks: true });
-  } catch (e) {
-    // A backend not yet deployed with `keepLocks` refuses the argument; filling
-    // blanks is still right, and a later notes change can be re-extracted.
-    if (!/keepLocks|extra field|Validator/i.test((e as Error).message)) throw e;
-    await convexMutation("ta/requirements:applyExtraction", { ...args, mode: "fill" });
-  }
-  markTablesStale();
 }
 
 /**
@@ -4651,11 +4223,8 @@ export async function findMatchesNow(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  if (repo.opening(openingId)?.jdStatus !== "approved") await fail(matchFailureText("jd_not_approved"));
-  markMatching(openingId);
-  after(() => rematchWhenRequirementsSettle(openingId, user.id, "manual"));
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Matching started — new matches appear here when it finishes.");
+  const r = startMatching(user, openingId, { revalidatePath, schedule: (work) => after(work) });
+  await (r.ok ? done : fail)(r.message);
 }
 
 /** The desk's standard questions — which are asked, and how they read. */
