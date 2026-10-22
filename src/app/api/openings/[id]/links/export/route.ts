@@ -7,6 +7,7 @@ import { matchesQuery } from "@/lib/paging";
 import { buildXlsx, toTsv, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
 import { getScopedLinkVaultEntries, buildLinkExportLayout } from "@/lib/linkExport";
 import { workLocationView } from "@/lib/workLocations";
+import { excelFilename, excelDownloadDisposition } from "@/lib/excelFilename";
 
 export const dynamic = "force-dynamic";
 
@@ -109,9 +110,7 @@ export async function GET(
   }
 
   const city = opening.workLocations?.find(l => l.id === location)?.name;
-  const safeJobTitle = `${opening.title}${city ? `-${city}` : ""}`.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 150);
-  const stamp = new Date().toISOString().slice(0, 10);
-  const filename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
+  const filename = excelFilename(repo.client(opening.clientId)?.name || "Client", opening.title, city);
 
   const buffer = buildXlsx({ sheets: layout.sheets });
 
@@ -119,7 +118,7 @@ export async function GET(
     status: 200,
     headers: {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Content-Disposition": excelDownloadDisposition(filename),
       "Cache-Control": "private, no-cache",
     },
   });

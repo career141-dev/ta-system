@@ -157,8 +157,8 @@ eq("attachment is returned", attachment !== null, true);
 if (attachment) {
   eq("contentType is OpenXML spreadsheet", attachment.contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   const stamp = new Date().toISOString().slice(0, 10);
-  const safeTitle = opening.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  eq("filename has correct pattern", attachment.filename, `career141-${safeTitle}-excel-tables-${stamp}.xlsx`);
+  const { excelFilename } = await import("@/lib/excelFilename");
+  eq("filename has correct pattern", attachment.filename, excelFilename(repo.client(opening.clientId)?.name || "Client", opening.title, undefined, new Date(stamp)));
   eq("base64 is valid encoding of buffer", attachment.base64, attachment.buffer.toString("base64"));
   eq("rowCount is positive", attachment.rowCount > 0, true);
 

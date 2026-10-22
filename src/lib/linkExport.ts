@@ -5,6 +5,7 @@ import { scopeLinks } from "@/lib/visibility";
 import { interestOf } from "@/lib/linkViews";
 import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 import { buildXlsx, formatLinkVaultExportRows, uniqueSheetNames, EXCEL_TABLES_EXPORT_HEADERS, type XlsxSheet } from "@/lib/xlsx";
+import { excelFilename } from "@/lib/excelFilename";
 import { inWorkLocation } from "./workLocations";
 
 export interface ExcelExportAttachment {
@@ -151,10 +152,9 @@ export function buildOpeningExcelAttachment(
 
   const layout = buildLinkExportLayout(entries, facts, userNames, canSeeLeadNotes);
 
-  const location = repo.opening(openingId)?.workLocations?.find(l => l.id === workLocationId);
-  const safeJobTitle = `${openingTitle}${location ? `-${location.name}` : ""}`.replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 150);
-  const stamp = new Date().toISOString().slice(0, 10);
-  const filename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
+  const opening = repo.opening(openingId);
+  const location = opening?.workLocations?.find(l => l.id === workLocationId);
+  const filename = excelFilename(opening ? repo.client(opening.clientId)?.name || "Client" : "Client", openingTitle, location?.name);
 
   const buffer = buildXlsx({ sheets: layout.sheets });
 

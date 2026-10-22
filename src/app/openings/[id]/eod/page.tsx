@@ -387,7 +387,9 @@ export default async function EodPage({
         allowActivityOnly={!!location}
         submissionType={midday ? "midday" : "eod"}
         excelLinksCount={excelLinksCount}
-        openingTitle={subjectTitle}
+        openingTitle={o.title}
+        clientName={client.name}
+        workLocationName={location?.name}
         dailyDraft={draft ? { id: draft._id, revision: draft.revision, fields: draft.fields } : undefined}
         dailyParentId={correction?._id}
         useDailyEmail={isConvex() && isTa(user)}
