@@ -323,9 +323,15 @@ function verdictsForSentence(cs: string[], mentions?: (clause: string) => boolea
       if (isUnreadable(v)) break;
       if (v) found = v;
     }
+    // Never forward from a clause about other people (22 Oct): "1 and 3, not
+    // 2" read "not 2" for 1 and 3 and rejected all three, marked safe. Left
+    // without a verdict, a bare list reads as a pick and a named person goes
+    // to review (readHits).
+    const namesOwn = !!mentions && mentions(cs[i]);
     for (let j = i + 1; j < cs.length && !found; j++) {
       const v = own[j];
       if (isUnreadable(v)) break;
+      if (namesOwn && mentions!(cs[j])) break;
       if (v) found = v;
     }
     out.push(found);
@@ -408,6 +414,8 @@ function readHits(reply: string, list: Candidateish[]) {
   const outOfRange = new Set<number>();
   /** Sentences that gave a verdict about nobody in the set. */
   const unplaced: string[] = [];
+  /** Clauses that name someone in the set but say nothing about them, beside a clause that decides. */
+  const undecided: string[] = [];
   const mentions = (clause: string) => mentionsSomeone(clause, list);
 
   for (const sentence of sentencesOf(reply)) {
@@ -438,7 +446,10 @@ function readHits(reply: string, list: Candidateish[]) {
         outcome = "shortlisted";
       }
 
-      if (!outcome) continue;
+      if (!outcome) {
+        if (mentions(line) && verdicts.some(Boolean)) undecided.push(line.slice(0, 160));
+        continue;
+      }
       spoke = true;
 
       for (const n of nums) {
@@ -462,7 +473,7 @@ function readHits(reply: string, list: Candidateish[]) {
     }
     if (spoke && !placed) unplaced.push(sentence.join(", ").slice(0, 160));
   }
-  return { hits, outOfRange: [...outOfRange], unplaced };
+  return { hits, outOfRange: [...outOfRange], unplaced, undecided };
 }
 
 /** The last word on each person wins, as it always has for the TA's paste box. */
@@ -497,6 +508,8 @@ export interface ReplyReading {
   unreadable: Unreadable[];
   /** Sentences with a verdict that named nobody in the set. */
   unplaced: string[];
+  /** Clauses naming someone in the set with no verdict of their own, beside one that decides. */
+  undecided: string[];
   /** Candidate numbers beyond the end of the set. */
   outOfRange: number[];
   /** all/both/none were used next to named or numbered people. */
@@ -504,7 +517,7 @@ export interface ReplyReading {
 }
 
 export function readReply(reply: string, list: Candidateish[]): ReplyReading {
-  const { hits, outOfRange, unplaced } = readHits(reply, list);
+  const { hits, outOfRange, unplaced, undecided } = readHits(reply, list);
   // Weakest first: all/both/none, then a name, then an explicit number. "Shortlist
   // all except Kasun" must leave Kasun out, not let "all" outvote his name.
   const merged = new Map<string, ParsedDecision>();
@@ -521,6 +534,7 @@ export function readReply(reply: string, list: Candidateish[]): ReplyReading {
     conflicts,
     unreadable: unreadableClauses(reply),
     unplaced,
+    undecided,
     outOfRange,
     mixedWholeSet: hits.some((h) => h.wholeSet) && hits.some((h) => !h.wholeSet),
   };

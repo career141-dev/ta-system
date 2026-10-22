@@ -104,5 +104,26 @@ ok("legacy exact subject is a fallback", matchReplyRound({ subject: "Re: SET 1 -
 ok("legacy subject fallback requires an authorized sender", matchReplyRound({ subject: "Re: SET 1 - ACME" }, [{ ...rounds[0], subject: "SET 1 - ACME", senderAuthorized: false }]).method === "none");
 ok("ambiguous token matches are not guessed", matchReplyRound({ subject: "Re: [C141-ABC234]" }, [rounds[0], { ...rounds[1], token: "C141-ABC234" }]).method === "none");
 
+// A clause never takes its verdict from a later clause about other people
+// (22 Oct): "1 and 3, not 2" rejected all three, marked safe to apply.
+const read = (text: string) => {
+  const r = parseShortlistReply(text, roster);
+  return { yn: ["a1", "a2", "a3"].map((id) => ({ shortlisted: "Y", rejected: "N", hold: "H" } as Record<string, string>)[r.decisions.find((d) => d.applicationId === id)?.outcome ?? ""] ?? "-").join(""), auto: r.autoSafe };
+};
+for (const text of ["1 and 3, not 2", "1 & 3, 2 no", "1, 3, but not 2", "Proceed with 1 and 3, not 2", "1 - yes, 2 - no, 3 - yes"]) {
+  ok(`"${text}" shortlists 1 and 3 and rejects 2`, read(text).yn === "YNY");
+}
+for (const text of ["Nimal and Dilani, not Kasun", "1 and 3 please, not 2"]) {
+  const r = read(text);
+  ok(`"${text}" never rejects the people it named first`, r.yn[0] !== "N" && r.yn[2] !== "N");
+  ok(`"${text}" goes to a person`, !r.auto);
+}
+for (const text of ["Hi Kasun, please shortlist 1", "Thanks Kasun, shortlist 1 and 3"]) {
+  const r = read(text);
+  ok(`"${text}" does not shortlist Kasun from the greeting`, r.yn[1] !== "Y");
+  ok(`"${text}" goes to a person`, !r.auto);
+}
+ok("a greeting to all still reads the picks", read("Hi all, proceed with 1 and 3").yn === "Y-Y");
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

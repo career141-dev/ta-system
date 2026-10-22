@@ -110,6 +110,9 @@ export function parseShortlistReply(raw: string, roster: ReplyCandidate[]): Pars
   for (const id of read.conflicts) reasons.add(`Conflicting decisions were found for ${nameOf(id)}.`);
   for (const refused of read.unreadable) reasons.add(`Could not read safely: “${refused.clause.slice(0, 120)}” — ${refused.why}`);
   for (const sentence of read.unplaced) reasons.add(`Could not match a candidate in: “${sentence.slice(0, 120)}”.`);
+  // "Nimal and Dilani, not Kasun": a person named with no verdict of their own
+  // is not guessed from the next clause (22 Oct); a person decides.
+  for (const clause of read.undecided) reasons.add(`No decision was written for: “${clause.slice(0, 120)}”.`);
   for (const n of read.outOfRange) reasons.add(`Candidate number ${n} is not in this email.`);
   if (read.mixedWholeSet) reasons.add("“All/both/none” was used alongside named candidates; check who it covers.");
 
