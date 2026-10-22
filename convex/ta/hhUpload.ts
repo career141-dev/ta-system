@@ -16,7 +16,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK, isDeskWideUser } from "./guard";
 import { claimForTa } from "./applications";
 import { toTaStage } from "./stages";
 import { assertWorkdayScope } from "../lib/workdayScope";
@@ -158,7 +158,15 @@ export const fileHeadhunt = internalMutation({
     const slug = profileSlug(candidate.linkedinUrl);
     // A marked row can still hold only a LinkedIn URL when its requested CV arrives (13 Oct).
     // Match an exact profile on the uploader's sheet, never another TA's or a name alone.
-    const linked = rows.find((r) => r.candidateId === candidate._id);
+    // Two TAs may each hold the same person (22 Oct): the uploader's own row,
+    // or one a lead added, takes the CV — never another TA's row.
+    let linked = rows.find((r) => r.candidateId === candidate._id && r.addedBy === user._id);
+    for (const r of rows) {
+      if (linked) break;
+      if (r.candidateId !== candidate._id) continue;
+      const adder = await ctx.db.get(r.addedBy);
+      if (adder && isDeskWideUser(adder)) linked = r;
+    }
     const profiles = slug ? rows.filter((r) => !r.candidateId && r.addedBy === user._id && profileSlug(r.linkedinUrl) === slug) : [];
     const row = linked ?? (profiles.length === 1 ? profiles[0] : undefined);
     if (row) {

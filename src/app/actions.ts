@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
 import { can, isDeskWide, isReadOnly, isTa, type Capability } from "@/lib/auth";
+import { otherHolders, rowCountsFor } from "@/lib/sharedLinks";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -566,7 +567,11 @@ export async function addLink(formData: FormData) {
   // before anything is saved, so a refused note does not leave half a row.
   const leadNote = String(formData.get("note") ?? "").trim();
   if (leadNote) await checkLeadNote(user, leadNote);
-  const already = repo.findLinkByUrl(openingId, key);
+  // Your own row, or one a lead added for you, is the row (22 Oct). Another
+  // TA holding the same person does not stop you: whoever shortlists first
+  // works them (lib/sharedLinks).
+  const deskWide = deskWideCheck();
+  const already = repo.findLinkByUrl(openingId, key, rowCountsFor(user, deskWide));
   if (already) {
     const who = repo.users().find((u) => u.id === already.addedBy)?.name;
     const said = `${already.name ?? "That profile"} is already in this table${who ? `, added by ${who}` : ""}.`;
@@ -589,8 +594,22 @@ export async function addLink(formData: FormData) {
     (name
       ? `Saved ${name} to Excel Tables as Shortlisted${String(formData.get("name") ?? "").trim() ? "" : " — the name is read from the link, so check it"}.`
       : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.") +
-      (leadNote ? " Your note is on the row." : ""),
+      (leadNote ? " Your note is on the row." : "") +
+      alsoHeldLine(otherHolders(repo.linksByUrl(openingId, key), user, deskWide)),
   );
+}
+
+/** Whether a user is a lead, director, admin or ops — whose rows every TA sees. */
+function deskWideCheck() {
+  return (id: string) => { const u = repo.user(id); return !!u && isDeskWide(u); };
+}
+
+/** " Thushini also has them in her table — …" when another TA holds the same person. */
+function alsoHeldLine(others: string[]): string {
+  const names = others.map((id) => repo.user(id)?.name ?? "Another TA");
+  if (!names.length) return "";
+  const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return ` ${who} also ${names.length === 1 ? "has" : "have"} them in their table — whoever shortlists them first works them.`;
 }
 
 /** Longest note a lead can leave: feedback, not a document. */
@@ -1775,6 +1794,15 @@ async function pipelineFromLink(
   }
   const made = repo.linkToApplication(entryId, user.id);
   if (!made.ok) return { tone: "error", message: made.message };
+  // Two TAs may hold the same person (22 Oct); the first to shortlist works
+  // them. Said plainly here rather than "Already on this opening's pipeline",
+  // which read as if the second TA had put them there.
+  const owner = repo.application(made.applicationId)?.ownerTaId;
+  if (owner && owner !== user.id && !isDeskWide(user)) {
+    revalidatePath(`/openings/${openingId}/hh/links`);
+    const who = repo.user(owner)?.name ?? "Another TA";
+    return { tone: "error", message: `${who} shortlisted them first — they are working them${STAGE_LABEL[made.stage] ? ` (in ${STAGE_LABEL[made.stage]})` : ""}.` };
+  }
   markTablesStale();
   revalidatePath(`/openings/${openingId}`, "layout");
   revalidatePath(`/openings/${openingId}/hh`, "layout");
@@ -3698,8 +3726,9 @@ export async function keepSuggestion(formData: FormData) {
   if (!s) await fail("That suggestion is no longer there — the list may have been regenerated.");
   repo.setSuggestionStatus(id, "kept", "more_like_this", user.id);
   let held: CvMatch | null = null;
+  let also = "";
   if (s!.linkedinUrl) {
-    const already = linkFor(openingId, s!);
+    const already = linkFor(openingId, s!, user);
     if (already) {
       revalidatePath(`/openings/${openingId}/hh`, "layout");
       await note(`${s!.name ?? "They"} ${s!.name ? "is" : "are"} already in Excel Tables${already.addedBy !== user.id ? `, added by ${repo.user(already.addedBy)?.name ?? "another TA"}` : ""}.`);
@@ -3707,15 +3736,18 @@ export async function keepSuggestion(formData: FormData) {
     const entryId = repo.addLink(openingId, s!.linkedinUrl, user.id);
     repo.updateLink(entryId, { name: s!.name, title: s!.headline, company: s!.company });
     held = await matchLink(entryId, user.id);
+    const key = linkKey(s!.linkedinUrl);
+    if (key) also = alsoHeldLine(otherHolders(repo.linksByUrl(openingId, key), user, deskWideCheck()));
   }
   revalidatePath(`/openings/${openingId}/hh`, "layout");
-  await back(`${heldLine(held)}${s!.name ?? "They"} selected and added to Excel Tables.`);
+  await back(`${heldLine(held)}${s!.name ?? "They"} selected and added to Excel Tables.${also}`);
 }
 
 /** The Excel Tables row a suggestion already has on this opening — by its address, or name and company (1 Oct). */
-function linkFor(openingId: string, s: { linkedinUrl: string | null; name: string; company: string | null }) {
+function linkFor(openingId: string, s: { linkedinUrl: string | null; name: string; company: string | null }, user: User) {
   const key = linkKey(s.linkedinUrl);
-  return (key ? repo.findLinkByUrl(openingId, key) : undefined) ?? repo.findLinkByPerson(openingId, s.name, s.company);
+  const mine = rowCountsFor(user, deskWideCheck());
+  return (key ? repo.findLinkByUrl(openingId, key, mine) : undefined) ?? repo.findLinkByPerson(openingId, s.name, s.company, mine);
 }
 
 /**
@@ -3791,7 +3823,7 @@ export async function chooseCv(formData: FormData) {
   if (!rowId) {
     const s = repo.suggestions(openingId).find((x) => x.id === suggestionId)!;
     if (!s.linkedinUrl) return fail("This suggestion has no LinkedIn profile to add.");
-    rowId = linkFor(openingId, s)?.id;
+    rowId = linkFor(openingId, s, user)?.id;
     if (!rowId) {
       rowId = repo.addLink(openingId, s.linkedinUrl, user.id);
       repo.updateLink(rowId, { name: s.name, title: s.headline, company: s.company });
