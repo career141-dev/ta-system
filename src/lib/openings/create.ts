@@ -6,7 +6,7 @@ import * as backend from "@/data/convex/backend";
 import type { User } from "@/data/types";
 import { assignableTas } from "@/lib/assignable";
 import { convexActorForEmail } from "@/lib/convexServer";
-import { extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
+import { CONSENT_TEXT, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { draftJd } from "@/lib/openings/jdDraft";
 import type { OpeningWriteDeps } from "@/lib/openings/writes";
 import type { WorkLocation } from "@/lib/workLocations";
@@ -50,6 +50,9 @@ export async function saveNewOpening(
 ): Promise<string | null> {
   const { clientId, notes, recordingKey, consentText, durationMs, country, hiringFor, autoFollowUp, workLocations } = input;
   const title = input.title.trim();
+  if (recordingKey && consentText !== CONSENT_TEXT) {
+    throw new Error("Confirm everyone agreed before saving the recording.");
+  }
   // Where the job is, whose passport the client wants, and — only where they
   // said so — which gender. These three decide where sourcing looks, so they are
   // asked at intake rather than inferred from the address later (§8A.2).
@@ -85,6 +88,9 @@ export async function saveNewOpening(
         taLeadId,
         directorId,
         notesMarkdown: notes,
+        recordingKey,
+        recordingDurationMs: durationMs,
+        consentText,
         briefKind: isLead ? "management_to_lead" : "lead_to_ta",
         briefExtracted: notes.trim() ? { ...extractFromText(notes), title } : undefined,
         autoFollowUp,

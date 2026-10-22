@@ -97,6 +97,14 @@ test("a recording is kept on the brief with the consent agreed to", async () => 
   assert.equal(brief.recordingDurationMs, 61000);
 });
 
+test("a recording cannot be attached with altered consent wording", async () => {
+  const { deps } = fakeDeps();
+  await assert.rejects(
+    saveNewOpening(user("ta"), input({ recordingKey: "convex:abc", consentText: "Everyone agreed." }), deps),
+    /Confirm everyone agreed/,
+  );
+});
+
 test("a client needs a name; industry falls back to Other; the contact is kept", async () => {
   const { deps } = fakeDeps();
   const blank = { name: " ", industry: "", contactName: "", contactTitle: "", contactEmail: "" };
@@ -120,13 +128,14 @@ test("the form's lists: TAs only for a lead, and the web's countries", () => {
   assert.deepEqual(forTa.tas, []);
 });
 
-test("bodies: a recording key must be one /api/recording gave", () => {
+test("bodies: a recording key and the server's consent wording are required", () => {
   const body = {
     clientId: "c1", title: "T", country: "Sri Lanka", hiringFor: "local", targetGender: "", workLocations: [{ id: "location_1", name: "Colombo", vacancies: 1 }],
-    notes: "", recording: { key: "convex:abc", durationMs: 1000, consentText: "x" }, autoFollowUp: false, assignedTaIds: [],
+    notes: "", recording: { key: "convex:abc", durationMs: 1000, consentText: CONSENT_TEXT }, autoFollowUp: false, assignedTaIds: [],
   };
   assert.equal(parseBody(newOpeningBody, body, "no").ok, true);
   assert.equal(parseBody(newOpeningBody, { ...body, recording: { ...body.recording, key: "../../etc" } }, "no").ok, false);
+  assert.equal(parseBody(newOpeningBody, { ...body, recording: { ...body.recording, consentText: "Everyone agreed." } }, "no").ok, false);
   assert.equal(parseBody(newOpeningBody, { ...body, targetGender: "Other" }, "no").ok, false);
   assert.equal(parseBody(newClientBody, { name: "A", industry: "", contactName: "", contactTitle: "", contactEmail: "", extra: 1 }, "no").ok, false);
 });

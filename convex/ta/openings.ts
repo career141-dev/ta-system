@@ -354,6 +354,9 @@ export const create = internalMutation({
     taLeadId: v.optional(v.union(v.string(), v.null())),
     directorId: v.optional(v.union(v.string(), v.null())),
     notesMarkdown: v.optional(v.string()),
+    recordingKey: v.optional(v.union(v.string(), v.null())),
+    recordingDurationMs: v.optional(v.union(v.number(), v.null())),
+    consentText: v.optional(v.union(v.string(), v.null())),
     /** Whose notes these are: a lead's brief, or the TA's own (1 Oct). Defaults to the lead's. */
     briefKind: v.optional(v.union(v.literal("management_to_lead"), v.literal("lead_to_ta"))),
     /** What the app read out of the notes (salary, locations, must-haves). */
@@ -457,7 +460,7 @@ export const create = internalMutation({
     const made = await ctx.db.get(jobId);
     if (made) await ctx.db.insert("jobPosts", firstPostFor(made, Date.now()));
 
-    if (args.notesMarkdown) {
+    if (args.notesMarkdown || args.recordingKey) {
       // Marked by who wrote it. A TA's notes were filed as the lead's brief, and
       // the job never pointed at them, so the TA found nothing on it (1 Oct).
       const briefId = await ctx.db.insert("briefs", {
@@ -466,9 +469,14 @@ export const create = internalMutation({
         kind: args.briefKind ?? "management_to_lead",
         capturedBy: user._id,
         capturedAt: Date.now(),
-        method: "notes",
-        notesMarkdown: args.notesMarkdown,
-        transcriptStatus: "none",
+        method: args.recordingKey ? (args.notesMarkdown ? "both" : "recording") : "notes",
+        notesMarkdown: args.notesMarkdown ?? "",
+        transcriptStatus: args.recordingKey ? "unavailable" : "none",
+        recordingKey: args.recordingKey ?? null,
+        recordingDurationMs: args.recordingDurationMs ?? null,
+        consentAcknowledgedBy: args.consentText ? user._id : null,
+        consentAcknowledgedAt: args.consentText ? Date.now() : null,
+        consentText: args.consentText ?? null,
         extracted: args.briefExtracted ?? {},
       });
       await ctx.db.patch(jobId, { briefId });

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { CONSENT_TEXT } from "@/lib/intake";
 import { OPENING_STATUSES, WORKING_STAGES } from "@/lib/openings/writes";
 
 /** Request bodies for the mobile openings writes, checked before anything runs. */
@@ -52,7 +53,7 @@ export const newOpeningBody = z
     workLocations: z.array(z.object({ id: text(80), name: text(200), vacancies: z.number() }).strict()).max(50),
     notes: text(20000),
     recording: z
-      .object({ key: z.string().regex(/^convex:[A-Za-z0-9_-]{1,200}$/), durationMs: z.number().int().min(0).max(24 * 3600 * 1000), consentText: text(2000) })
+      .object({ key: z.string().regex(/^convex:[A-Za-z0-9_-]{1,200}$/), durationMs: z.number().int().min(0).max(24 * 3600 * 1000), consentText: z.literal(CONSENT_TEXT) })
       .strict()
       .nullable(),
     autoFollowUp: z.boolean(),
