@@ -7,6 +7,7 @@ import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 import { buildXlsx, formatLinkVaultExportRows, uniqueSheetNames, EXCEL_TABLES_EXPORT_HEADERS, type XlsxSheet } from "@/lib/xlsx";
 import { excelFilename } from "@/lib/excelFilename";
 import { inWorkLocation } from "./workLocations";
+import { rowApplication } from "./sharedLinks";
 
 export interface ExcelExportAttachment {
   filename: string;
@@ -43,7 +44,9 @@ export function getScopedLinkVaultEntries(
       const found = r.candidateId
         ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId && inWorkLocation(a, r.workLocationId ?? ""))
         : undefined;
-      const app = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
+      const onPipeline = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
+      // Shortlisted first by another TA: not this TA's Interested (lib/sharedLinks).
+      const { app } = rowApplication(r, onPipeline, (id) => deskWide.has(id));
       return [r.id, { app, interest: interestOf(r, app) }] as const;
     }),
   );

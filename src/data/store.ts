@@ -2332,12 +2332,22 @@ const rawRepo = {
     });
   },
 
-  /** The same person pasted twice, or pasted and then captured, is one row. */
-  findLinkByUrl(openingId: Id, canonical: string): LinkVaultEntry | undefined {
+  /**
+   * The same person pasted twice, or pasted and then captured, is one row —
+   * per TA. `include` narrows it to the rows that count for the caller: two
+   * TAs on one opening may each hold the same person, and whoever shortlists
+   * first works them (22 Oct).
+   */
+  findLinkByUrl(openingId: Id, canonical: string, include: (row: LinkVaultEntry) => boolean = () => true): LinkVaultEntry | undefined {
+    return this.linksByUrl(openingId, canonical).find(include);
+  },
+
+  /** Every row on this opening for one profile address, whoever added it. */
+  linksByUrl(openingId: Id, canonical: string): LinkVaultEntry[] {
     // By the profile's key, not a substring: "linkedin.com/in/nimal" is inside
     // "linkedin.com/in/nimal-perera", and they are different people.
     const want = canonical.toLowerCase();
-    return load().linkVault.find(
+    return load().linkVault.filter(
       (l) => l.openingId === openingId && (linkKey(l.linkedinUrl) ?? l.linkedinUrl.toLowerCase()) === want,
     );
   },
@@ -2348,11 +2358,12 @@ const rawRepo = {
    * Recruiter has two different addresses, and became two rows. The same full
    * name at the same company on one opening is the same person.
    */
-  findLinkByPerson(openingId: Id, name: string | null | undefined, company: string | null | undefined): LinkVaultEntry | undefined {
+  findLinkByPerson(openingId: Id, name: string | null | undefined, company: string | null | undefined, include: (row: LinkVaultEntry) => boolean = () => true): LinkVaultEntry | undefined {
     if (!name || !company) return undefined;
     return load().linkVault.find(
       (l) =>
         l.openingId === openingId &&
+        include(l) &&
         compareNames(l.name ?? l.capture?.fullName, name) === "exact" &&
         companyMatch(l.company ?? l.capture?.currentCompany, company) === "same",
     );

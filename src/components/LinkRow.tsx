@@ -70,6 +70,7 @@ export function LinkRow({
   addedByName,
   userNames,
   onPipeline = null,
+  takenByName = null,
   interest = "pending",
   canNote = false,
   viewerId = "",
@@ -82,6 +83,8 @@ export function LinkRow({
   userNames: Record<string, string>;
   /** Their application on this opening, once they have been added. */
   onPipeline?: Pick<Application, "id" | "stage"> | null;
+  /** Another TA shortlisted this person first (lib/sharedLinks): theirs to work. */
+  takenByName?: string | null;
   /** Pending, Interested or Not interested (lib/linkViews interestOf). */
   interest?: Interest;
   /** A lead, director, admin or ops: may leave notes for the TA. */
@@ -365,6 +368,10 @@ export function LinkRow({
                   >
                     In {STAGE_LABEL[onPipeline.stage]} →
                   </Link>
+                ) : takenByName ? (
+                  <span className="rounded-full border border-rule bg-tag px-4 py-1.5 text-[12.5px] text-ink-soft">
+                    Shortlisted first by {takenByName}
+                  </span>
                 ) : readOnly ? null : r.outcome === "shortlisted" && r.name ? (
                   <form onSubmit={(e) => toPipeline.run(submitted(e).formData)}>
                     <input type="hidden" name="openingId" value={openingId} />
