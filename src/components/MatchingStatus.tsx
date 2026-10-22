@@ -1,10 +1,6 @@
-import { repo } from "@/data/store";
-import { isConvex } from "@/data/mode";
-import * as backend from "@/data/convex/backend";
 import { getCurrentUser } from "@/lib/session";
-import { allows } from "@/lib/auth";
 import { timeAt } from "@/lib/format";
-import { matchingMarks, matchingState } from "@/lib/matchingNow";
+import { matchingSnapshot } from "@/lib/matchingSnapshot";
 import { findMatchesNow } from "@/app/actions";
 import { AutoRefresh } from "@/app/settings/AutoRefresh";
 import { LoadingProgress, MATCHING_STEPS } from "./LoadingScenes";
@@ -22,29 +18,10 @@ import { Spinner, SubmitButton } from "./Submit";
  * `full` shows the step-by-step scene — for a list that is still empty.
  */
 export async function MatchingStatus({ openingId, full = false }: { openingId: string; full?: boolean }) {
-  const o = repo.opening(openingId);
-  if (!o || o.jdStatus !== "approved") return null;
-  const user = await getCurrentUser();
-  const canRun = allows(user, "opening.sourcing", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
-
-  const [engine, runs] = isConvex()
-    ? await Promise.all([
-        backend.reverseMatchResults({ id: user.id }, openingId).catch(() => null),
-        backend.matchRuns({ id: user.id }, openingId).catch(() => null),
-      ])
-    : [null, null];
-  const last = (runs ?? repo.matchRuns(openingId)).reduce<{ at: number; added: number; note: string | null } | null>(
-    (a, r) => (!a || r.at > a.at ? r : a),
-    null,
-  );
-  const state = matchingState({
-    now: Date.now(),
-    ...matchingMarks(openingId),
-    requirementsStatus: o.requirements?.status,
-    engineStatus: engine?.status,
-    engineAt: engine?.matchedAt ? Date.parse(engine.matchedAt) || null : null,
-    lastRun: last,
-  });
+  // The state and the permission are shared with the mobile API (lib/matchingSnapshot).
+  const snapshot = await matchingSnapshot(await getCurrentUser(), openingId);
+  if (!snapshot) return null;
+  const { state, canRun } = snapshot;
 
   const runAgain = (label: string) =>
     canRun ? (
