@@ -26,7 +26,9 @@ const HOUSE_NOTE = (c: Candidate, a: Application): string[] => {
     const clean = n.replace(/^>/, "").trim();
     if (clean && !out.some((o) => o.endsWith(clean))) out.push(`>${clean}`);
   }
-  return out.slice(0, 4);
+  // The CV box carries every TA note; the email must not drop later notes
+  // after the experience and employer lines take up the first two slots.
+  return out;
 };
 
 /**
@@ -100,6 +102,7 @@ export function shortlistRowFor(a: Application, c: Candidate, no: number): Short
     currentRemuneration: c.currentSalary ?? "Not disclosed",
     expectedRemuneration: c.expectedSalary ?? "Open to discuss",
     applicationId: a.id,
+    reviewStageChangedAt: a.lastStageChangedAt,
   };
 }
 

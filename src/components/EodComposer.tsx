@@ -303,7 +303,7 @@ function EodNotesEditor({
   };
 
   return (
-    <div className="flex flex-col gap-1 w-full min-w-[270px]">
+    <div className="flex flex-col gap-1 w-[360px] min-w-[360px] max-w-[360px]">
       {/* Mini formatting toolbar */}
       <div className="flex items-center gap-1 px-0.5 py-0.5 text-[10.5px]">
         <button
@@ -350,7 +350,7 @@ function EodNotesEditor({
         onBlur={sync}
         onKeyDown={handleKeyDown}
         data-placeholder="Type notes or select text & click Highlight..."
-        className="w-full min-h-[58px] max-h-[120px] overflow-y-auto resize-y p-2 rounded border border-rule/50 hover:border-rule focus:border-brand focus:bg-surface leading-[1.6] text-[12px] text-ink outline-none transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-ink-faint bg-paper/30 whitespace-pre-wrap break-words"
+        className="w-full min-h-[58px] max-h-[120px] overflow-y-auto resize-y p-2 rounded border border-rule/50 hover:border-rule focus:border-brand focus:bg-surface leading-[1.6] text-[12px] text-ink outline-none transition-colors empty:before:content-[attr(data-placeholder)] empty:before:text-ink-faint bg-paper/30 whitespace-pre-wrap [overflow-wrap:anywhere]"
       />
 
       {/* Hidden input to ensure form submission always carries the exact serialized notes string */}
