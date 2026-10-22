@@ -3,7 +3,7 @@
  * a Director's subject names, and inferring the opening for a client's mail.
  * Pure — no Graph, no database.
  */
-import { inferOpening, matchHouseSubject, parseHouseSubject, shouldMove, stripReplyPrefixes, type OpeningLite } from "../convex/lib/shortlistMail";
+import { DIRECTOR_MAILBOXES, inferOpening, matchHouseSubject, parseHouseSubject, shouldMove, stripReplyPrefixes, type OpeningLite } from "../convex/lib/shortlistMail";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -89,6 +89,8 @@ eq("interview is not pulled back", shouldMove("interview", "client_review"), fal
 eq("rejected is left for a person", shouldMove("rejected", "director_shortlist"), false);
 eq("dropped out is left for a person", shouldMove("unresponsive", "client_review"), false);
 eq("no stage counts as new", shouldMove(undefined, "director_shortlist"), true);
+// 22 Oct: the Director replies from these and is not on People.
+eq("the Director's mailboxes", [...DIRECTOR_MAILBOXES], ["joborders@career141.com", "shamra@career141.com"]);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

@@ -14,6 +14,7 @@ import {
 import { resolveActor } from "../lib/auth";
 import { toTaStage } from "../ta/stages";
 import { getGraphToken } from "../lib/graphClient";
+import { DIRECTOR_MAILBOXES } from "../lib/shortlistMail";
 
 const decisionValidator = v.object({
   applicationId: v.id("applications"),
@@ -53,10 +54,10 @@ export const context = internalQuery({
   handler: async (ctx, args): Promise<DecisionContext[]> => {
     const rounds = (await ctx.db.query("reviewRounds").collect()).filter((round) => round.status !== "returned");
     const users = await ctx.db.query("users").collect();
-    const directorAddresses = new Set(users
+    const directorAddresses = new Set([...DIRECTOR_MAILBOXES, ...users
       .filter((user) => user.isActive && deskRole(user) === "director")
       .flatMap((user) => [normalAddress(user.email), normalAddress(user.routingEmail)])
-      .filter(Boolean));
+      .filter(Boolean)]);
     const out: DecisionContext[] = [];
     for (const round of rounds) {
       const job = await ctx.db.get(round.openingId);
