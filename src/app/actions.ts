@@ -3,8 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { can, isDeskWide, isReadOnly, isTa, type Capability } from "@/lib/auth";
+import { can, isDeskWide, isReadOnly, isTa, seesEveryTaRow, type Capability } from "@/lib/auth";
 import { otherHolders, rowCountsFor } from "@/lib/sharedLinks";
+import { readWorkCountry } from "@/lib/countries";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
 import {
   binOpeningNamed as binOpeningShared,
@@ -2010,7 +2011,12 @@ export async function addLinkLevel(formData: FormData) {
   const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
   const n = repo.addLinkLevel(openingId, user.id, location?.id);
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(`/openings/${openingId}/hh/links?level=${n}${location ? `&location=${location.id}` : ""}`);
+  redirect(`/openings/${openingId}/hh/links?level=${n}${location ? `&location=${location.id}` : ""}${ownSheetsParam(user)}`);
+}
+
+/** A lead's own L's open under their own name: on Everyone there are no L tabs (22 Oct). */
+function ownSheetsParam(user: User): string {
+  return isDeskWide(user) || seesEveryTaRow(user) ? `&by=${encodeURIComponent(user.id)}` : "";
 }
 
 /** A name for one of your L's on Excel Tables; blank puts the date back. */
@@ -2039,8 +2045,22 @@ export async function deleteLinkLevel(formData: FormData) {
   const moved = repo.deleteLinkLevel(openingId, user.id, n, location?.id);
   if (moved === null) return fail(`L${n} is not one of yours here.`);
   revalidatePath(`/openings/${openingId}`, "layout");
-  const msg = moved ? `Deleted L${n}. Its ${moved === 1 ? "row is" : `${moved} rows are`} still here, under All.` : `Deleted L${n}.`;
-  redirect(`/openings/${openingId}/hh/links?msg=${encodeURIComponent(msg)}&tone=ok${location ? `&location=${location.id}` : ""}`);
+  // Its links are shown where they went, with Undo above them (22 Oct).
+  redirect(`/openings/${openingId}/hh/links?deleted=${n}${moved ? "&level=none" : ""}${location ? `&location=${location.id}` : ""}${ownSheetsParam(user)}`);
+}
+
+/** Undo a delete made a moment ago: the L and its links come back. */
+export async function restoreLinkLevel(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const n = Math.floor(Number(formData.get("level")));
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
+  const back = repo.restoreLinkLevel(openingId, user.id, n, location?.id);
+  if (back === null) return fail(`L${n} can no longer be put back. Start a new L-sheet and move its links there.`);
+  revalidatePath(`/openings/${openingId}`, "layout");
+  const msg = `L${n} is back${back ? ` with ${back === 1 ? "its link" : `its ${back} links`}` : ""}.`;
+  redirect(`/openings/${openingId}/hh/links?level=${n}&msg=${encodeURIComponent(msg)}&tone=ok${location ? `&location=${location.id}` : ""}${ownSheetsParam(user)}`);
 }
 
 export async function renameLinkLevelInline(_: ActionResult | null, formData: FormData) {
@@ -3077,6 +3097,7 @@ function personFrom(formData: FormData) {
     phone: String(formData.get("phone") ?? "").trim() || null,
     routingEmail: String(formData.get("routingEmail") ?? "").trim().toLowerCase() || null,
     role: (DESK_ROLES as readonly string[]).includes(role) ? (role as import("@/data/types").Role) : null,
+    workCountry: readWorkCountry(formData.get("workCountry")),
   };
 }
 
@@ -3107,13 +3128,14 @@ export async function addUser(formData: FormData) {
   if (!p.email) await fail("An email is required — it is what they sign in with.");
   if (!p.role) await fail("Pick a role.");
   if (!isConvex()) {
-    repo.addUser({ name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    const id = repo.addUser({ name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    repo.updateUser(id, { workCountry: p.workCountry });
     revalidatePath("/people");
     return;
   }
   await saveRoster(
     () => convexMutation("ta/users:adminSaveUser", {
-      actorId: actor.id, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+      actorId: actor.id, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role, workCountry: p.workCountry,
     }),
     `${p.name} added as ${p.role}.`,
   );
@@ -3126,13 +3148,13 @@ export async function updateUser(formData: FormData) {
   const p = personFrom(formData);
   if (!userId || !p.name || !p.email || !p.role) await fail("Name, email and role are all required.");
   if (!isConvex()) {
-    repo.updateUser(userId, { name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role! });
+    repo.updateUser(userId, { name: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, role: p.role!, workCountry: p.workCountry });
     revalidatePath("/people");
     return;
   }
   await saveRoster(
     () => convexMutation("ta/users:adminSaveUser", {
-      actorId: actor.id, userId, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role,
+      actorId: actor.id, userId, fullName: p.name, email: p.email, phone: p.phone, routingEmail: p.routingEmail, taRole: p.role, workCountry: p.workCountry,
     }),
     `${p.name} saved.`,
   );

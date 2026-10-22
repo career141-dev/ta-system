@@ -57,7 +57,7 @@ export function ProjectSidebar({
   openingId: string;
   posts: SidebarPost[];
   /** The viewer's L's under Excel Tables, started with its + (29 Sep). */
-  levels?: { n: number; label: string; name: string; count: number; canManage?: boolean }[];
+  levels?: { n: number; label: string; name: string; count: number; canManage?: boolean; query?: string }[];
   /** What the + starts next — numbers are not reused after a delete. */
   nextLevel?: number;
   /** A client contact gets the pipeline from their shortlist on, and none of
@@ -253,12 +253,13 @@ export function ProjectSidebar({
                   {!locationSheets && levels.length > 0 && (
                     <div className="mb-1 ml-3.5 flex flex-col gap-0.5 border-l border-rule pl-3">
                       {levels.map((l) => {
-                        const on = path.startsWith(i.href) && search.get("level") === String(l.n);
+                        const query = l.query ?? `level=${l.n}`;
+                        const on = path.startsWith(i.href) && [...new URLSearchParams(query)].every(([k, v]) => search.get(k) === v);
                         return (
                           <LinkLevelItem
                             key={l.n}
                             openingId={openingId}
-                            href={`${i.href}?level=${l.n}`}
+                            href={`${i.href}?${query}`}
                             level={l}
                             active={on}
                             className={sub(on)}

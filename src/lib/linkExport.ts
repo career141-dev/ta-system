@@ -111,7 +111,8 @@ export function buildLinkExportLayout(
     (a.level ?? Infinity) - (b.level ?? Infinity));
   // Reserve space for the level so a long TA name cannot hide L1 versus L2.
   const names = uniqueSheetNames(ordered.map((group) => {
-    const suffix = group.level === null ? " Unassigned" : ` L${group.level}`;
+    // "Unassigned" read as Location not assigned (22 Oct).
+    const suffix = group.level === null ? " Not in a sheet" : ` L${group.level}`;
     return ownerName(group.owner).slice(0, 31 - suffix.length) + suffix;
   }));
   const sheets: XlsxSheet[] = ordered.map((group, i) => {

@@ -58,5 +58,5 @@ assert.equal(shortlistRows(opening.id, ta.id, "director", undefined, "m").some(r
 repo.deleteLinkLevel(opening.id, ta.id, 1, "m");
 assert.equal(repo.linkEntry(mRow)?.level, null);
 assert.equal(repo.linkEntry(dRow)?.level, 1, "Deleting Mumbai L1 cannot change Delhi L1");
-assert.equal(repo.addLinkLevel(opening.id, ta.id, "m"), 3);
+assert.equal(repo.addLinkLevel(opening.id, ta.id, "m"), 1, "Mumbai L1 is free again once its rows left it (22 Oct)");
 console.log("Location validation, identity, L-sheet isolation, application inheritance, drafts and scoped exports passed.");

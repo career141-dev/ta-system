@@ -16,17 +16,21 @@ import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
  * with this person, shown on the row as "TA Lead · <name> sent this note"
  * (25 Sep). A TA's box is unchanged.
  */
-export function AddLinkForm({ openingId, canNote = false, workLocationId, level }: { openingId: string; canNote?: boolean; workLocationId?: string; level?: number }) {
+export function AddLinkForm({ openingId, canNote = false, workLocationId, level, addingTo }: { openingId: string; canNote?: boolean; workLocationId?: string; level?: number; addingTo?: string }) {
   const add = useInline(addLinkInline);
+  // Which sheet the link lands in, said before it is pressed (22 Oct).
   const button = (
-    <SubmitButton
-      busy={add.pending}
-      locked={add.pending}
-      pendingLabel="Adding…"
-      className="rounded-lg bg-brand px-8 py-3 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-    >
-      Add to table
-    </SubmitButton>
+    <div className="flex flex-col items-start gap-1">
+      <SubmitButton
+        busy={add.pending}
+        locked={add.pending}
+        pendingLabel="Adding…"
+        className="rounded-lg bg-brand px-8 py-3 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+      >
+        Add to table
+      </SubmitButton>
+      {addingTo && <span className="text-[11.5px] text-ink-soft">{addingTo}</span>}
+    </div>
   );
   return (
     <form

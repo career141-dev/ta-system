@@ -11,6 +11,7 @@
  * is on screen, and these values decide who a recruiter calls.
  */
 
+import { readWorkCountry } from "@/lib/countries";
 import type {
   Application,
   Candidate,
@@ -343,6 +344,7 @@ export function mapUser(u: BackendUser): User {
     role,
     initials: u.initials || initialsOf(u.fullName),
     isActive: u.isActive,
+    workCountry: readWorkCountry(u.workCountry),
   };
 }
 

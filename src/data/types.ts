@@ -46,6 +46,8 @@ export interface User {
   role: Role;
   initials: string;
   isActive: boolean;
+  /** Sri Lanka, India or Pakistan (lib/countries); unset is Sri Lanka. */
+  workCountry?: import("@/lib/countries").WorkCountry | null;
 }
 
 // ─── Client → Opening → Job Post (spec §4.1–4.3) ─────────────────────────────
@@ -750,13 +752,21 @@ export interface ProfileCapture {
 
 /** One of a TA's L's on an opening's Excel Tables (store.linkLevels, 29 Sep). */
 export interface LinkLevel {
-  /** 1 for L1. Never reused, so rows can hold it. */
+  /**
+   * 1 for L1. A deleted number is taken again by the TA's next + once none
+   * of their rows hold it (22 Oct); sheets still there keep theirs.
+   */
   n: number;
   /** When it was started with +. */
   at: number;
   /** The TA's own name for it; the date is shown when there is none. */
   name?: string;
   deleted?: boolean;
+  /** When it was deleted, and the rows that went to Not in a sheet — for Undo. */
+  deletedAt?: number;
+  movedRows?: string[];
+  /** A source batch brought in when rows were given a location (convex/ta/workLocations). */
+  importedFrom?: string;
 }
 
 export interface LinkVaultEntry {

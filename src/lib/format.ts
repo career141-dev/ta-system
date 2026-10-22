@@ -30,6 +30,21 @@ export function timeAt(ts: number): string {
   });
 }
 
+/**
+ * "22 Oct 2026, 10:42 AM" in Sri Lanka time, whichever machine renders it
+ * (22 Oct): Excel Tables showed the day alone, in the server's zone, so a
+ * link added after midnight read as the day before.
+ */
+export function colomboDateTime(ts: number, withYear = false): string {
+  const date = new Date(ts).toLocaleDateString("en-GB", { day: "numeric", month: "short", ...(withYear ? { year: "numeric" } : {}), timeZone: "Asia/Colombo" });
+  return `${date}, ${clockAt(ts, "Asia/Colombo")}`;
+}
+
+/** "10:42 AM" in a time zone. */
+export function clockAt(ts: number, timeZone: string): string {
+  return new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone });
+}
+
 /** On-screen dates: "30 Aug 2026". Relative ageing uses relDays; timestamps use timeAt. */
 export function dateAt(ts: number | null): string {
   if (!ts) return "—";

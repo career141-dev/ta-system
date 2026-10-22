@@ -1,5 +1,6 @@
 "use client";
 
+import { WORK_COUNTRIES } from "@/lib/countries";
 import { useState } from "react";
 import { addUser, inviteUser, revokeUserInvite, setShortlistInbox, setUserActive, updateUser } from "@/app/actions";
 import type { OffDeskAccount, PendingInvite } from "@/lib/invites";
@@ -174,6 +175,14 @@ export function PeopleAdmin({
                 ))}
               </select>
             </label>
+            <label>
+              <span className="mb-1.5 block text-[12px] text-ink-soft">Works in</span>
+              <select name="workCountry" defaultValue="Sri Lanka" className={`${inputClass} cursor-pointer`}>
+                {WORK_COUNTRIES.map((c) => (
+                  <option key={c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </label>
             <label className="sm:col-span-2">
               <span className="mb-1.5 block text-[12px] text-ink-soft">
                 Applications inbox
@@ -257,6 +266,19 @@ export function PeopleAdmin({
                     LinkedIn job setup, and everything landing in it is an
                     applicant to be filed.
                   */}
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
+                      Works in
+                    </span>
+                    <select name="workCountry" defaultValue={u.workCountry ?? "Sri Lanka"} className={`${inputClass} max-w-[220px] cursor-pointer`}>
+                      {WORK_COUNTRIES.map((c) => (
+                        <option key={c.name} value={c.name}>{c.name}</option>
+                      ))}
+                    </select>
+                    <span className="mt-1 block text-[11px] text-ink-faint">
+                      Excel Tables shows when they added each link in Sri Lanka time, and in theirs when it differs.
+                    </span>
+                  </label>
                   <label className="block">
                     <span className="mb-1 block text-[11px] uppercase tracking-[0.08em] text-ink-faint">
                       Applications inbox

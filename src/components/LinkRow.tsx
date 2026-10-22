@@ -21,7 +21,7 @@ import { ActionNote, SubmitButton, latest, submitted, useInline } from "./Submit
 import { CompanyReferenceSection } from "./CompanyReferenceSection";
 import Link from "next/link";
 import { inputClass } from "./form";
-import { dateAt } from "@/lib/format";
+import { clockAt, colomboDateTime, dateAt } from "@/lib/format";
 import { newestFirst, noteByline } from "@/lib/leadNotes";
 import { STAGE_LABEL } from "@/data/types";
 import type { Application, LinkOutcome, LinkVaultEntry } from "@/data/types";
@@ -71,6 +71,7 @@ export function LinkRow({
   userNames,
   onPipeline = null,
   takenByName = null,
+  addedByTimeZone = null,
   interest = "pending",
   canNote = false,
   viewerId = "",
@@ -85,6 +86,8 @@ export function LinkRow({
   onPipeline?: Pick<Application, "id" | "stage"> | null;
   /** Another TA shortlisted this person first (lib/sharedLinks): theirs to work. */
   takenByName?: string | null;
+  /** Where the person who added it works, when that is not Sri Lanka time (Pakistan). */
+  addedByTimeZone?: { zone: string; label: string } | null;
   /** Pending, Interested or Not interested (lib/linkViews interestOf). */
   interest?: Interest;
   /** A lead, director, admin or ops: may leave notes for the TA. */
@@ -500,7 +503,10 @@ export function LinkRow({
                 )}
               </div>
               <p className="text-left sm:text-right text-[11px] leading-snug text-ink-faint">
-                Added {dateAt(r.createdAt)}
+                Added {colomboDateTime(r.createdAt, true)} <span className="text-ink-faint">(Sri Lanka)</span>
+                {addedByTimeZone && addedByTimeZone.zone !== "Asia/Colombo" && clockAt(r.createdAt, addedByTimeZone.zone) !== clockAt(r.createdAt, "Asia/Colombo") && (
+                  <><br />{clockAt(r.createdAt, addedByTimeZone.zone)} {addedByTimeZone.label} time</>
+                )}
                 <br />
                 by {addedByName}
               </p>
