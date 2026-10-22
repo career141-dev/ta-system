@@ -3,7 +3,7 @@ import { canonicalProfile } from "@/lib/serper";
 import { linkKey } from "@/lib/url";
 import { authorised, extensionUser, normaliseCapture, preflight, reply } from "@/lib/extension";
 import { can, isDeskWide } from "@/lib/auth";
-import { rowIsAnotherTas } from "@/lib/visibility";
+import { otherHolders, rowCountsFor } from "@/lib/sharedLinks";
 import { primeStore } from "@/data/prime";
 import { revalidatePath } from "next/cache";
 import { matchLink } from "@/lib/cvMatch";
@@ -85,19 +85,16 @@ export async function POST(req: Request) {
   // person from Recruiter made a new row — or by the same full name at the
   // same company, which catches one person saved from LinkedIn and Recruiter.
   const key = canonical ?? linkKey(capture.sourceUrl);
+  // Another TA's row is theirs: capturing over it rewrote their name, title
+  // and company (2 Oct). Since 22 Oct it no longer refuses the capture either
+  // — this TA gets their own row, and whoever shortlists first works the
+  // person (lib/sharedLinks). Only your own row, or a lead's you can see, is
+  // updated in place.
+  const deskWide = (id: string) => { const u = repo.user(id); return !!u && isDeskWide(u); };
+  const mine = rowCountsFor(user, deskWide);
   const existing =
-    (key ? repo.findLinkByUrl(openingId, key) : undefined) ??
-    repo.findLinkByPerson(openingId, capture.fullName, capture.currentCompany);
-  // Another TA's row is theirs. Capturing over it rewrote their name, title and
-  // company; the capture is refused and says whose it is, so neither TA works
-  // the same person (2 Oct).
-  if (existing && rowIsAnotherTas(existing, user, (id) => { const u = repo.user(id); return !!u && isDeskWide(u); })) {
-    const owner = repo.user(existing.addedBy)?.name ?? "another TA";
-    return reply({
-      error: "taken",
-      message: `${existing.name ?? capture.fullName ?? "That profile"} is already in the table, added by ${owner}. It is theirs to work — leave this one alone.`,
-    }, 409);
-  }
+    (key ? repo.findLinkByUrl(openingId, key, mine) : undefined) ??
+    repo.findLinkByPerson(openingId, capture.fullName, capture.currentCompany, mine);
   // Old extension copies omit a location: keep these captures visibly
   // unassigned on multi-location jobs until the TA reviews them.
   const requestedLocation = String(body.workLocationId ?? "") || undefined;
@@ -141,6 +138,8 @@ export async function POST(req: Request) {
     // Who has the row already, so a TA unsure whether they added someone
     // hears "already in the table — added by Hassan" (1 Oct).
     addedByName: existing ? (repo.users().find((u) => u.id === existing.addedBy)?.name ?? null) : null,
+    // Other TAs holding the same person (22 Oct): whoever shortlists first works them.
+    alsoWith: key ? otherHolders(repo.linksByUrl(openingId, key), user, deskWide).map((id) => repo.user(id)?.name ?? "Another TA") : [],
     // What our database said about them, for the extension to show (1 Oct):
     // already held (with or without a CV), possibly someone to check, or new.
     match: held && held.decided !== "different" ? { strength: held.decided === "same" ? "same" : held.strength, fullName: held.fullName, hasCv: held.hasCv } : null,

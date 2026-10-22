@@ -21,6 +21,7 @@ import { inWorkLocation, workLocationView } from "@/lib/workLocations";
 import { WorkLocationTabs } from "./WorkLocationTabs";
 import { AssignWorkLocation, WorkLocationBulkControls } from "./AssignWorkLocation";
 import { LinkLevelItem } from "./LinkLevelItem";
+import { rowApplication } from "@/lib/sharedLinks";
 
 const PAGE_SIZE = 25;
 const BULK_FORM = "bulk-links";
@@ -86,8 +87,10 @@ export function LinkVaultTable({
       // "Add to pipeline" again and reads Pending (29 Sep).
       // Nor is someone only suggested to the opening by the database matcher:
       // they are not shortlisted until the TA presses it (1 Oct).
-      const app = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
-      return [r.id, { app, interest: interestOf(r, app) }] as const;
+      const onPipeline = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
+      // Another TA shortlisted the same person first: not this row's progress (lib/sharedLinks).
+      const { app, takenBy } = rowApplication(r, onPipeline, (id) => deskWide.has(id));
+      return [r.id, { app, interest: interestOf(r, app), takenBy }] as const;
     }),
   );
   type F = { status: string; level: number; addons: boolean; imark: boolean; by: string };
@@ -275,6 +278,7 @@ export function LinkVaultTable({
                   openingId={openingId}
                   addedByName={userNames[r.addedBy] ?? "—"}
                   onPipeline={facts.get(r.id)!.app}
+                  takenByName={facts.get(r.id)!.takenBy ? (userNames[facts.get(r.id)!.takenBy!] ?? "Another TA") : null}
                   interest={facts.get(r.id)!.interest}
                   userNames={userNames}
                   canNote={canNote}

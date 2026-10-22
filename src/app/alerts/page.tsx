@@ -10,25 +10,9 @@ import { SubmitButton } from "@/components/Submit";
 import { AlertsScopeToggle } from "@/components/AlertsScopeToggle";
 import { markAlertsAsRead, markAlertsAsUnread } from "@/app/actions";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
+import { KIND_LABEL } from "@/lib/alertKinds";
 
 const PAGE_SIZE = 25;
-
-const KIND_LABEL: Record<string, string> = {
-  low_volume: "Low volume",
-  advert_quiet: "Advert quiet",
-  cv_waiting: "CV waiting",
-  followup_due: "Follow-up",
-  stale_role: "Stale role",
-  shortlist_sla: "Unscreened",
-  client_review_chase: "Client chase",
-  director_review_chase: "Director chase",
-  review_reply_received: "Review reply",
-  interview_confirmation: "Confirm attendance",
-  interview_confirmation_escalation: "Escalation",
-  interview_followup: "Interview follow-up",
-  joining_date: "Joining date",
-  opening_assigned: "Role assigned",
-};
 
 export default async function AlertsPage({
   searchParams,
