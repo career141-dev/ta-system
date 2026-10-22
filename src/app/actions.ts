@@ -6189,51 +6189,36 @@ export async function saveReportInline(_: ActionResult | null, formData: FormDat
   return inline(() => saveReport(formData));
 }
 
+/** The alert ids a form posted: every `alertId` field, as the bulk bar and a row's button send them. */
+function postedAlertIds(formData: FormData): string[] {
+  const alertIds = formData.getAll("alertId").map(String).filter(Boolean);
+  if (alertIds.length === 0) {
+    const single = String(formData.get("alertId") ?? "").trim();
+    if (single) alertIds.push(single);
+  }
+  return alertIds;
+}
+
+/** The read-state service (src/lib/alerts/readState.ts), with this app's cache and backend. */
+async function markAlertsFor(user: User, request: import("@/lib/alerts/readState").MarkAlertsRequest) {
+  const { markAlerts } = await import("@/lib/alerts/readState");
+  const outcome = await markAlerts(user, request, { revalidatePath, convexMutation });
+  return outcome.ok ? done(outcome.message) : fail(outcome.message);
+}
+
 /**
- * Marks one, many, or all alerts as read for the current user.
+ * Marks one, many, or all alerts as read for the current user. The rules live
+ * in src/lib/alerts/readState.ts, shared with the mobile API.
  */
 export async function markAlertsAsRead(formData: FormData) {
   await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
   if (!user) return fail("You must be signed in.");
 
-  const all = formData.get("all") === "true";
-  if (all) {
-    const { alertsFor, computeAlerts } = await import("@/lib/sla");
-    const canSwitchScope = user.role === "admin" || user.role === "ta_lead" || user.role === "director";
-    const isEveryone = formData.get("isEveryone") === "true" && canSwitchScope;
-    const targetAlerts = isEveryone ? computeAlerts() : alertsFor(user.id);
-    repo.markAlertsRead(user.id, targetAlerts.map((a) => a.id));
-
-    if (isConvex()) {
-      await convexMutation("ta/notifications:markAllRead", { userId: user.id }).catch(() => {});
-    }
-    revalidatePath("/alerts");
-    revalidatePath("/api/notifications");
-    return done("All alerts marked as read.");
+  if (formData.get("all") === "true") {
+    return markAlertsFor(user, { all: true, everyone: formData.get("isEveryone") === "true" });
   }
-
-  let alertIds = formData.getAll("alertId").map(String).filter(Boolean);
-  if (alertIds.length === 0) {
-    const single = String(formData.get("alertId") ?? "").trim();
-    if (single) alertIds.push(single);
-  }
-
-  if (alertIds.length === 0) return fail("No alerts selected.");
-
-  repo.markAlertsRead(user.id, alertIds);
-
-  if (isConvex()) {
-    await Promise.all(
-      alertIds.map((id) =>
-        convexMutation("ta/notifications:markRead", { userId: user.id, notificationId: id }).catch(() => {}),
-      ),
-    );
-  }
-
-  revalidatePath("/alerts");
-  revalidatePath("/api/notifications");
-  return done(`${alertIds.length} ${alertIds.length === 1 ? "alert" : "alerts"} marked as read.`);
+  return markAlertsFor(user, { read: true, ids: postedAlertIds(formData) });
 }
 
 export async function markAlertsAsReadInline(_: ActionResult | null, formData: FormData) {
@@ -6244,28 +6229,7 @@ export async function markAlertsAsUnread(formData: FormData) {
   await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
   if (!user) return fail("You must be signed in.");
-
-  let alertIds = formData.getAll("alertId").map(String).filter(Boolean);
-  if (alertIds.length === 0) {
-    const single = String(formData.get("alertId") ?? "").trim();
-    if (single) alertIds.push(single);
-  }
-
-  if (alertIds.length === 0) return fail("No alerts selected.");
-
-  repo.markAlertsUnread(user.id, alertIds);
-
-  if (isConvex()) {
-    await Promise.all(
-      alertIds.map((id) =>
-        convexMutation("ta/notifications:markUnread", { userId: user.id, notificationId: id }).catch(() => {}),
-      ),
-    );
-  }
-
-  revalidatePath("/alerts");
-  revalidatePath("/api/notifications");
-  return done(`${alertIds.length} ${alertIds.length === 1 ? "alert" : "alerts"} marked as unread.`);
+  return markAlertsFor(user, { read: false, ids: postedAlertIds(formData) });
 }
 
 export async function markAlertsAsUnreadInline(_: ActionResult | null, formData: FormData) {
