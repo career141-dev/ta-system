@@ -1,4 +1,5 @@
 import { repo, setsForOpening, stageCounts } from "@/data/store";
+import { upcomingInterviews } from "@/lib/upcomingInterviews";
 import { PIPELINE_STAGES, PRIORITY_TARGET, STAGE_LABEL, type Interview, type User } from "@/data/types";
 import { kindLabel } from "@/lib/alertKinds";
 import { isTa } from "@/lib/auth";
@@ -83,19 +84,9 @@ function taHome(user: User, now?: number): TaHome {
   const openings = visible.filter((opening) => opening.status === "open");
   const alerts = alertsFor(user.id, now);
 
-  /*
-   * Upcoming interviews: the next five pending ones, as on the web — but only
-   * on openings this user can see. The web list reads every interview on the
-   * desk; the app does not widen what a TA can see to other TAs' candidates
-   * (the same scoping as /api/mobile/v1/bootstrap).
-   */
-  const visibleIds = new Set(visible.map((opening) => opening.id));
-  const interviews = repo
-    .interviews()
-    .filter((interview) => interview.outcome === "pending" && interview.scheduledAt > at)
-    .filter((interview) => visibleIds.has(repo.application(interview.applicationId)?.openingId ?? ""))
-    .sort((a, b) => a.scheduledAt - b.scheduledAt)
-    .slice(0, 5)
+  // The next five pending interviews on openings this user can see — the same
+  // list the web home now shows (lib/upcomingInterviews).
+  const interviews = upcomingInterviews(user, at)
     .map(homeInterview)
     .filter((row): row is HomeInterview => row !== null);
 

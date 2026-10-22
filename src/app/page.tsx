@@ -5,6 +5,7 @@ import { getCurrentUser } from "@/lib/session";
 import { PRIORITY_TARGET } from "@/data/types";
 import { colomboDaysBetween, inHours, relDays } from "@/lib/format";
 import { alertsFor } from "@/lib/sla";
+import { upcomingInterviews } from "@/lib/upcomingInterviews";
 import { LeadDashboard } from "@/components/dash/LeadDashboard";
 import { DirectorDashboard } from "@/components/dash/DirectorDashboard";
 import { OpsDashboard } from "@/components/dash/OpsDashboard";
@@ -31,11 +32,8 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
   const routine = alerts.filter((a) => !a.urgent);
   const clients = repo.clients();
 
-  const interviews = repo
-    .interviews()
-    .filter((i) => i.outcome === "pending" && i.scheduledAt > Date.now())
-    .sort((a, b) => a.scheduledAt - b.scheduledAt)
-    .slice(0, 5);
+  // Only interviews on openings this person can open (lib/upcomingInterviews, 22 Oct).
+  const interviews = upcomingInterviews(user);
 
   const greeting = colomboGreeting();
 
