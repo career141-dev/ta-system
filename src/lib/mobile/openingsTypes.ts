@@ -6,6 +6,7 @@
  * `POST /api/mobile/v1/openings/{id}/status`     ← SetStatusBody     → ActionResult
  * `POST /api/mobile/v1/openings/{id}/working-stage` ← SetWorkingStageBody → ActionResult
  * `POST /api/mobile/v1/openings/bin`             ← BinOpeningsBody   → BinResult
+ * (more below, by step)
  *
  * Kept identical in ta-system `src/lib/mobile/openingsTypes.ts` and TA_APP
  * `src/types/openings.ts`: change both together.
@@ -258,4 +259,79 @@ export interface AccessRequestBody {
 export interface AccessDecisionBody {
   decision: "approve" | "reject";
   reason: string;
+}
+
+// ─── Step 3, part 3: New opening ─────────────────────────────────────────────
+//
+// `GET  /api/mobile/v1/openings/new`  → NewOpeningPayload  (web `/openings/new`)
+// `POST /api/mobile/v1/openings`      ← NewOpeningBody     → NewOpeningResult
+// `POST /api/mobile/v1/clients`       ← NewClientBody      → NewClientResult
+// `POST /api/recording` (multipart: `audio`, `durationMs`) → RecordingResult — the web's own route
+
+export interface NewOpeningPayload {
+  apiVersion: 1;
+  /** TA Lead and Admin assign the work and leave the brief; a TA is the recruiter. */
+  isLead: boolean;
+  /** client.manage: may add a client from the form. */
+  canAddClient: boolean;
+  clients: { id: string; name: string; industry: string }[];
+  /** Active TAs a lead may assign; empty for a TA. */
+  tas: { id: string; name: string }[];
+  countries: string[];
+  nationalities: string[];
+  /** Country → its own nationality, for "Sri Lankan — a local hire". */
+  localNationality: Record<string, string>;
+  industries: string[];
+  /** Shown before recording starts, and saved with the brief once agreed. */
+  consentText: string;
+}
+
+export interface WorkLocationInput {
+  id: string;
+  name: string;
+  vacancies: number;
+}
+
+export interface NewOpeningBody {
+  clientId: string;
+  title: string;
+  country: string;
+  /** "local", or the nationality being sent to the country. */
+  hiringFor: string;
+  /** "Female" | "Male", only when the client said so; "" otherwise. */
+  targetGender: string;
+  workLocations: WorkLocationInput[];
+  notes: string;
+  /** From /api/recording, with the consent wording agreed to. */
+  recording: { key: string; durationMs: number; consentText: string } | null;
+  autoFollowUp: boolean;
+  /** Kept only for a lead. */
+  assignedTaIds: string[];
+}
+
+export interface NewOpeningResult {
+  ok: true;
+  message: string;
+  openingId: string;
+}
+
+export interface NewClientBody {
+  name: string;
+  industry: string;
+  contactName: string;
+  contactTitle: string;
+  contactEmail: string;
+}
+
+export interface NewClientResult {
+  ok: true;
+  message: string;
+  client: { id: string; name: string; industry: string };
+}
+
+export interface RecordingResult {
+  key: string | null;
+  transcript: string | null;
+  transcriptProblem: string | null;
+  storageProblem: string | null;
 }
