@@ -27,11 +27,15 @@ export interface HouseSubject {
   cvCount: number | null;
 }
 
-/** Forwards and replies stack "RE: FW:" in front; the subject proper is what follows. */
+/**
+ * Forwards and replies stack "RE: FW:" in front; the subject proper is what
+ * follows. A resent end-of-day email adds "REVISED - " (lib/eod-format
+ * revisedSubject), which until 22 Oct was read as the client's name.
+ */
 export function stripReplyPrefixes(subject: string): string {
   let s = (subject ?? "").trim();
   for (;;) {
-    const next = s.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "");
+    const next = s.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "").replace(/^\s*revised\s*[-–—:]\s*/i, "");
     if (next === s) return s;
     s = next;
   }

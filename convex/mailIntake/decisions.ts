@@ -7,8 +7,12 @@ import { internalAction, internalMutation, internalQuery, type MutationCtx } fro
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { executeStageTransition, type PipelineStage } from "../pipeline/pipelineStateMachine";
-import { matchReplyRound, newestReplyText, parseShortlistReply, type ReplyDecision, type ReplyRound } from "../lib/shortlistReply";
+import {
+  matchReplyRound, newestReplyText, parseShortlistReply, placement, SHORTLIST_STAGE,
+  type ReplyDecision, type ReplyRound,
+} from "../lib/shortlistReply";
 import { resolveActor } from "../lib/auth";
+import { toTaStage } from "../ta/stages";
 import { getGraphToken } from "../lib/graphClient";
 
 const decisionValidator = v.object({
@@ -167,43 +171,58 @@ export const createReview = internalMutation({
   },
 });
 
-function allowedStage(kind: "director" | "client", stage: string): boolean {
-  return kind === "director"
-    ? ["new_cvs", "matched_candidates", "ta_shortlist", "ai_call", "follow_up", "second_shortlist"].includes(stage)
-    : stage === "director_shortlist";
-}
+type ApplyResult = {
+  moved: number; rejected: number; held: number; stale: number;
+  /** Recorded, not moved: they were already where the decision puts them. */
+  already: number;
+  /** Taken off a shortlist they were moved onto before the reviewer said no. */
+  corrected: number;
+  /** Recorded, not moved, for a person to settle. */
+  left: { applicationId: string; stage: string; outcome: string }[];
+};
 
-async function apply(ctx: MutationCtx, review: Doc<"shortlistDecisionReviews">, decisions: ReplyDecision[], confirmed: boolean, actorId?: Id<"users">) {
-  if (!review.roundId) return { moved: 0, rejected: 0, held: 0, stale: decisions.length };
+async function apply(ctx: MutationCtx, review: Doc<"shortlistDecisionReviews">, decisions: ReplyDecision[], confirmed: boolean, actorId?: Id<"users">): Promise<ApplyResult> {
+  const result: ApplyResult = { moved: 0, rejected: 0, held: 0, stale: 0, already: 0, corrected: 0, left: [] };
+  if (!review.roundId) return { ...result, stale: decisions.length };
   const round = await ctx.db.get(review.roundId);
-  if (!round) return { moved: 0, rejected: 0, held: 0, stale: decisions.length };
+  if (!round) return { ...result, stale: decisions.length };
   const existing = new Map(round.decisions.map((decision) => [decision.applicationId as string, decision]));
-  let moved = 0, rejected = 0, held = 0, stale = 0;
   const accepted: typeof round.decisions = [];
+  const who = round.kind === "director" ? "Director" : "Client";
   for (const decision of decisions) {
     const applicationId = decision.applicationId as Id<"applications">;
-    if (!round.applicationIds.includes(applicationId)) { stale++; continue; }
+    if (!round.applicationIds.includes(applicationId)) { result.stale++; continue; }
     if (decision.outcome === "hold") {
-      held++;
+      result.held++;
       accepted.push({ applicationId, outcome: "hold", note: decision.evidence || null, confirmed });
       continue;
     }
     const application = await ctx.db.get(applicationId);
-    if (!application || !allowedStage(round.kind, application.currentStage)) { stale++; continue; }
-    const target = decision.outcome === "shortlisted"
-      ? (round.kind === "director" ? "director_shortlist" : "client_review")
-      : "rejected";
+    if (!application) { result.stale++; continue; }
+    // The reviewer's decision is recorded whatever happens to the stage: it is
+    // what they said, and the reports read it (22 Oct).
+    accepted.push({ applicationId, outcome: decision.outcome, note: decision.evidence || null, confirmed });
+    const how = placement(round.kind, application.currentStage, decision.outcome, confirmed);
+    if (how === "already") { result.already++; continue; }
+    if (how === "left") {
+      result.left.push({ applicationId, stage: application.currentStage, outcome: decision.outcome });
+      continue;
+    }
+    const target = decision.outcome === "shortlisted" ? SHORTLIST_STAGE[round.kind] : "rejected";
     await executeStageTransition(ctx, {
       applicationId,
       targetStage: target as PipelineStage,
       actorId: actorId ?? "shortlist-mail",
-      reason: `${round.kind === "director" ? "Director" : "Client"} decision from ${review.fromAddress}: ${decision.evidence.slice(0, 180)}`,
+      reason: how === "correct"
+        ? `Corrected: the ${who}'s reply from ${review.fromAddress} says not selected, after they had been moved to the shortlist: ${decision.evidence.slice(0, 160)}`
+        : `${who} decision from ${review.fromAddress}: ${decision.evidence.slice(0, 180)}`,
       bypassRoleCheck: true,
       skipAutoOutreach: true,
       decidedByReviewer: true,
     });
-    accepted.push({ applicationId, outcome: decision.outcome, note: decision.evidence || null, confirmed });
-    if (decision.outcome === "shortlisted") moved++; else rejected++;
+    if (how === "correct") result.corrected++;
+    else if (decision.outcome === "shortlisted") result.moved++;
+    else result.rejected++;
   }
   for (const decision of accepted) existing.set(decision.applicationId as string, decision);
   const merged = [...existing.values()];
@@ -213,14 +232,14 @@ async function apply(ctx: MutationCtx, review: Doc<"shortlistDecisionReviews">, 
     returnedAt: Date.now(),
     status: merged.filter((decision) => decision.outcome !== "hold").length >= round.applicationIds.length ? "returned" : "partial",
   });
-  return { moved, rejected, held, stale };
+  return result;
 }
 
 export const applyAutomatic = internalMutation({
   args: { reviewId: v.id("shortlistDecisionReviews") },
   handler: async (ctx, args) => {
     const review = await ctx.db.get(args.reviewId);
-    if (!review || review.status !== "pending") return { moved: 0, rejected: 0, held: 0, stale: 0 };
+    if (!review || review.status !== "pending") return { moved: 0, rejected: 0, held: 0, stale: 0, already: 0, corrected: 0, left: [] };
     const result = await apply(ctx, review, review.decisions, false);
     await ctx.db.patch(review._id, { status: "auto_applied", appliedAt: Date.now() });
     return result;
@@ -260,6 +279,18 @@ export const processReply = internalAction({
     if (!chosen) reviewReasons.push(matched.note);
     if (chosen && !chosen.senderAuthorized) reviewReasons.push("The sender is not the recorded Director or client contact.");
     if (matched.method === "subject") reviewReasons.push("This legacy reply matched only by subject and needs confirmation.");
+    // Anybody the reply would leave where they are, or would take back off a
+    // shortlist, is for a person: an automatic read never undoes a move.
+    for (const decision of chosen ? parsed.decisions : []) {
+      const row = chosen!.roster.find((candidate) => candidate.applicationId === decision.applicationId);
+      if (!row) continue;
+      const how = placement(chosen!.kind, row.stage, decision.outcome, false);
+      if (how === "left" && decision.outcome === "rejected" && row.stage === SHORTLIST_STAGE[chosen!.kind]) {
+        reviewReasons.push(`${row.name} is already in ${chosen!.kind === "director" ? "Director" : "Client"} Shortlist, but the reply says not selected. Confirm to take them off.`);
+      } else if (how === "left") {
+        reviewReasons.push(`${row.name} is at ${toTaStage(row.stage).replace(/_/g, " ")}, so the reply's ${decision.outcome === "rejected" ? "not selected" : decision.outcome} is not applied there.`);
+      }
+    }
     const decisions = parsed.decisions.map((decision) => ({ ...decision, applicationId: decision.applicationId as Id<"applications"> }));
     const reviewId = await ctx.runMutation(internal.mailIntake.decisions.createReview, {
       sourceMessageId: args.sourceMessageId, graphMessageId: args.graphMessageId,
@@ -272,9 +303,10 @@ export const processReply = internalAction({
     });
     const automatic = process.env.C141_SHORTLIST_AUTO_APPLY === "on"
       && !args.historical && Boolean(chosen?.senderAuthorized) && parsed.autoSafe
+      && reviewReasons.length === 0
       && matched.method !== "none" && matched.method !== "subject";
     if (automatic) {
-      const result: { moved: number; rejected: number; held: number; stale: number } = await ctx.runMutation(internal.mailIntake.decisions.applyAutomatic, { reviewId });
+      const result: ApplyResult = await ctx.runMutation(internal.mailIntake.decisions.applyAutomatic, { reviewId });
       return { reviewId: reviewId as string, status: "auto_applied", note: `${result.moved} shortlisted, ${result.rejected} rejected; ${result.stale} stale.`, openingId: chosen?.openingId, candidateIds: chosen?.roster.map((row) => row.candidateId).filter(Boolean) as string[] ?? [] };
     }
     await ctx.runMutation(internal.mailIntake.decisions.requireReview, { reviewId });

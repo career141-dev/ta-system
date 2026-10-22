@@ -18,6 +18,8 @@ eq("reply prefixes stripped", parseHouseSubject("RE: FW: Lanka Hospital > PA to 
 eq("app's own subject", parseHouseSubject("SET 1 - DELMO - BRAND MANAGER - 3 CVs"), { client: "DELMO", position: "BRAND MANAGER", setNumber: 1, cvCount: 3 });
 eq("hyphen inside a title survives", parseHouseSubject("SET 2 - DELMO - Sales-Retail Lead - 1 CV")?.position, "Sales-Retail Lead");
 eq("client subject is not a director subject", parseHouseSubject("CVs for the CFO assistant role"), null);
+// 22 Oct: "REVISED" was read as the client, so the resent email named no opening.
+eq("a revised email names the same opening", parseHouseSubject("RE: REVISED - SET 2 - DELMO - BRAND MANAGER - 3 CVs"), { client: "DELMO", position: "BRAND MANAGER", setNumber: 2, cvCount: 3 });
 eq("empty subject", parseHouseSubject(""), null);
 eq("set with no client and position", parseHouseSubject("SET 01"), null);
 eq("strip prefixes", stripReplyPrefixes("Re: RE: fwd: hi"), "hi");
