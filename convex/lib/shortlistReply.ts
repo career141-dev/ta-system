@@ -1,6 +1,8 @@
 // Pure helpers for reading shortlist replies. Kept free of Convex and Graph so
 // the exact safety rules can be unit-tested without touching a mailbox or DB.
 
+import { readReply } from "../../src/lib/replyReader";
+
 export type ReplyOutcome = "shortlisted" | "rejected" | "hold";
 
 export interface ReplyCandidate {
@@ -23,7 +25,9 @@ export interface ParsedShortlistReply {
 export function stripReplyPrefixes(subject: string): string {
   let out = (subject ?? "").trim();
   for (;;) {
-    const next = out.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "");
+    // "REVISED - " is the TA resending the same email (lib/eod-format); a
+    // reply to it belongs to the same round.
+    const next = out.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "").replace(/^\s*revised\s*[-–—:]\s*/i, "");
     if (next === out) return out.replace(/\s+/g, " ").trim();
     out = next;
   }
@@ -67,92 +71,107 @@ export function newestReplyText(raw: string): string {
   return text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 }
 
-const POSITIVE = /\b(shortlist(?:ed)?|select(?:ed)?|proceed|go ahead|take forward|interview|approve(?:d)?|both|all)\b/i;
-const NEGATIVE = /\b(not shortlisted|reject(?:ed)?|drop(?:ped)?|not suitable|unsuitable|decline(?:d)?|none|neither)\b/i;
-const HOLD = /\b(optional(?:ly)?|conditional(?:ly)?|maybe|hold|reserve|backup|stand ?by|not sure|unsure)\b/i;
+const HOLD_WORDS = /\b(optional(?:ly)?|conditional(?:ly)?|maybe|hold|reserve|backup|stand ?by|not sure|unsure)\b/i;
 const OTHERS = /\b(other|others|remaining|rest)\b/i;
 
-function uniqueNameTokens(candidate: ReplyCandidate, roster: ReplyCandidate[]): string[] {
-  return candidate.name
-    .toLowerCase()
-    .replace(/[^a-z0-9 ]/g, " ")
-    .split(/\s+/)
-    .filter((part) => part.length >= 3)
-    .filter((part) => roster.filter((row) => row.name.toLowerCase().includes(part)).length === 1);
-}
-
-function outcomeOf(text: string): ReplyOutcome | null {
-  if (HOLD.test(text)) return "hold";
-  if (NEGATIVE.test(text)) return "rejected";
-  if (POSITIVE.test(text)) return "shortlisted";
-  return null;
-}
+/** Capitalised words that are not somebody's name. */
+const NOT_A_NAME = new Set([
+  "please", "kindly", "shortlist", "shortlisted", "select", "selected", "selection", "proceed", "interview",
+  "approve", "approved", "reject", "rejected", "drop", "dropped", "hold", "optional", "conditional",
+  "maybe", "reserve", "none", "both", "all", "not", "suitable", "unsuitable", "candidate", "candidates",
+  "yes", "no", "ok", "okay", "good", "fine", "strong", "weak", "keep", "include", "take", "go", "ahead",
+  "forward", "pass", "decline", "declined", "remove", "except", "only", "just", "first", "second", "third",
+  "last", "number", "set", "and", "but", "the", "they", "them", "he", "she", "his", "her", "we", "i", "you",
+  "is", "are", "was", "can", "could", "would", "will", "should", "let", "also", "with", "for", "this", "that",
+  "these", "those", "one", "ones", "cv", "cvs", "sir", "madam", "director", "client", "team", "thanks",
+]);
 
 /**
- * Conservative deterministic parser. It proposes only people explicitly
- * named/numbered, except for unambiguous whole-roster words (all/both/none).
+ * Conservative deterministic reading of a reply at shortlists@. The rules are
+ * the TA paste box's (src/lib/replyReader.ts) — negation, "not 2", masked
+ * times, dates and set numbers — and this adds the gate for acting without a
+ * person: `autoSafe` only when every sentence was read, nobody was read two
+ * ways and nothing was held.
+ *
+ * Replaced the 19 Oct regex reader on 22 Oct. That one had no negation, so
+ * "2 not selected" and "Do not proceed with 2" both shortlisted candidate two,
+ * and "Hi all" shortlisted the whole set — each marked safe to apply.
  * Silence is never turned into rejection.
  */
 export function parseShortlistReply(raw: string, roster: ReplyCandidate[]): ParsedShortlistReply {
   const text = newestReplyText(raw);
   const reasons = new Set<string>();
-  const picked = new Map<string, ReplyDecision>();
   if (!text) return { decisions: [], reviewReasons: ["The reply body is empty."], autoSafe: false };
-  if (OTHERS.test(text)) reasons.add('“Others/remaining” must be checked against the original roster.');
-  if (HOLD.test(text)) reasons.add("Optional or conditional decisions require confirmation.");
+  if (OTHERS.test(text)) reasons.add("“Others/remaining” must be checked against the original roster.");
+  if (HOLD_WORDS.test(text)) reasons.add("Optional or conditional decisions require confirmation.");
 
-  const clauses = text.split(/[\n.!?;]+/).map((part) => part.trim()).filter(Boolean);
-  for (const clause of clauses) {
-    const bareNumberList = /^\s*#?\d{1,2}(?:\s*(?:,|&|and)\s*#?\d{1,2})*\s*$/i.test(clause);
-    const outcome = outcomeOf(clause) ?? (bareNumberList ? "shortlisted" : null);
-    if (!outcome) continue;
-    const lower = clause.toLowerCase();
-    const numbers = new Set<number>();
-    for (const hit of clause.matchAll(/(?<!\d)(\d{1,2})(?!\d)/g)) {
-      const n = Number(hit[1]);
-      const at = hit.index ?? 0;
-      const before = lower.slice(Math.max(0, at - 12), at);
-      const after = lower.slice(at + hit[1].length, at + hit[1].length + 14);
-      if (/\b(?:at|on)\s*$/.test(before) || /^\s*(?:am|pm|years?|weeks?|days?|months?|%|lakhs?|lkr|usd)\b/.test(after)) continue;
-      if (n >= 1 && n <= roster.length) numbers.add(n);
-    }
-    const wholeRoster = /\b(all|both|everyone|everybody|none|neither)\b/i.test(clause) && !OTHERS.test(clause);
-    if (wholeRoster) for (let n = 1; n <= roster.length; n++) numbers.add(n);
-    if (roster.length === 1 && numbers.size === 0) numbers.add(1);
+  const read = readReply(text, roster);
+  const nameOf = (id: string) => roster.find((row) => row.applicationId === id)?.name ?? id;
+  for (const id of read.conflicts) reasons.add(`Conflicting decisions were found for ${nameOf(id)}.`);
+  for (const refused of read.unreadable) reasons.add(`Could not read safely: “${refused.clause.slice(0, 120)}” — ${refused.why}`);
+  for (const sentence of read.unplaced) reasons.add(`Could not match a candidate in: “${sentence.slice(0, 120)}”.`);
+  for (const n of read.outOfRange) reasons.add(`Candidate number ${n} is not in this email.`);
+  if (read.mixedWholeSet) reasons.add("“All/both/none” was used alongside named candidates; check who it covers.");
 
-    const matchedNames = new Set<string>();
-    for (const n of numbers) {
-      const candidate = roster[n - 1];
-      const prior = picked.get(candidate.applicationId);
-      if (prior && prior.outcome !== outcome) reasons.add(`Conflicting decisions were found for ${candidate.name}.`);
-      picked.set(candidate.applicationId, { applicationId: candidate.applicationId, outcome, evidence: clause.slice(0, 240) });
-    }
-    for (const candidate of roster) {
-      const tokens = uniqueNameTokens(candidate, roster);
-      if (!tokens.some((token) => new RegExp(`\\b${token}\\b`, "i").test(lower))) continue;
-      tokens.forEach((token) => matchedNames.add(token));
-      const prior = picked.get(candidate.applicationId);
-      if (prior && prior.outcome !== outcome) reasons.add(`Conflicting decisions were found for ${candidate.name}.`);
-      picked.set(candidate.applicationId, { applicationId: candidate.applicationId, outcome, evidence: clause.slice(0, 240) });
-    }
-    if (!wholeRoster && numbers.size === 0 && roster.length > 1) {
-      const ignored = new Set([
-        "please", "kindly", "shortlist", "shortlisted", "select", "selected", "proceed", "interview",
-        "approve", "approved", "reject", "rejected", "drop", "dropped", "hold", "optional", "conditional",
-        "maybe", "reserve", "none", "both", "all", "not", "suitable", "unsuitable", "candidate",
-      ]);
-      const unknown = [...clause.matchAll(/\b[A-Z][a-z]{2,}\b/g)]
-        .map((hit) => hit[0].toLowerCase())
-        .filter((word) => !ignored.has(word) && !matchedNames.has(word));
-      if (unknown.length > 0) reasons.add(`Could not uniquely match: ${[...new Set(unknown)].join(", ")}.`);
-      if (matchedNames.size === 0) reasons.add(`Could not match a candidate in: “${clause.slice(0, 120)}”.`);
-    }
+  // A name the set does not hold — "Nimal and Ruwan are shortlisted" — is a
+  // person this reply decides about whom we cannot place.
+  const known = new Set(roster.flatMap((row) => row.name.toLowerCase().split(/[^a-z0-9]+/)).filter(Boolean));
+  const unknown = [...text.matchAll(/\b[A-Z][a-z]{2,}\b/g)]
+    .map((hit) => hit[0].toLowerCase())
+    .filter((word) => !NOT_A_NAME.has(word) && !known.has(word));
+  const decisive = /\b(shortlist|select|proceed|approve|reject|drop|interview|take|go ahead|not suitable|unsuitable)/i;
+  const sentencesWithUnknown = text.split(/[\n.!?;]+/).filter((sentence) =>
+    decisive.test(sentence) && unknown.some((word) => new RegExp(`\\b${word}\\b`, "i").test(sentence)));
+  if (sentencesWithUnknown.length > 0) {
+    const words = unknown.filter((word) => sentencesWithUnknown.some((sentence) => new RegExp(`\\b${word}\\b`, "i").test(sentence)));
+    reasons.add(`Could not uniquely match: ${[...new Set(words)].join(", ")}.`);
   }
 
-  const decisions = [...picked.values()];
+  const decisions: ReplyDecision[] = read.decisions.map((decision) => ({
+    applicationId: decision.applicationId,
+    outcome: decision.outcome,
+    evidence: (decision.note ?? "").slice(0, 240),
+  }));
   if (decisions.length === 0) reasons.add("No explicit candidate decision could be read safely.");
   if (decisions.some((decision) => decision.outcome === "hold")) reasons.add("Held candidates are never moved automatically.");
   return { decisions, reviewReasons: [...reasons], autoSafe: reasons.size === 0 && decisions.length > 0 };
+}
+
+/** Stages a candidate sits in while the reviewer has not yet decided. */
+const AWAITING: Record<"director" | "client", string[]> = {
+  director: ["new_cvs", "matched_candidates", "ta_shortlist", "ai_call", "follow_up", "second_shortlist"],
+  client: ["director_shortlist"],
+};
+
+/** Where a reviewer's "yes" puts somebody. */
+export const SHORTLIST_STAGE = { director: "director_shortlist", client: "client_review" } as const;
+
+/**
+ * What a reviewer's decision does to somebody, given where they stand now.
+ *
+ *   move     waiting for this reviewer: moved to the shortlist or to rejected
+ *   already  already where the decision puts them: recorded, not moved
+ *   correct  the reviewer said no, but they were already moved onto this
+ *            reviewer's shortlist — by the TA's own email copy, an earlier
+ *            misread, or a hand. A person confirmed it, so they come off.
+ *   left     anything else: recorded, not moved, and reported, so a person
+ *            decides. A "no" read without a person is never a correction.
+ *
+ * Until 22 Oct everybody past the waiting stages was "stale" and the decision
+ * was dropped, so a wrong move could never be undone by the Director's reply.
+ */
+export function placement(
+  kind: "director" | "client",
+  stage: string,
+  outcome: ReplyOutcome,
+  confirmed: boolean,
+): "move" | "already" | "correct" | "left" {
+  if (outcome === "hold") return "already";
+  const target = outcome === "shortlisted" ? SHORTLIST_STAGE[kind] : "rejected";
+  if (stage === target) return "already";
+  if (AWAITING[kind].includes(stage)) return "move";
+  if (outcome === "rejected" && stage === SHORTLIST_STAGE[kind]) return confirmed ? "correct" : "left";
+  return "left";
 }
 
 export interface ReplyRound {

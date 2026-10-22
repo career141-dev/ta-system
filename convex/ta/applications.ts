@@ -29,6 +29,7 @@ import { nextSetFor } from "../lib/sets";
 import { backupPrimary } from "../lib/backup";
 import { workingStageKey } from "../../src/lib/workingStage";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
+import { recordShortlistDecision } from "../lib/shortlistDecision";
 import { isGone } from "../../src/lib/bin";
 
 
@@ -312,6 +313,16 @@ export const moveStage = internalMutation({
       // Day 0 message on an opening switched off (review of PR #2, 21 Sep).
       skipAutoOutreach: target === "follow_up" ? !followUpOn(await ctx.db.get(app.jobId)) : undefined,
     });
+    // Moving somebody onto a reviewer's shortlist by hand says the reviewer
+    // chose them, so the round they were sent in records it (22 Oct).
+    if (target === "director_shortlist" || target === "client_review") {
+      await recordShortlistDecision(ctx, {
+        applicationId: appId, jobId: app.jobId,
+        kind: target === "director_shortlist" ? "director" : "client",
+        outcome: "shortlisted", confirmed: true,
+        note: `Moved by ${user.fullName}${args.reason ? `: ${args.reason}` : ""}`,
+      });
+    }
     return { ...result, stage: toTaStage(target) };
   },
 });

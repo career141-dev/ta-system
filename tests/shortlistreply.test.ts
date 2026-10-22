@@ -1,4 +1,4 @@
-import { matchReplyRound, parseShortlistReply, reviewToken } from "../convex/lib/shortlistReply";
+import { matchReplyRound, parseShortlistReply, placement, reviewToken } from "../convex/lib/shortlistReply";
 
 let pass = 0, fail = 0;
 const ok = (label: string, condition: boolean) => {
@@ -46,6 +46,50 @@ ok("an unknown name alongside a known name requires review", !unknown.autoSafe &
 
 const quoted = parseShortlistReply("Both shortlisted\n\n-----Original Message-----\nNone shortlisted", roster.slice(0, 2));
 ok("quoted history is not parsed", quoted.decisions.every((d) => d.outcome === "shortlisted"));
+
+// 22 Oct: replies the 19 Oct reader got wrong, each marked safe to apply on
+// its own. Y = shortlisted, N = rejected, H = hold, - = not mentioned.
+const verdicts = (reply: string) => {
+  const read = parseShortlistReply(reply, roster);
+  const by = new Map(read.decisions.map((d) => [d.applicationId, d.outcome]));
+  return roster.map((row) => ({ shortlisted: "Y", rejected: "N", hold: "H" } as Record<string, string>)[by.get(row.applicationId) ?? ""] ?? "-").join("");
+};
+const reads = (reply: string, want: string, safe: boolean) => {
+  const got = verdicts(reply);
+  const autoSafe = parseShortlistReply(reply, roster).autoSafe;
+  ok(`${JSON.stringify(reply)} reads ${want}${safe ? "" : ", for a person to check"} (got ${got}${autoSafe ? ", auto" : ""})`, got === want && autoSafe === safe);
+};
+reads("2 not selected", "-N-", true);
+reads("Kasun is not selected", "-N-", true);
+reads("Selected: 1, 3\nNot selected: 2", "YNY", true);
+reads("Selected - Nimal\nNot Selected - Kasun", "YN-", true);
+reads("Dear All\nKasun not selected", "-N-", true);
+reads("Hi all,\n\nPlease proceed with 1 and 3.\n\nThanks", "Y-Y", true);
+reads("Hi all, please proceed with 1 and 3", "Y-Y", true);
+reads("Thanks all. Shortlist 1", "Y--", true);
+reads("Hi, all shortlisted", "YYY", true);
+reads("Proceed with 1, reject 2", "YN-", true);
+reads("1 and 3 selected, 2 not suitable", "YNY", true);
+reads("Proceed with Nimal and Dilani but not Kasun", "YNY", true);
+reads("Do not proceed with 2", "-N-", true);
+reads("Please don't shortlist Kasun", "-N-", true);
+reads("Nimal - Yes\nKasun - No\nDilani - Yes", "YNY", true);
+reads("Set 2: proceed with Nimal", "Y--", true);
+reads("Do not reject 1", "---", false);
+reads("Not approved", "---", false);
+reads("Shortlist 5", "---", false);
+reads("Shortlist all except Kasun", "YNY", false);
+
+// What a decision does to somebody, given where they already are (22 Oct).
+ok("Director Review + selected moves", placement("director", "second_shortlist", "shortlisted", false) === "move");
+ok("Director Review + not selected moves to rejected", placement("director", "second_shortlist", "rejected", false) === "move");
+ok("already in Director Shortlist + selected is recorded, not moved", placement("director", "director_shortlist", "shortlisted", false) === "already");
+ok("already in Director Shortlist + not selected, read by the reader alone, is left for a person", placement("director", "director_shortlist", "rejected", false) === "left");
+ok("already in Director Shortlist + not selected, confirmed by a person, is corrected", placement("director", "director_shortlist", "rejected", true) === "correct");
+ok("past Director Shortlist is never moved back by a reply", placement("director", "interview", "rejected", true) === "left");
+ok("a rejected candidate is not brought back by a reply", placement("director", "rejected", "shortlisted", true) === "left");
+ok("a client's no for somebody already in Client Shortlist is corrected only when confirmed", placement("client", "client_review", "rejected", true) === "correct" && placement("client", "client_review", "rejected", false) === "left");
+ok("a reply to the revised email matches the round", matchReplyRound({ subject: "RE: REVISED - SET 1 - ACME" }, [{ id: "r9", token: "C141-MAIL-x", subject: "SET 1 - ACME", status: "awaiting" }]).round?.id === "r9");
 
 ok("tracking token is found inside the subject", reviewToken("Re: Job [C141-ABC234]") === "C141-ABC234");
 

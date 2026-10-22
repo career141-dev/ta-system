@@ -28,5 +28,15 @@ ok("a matched person is returned before any patch is written",
 ok("referees and embedding are not rewritten for a person we hold", /!keptAsIs && extracted\.referees/.test(extraction) && /if \(!keptAsIs\) \{/.test(extraction));
 ok("a shortlist copy is not matched against every open job", /else if \(shortlistCopy\)/.test(extraction));
 
+// 22 Oct: the TA's own end-of-day copy always carries CVs, and was filed as the
+// Director's shortlist because the copy was only recognised without them.
+const ownCopy = process_.indexOf("if (originalTrackedCopy) {");
+ok("the TA's own tracked copy is skipped before the CV path", ownCopy > 0 && ownCopy < process_.indexOf("if (cvs.length === 0) {", ownCopy) && ownCopy < process_.indexOf("parseHouseSubject(subject)"));
+ok("a shortlist subject moves people only from a recorded Director address", /if \(house && !fromDirector\) \{[\s\S]{0,200}outcome: "held"/.test(process_));
+ok("the director address list uses the desk role", /mapUser\(u\)\.role === "director"/.test(src("convex/mailIntake/shortlist.ts")));
+ok("a mail-filed move records the Director's decision", /recordShortlistDecision\(ctx/.test(src("convex/mailIntake/shortlist.ts")));
+ok("a hand move to Director Shortlist records the decision", /target === "director_shortlist" \|\| target === "client_review"\) \{\s*await recordShortlistDecision/.test(src("convex/ta/applications.ts")));
+ok("an automatic read applies nothing a person must check", /&& reviewReasons\.length === 0/.test(src("convex/mailIntake/decisions.ts")));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

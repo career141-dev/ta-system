@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { pageUser } from "@/lib/session";
 import { convexActorForEmail, convexQuery } from "@/lib/convexServer";
 import { SubmitButton } from "@/components/Submit";
+import { STAGE_LABEL } from "@/data/types";
+import { toTaStage } from "../../../convex/ta/stages";
 import { confirmShortlistReply, ignoreShortlistReply, keepShortlistReplyForReview, rematchShortlistReply } from "./actions";
 
 type Outcome = "shortlisted" | "rejected" | "hold";
@@ -99,7 +101,7 @@ export default async function ShortlistDecisionsPage() {
                             const decision = proposed.get(candidate.applicationId);
                             return <tr key={candidate.applicationId} className="border-t border-rule">
                               <td className="px-3 py-2.5 font-medium">{candidate.name}<input type="hidden" name={`evidence:${candidate.applicationId}`} value={decision?.evidence ?? "Confirmed from the shortlist reply"} /></td>
-                              <td className="px-3 py-2.5 text-ink-soft">{candidate.stage}</td>
+                              <td className="px-3 py-2.5 text-ink-soft">{candidate.stage === "missing" ? "Not found" : STAGE_LABEL[toTaStage(candidate.stage)]}</td>
                               <td className="px-3 py-2.5"><select name={`decision:${candidate.applicationId}`} defaultValue={decision?.outcome ?? "skip"} className="rounded-lg border border-rule bg-paper px-2 py-1.5"><option value="skip">No decision</option><option value="shortlisted">Shortlisted</option><option value="rejected">Not shortlisted</option><option value="hold">Hold / optional</option></select></td>
                             </tr>;
                           })}</tbody>

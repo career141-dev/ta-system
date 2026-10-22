@@ -131,6 +131,15 @@ eq("1, 3", "Y-Y--");
 eq("busy with 2 interviews this week, will reply tomorrow", "-----");
 eq("I have 3 concerns about this set", "-----");
 
+console.log("\nthe shortlists@ misreads (22 Oct), read the same way here");
+eq("1 and 3 selected, 2 not suitable", "YNY--");
+eq("Hi all, please proceed with 1 and 3", "Y-Y--");
+eq("Thanks all. Shortlist 1", "Y----");
+eq("Set 2: proceed with 1", "Y----");
+eq("SET 02 - shortlist 4", "---Y-");
+eq("Shortlist all except 2", "YNYYY");
+eq("Interview 1 and 3", "Y-Y--");
+
 console.log("\nsilence never rejects an unmentioned candidate");
 const { withUnpickedRejected } = await import("@/lib/reviewReply");
 const ids5 = ["a1", "a2", "a3", "a4", "a5"];
