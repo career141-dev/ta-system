@@ -7,7 +7,7 @@ import { assignableTas } from "@/lib/assignable";
 import { allows, isDeskWide, isTa, seesEveryTaRow } from "@/lib/auth";
 import { colomboDaysBetween } from "@/lib/format";
 import { linkedinStatus } from "@/lib/linkedinStatus";
-import { levelLabel } from "@/lib/linkViews";
+import { ownSheets } from "@/lib/openingSheets";
 import { OPENING_BUCKETS, statusMatchesBucket, type OpeningBucket } from "@/lib/openingStatus";
 import { computeAlerts } from "@/lib/sla";
 import { seatFor, visiblePosts, visibleToSeat, type Seat } from "@/lib/visibility";
@@ -178,27 +178,12 @@ export function mobileOpeningShell(
     .filter(({ s }) => allowed === null || allowed.has(s))
     .map(({ s, closed }) => ({ stage: s, label: STAGE_LABEL[s], count: counts[s] ?? 0, closed }));
 
-  // Excel Tables: the L-sheets this person started, or the opening's for a lead
-  // who has none of their own (layout.tsx).
-  let tables: OpeningShell["tables"] = [];
-  if (seat.canSeeSourcing) {
-    const isLeadViewer = isDeskWide(user) || seesEveryTaRow(user);
-    const myLevels = repo.linkLevels(openingId, user.id);
-    const vaultRows = repo.linkVault(openingId);
-    if (myLevels.length > 0 || !isLeadViewer) {
-      const mine = vaultRows.filter((r) => r.addedBy === user.id);
-      tables = myLevels.map((l) => ({ n: l.n, label: levelLabel(l), name: l.name ?? "", count: mine.filter((r) => r.level === l.n).length }));
-    } else {
-      const byN = new Map<number, { n: number; at: number; name?: string }>();
-      for (const uid of [...new Set(vaultRows.map((r) => r.addedBy))]) {
-        for (const l of repo.linkLevels(openingId, uid)) if (!byN.has(l.n)) byN.set(l.n, { ...l });
-      }
-      for (const r of vaultRows) if (typeof r.level === "number" && r.level > 0 && !byN.has(r.level)) byN.set(r.level, { n: r.level, at: 0 });
-      tables = [...byN.values()]
-        .sort((a, b) => a.n - b.n)
-        .map((l) => ({ n: l.n, label: l.at ? levelLabel(l) : `L${l.n}`, name: l.name ?? "", count: vaultRows.filter((r) => r.level === l.n).length }));
-    }
-  }
+  // Excel Tables: the same list as the web sidebar (lib/openingSheets) — this
+  // person's own L's and their links in none; none on openings with work
+  // locations, which keep their sheets per location on the table.
+  const tables: OpeningShell["tables"] = o.workLocations?.length
+    ? []
+    : ownSheets(openingId, user, seat.canSeeSourcing).map(({ n, label, name, count }) => ({ n, label, name, count }));
 
   return {
     id: o.id,

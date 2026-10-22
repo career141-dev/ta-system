@@ -18,6 +18,7 @@ const { repo } = await import("@/data/store");
 const { allows, isDeskWide } = await import("@/lib/auth");
 const { mobileOpeningsList, mobileOpeningShell, mobileOpeningOverview, mayReadOpening } = await import("@/lib/mobile/openings");
 const { toCountry } = await import("@/lib/openingCountry");
+const { ownSheets } = await import("@/lib/openingSheets");
 const { decideOn, writeOpeningStatus, writeWorkingStage, binOpenings } = await import("@/lib/openings/writes");
 const { setStatusBody, setWorkingStageBody, binOpeningsBody, parseBody } = await import("@/lib/mobile/openingsBodies");
 repo.reset();
@@ -129,6 +130,21 @@ test("an opening's shell and overview follow the seat: a client contact sees the
   const overview = mobileOpeningOverview(admin, opening.id, { matching: null })!;
   assert.equal(overview.pipeline.reduce((n, s) => n + s.count, 0), overview.inPipeline);
   assert.equal(overview.canEdit, true);
+});
+
+test("Excel Tables on the phone is the web sidebar's list: one person's own sheets, never every TA's added together", () => {
+  const opening = repo.openings().find((o) => !o.workLocations?.length && o.assignedTaIds.length >= 1)!;
+  const ta = repo.user(opening.assignedTaIds[0])!;
+  repo.addLinkLevel(opening.id, ta.id);
+  repo.addLink(opening.id, "https://www.linkedin.com/in/mobile-sheet-test", ta.id, "Mobile Sheet", "shortlisted", undefined, 1);
+  const lead = seeded("ta_lead");
+  const taShell = mobileOpeningShell(ta, opening.id, { middayEmails: [] })!;
+  assert.deepEqual(taShell.tables, ownSheets(opening.id, ta, true).map(({ n, label, name, count }) => ({ n, label, name, count })));
+  assert(taShell.tables.some((t) => t.n === 1 && t.count >= 1), "the TA's own L1 with its link");
+  const leadShell = mobileOpeningShell(lead, opening.id, { middayEmails: [] })!;
+  assert(!leadShell.tables.some((t) => t.n === 1 && t.count >= 1) || repo.linkLevels(opening.id, lead.id).length > 0,
+    "a lead does not get the TA's L1 as their own");
+  assert.deepEqual(leadShell.tables, ownSheets(opening.id, lead, true).map(({ n, label, name, count }) => ({ n, label, name, count })));
 });
 
 test("a TA cannot read an opening they are not on", () => {

@@ -7,7 +7,8 @@ import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
 import { allows, isDeskWide, isTa, seesEveryTaRow } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
-import { NO_SHEET, levelLabel } from "@/lib/linkViews";
+import { NO_SHEET } from "@/lib/linkViews";
+import { ownSheets } from "@/lib/openingSheets";
 import { isConvex } from "@/data/mode";
 import { convexQuery } from "@/lib/convexServer";
 import type { DailyEmail } from "@/lib/dailyEmail";
@@ -65,24 +66,8 @@ export default async function OpeningLayout({
     status: p.status,
     count: apps.filter((a) => a.jobPostId === p.id).length,
   }));
-  // The L's this person started under Excel Tables, with how many rows each
-  // holds — the same sheets and counts as the table's tabs (22 Oct). A lead's
-  // are their own, opened under their name; every TA's L's together were
-  // several people's L1 under one number.
-  const isLeadViewer = isDeskWide(user) || seesEveryTaRow(user);
-  const myLevels = seat.canSeeSourcing ? repo.linkLevels(id, user.id) : [];
-  const mine = seat.canSeeSourcing ? repo.linkVault(id).filter((r) => r.addedBy === user.id && !r.workLocationId) : [];
-  const own = isLeadViewer ? `by=${encodeURIComponent(user.id)}&` : "";
-  const levels: { n: number; label: string; name: string; count: number; canManage?: boolean; query: string }[] = myLevels.map((l) => ({
-    n: l.n,
-    label: levelLabel(l),
-    name: l.name ?? "",
-    count: mine.filter((r) => r.level === l.n).length,
-    canManage: true,
-    query: `${own}level=${l.n}`,
-  }));
-  const noSheet = mine.filter((r) => !(r.level && r.level > 0)).length;
-  if (noSheet > 0) levels.push({ n: NO_SHEET, label: "Not in a sheet", name: "", count: noSheet, canManage: false, query: `${own}level=none` });
+  // The L's this person started, as the table's tabs show them (lib/openingSheets).
+  const levels = ownSheets(id, user, seat.canSeeSourcing).map((l) => ({ ...l, canManage: l.n !== NO_SHEET }));
 
   return (
     <>
