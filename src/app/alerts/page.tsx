@@ -10,7 +10,8 @@ import { SubmitButton } from "@/components/Submit";
 import { AlertsScopeToggle } from "@/components/AlertsScopeToggle";
 import { markAlertsAsRead, markAlertsAsUnread } from "@/app/actions";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
-import { KIND_LABEL } from "@/lib/alertKinds";
+import { KIND_LABEL, runsEveryDay } from "@/lib/alertKinds";
+import { canSwitchAlertScope } from "@/lib/alerts/readState";
 
 const PAGE_SIZE = 25;
 
@@ -25,7 +26,7 @@ export default async function AlertsPage({
 
   await primeStore({ allApplications: true, followUps: true });
   const user = await getCurrentUser();
-  const canSwitchScope = user.role === "admin" || user.role === "ta_lead" || user.role === "director";
+  const canSwitchScope = canSwitchAlertScope(user);
   const everyones = canSwitchScope && all === "1";
   const users = repo.users();
 
@@ -51,7 +52,7 @@ export default async function AlertsPage({
   });
 
   const working = isWorkingDay(new Date());
-  const everyDay = (k: string) => k === "followup_due" || k === "opening_assigned" || k === "review_reply_received";
+  const everyDay = runsEveryDay;
   const urgent = filteredAlerts.filter((a) => a.urgent);
   const today = filteredAlerts.filter((a) => !a.urgent && (working || everyDay(a.kind)));
   const held = filteredAlerts.filter((a) => !a.urgent && !working && !everyDay(a.kind));
