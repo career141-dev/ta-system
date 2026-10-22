@@ -42,7 +42,7 @@ export function decodeEodBrowserDraft(value: string | null): Partial<EodBrowserD
  * edit. A record that has changed since means the TA updated the profile after
  * typing, so the profile's value goes out instead of the older edit (22 Oct).
  */
-export type CandidateDraft = Partial<ShortlistRow> & { _base?: Partial<Record<keyof ShortlistRow, string>>; _reviewStageChangedAt?: number };
+export type CandidateDraft = Partial<ShortlistRow> & { _base?: Partial<Record<keyof ShortlistRow, string>> };
 
 /** A box field as text: notes one per line, as the form sends them. */
 export function draftFieldText(value: unknown): string {
@@ -54,23 +54,19 @@ export function draftFieldText(value: unknown): string {
  * after a profile update that would drop every key the TA typed into the box.
  */
 export function editCandidateDraft(draft: CandidateDraft | undefined, row: ShortlistRow | undefined, field: keyof ShortlistRow, value: unknown): CandidateDraft {
-  if (row?.reviewStageChangedAt !== undefined && draft?._reviewStageChangedAt !== row.reviewStageChangedAt) draft = undefined;
-  return { ...draft, [field]: value, _reviewStageChangedAt: row?.reviewStageChangedAt, _base: { ...draft?._base, ...(row ? { [field]: draftFieldText(row[field]) } : {}) } };
+  return { ...draft, [field]: value, _base: { ...draft?._base, ...(row ? { [field]: draftFieldText(row[field]) } : {}) } };
 }
 
 /**
- * The row the email carries. Edits belong to one visit to the review stage.
- * Within that visit, a field saved without a base keeps the TA's edit rather
- * than guessing which note lines the TA deliberately deleted. Old drafts
- * without a review timestamp reset once when used with a versioned row.
+ * The row the email carries. A field saved without a base (every draft before
+ * 22 Oct) keeps the TA's edit: guessing from the notes' wording dropped edits
+ * a TA had made on purpose, and the original notes went to the Director.
  */
 export function applyCandidateDraft(row: ShortlistRow, draft: CandidateDraft | undefined): ShortlistRow {
   if (!draft) return row;
-  // Unversioned drafts cannot establish which review visit they belong to.
-  if (row.reviewStageChangedAt !== undefined && draft._reviewStageChangedAt !== row.reviewStageChangedAt) return row;
   const out: Record<string, unknown> = { ...row };
   for (const [key, value] of Object.entries(draft)) {
-    if (key === "_base" || key === "_reviewStageChangedAt" || key === "reviewStageChangedAt" || value === undefined) continue;
+    if (key === "_base" || value === undefined) continue;
     const base = draft._base?.[key as keyof ShortlistRow];
     if (base !== undefined && base !== draftFieldText(row[key as keyof ShortlistRow])) continue;
     out[key] = value;
@@ -82,8 +78,6 @@ export function applyCandidateDraft(row: ShortlistRow, draft: CandidateDraft | u
 export function candidateDraftsFromFields(rows: ShortlistRow[], fields: Record<string, string>): Record<string, CandidateDraft> {
   return Object.fromEntries(rows.map(row => {
     const draft: Record<string, unknown> = {};
-    const stage = fields[`base_shortlist_${row.applicationId}_reviewStageChangedAt`];
-    if (stage !== undefined && stage !== "") draft._reviewStageChangedAt = Number(stage);
     const base: Record<string, string> = {};
     for (const key of Object.keys(row)) {
       const value = fields[`shortlist_${row.applicationId}_${key}`];
@@ -103,9 +97,6 @@ export function candidateDraftsFromFields(rows: ShortlistRow[], fields: Record<s
  */
 export function candidateDraftBases(rows: ShortlistRow[], fields: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const row of rows) if (row.reviewStageChangedAt !== undefined) {
-    out[`base_shortlist_${row.applicationId}_reviewStageChangedAt`] = String(row.reviewStageChangedAt);
-  }
   for (const row of rows) for (const key of Object.keys(row) as (keyof ShortlistRow)[]) {
     if (fields[`shortlist_${row.applicationId}_${key}`] !== undefined) out[`base_shortlist_${row.applicationId}_${key}`] = draftFieldText(row[key]);
   }

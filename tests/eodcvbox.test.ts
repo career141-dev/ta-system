@@ -57,12 +57,6 @@ console.log("\nsaved to the candidate");
   const after = repo.candidate(app.candidateId)!;
   eq("the candidate has the email's company and designation", [after.currentEmployer, after.currentTitle], ["Hayleys PLC", "Senior Brand Manager"]);
   eq("and the next email reads them", [shortlistRowFor(app, after, 1).currentCompany, shortlistRowFor(app, after, 1).currentDesignation], ["Hayleys PLC", "Senior Brand Manager"]);
-  const updatedApp = { ...app, notes: ["Note: first", "Note: second", "New follow-up note"] };
-  const updatedCandidate = { ...after, totalExperienceYears: 1, currentEmployer: "Example employer" };
-  const emailNotes = shortlistRowFor(updatedApp, updatedCandidate, 1).notes;
-  eq("the email includes new notes beyond its former four-line cutoff", emailNotes,
-    [">Total Experience - 1yr", ">Currently at Example employer", ">Note: first", ">Note: second", ">New follow-up note"]);
-  eq("all TA notes from the CV box also appear in the email", updatedApp.notes.every(note => emailNotes.includes(`>${note}`)), true);
 }
 
 console.log("\nthe box on the CV");

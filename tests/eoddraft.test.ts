@@ -82,21 +82,5 @@ eq("a draft saved before bases keeps every edit", applyCandidateDraft(updated, c
 eq("the browser draft keeps bases across navigation",
   applyCandidateDraft(updated, decodeEodBrowserDraft(encodeEodBrowserDraft({ ...draft, shortlistDraft: { app1: edited } }))?.shortlistDraft?.app1).notice, "1 month");
 
-// Leaving and returning to Director Review starts a new email draft for this CV.
-const firstReview = record({ reviewStageChangedAt: 100 });
-const firstEdit = editCandidateDraft(undefined, firstReview, "notes", [">Available for interviews"]);
-eq("deleted lines stay deleted during the same review visit", applyCandidateDraft(firstReview, firstEdit).notes, [">Available for interviews"]);
-const nextReview = record({ reviewStageChangedAt: 200, notes: [">New follow-up details", ">New availability"] });
-const browserEdit = decodeEodBrowserDraft(encodeEodBrowserDraft({ ...draft, shortlistDraft: { app1: firstEdit } }))?.shortlistDraft?.app1;
-eq("returning to review discards the earlier browser notes", applyCandidateDraft(nextReview, browserEdit).notes, nextReview.notes);
-eq("returning to review resets edits even if the source notes are identical", applyCandidateDraft({ ...firstReview, reviewStageChangedAt: 200 }, firstEdit).notes, firstReview.notes);
-const reviewSaved = { ...form, ...candidateDraftBases([firstReview], form) };
-eq("server drafts preserve deletions in the same review visit", applyCandidateDraft(firstReview, candidateDraftsFromFields([firstReview], reviewSaved).app1).notes, [">Available for interviews"]);
-eq("server drafts expire when the candidate returns to review", applyCandidateDraft(nextReview, candidateDraftsFromFields([nextReview], reviewSaved).app1).notes, nextReview.notes);
-eq("unversioned edits cannot override a new review visit", applyCandidateDraft(nextReview, legacy).notes, nextReview.notes);
-const nextEdit = editCandidateDraft(firstEdit, nextReview, "age", "32");
-eq("editing another field does not revive earlier notes", applyCandidateDraft(nextReview, nextEdit).notes, nextReview.notes);
-eq("new review edits are preserved", applyCandidateDraft(nextReview, nextEdit).age, "32");
-
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
