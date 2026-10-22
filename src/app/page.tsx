@@ -13,6 +13,7 @@ import { Pager } from "@/components/Pager";
 import { matchesQuery, pageOf, type Params } from "@/lib/paging";
 import { linkedinStatus } from "@/lib/linkedinStatus";
 import { LinkedInPill } from "@/components/LinkedInPill";
+import { openingNeed } from "@/lib/openingNeed";
 
 /**
  * The day, not the database. What is urgent, what is scheduled, what each of my
@@ -155,14 +156,7 @@ export default async function Dashboard({ searchParams }: { searchParams: Promis
               const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : 0;
               const target = PRIORITY_TARGET[o.priorityTier].days;
 
-              const need =
-                o.jdStatus === "pending_ta_approval"
-                  ? "The JD is waiting for your approval"
-                  : cvsToday < 10
-                    ? `Only ${cvsToday} CVs today — under the ten a day line`
-                    : openSet
-                      ? `Set ${openSet.setNumber} needs ${5 - openSet.count} more to close`
-                      : "On track";
+              const need = openingNeed({ jdStatus: o.jdStatus, cvsToday, openSet }).text;
 
               return (
                 <Link
