@@ -296,7 +296,7 @@ const isUnreadable = (x: Outcome | Unreadable | null): x is Unreadable =>
  * suitable" splits into "2" and "not suitable", and until 22 Oct "2" took the
  * "selected" behind it.
  */
-function verdictsForSentence(cs: string[], mentions?: (clause: string) => boolean): (Outcome | null)[] {
+function verdictsForSentence(cs: string[], mentions: (clause: string) => boolean): (Outcome | null)[] {
   const own = cs.map(outcomeOf);
   const out: (Outcome | null)[] = [];
 
@@ -312,7 +312,7 @@ function verdictsForSentence(cs: string[], mentions?: (clause: string) => boolea
     }
 
     const next = own[i + 1];
-    if (mentions && next && !isUnreadable(next) && !mentions(cs[i + 1])) {
+    if (next && !isUnreadable(next) && !mentions(cs[i + 1])) {
       out.push(next);
       continue;
     }
@@ -327,11 +327,11 @@ function verdictsForSentence(cs: string[], mentions?: (clause: string) => boolea
     // 2" read "not 2" for 1 and 3 and rejected all three, marked safe. Left
     // without a verdict, a bare list reads as a pick and a named person goes
     // to review (readHits).
-    const namesOwn = !!mentions && mentions(cs[i]);
+    const namesOwn = mentions(cs[i]);
     for (let j = i + 1; j < cs.length && !found; j++) {
       const v = own[j];
       if (isUnreadable(v)) break;
-      if (namesOwn && mentions!(cs[j])) break;
+      if (namesOwn && mentions(cs[j])) break;
       if (v) found = v;
     }
     out.push(found);
