@@ -1,7 +1,8 @@
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
-import { can, isDeskWide } from "@/lib/auth";
+import { can, isDeskWide, seesEveryTaRow } from "@/lib/auth";
+import { inDay, inSheet, readLinkFilters, sheetOwner } from "@/lib/linkViews";
 import type { LinkVaultEntry } from "@/data/types";
 import { matchesQuery } from "@/lib/paging";
 import { buildXlsx, toTsv, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
@@ -59,22 +60,21 @@ export async function GET(
   catch { return new Response("Invalid work location.", { status: 400 }); }
   const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user, location);
   const q = sp.get("q") ?? "";
-  const status = sp.get("status") ?? "";
-  const level = Math.max(0, Math.floor(Number(sp.get("level"))) || 0);
-  const addons = sp.get("addons") === "1" || sp.get("addons") === "true";
-  const by = sp.get("by") ?? "";
-  const imark = sp.get("imark") === "1";
+  const f = readLinkFilters(Object.fromEntries(sp.entries()));
   const exportAll = sp.get("all") === "1";
-
-  type F = { status: string; level: number; addons: boolean; imark: boolean; by: string };
-  const pass = (r: LinkVaultEntry, f: F) => {
+  // The same cut as the screen (22 Oct): a sheet is one person's, so an L
+  // counts only with someone chosen — the TA themself, or the lead's pick.
+  const owner = sheetOwner(user.id, isDeskWide(user) || seesEveryTaRow(user), f.by);
+  const now = Date.now();
+  const pass = (r: LinkVaultEntry) => {
     const x = facts.get(r.id);
     return (
       (!f.status || x?.interest === f.status) &&
-      (!f.level || r.level === f.level) &&
+      inSheet(r, owner ? f.level : 0, owner) &&
       (!f.addons || !!r.isAddOn) &&
       (!f.imark || r.isEyeMarked) &&
-      (!f.by || r.addedBy === f.by)
+      (!f.by || r.addedBy === f.by) &&
+      inDay(r.createdAt, f.day, now)
     );
   };
 
@@ -82,7 +82,7 @@ export async function GET(
     ? entries
     : entries
         .filter((r) => matchesQuery(q, r.name, r.title, r.company, r.linkedinUrl, r.phoneNumber))
-        .filter((r) => pass(r, { status, level, addons, imark, by }));
+        .filter(pass);
 
   const layout = buildLinkExportLayout(rowsToExport, facts, userNames, canSeeLeadNotes);
 

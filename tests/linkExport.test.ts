@@ -193,7 +193,7 @@ const entries = [
 const facts = new Map(entries.map(e => [e.id, { app: null, interest: e.id === "n" ? "not_interested" : ["a", "b"].includes(e.id) ? "interested" : "pending" }]));
 const names = { [ta1.id]: "Dilshan Perera", [ta2.id]: "Kasun Silva", [lead.id]: "Suresh Fernando" };
 const layout = buildLinkExportLayout(entries, facts, names, true);
-eq("TA levels sorted numerically and unassigned retained", layout.sheets.map(s => s.name), ["Dilshan Perera L1", "Dilshan Perera L2", "Dilshan Perera L10", "Kasun Silva L1", "Suresh Fernando Unassigned"]);
+eq("TA levels sorted numerically and unassigned retained", layout.sheets.map(s => s.name), ["Dilshan Perera L1", "Dilshan Perera L2", "Dilshan Perera L10", "Kasun Silva L1", "Suresh Fernando Not in a sheet"]);
 const first = layout.sheets[0];
 eq("status sections in agreed order", first.sectionRows!.map(i => first.rows[i][0]), ["Interested", "Pending", "Not Interested"]);
 eq("each candidate appears once in correct group", first.rows.filter(r => r[1]).map(r => [r[0], r[2]]), [["Alice", "Interested"], ["Bob", "Interested"], ["Zed", "Pending"], ["No", "Not Interested"]]);

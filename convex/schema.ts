@@ -178,6 +178,9 @@ export default defineSchema({
      * See src/lib/routing.ts.
      */
     routingEmail: v.optional(v.union(v.string(), v.null())),
+    // Where they work, for showing times in their clock too (22 Oct):
+    // "Sri Lanka", "India" or "Pakistan" (src/lib/countries). Unset is Sri Lanka.
+    workCountry: v.optional(v.string()),
     initials: v.optional(v.string()),
     /** The new platform's role vocabulary, mapped from `role` above. */
     taRole: v.optional(v.union(
