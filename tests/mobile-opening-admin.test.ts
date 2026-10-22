@@ -132,14 +132,14 @@ test("matching starts only once the JD is approved", () => {
   assert(notApproved || approved, "the seed has an opening");
 });
 
-test("the admin payload fills the forms and says who may save them", () => {
+test("the admin payload fills the forms only for people who may save them", () => {
   const opening = repo.openings()[0];
   const admin = mobileOpeningAdmin(synthetic("admin"), opening.id)!;
   assert.equal(admin.canManage, true);
   assert.equal(admin.details.title, opening.title);
   assert.equal(admin.roles.length, 4);
   assert(admin.people.every((p) => repo.user(p.id)?.isActive));
-  assert.equal(mobileOpeningAdmin(synthetic("viewer"), opening.id)!.canManage, false);
+  assert.equal(mobileOpeningAdmin(synthetic("viewer"), opening.id), null);
 });
 
 test("request bodies are checked before anything runs", () => {

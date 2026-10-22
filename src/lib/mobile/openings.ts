@@ -350,10 +350,15 @@ export function mobileOpeningOverview(
 export function mobileOpeningAdmin(user: User, openingId: string): OpeningAdminPayload | null {
   const o = repo.opening(openingId);
   if (!o) return null;
+  const assignment = repo.assignmentFor(openingId, user.id) ?? null;
+  // This payload includes the full active-user directory for the team picker.
+  // Keep that directory behind the same capability as the save routes, even if
+  // a future caller forgets to perform the route-level authorization first.
+  if (!allows(user, "opening.manage", { openingId, assignment })) return null;
   const live = (o.workLocations ?? []).filter((l) => !l.archived);
   return {
     apiVersion: 1,
-    canManage: allows(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null }),
+    canManage: true,
     details: {
       title: o.title,
       salaryMin: o.salaryMin ?? null,
