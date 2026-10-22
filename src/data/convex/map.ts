@@ -74,6 +74,7 @@ export interface BackendOpening {
   targetNationalities: string[];
   targetGender: string | null;
   headcount: number;
+  workLocations?: import("@/lib/workLocations").WorkLocation[];
   priorityTier: string | null;
   positionStatus: string | null;
   status: string;
@@ -120,6 +121,7 @@ export function mapOpening(o: BackendOpening): MappedOpening {
     targetGender: o.targetGender ?? null,
     locations: o.locations ?? [],
     headcount: o.headcount ?? 1,
+    workLocations: o.workLocations,
     // A tier drives the "day N of target" counters, so an unset one has to be
     // a real default rather than undefined. P3 (one month) is the middle.
     priorityTier: (PRIORITY_TIERS.has(o.priorityTier ?? "") ? o.priorityTier : "P3") as PriorityTier,
@@ -220,6 +222,7 @@ export function channelOf(legacy: string | null | undefined): SourcingChannel {
 }
 
 export interface BackendApplication {
+  workLocationId?: string;
   id: string;
   openingId: string;
   candidateId: string;
@@ -242,6 +245,7 @@ export function mapApplication(a: BackendApplication): Application {
   return {
     id: a.id,
     openingId: a.openingId,
+    workLocationId: a.workLocationId,
     jobPostId: a.jobPostId,
     candidateId: a.candidateId,
     stage: a.stage as Stage,

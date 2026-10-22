@@ -15,41 +15,158 @@ interface NotificationItem {
   createdAt: string;
 }
 
-const POLL_MS = 20_000;
+/**
+ * Shared AudioContext for the application window.
+ *
+ * Browsers require a user interaction (click, keypress, touch) before Web Audio
+ * can output sound. We attach passive window listeners to unlock/resume the shared
+ * AudioContext on the user's first interaction so background polls can reliably chime.
+ */
+let sharedAudioCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  const Ctx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!Ctx) return null;
+  if (!sharedAudioCtx || sharedAudioCtx.state === "closed") {
+    sharedAudioCtx = new Ctx();
+  }
+  return sharedAudioCtx;
+}
+
+if (typeof window !== "undefined") {
+  const unlockAudio = () => {
+    try {
+      const ctx = getAudioContext();
+      if (ctx && ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+    } catch {}
+  };
+  window.addEventListener("pointerdown", unlockAudio, { passive: true, capture: true });
+  window.addEventListener("keydown", unlockAudio, { passive: true, capture: true });
+  window.addEventListener("click", unlockAudio, { passive: true, capture: true });
+}
 
 /**
- * A short two-tone chime, synthesized on the fly rather than shipped as a
- * sound file — nothing to fetch, nothing to license, and it survives a
- * cache-cleared browser the same as a `public/` asset never could.
+ * Synthesizes a bright, resonant two-tone brass bell chime (G5 -> C6).
  *
- * Browsers refuse to start an AudioContext before the page has seen a click,
- * so a chime due before that is simply skipped — the badge still updates.
+ * Designed with a sharp metallic strike transient and physical harmonic overtones
+ * that decay naturally, producing the clear acoustic signature of a desk/reception bell.
  */
-function playChime() {
+export async function playNotificationBell() {
   try {
-    const Ctx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctx) return;
-    const ctx = new Ctx();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    if (ctx.state === "suspended") {
+      await ctx.resume().catch(() => {});
+    }
+    if (ctx.state === "suspended") return;
+
     const now = ctx.currentTime;
-    [880, 1320].forEach((freq, i) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.value = freq;
-      const start = now + i * 0.12;
-      gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.18, start + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.28);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(start);
-      osc.stop(start + 0.3);
+
+    // Master gain & dynamics compressor to ensure a warm, punchy, distortion-free bell sound
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.42, now);
+
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.setValueAtTime(-16, now);
+    compressor.knee.setValueAtTime(10, now);
+    compressor.ratio.setValueAtTime(4, now);
+    compressor.attack.setValueAtTime(0.003, now);
+    compressor.release.setValueAtTime(0.2, now);
+
+    masterGain.connect(compressor);
+    compressor.connect(ctx.destination);
+
+    // Two-tone bell chime:
+    // Strike 1: G5 (~784 Hz) with bright overtone resonance
+    // Strike 2: C6 (~1046.5 Hz) with extended ringing decay
+    const strikes = [
+      {
+        start: now,
+        duration: 0.9,
+        fundamental: 784,
+        partials: [
+          { freqMult: 1, gain: 0.35 },
+          { freqMult: 2, gain: 0.18 },
+          { freqMult: 3, gain: 0.10 },
+          { freqMult: 4.2, gain: 0.06 },
+        ],
+        strikeFreq: 3136,
+      },
+      {
+        start: now + 0.15,
+        duration: 1.4,
+        fundamental: 1046.5,
+        partials: [
+          { freqMult: 1, gain: 0.40 },
+          { freqMult: 2, gain: 0.22 },
+          { freqMult: 3, gain: 0.12 },
+          { freqMult: 4.2, gain: 0.07 },
+        ],
+        strikeFreq: 4186,
+      },
+    ];
+
+    strikes.forEach(({ start, duration, fundamental, partials, strikeFreq }) => {
+      // Metallic strike transient (the click of the bell clapper)
+      const strikeOsc = ctx.createOscillator();
+      const strikeGain = ctx.createGain();
+      strikeOsc.type = "sine";
+      strikeOsc.frequency.setValueAtTime(strikeFreq, start);
+      strikeGain.gain.setValueAtTime(0.22, start);
+      strikeGain.gain.exponentialRampToValueAtTime(0.0001, start + 0.035);
+      strikeOsc.connect(strikeGain);
+      strikeGain.connect(masterGain);
+      strikeOsc.start(start);
+      strikeOsc.stop(start + 0.04);
+
+      // Resonant harmonic bell partials
+      partials.forEach(({ freqMult, gain: pGain }) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(fundamental * freqMult, start);
+
+        gain.gain.setValueAtTime(0, start);
+        gain.gain.linearRampToValueAtTime(pGain, start + 0.006);
+        gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+
+        osc.connect(gain);
+        gain.connect(masterGain);
+
+        osc.start(start);
+        osc.stop(start + duration + 0.05);
+      });
     });
-    setTimeout(() => ctx.close().catch(() => {}), 700);
   } catch {
-    // No audio device, or the autoplay policy blocked it either way.
+    // Autoplay blocked or no audio output device
   }
+}
+
+/** Flashes tab title when a notification arrives while the window is in the background */
+function flashNotificationTitle(text: string) {
+  if (typeof document === "undefined" || !document.hidden) return;
+  const originalTitle = document.title;
+  let ticks = 0;
+  const interval = setInterval(() => {
+    ticks++;
+    document.title = ticks % 2 === 1 ? `🔔 ${text}` : originalTitle;
+    if (ticks >= 12 || !document.hidden) {
+      clearInterval(interval);
+      document.title = originalTitle;
+    }
+  }, 1000);
+
+  const onVisible = () => {
+    clearInterval(interval);
+    document.title = originalTitle;
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+  document.addEventListener("visibilitychange", onVisible);
 }
 
 function timeAgo(iso: string): string {
@@ -63,10 +180,8 @@ function timeAgo(iso: string): string {
 }
 
 /**
- * The bell in the header. Nothing in this app pushes to the browser, so this
- * polls its own feed (`/api/notifications`) rather than subscribing — the
- * same reason the Alerts badge next to it is recomputed on each page load,
- * just on a timer instead of on navigation.
+ * The bell in the header. Polls `/api/notifications` and chimes audibly whenever
+ * new notifications arrive (e.g. strategy assignments from the TA Lead).
  */
 export function NotificationBell() {
   const [open, setOpen] = useState(false);
@@ -85,8 +200,12 @@ export function NotificationBell() {
       if (data.signedOut) return;
       const unread = data.notifications.filter((n) => !n.read);
 
-      if (seenIds.current && unread.some((n) => !seenIds.current!.has(n.id))) {
-        playChime();
+      if (seenIds.current) {
+        const newUnread = unread.filter((n) => !seenIds.current!.has(n.id));
+        if (newUnread.length > 0) {
+          playNotificationBell();
+          flashNotificationTitle(newUnread[0].title);
+        }
       }
       seenIds.current = new Set(unread.map((n) => n.id));
 
@@ -99,8 +218,34 @@ export function NotificationBell() {
 
   useEffect(() => {
     poll();
-    const id = setInterval(poll, POLL_MS);
-    return () => clearInterval(id);
+    let intervalId: NodeJS.Timeout;
+
+    // 10s polling when page is visible for fast responsive notification; 20s when in background
+    const startPolling = () => {
+      clearInterval(intervalId);
+      const ms = typeof document !== "undefined" && document.hidden ? 20_000 : 10_000;
+      intervalId = setInterval(poll, ms);
+    };
+
+    startPolling();
+
+    const onVisibilityChange = () => {
+      if (!document.hidden) poll();
+      startPolling();
+    };
+
+    const onFocus = () => {
+      poll();
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", onFocus);
+
+    return () => {
+      clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", onFocus);
+    };
   }, [poll]);
 
   const markRead = (id: string) => {
@@ -128,7 +273,7 @@ export function NotificationBell() {
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Notifications"
-        className="relative grid h-9 w-9 place-items-center rounded-lg text-ink-soft hover:bg-paper hover:text-ink"
+        className="relative grid h-9 w-9 place-items-center rounded-lg text-ink-soft hover:bg-paper hover:text-ink cursor-pointer"
       >
         <BellIcon />
         {unreadCount > 0 && (
@@ -141,11 +286,22 @@ export function NotificationBell() {
         <div className="absolute right-0 top-full z-50 mt-1 w-80 rounded-lg border border-rule bg-surface shadow-lg">
           <div className="flex items-center justify-between border-b border-rule px-3 py-2">
             <span className="text-[12.5px] font-semibold">Notifications</span>
-            {unreadCount > 0 && (
-              <button onClick={markAllRead} className="text-[11.5px] font-medium text-brand hover:underline">
-                Mark all read
+            <div className="flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => playNotificationBell()}
+                title="Test notification sound"
+                aria-label="Test notification sound"
+                className="text-[11px] text-ink-faint hover:text-ink cursor-pointer"
+              >
+                Test sound
               </button>
-            )}
+              {unreadCount > 0 && (
+                <button onClick={markAllRead} className="text-[11.5px] font-medium text-brand hover:underline cursor-pointer">
+                  Mark all read
+                </button>
+              )}
+            </div>
           </div>
           <div className="max-h-96 overflow-y-auto py-1">
             {items.length === 0 ? (
@@ -159,10 +315,21 @@ export function NotificationBell() {
                     <span className="text-[10.5px] text-ink-faint">{timeAgo(n.createdAt)}</span>
                   </div>
                 );
-                return n.jobId ? (
+
+                const strategyHref = n.type === "strategy_assigned" && n.jobId ? `/openings/${n.jobId}/strategies` : null;
+                const linkHref =
+                  n.href ??
+                  strategyHref ??
+                  (n.type.startsWith("workday_")
+                    ? "/openings?checks=open"
+                    : n.jobId
+                    ? `/openings/${n.jobId}`
+                    : null);
+
+                return linkHref ? (
                   <Link
                     key={n.id}
-                    href={n.href ?? (n.type.startsWith("workday_") ? "/openings?checks=open" : `/openings/${n.jobId}`)}
+                    href={linkHref}
                     onClick={() => {
                       setOpen(false);
                       if (!n.read) markRead(n.id);

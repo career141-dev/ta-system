@@ -1,3 +1,6 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { decideOpeningAccess, requestOpeningAccess } from "@/app/actions";
 import { ProblemState } from "./ProblemState";
 
@@ -31,66 +34,114 @@ function dateTime(at: number): string {
 }
 
 export function RequestOpeningAccess({ openings }: { openings: AvailableOpening[] }) {
+  const [open, setOpen] = useState(false);
   const selectable = openings.filter((opening) => opening.requestStatus !== "pending");
   const pending = openings.filter((opening) => opening.requestStatus === "pending");
 
+  useEffect(() => {
+    if (!open) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [open]);
+
   return (
-    <section className="mb-6 rounded-xl border border-rule bg-surface p-5">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-[14px] font-semibold">Request access to an opening</h2>
-        <p className="text-[12.5px] text-ink-soft">
-          Select an active opening. It will appear in My Openings only after its TA Lead approves you.
-        </p>
-      </div>
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls="request-job-access-dialog"
+        onClick={() => setOpen(true)}
+        className="rounded-full border border-brand bg-white px-4 py-2 text-[13px] font-medium text-brand hover:bg-brand/5"
+      >
+        Request job access
+      </button>
 
-      {selectable.length > 0 ? (
-        <form action={requestOpeningAccess} className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] md:items-end">
-          <label className="grid gap-1.5 text-[12px] font-medium text-ink-soft">
-            Available opening
-            <select
-              name="openingId"
-              required
-              defaultValue=""
-              className="h-10 min-w-0 rounded-lg border border-rule bg-white px-3 text-[13px] text-ink outline-none focus:border-brand"
-            >
-              <option value="" disabled>Select client and position</option>
-              {selectable.map((opening) => (
-                <option key={opening.id} value={opening.id}>
-                  {opening.clientName} — {opening.title}{opening.positionCode ? ` (${opening.positionCode})` : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="grid gap-1.5 text-[12px] font-medium text-ink-soft">
-            Reason <span className="font-normal text-ink-faint">(optional)</span>
-            <input
-              name="reason"
-              maxLength={1000}
-              placeholder="Why do you need access?"
-              className="h-10 min-w-0 rounded-lg border border-rule bg-white px-3 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-brand"
-            />
-          </label>
-          <button className="h-10 rounded-lg bg-brand px-4 text-[12.5px] font-semibold text-white hover:opacity-90">
-            Request access
-          </button>
-        </form>
-      ) : (
-        <p className="mt-4 text-[12.5px] text-ink-faint">No other active openings are available.</p>
-      )}
+      {open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink/35 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setOpen(false);
+          }}
+        >
+          <section
+            id="request-job-access-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="request-job-access-title"
+            className="w-full max-w-2xl rounded-xl border border-rule bg-surface p-5 shadow-xl sm:p-6"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex flex-col gap-1">
+                <h2 id="request-job-access-title" className="text-[16px] font-semibold">Request job access</h2>
+                <p className="text-[12.5px] text-ink-soft">
+                  Select an active opening. It will appear in My Openings only after its TA Lead approves you.
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close request job access"
+                onClick={() => setOpen(false)}
+                className="rounded-lg border border-rule px-2.5 py-1.5 text-[12px] font-medium text-ink-soft hover:bg-paper"
+              >
+                Close
+              </button>
+            </div>
 
-      {pending.length > 0 && (
-        <div className="mt-4 border-t border-rule pt-3">
-          <p className="text-[11.5px] font-semibold uppercase tracking-wide text-ink-faint">Waiting for approval</p>
-          <ul className="mt-2 grid gap-1.5 text-[12.5px] text-ink-soft">
-            {pending.map((opening) => (
-              <li key={opening.id}>
-                {opening.clientName} — {opening.title} · {opening.leadName}
-              </li>
-            ))}
-          </ul>
+            {selectable.length > 0 ? (
+              <form action={requestOpeningAccess} className="mt-5 grid gap-3">
+                <label className="grid gap-1.5 text-[12px] font-medium text-ink-soft">
+                  Available opening
+                  <select
+                    name="openingId"
+                    required
+                    defaultValue=""
+                    className="h-10 min-w-0 rounded-lg border border-rule bg-white px-3 text-[13px] text-ink outline-none focus:border-brand"
+                  >
+                    <option value="" disabled>Select client and position</option>
+                    {selectable.map((opening) => (
+                      <option key={opening.id} value={opening.id}>
+                        {opening.clientName} — {opening.title}{opening.positionCode ? ` (${opening.positionCode})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1.5 text-[12px] font-medium text-ink-soft">
+                  Reason <span className="font-normal text-ink-faint">(optional)</span>
+                  <textarea
+                    name="reason"
+                    maxLength={1000}
+                    rows={3}
+                    placeholder="Why do you need access?"
+                    className="resize-y rounded-lg border border-rule bg-white px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-faint focus:border-brand"
+                  />
+                </label>
+                <button className="ml-auto h-10 rounded-lg bg-brand px-4 text-[12.5px] font-semibold text-white hover:opacity-90">
+                  Send request
+                </button>
+              </form>
+            ) : (
+              <p className="mt-5 text-[12.5px] text-ink-faint">No other active openings are available.</p>
+            )}
+
+            {pending.length > 0 && (
+              <div className="mt-5 border-t border-rule pt-4">
+                <p className="text-[11.5px] font-semibold uppercase tracking-wide text-ink-faint">Waiting for approval</p>
+                <ul className="mt-2 grid gap-1.5 text-[12.5px] text-ink-soft">
+                  {pending.map((opening) => (
+                    <li key={opening.id}>
+                      {opening.clientName} — {opening.title} · {opening.leadName}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
         </div>
       )}
-    </section>
+    </>
   );
 }
 

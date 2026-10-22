@@ -362,14 +362,14 @@ export function EmptySuggestionsReason({ jobId }: { jobId: string }) {
   return <WorkForm op="saveCheck" fields={{ jobId, kind: "emptySuggestions" }}><label className="block text-xs">Why this search found no profiles<textarea required name="reason" maxLength={1000} className={inputClass} /></label><button className={buttonClass}>Save empty-search explanation</button></WorkForm>;
 }
 
-export function EodJobChecks({ jobId, linkConfirmed, revised, onBlocked, onResearchSaved, onResearchExcused, extraReasons = [] }: { jobId: string; linkConfirmed: boolean; revised: boolean; onBlocked: (blocked: boolean) => void; onResearchSaved?: (link: string) => void; onResearchExcused?: (excused: boolean) => void; extraReasons?: { key: string; message: string }[] }) {
+export function EodJobChecks({ jobId, locationScoped = false, linkConfirmed, revised, onBlocked, onResearchSaved, onResearchExcused, extraReasons = [] }: { jobId: string; locationScoped?: boolean; linkConfirmed: boolean; revised: boolean; onBlocked: (blocked: boolean) => void; onResearchSaved?: (link: string) => void; onResearchExcused?: (excused: boolean) => void; extraReasons?: { key: string; message: string }[] }) {
   const { data, error } = useWorkday(false);
   const job = data?.active?.jobs.find(j => j.jobId === jobId);
   const savedLink = confirmedResearchLink(job?.eodChecks ?? job?.checks ?? []);
   const excused = !!job?.eodChecks?.find(c => c.key.startsWith("chatgpt:"))?.exception;
   useEffect(() => { onResearchExcused?.(!error && excused); }, [error, excused, onResearchExcused]);
   useEffect(() => { if (savedLink) onResearchSaved?.(savedLink); }, [savedLink, onResearchSaved]);
-  const blockers = job ? emailBlockers([job]).filter(c => !(linkConfirmed && c.key.startsWith("chatgpt:"))) : [];
+  const blockers = job ? emailBlockers([job]).filter(c => !(linkConfirmed && c.key.startsWith("chatgpt:")) && !(locationScoped && ["director_cv", "midday_email", "mail"].includes(c.key.split(":")[0]))) : [];
   const blocked = !!error || !data || (data.canWork && (!job || blockers.length > 0));
   const additionalReasons = extraReasons.filter(reason => !blockers.some(c => c.key.split(":")[0] === reason.key));
   useEffect(() => { onBlocked(blocked); }, [blocked, onBlocked]);

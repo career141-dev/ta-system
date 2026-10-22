@@ -1,7 +1,7 @@
 /**
  * Tests for Excel (.xlsx) builder and clipboard formatters (lib/xlsx).
  */
-import { buildXlsx, formatLinkVaultExportRows, EXCEL_TABLES_EXPORT_HEADERS, detectHyperlink } from "@/lib/xlsx";
+import { buildXlsx, formatLinkVaultExportRows, EXCEL_TABLES_EXPORT_HEADERS, detectHyperlink, uniqueSheetNames } from "@/lib/xlsx";
 import { toTsv, toHtmlTable } from "@/lib/spreadsheetClipboard";
 
 let pass = 0, fail = 0;
@@ -104,20 +104,17 @@ const sampleEntries = [
 
 const exportRows = formatLinkVaultExportRows(sampleEntries);
 eq("generates expected row count", exportRows.length, 2);
-eq("first row has 13 columns matching headers", exportRows[0].length, EXCEL_TABLES_EXPORT_HEADERS.length);
+eq("only the four agreed columns remain", [...EXCEL_TABLES_EXPORT_HEADERS], ["Candidate Name", "Links", "Status", "Notes"]);
+eq("first row has four columns", exportRows[0].length, 4);
 eq("first row candidate name", exportRows[0][0], "Kasun Silva");
-eq("first row company", exportRows[0][2], "WSO2");
-eq("first row phone source resolved", exportRows[0][4], "Mutual connection");
-eq("first row email extracted", exportRows[0][5], "kasun@wso2.com");
-eq("first row level formatted", exportRows[0][7], "L1");
-eq("first row status formatted", exportRows[0][8], "Interested");
-eq("first row add-on flag", exportRows[0][9], "Yes");
+eq("first row link", exportRows[0][1], sampleEntries[0].linkedinUrl);
+eq("first row status formatted", exportRows[0][2], "Interested");
+eq("first row note", exportRows[0][3], "Approached on LinkedIn");
+eq("contact details excluded", exportRows.flat().includes("kasun@wso2.com"), false);
 
 eq("second row falls back to capture fullName", exportRows[1][0], "Jane Doe");
-eq("second row falls back to capture currentTitle", exportRows[1][1], "VP Sales");
-eq("second row falls back to capture currentCompany", exportRows[1][2], "Dialog");
-eq("second row missing email falls back to dash", exportRows[1][5], "—");
-eq("second row null level falls back to All", exportRows[1][7], "All");
+eq("second row pending", exportRows[1][2], "Pending");
+eq("second row missing notes falls back to dash", exportRows[1][3], "—");
 
 console.log("\n5. detectHyperlink URL recognition");
 eq("full https URL recognized", detectHyperlink("https://www.linkedin.com/in/kasun-silva")?.url, "https://www.linkedin.com/in/kasun-silva");
@@ -145,14 +142,34 @@ eq("relationship mode is External", sheetRels.includes('TargetMode="External"'),
 
 const sheetXml = unzippedVault.get("xl/worksheets/sheet1.xml") ?? "";
 eq("sheet has hyperlinks section", sheetXml.includes("<hyperlinks>"), true);
-eq("first row LinkedIn cell G2 linked to rId1", sheetXml.includes('<hyperlink ref="G2" r:id="rId1"/>'), true);
-eq("second row LinkedIn cell G3 linked to rId2", sheetXml.includes('<hyperlink ref="G3" r:id="rId2"/>'), true);
-eq("G2 cell has hyperlink style s=2", sheetXml.includes('<c r="G2" t="inlineStr" s="2">'), true);
+eq("first row LinkedIn cell B2 linked to rId1", sheetXml.includes('<hyperlink ref="B2" r:id="rId1"/>'), true);
+eq("second row LinkedIn cell B3 linked to rId2", sheetXml.includes('<hyperlink ref="B3" r:id="rId2"/>'), true);
+eq("B2 cell has hyperlink style s=2", sheetXml.includes('<c r="B2" t="inlineStr" s="2">'), true);
 eq("A2 candidate name cell has default style s=0", sheetXml.includes('<c r="A2" t="inlineStr" s="0">'), true);
 
 const stylesXml = unzippedVault.get("xl/styles.xml") ?? "";
 eq("styles contains hyperlink blue color", stylesXml.includes('color rgb="FF0563C1"'), true);
 eq("styles contains underline for hyperlink", stylesXml.includes("<u/>"), true);
+eq("Interested status cell is green", sheetXml.includes('<c r="C2" t="inlineStr" s="3">'), true);
+eq("Pending status cell is yellow", sheetXml.includes('<c r="C3" t="inlineStr" s="4">'), true);
+eq("header has no fill", stylesXml.includes('fontId="1" fillId="0"'), true);
+
+const multi = unzipFiles(buildXlsx({ sheets: [
+  { name: "Same L1", headers: [...EXCEL_TABLES_EXPORT_HEADERS], rows: [["Not Interested", "", "", ""], ["=Unsafe & <Name>", "https://example.com/a?x=1&y=2", "Not Interested", "line\u0001break"]], sectionRows: [0] },
+  { name: "same l1", headers: [...EXCEL_TABLES_EXPORT_HEADERS], rows: exportRows },
+] }));
+eq("duplicate tab names disambiguated", multi.get("xl/workbook.xml")?.includes('name="same l1 (2)"'), true);
+eq("every worksheet registered in content types", multi.get("[Content_Types].xml")?.includes('/xl/worksheets/sheet2.xml'), true);
+eq("each worksheet has independent relationships", multi.has("xl/worksheets/_rels/sheet2.xml.rels"), true);
+eq("second worksheet target is correct", multi.get("xl/worksheets/_rels/sheet2.xml.rels")?.includes(sampleEntries[0].linkedinUrl), true);
+eq("red only on Not Interested status", multi.get("xl/worksheets/sheet1.xml")?.includes('<c r="C3" t="inlineStr" s="5">'), true);
+eq("section heading is bold", multi.get("xl/worksheets/sheet1.xml")?.includes('<c r="A2" t="inlineStr" s="1">'), true);
+eq("formula injection stays text", multi.get("xl/worksheets/sheet1.xml")?.includes('&apos;=Unsafe &amp; &lt;Name&gt;'), true);
+eq("invalid XML controls removed", multi.get("xl/worksheets/sheet1.xml")?.includes('\u0001'), false);
+eq("URL query string escaped", multi.get("xl/worksheets/_rels/sheet1.xml.rels")?.includes('x=1&amp;y=2'), true);
+const safeNames = uniqueSheetNames(["'Invalid:[]/?*'", "x".repeat(50), "X".repeat(50), "History", "''"]);
+eq("tab names fit Excel limits", safeNames.every((n) => n.length <= 31 && !/[:\\/?*\[\]]/.test(n) && !n.startsWith("'") && !n.endsWith("'")), true);
+eq("tab names unique ignoring case", new Set(safeNames.map(n => n.toLowerCase())).size, safeNames.length);
 
 const vaultHtml = toHtmlTable([...EXCEL_TABLES_EXPORT_HEADERS], exportRows);
 eq("html table wraps LinkedIn URL in anchor tag", vaultHtml.includes('<a href="https://www.linkedin.com/in/kasun-silva"'), true);

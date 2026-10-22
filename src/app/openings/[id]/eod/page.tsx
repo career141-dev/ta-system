@@ -29,6 +29,9 @@ import { isWordFile } from "@/lib/wordToPdf";
 import type { ShortlistRow } from "@/lib/eod-format";
 import { EodDraftCleanup } from "@/components/EodDraftCleanup";
 import type { WorkingStage } from "@/data/types";
+import { workLocationView, inWorkLocation } from "@/lib/workLocations";
+import { WorkLocationTabs } from "@/components/WorkLocationTabs";
+import { eodDraftKeys } from "@/lib/eodDraft";
 
 const PAGE_SIZE = 10;
 
@@ -49,7 +52,7 @@ export default async function EodPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string; sent?: string }>;
+  searchParams: Promise<{ location?: string; kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string; sent?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -70,7 +73,13 @@ export default async function EodPage({
       sessionStart = context.sessionStart;
     }
   }
-  const dailyEmails = kind === "director" && isConvex() ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
+  const o = repo.opening(id);
+  if (!o) notFound();
+  const allDailyEmails = kind === "director" && isConvex() ? await convexQuery<DailyEmail[]>("ta/dailyEmails:list", { actorId: user.id, jobId: id }) : [];
+  const opened = allDailyEmails.find(e => e._id === sp.mail || !!e.legacyCopyId && [sp.resend, sp.view].includes(e.legacyCopyId));
+  const workLocationId = workLocationView(o, sp.location ?? (opened ? opened.workLocationId ?? "unassigned" : sp.resend || sp.view ? "unassigned" : undefined));
+  const location = o.workLocations?.find(l => l.id === workLocationId);
+  const dailyEmails = allDailyEmails.filter(e => inWorkLocation(e, workLocationId));
   const dailyHistory = dailyEmails.filter(e => e.submissionType === (midday ? "midday" : "eod"));
   // A query string alone cannot delete a draft. Match it to this user's
   // accepted backend record so a failed/replayed URL never clears their work.
@@ -78,10 +87,8 @@ export default async function EodPage({
   const selectedDaily = dailyHistory.find(e => e._id === sp.mail || (!!e.legacyCopyId && (e.legacyCopyId === sp.resend || e.legacyCopyId === sp.view)));
   const draft = midday && selectedDaily && selectedDaily.userId === user.id && selectedDaily.date === workdayDate(Date.now()) && ["draft", "failed"].includes(selectedDaily.status) ? selectedDaily : undefined;
   const correction = !midday && (sp.revise === "yes" || !!sp.resend) && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && selectedDaily.snapshot ? selectedDaily : undefined;
-  const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId);
+  const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt);
   await primeEyeMarked(id, user);
-  const o = repo.opening(id);
-  if (!o) notFound();
 
   const client = repo.client(o.clientId);
   if (!client) notFound();
@@ -94,10 +101,11 @@ export default async function EodPage({
     isTa(user) ? user.id : null,
     kind,
     kind === "director" ? { workType, sessionStart } : undefined,
+    workLocationId,
   );
-  const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user) : [];
-  const effort = effortRow(id, user);
-  const excelLinksCount = getScopedLinkVaultEntries(id, user).entries.length;
+  const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user, workLocationId) : [];
+  const effort = effortRow(id, user, new Date(), workLocationId);
+  const excelLinksCount = getScopedLinkVaultEntries(id, user, workLocationId).entries.length;
 
   // This TA's own sets — each recruiter numbers their own.
   const sets = setsForOpening(id, user.id);
@@ -105,14 +113,14 @@ export default async function EodPage({
   const latestSet = sets.length ? sets.reduce((a, b) => (b.setNumber > a.setNumber ? b : a)) : undefined;
 
   // Everyone still waiting on this reviewer, whichever email they went out in.
-  const waiting = repo.waitingOn(id, kind);
+  const waiting = repo.waitingOn(id, kind).filter(a => inWorkLocation(repo.application(a.applicationId) ?? {}, workLocationId));
   const awaiting = waiting.length
-    ? repo.reviewRounds(id).filter((r) => r.kind === kind && r.status !== "returned").sort((a, b) => b.sentAt - a.sentAt)[0]
+    ? repo.reviewRounds(id).filter((r) => r.kind === kind && inWorkLocation(r, workLocationId) && r.status !== "returned").sort((a, b) => b.sentAt - a.sentAt)[0]
     : undefined;
 
   const allHistory = repo
     .reviewRounds(id)
-    .filter((r) => r.kind === kind && r.status === "returned")
+    .filter((r) => r.kind === kind && inWorkLocation(r, workLocationId) && r.status === "returned")
     .sort((a, b) => (b.returnedAt ?? b.sentAt) - (a.returnedAt ?? a.sentAt));
   const matchingHistory = allHistory.filter((r) =>
     matchesQuery(
@@ -129,15 +137,16 @@ export default async function EodPage({
 
   // The set tonight's CVs went into — the same figure as the SETS column.
   const nextSetNumber = latestSet?.setNumber ?? 1;
+  const subjectTitle = `${o.title}${location ? ` - ${location.name}` : ""}`;
   const formattedSubject = rows.length
-    ? subjectLine(client.name, o.title, nextSetNumber, rows.length)
-    : `${client.name.toUpperCase()} - ${o.title.toUpperCase()} - DAILY ACTIVITY`;
+    ? subjectLine(client.name, subjectTitle, nextSetNumber, rows.length)
+    : `${client.name.toUpperCase()} - ${subjectTitle.toUpperCase()} - DAILY ACTIVITY`;
 
   // The Director's emails sent in the last month, kept to read back and to
   // correct and send again (8 Oct). A TA sees their own; a lead or director
   // sees the desk's.
   const copies =
-    kind === "director" ? repo.eodCopies(id).filter((c) => !isTa(user) || c.sentBy === user.id) : [];
+    kind === "director" && !workLocationId ? repo.eodCopies(id).filter((c) => !isTa(user) || c.sentBy === user.id) : [];
   // Opened to read: any version on that list.
   const viewCopy = sp.view ? copies.find((c) => c.id === sp.view) : undefined;
   // Opened to send again: only the sender's own, only inside its month.
@@ -193,14 +202,7 @@ export default async function EodPage({
 
   return (
     <div className="mx-auto max-w-[1100px] py-1 sm:px-8 sm:py-9">
-      {sentDaily?.submissionType === "eod" && <EodDraftCleanup keys={[
-        sentDaily.parentId
-          ? `eod-composer-draft:${id}:director:resend:${sentDaily.parentId}`
-          : `eod-composer-draft:${id}:director`,
-        sentDaily.parentId
-          ? `eod-effort:${id}:resend:${sentDaily.parentId}`
-          : `eod-effort:${id}:${sentDaily.snapshot?.effort.date ?? effort.date}`,
-      ]} />}
+      {sentDaily?.submissionType === "eod" && <EodDraftCleanup keys={Object.values(eodDraftKeys(id, "director", sentDaily.snapshot?.effort.date ?? effort.date, user.id, sentDaily.workLocationId, sentDaily.parentId, sentDaily.date))} />}
       <div className="flex items-center justify-between">
         <Link
           href={`/openings/${id}`}
@@ -222,6 +224,8 @@ export default async function EodPage({
           Replies are tracked and candidate stages advance automatically.
         </p>
       </header>
+      <WorkLocationTabs locations={o.workLocations} selected={workLocationId} basePath={`/openings/${id}/${midday ? "midday" : "eod"}`} params={{ kind }} sent={allDailyEmails.filter(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === (midday ? "midday" : "eod") && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt).flatMap(e => e.workLocationId ? [e.workLocationId] : [])} />
+      {workLocationId === "" && <p className="mb-5 text-[13px] text-ink-soft">Select a location to prepare its email. Assign candidates without a location in Excel Tables or the pipeline first.</p>}
 
 
       {/* ── Waiting on a reply ─────────────────────────────────────────── */}
@@ -343,8 +347,9 @@ export default async function EodPage({
       </details>
 
       {kind === "director" && <DailyEmailHistory emails={dailyHistory} openingId={id} />}
-      {midday && <form action={addMiddayEmail} className="mb-5">
+      {midday && workLocationId !== "" && !location?.archived && <form action={addMiddayEmail} className="mb-5">
         <input type="hidden" name="openingId" value={id} />
+        <input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
         <SubmitButton disabled={eodClosed} pendingLabel="Adding…" className="rounded-lg bg-brand px-4 py-2 text-white disabled:opacity-40">Add midday email</SubmitButton>
       </form>}
       {eodClosed && !correction && <p className="mb-5 text-sm">End of day has been sent. You can read your sent emails or correct the original EOD email. New submissions resume tomorrow.</p>}
@@ -371,14 +376,20 @@ export default async function EodPage({
       )}
 
       {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
-      {(!midday || !!draft) && (!selectedDaily || !!draft || !!correction) && (!eodClosed || !!correction || !!resendCopy) && <>
+      {(workLocationId !== "" || !!correction || !!resendCopy) && (!location?.archived || !!correction) && (!midday || !!draft) && (!selectedDaily || !!draft || !!correction) && (!eodClosed || !!correction || !!resendCopy) && <>
       {!midday && <LiveTableRefresh />}
       {!midday && !correction && workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
       <EodComposer
-        key={draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}
+        key={`${workdayDate(Date.now())}:${workLocationId ?? "legacy"}:${draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}`}
+        draftDate={correction?.date}
+        workLocationId={correction ? correction.workLocationId : workLocationId || undefined}
+        actorId={user.id}
+        allowActivityOnly={!!location}
         submissionType={midday ? "midday" : "eod"}
         excelLinksCount={excelLinksCount}
         openingTitle={o.title}
+        clientName={client.name}
+        workLocationName={location?.name}
         dailyDraft={draft ? { id: draft._id, revision: draft.revision, fields: draft.fields } : undefined}
         dailyParentId={correction?._id}
         useDailyEmail={isConvex() && isTa(user)}

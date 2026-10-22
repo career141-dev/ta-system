@@ -5,6 +5,7 @@ import { cvSource, headhuntedCandidates } from "@/lib/cvSource";
 import type { Application, Candidate, Id, User } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
 import { isEodCandidateEligible, type EodEligibility } from "./eodEligibility";
+import { inWorkLocation } from "./workLocations";
 
 /**
  * The end-of-day email — spec §10.
@@ -40,6 +41,7 @@ export function shortlistRows(
   taId: Id | null,
   kind: "director" | "client" = "director",
   eligibility?: Pick<EodEligibility, "workType" | "sessionStart">,
+  workLocationId?: string,
 ): ShortlistRow[] {
   // Who is waiting to be sent: people at the stage BEFORE this reviewer's
   // decision, and not already in a set that went to them. The list used to
@@ -47,7 +49,7 @@ export function shortlistRows(
   // put decided candidates back in front of them (audit finding 27).
   const stage = kind === "director" ? "director_review" : "director_shortlist";
   const alreadySent = new Set(
-    repo.reviewRounds(openingId).filter((r) => r.kind === kind).flatMap((r) => r.applicationIds),
+    repo.reviewRounds(openingId).filter((r) => r.kind === kind && !r.recoveryReopenedAt).flatMap((r) => r.applicationIds),
   );
   // Only people actually in Director Review go in the Director's email (29 Sep).
   // A finished follow-up used to pull a TA Shortlisted candidate in as well
@@ -55,6 +57,7 @@ export function shortlistRows(
   // moves them to Director Review first.
   const apps = repo
     .applications(openingId)
+    .filter(a => inWorkLocation(a, workLocationId))
     .filter((a) => {
       if (alreadySent.has(a.id)) return false;
       if (kind !== "director" || !eligibility) return a.stage === stage;
@@ -142,17 +145,17 @@ export function effortBucket(app: Application, headhunted: ReadonlySet<Id>): Eff
  * stage's time is overwritten by the next move, and Excel Tables' "Add to
  * pipeline" puts people in Director Review without sending anything.
  */
-export function sentToDirectorToday(openingId: Id, taId: Id, since: number): Application[] {
+export function sentToDirectorToday(openingId: Id, taId: Id, since: number, workLocationId?: string): Application[] {
   const ids = new Set(
     repo
       .reviewRounds(openingId)
-      .filter((r) => r.kind === "director" && r.sentBy === taId && r.sentAt >= since)
+      .filter((r) => r.kind === "director" && r.sentBy === taId && r.sentAt >= since && !r.recoveryReopenedAt)
       .flatMap((r) => r.applicationIds),
   );
-  for (const r of shortlistRows(openingId, taId, "director")) ids.add(r.applicationId);
+  for (const r of shortlistRows(openingId, taId, "director", undefined, workLocationId)) ids.add(r.applicationId);
   return [...ids].flatMap((id) => {
     const a = repo.application(id);
-    return a && a.openingId === openingId ? [a] : [];
+    return a && a.openingId === openingId && inWorkLocation(a, workLocationId) ? [a] : [];
   });
 }
 
@@ -179,11 +182,11 @@ export function sentToDirectorToday(openingId: Id, taId: Id, since: number): App
  *             until the desk asked for the CVs they brought (28 Sep).
  *   L         headhunted through Excel Tables.
  */
-export function effortRow(openingId: Id, ta: User, date = new Date()): EffortRow {
+export function effortRow(openingId: Id, ta: User, date = new Date(), workLocationId?: string): EffortRow {
   // Today in Colombo, whatever the server's clock is set to.
   const since = colomboDayStart(date.getTime());
-  const vault = repo.linkVault(openingId);
-  const day = sentToDirectorToday(openingId, ta.id, since);
+  const vault = repo.linkVault(openingId).filter(r => inWorkLocation(r, workLocationId));
+  const day = sentToDirectorToday(openingId, ta.id, since, workLocationId);
   const scouted = vault.filter(
     (v) =>
       (v.addedBy === ta.id && v.createdAt >= since) ||

@@ -12,6 +12,7 @@ interface LinkExportMenuProps {
     addons?: boolean;
     imark?: boolean;
     by?: string;
+    location?: string;
   };
   matchingCount: number;
 }
@@ -46,6 +47,7 @@ export function LinkExportMenu({ openingId, filters, matchingCount }: LinkExport
     if (filters.addons) p.addons = "1";
     if (filters.imark) p.imark = "1";
     if (filters.by) p.by = filters.by;
+    if (filters.location) p.location = filters.location;
     for (const [k, v] of Object.entries(extra)) p[k] = v;
     return new URLSearchParams(p).toString();
   };

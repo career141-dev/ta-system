@@ -16,7 +16,7 @@ import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
  * with this person, shown on the row as "TA Lead · <name> sent this note"
  * (25 Sep). A TA's box is unchanged.
  */
-export function AddLinkForm({ openingId, canNote = false }: { openingId: string; canNote?: boolean }) {
+export function AddLinkForm({ openingId, canNote = false, workLocationId, level }: { openingId: string; canNote?: boolean; workLocationId?: string; level?: number }) {
   const add = useInline(addLinkInline);
   const button = (
     <SubmitButton
@@ -38,9 +38,11 @@ export function AddLinkForm({ openingId, canNote = false }: { openingId: string;
         // that the message does not already repeat.
         form.reset();
       }}
-      className="mb-6"
+      className="mb-6 lg:pr-32"
     >
       <input type="hidden" name="openingId" value={openingId} />
+      <input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
+      <input type="hidden" name="level" value={level ?? 0} />
       <div className="flex flex-wrap items-end gap-3">
         <label className="relative min-w-[280px] flex-[2]">
           <span className="absolute -top-2 left-3 bg-paper px-1.5 text-[11px] text-ink-soft">LinkedIn profile</span>

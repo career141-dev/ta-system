@@ -688,7 +688,7 @@ export async function extractText(
   skipOCR: boolean = false,
   ctx?: ActionCtx,
   cvUploadId?: Id<"cvUploads">
-): Promise<{ text: string; extractionModel: string }> {
+): Promise<{ text: string; extractionModel: string; method: string; ocrAttempted: boolean }> {
   const type = fileType.toLowerCase();
 
   // 1. PDF Document Extraction
@@ -701,14 +701,17 @@ export async function extractText(
     }
 
     if (pdfText && pdfText.trim().length >= 50) {
-      return { text: pdfText, extractionModel: "deepseek-v4-flash" };
+      return { text: pdfText, extractionModel: "deepseek-v4-flash", method: "pdf_text", ocrAttempted: false };
     }
 
     console.log(`[extractText] PDF text extraction yielded < 50 chars (${pdfText.trim().length} chars). Sending to Tesseract OCR...`);
 
+    if (ctx && cvUploadId) {
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
+    }
     const tesseractText = await extractTextWithTesseract(buffer, fileType, ctx, cvUploadId);
     if (tesseractText && tesseractText.trim().length >= 20) {
-      return { text: tesseractText, extractionModel: "ocr-tesseract" };
+      return { text: tesseractText, extractionModel: "ocr-tesseract", method: "tesseract", ocrAttempted: true };
     }
 
     // Tesseract also failed (e.g. custom font-encoded PDFs that aren't scanned images).
@@ -724,7 +727,7 @@ export async function extractText(
           const visionText = await within(callNvidiaVisionOCR(ctx, pageImages, cvUploadId), VISION_LIMIT_MS, "", "vision OCR");
           if (visionText && visionText.trim().length >= 20) {
             console.log(`[extractText] Vision OCR pipeline fallback succeeded (${visionText.trim().length} chars).`);
-            return { text: visionText, extractionModel: "vision-nvidia-pdf" };
+            return { text: visionText, extractionModel: "vision-nvidia-pdf", method: "vision_ocr", ocrAttempted: true };
           }
         } else {
           console.warn("[extractText] Could not render page images for Vision OCR fallback.");
@@ -735,10 +738,10 @@ export async function extractText(
     }
 
     if (pdfText && pdfText.trim().length > 0) {
-      return { text: pdfText, extractionModel: "deepseek-v4-flash" };
+      return { text: pdfText, extractionModel: "deepseek-v4-flash", method: "pdf_text_thin", ocrAttempted: true };
     }
 
-    return { text: tesseractText || pdfText || "", extractionModel: "ocr-tesseract" };
+    return { text: tesseractText || pdfText || "", extractionModel: "ocr-tesseract", method: "ocr_failed", ocrAttempted: true };
   }
 
 
@@ -748,14 +751,16 @@ export async function extractText(
 
   if (type === "docx" || type === "doc" || type.includes("wordprocessingml") || isZipHeader) {
     const docxText = await extractTextFromDocx(buffer);
-    return { text: docxText, extractionModel: "deepseek-v4-flash" };
+    return { text: docxText, extractionModel: "deepseek-v4-flash", method: "docx_text", ocrAttempted: false };
   }
 
   // 3. Images (PNG, JPG, JPEG, WEBP, TIFF)
   if (type.includes("image") || type === "png" || type === "jpeg" || type === "jpg" || type === "webp" || type === "tiff") {
-
+    if (ctx && cvUploadId) {
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
+    }
     const visionText = await extractTextFromImage(buffer, fileType, ctx, cvUploadId);
-    return { text: visionText, extractionModel: "vision-llama32" };
+    return { text: visionText, extractionModel: "vision-llama32", method: "image_ocr", ocrAttempted: true };
   }
 
   // 4. RTF & TXT
@@ -768,14 +773,14 @@ export async function extractText(
       .replace(/\\'[0-9a-f]{2}/g, "")
       .replace(/\s+/g, " ")
       .trim();
-    if (text.length > 50) return { text, extractionModel: "deepseek-v4-flash" };
+    if (text.length > 50) return { text, extractionModel: "deepseek-v4-flash", method: "rtf_text", ocrAttempted: false };
   }
 
   if (type === "txt") {
-    return { text: new TextDecoder("utf-8").decode(buffer), extractionModel: "deepseek-v4-flash" };
+    return { text: new TextDecoder("utf-8").decode(buffer), extractionModel: "deepseek-v4-flash", method: "plain_text", ocrAttempted: false };
   }
 
-  return { text: new TextDecoder("utf-8", { fatal: false }).decode(buffer), extractionModel: "deepseek-v4-flash" };
+  return { text: new TextDecoder("utf-8", { fatal: false }).decode(buffer), extractionModel: "deepseek-v4-flash", method: "plain_text", ocrAttempted: false };
 }
 
 // ──────────────────────────────────────────────────
@@ -1068,6 +1073,7 @@ async function runCvExtractionLocked(
     cvUploadId,
     status: "processing",
     processingStartedAt: Date.now(),
+    processingStage: "downloading",
   });
 
   if (args.logId) {
@@ -1121,6 +1127,7 @@ async function runCvExtractionLocked(
         status: "processed",
         fileHash,
         candidateId: existingCandidate._id,
+        processingStage: "filing",
       }) as string | undefined | null;
       // The same file again: keep the one already held, drop this copy (2 Oct).
       await ctx.runMutation(internal.cvs.cvReplace.reuseFile, { newUploadId: cvUploadId, heldUploadId: existingCandidate.cvUploadId });
@@ -1182,20 +1189,29 @@ async function runCvExtractionLocked(
         });
       }
 
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
+        cvUploadId,
+        processingStage: "completed",
+        completedAt: Date.now(),
+      });
+
       return existingCandidate._id;
     }
 
     const tTextStart = Date.now();
-    const { text: rawText, extractionModel } = await extractText(buffer, fileType, !!skipLLM, ctx, cvUploadId);
+    await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "extracting_text" });
+    const { text: rawText, extractionModel, method: textExtractionMethod, ocrAttempted } = await extractText(buffer, fileType, !!skipLLM, ctx, cvUploadId);
+    await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, textExtractionMethod });
     t_text = Date.now() - tTextStart;
     checkDeadline("post_text_extraction");
 
     const cleanedText = cleanRawText(rawText);
     let trimmed = cleanedText.trim();
 
-    if (trimmed.length < 50) {
+    if (trimmed.length < 50 && !ocrAttempted) {
       console.warn(`[CvExtraction] Initial text extraction returned short text (${trimmed.length} chars < 50). Attempting Tesseract OCR fallback...`);
       try {
+        await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
         const tesseractText = await extractTextWithTesseract(buffer, fileType);
         const cleanedTesseract = cleanRawText(tesseractText).trim();
         if (cleanedTesseract.length >= 50) {
@@ -1212,6 +1228,8 @@ async function runCvExtractionLocked(
       await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
         cvUploadId,
         status: "needs_review",
+        processingStage: "needs_review",
+        completedAt: Date.now(),
         errorMessage: `Low-confidence OCR text (${trimmed.length} chars < 50 threshold). Tesseract failed or produced thin text. Flagged for manual TA human review.`,
       });
       if (args.logId) {
@@ -1313,6 +1331,8 @@ async function runCvExtractionLocked(
         });
       }
 
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "structuring" });
+
       // LLM structuring only — embedding is deferred to background scheduler below
       checkDeadline("pre_llm");
       const tLlmStart = Date.now();
@@ -1330,54 +1350,23 @@ async function runCvExtractionLocked(
 
       extracted = extractedData;
 
-      // 30 Sep: with the providers slow, the first read alone can take ~180s, and
-      // OCR plus a second read then ran past Convex's 300s kill, so the upload
-      // was never marked failed and the candidate stayed "Unnamed". A second read
-      // can take up to ~180s, so start OCR only when there is time for both.
+      // A timed-out model call must leave a clear failed state. Text/OCR was
+      // already completed above, so repeating both here only doubled the wait
+      // and could run past Convex's action deadline.
       if (!extracted && Date.now() - tStart > CV_EXTRACTION_DEADLINE_MS - 120_000) {
         throw new Error(`LLM failed to extract candidate data (API timeout) — no time left for OCR retry (${Math.round((Date.now() - tStart) / 1000)}s elapsed)`);
-      }
-
-      // Fallback: If initial text extraction produced thin/no text, process CV through local Tesseract.js OCR
-      if (!extracted) {
-        console.warn(`[CvExtraction] Initial text extraction returned thin/empty result. Sending CV to Tesseract OCR...`);
-        try {
-          const tesseractRawText = await extractTextWithTesseract(buffer, fileType);
-          const cleanedTesseract = cleanRawText(tesseractRawText).trim();
-
-          // STRICT LOW-CONFIDENCE / THIN-TEXT CHECK (< 50 characters)
-          if (cleanedTesseract.length < 50) {
-            console.warn(`[CvExtraction] Tesseract OCR output is too short (${cleanedTesseract.length} chars < 50 threshold). Flagging upload ${cvUploadId} for human review.`);
-            await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
-              cvUploadId,
-              status: "needs_review",
-              errorMessage: `Low-confidence OCR text (${cleanedTesseract.length} chars < 50 threshold). Flagged for manual TA human review.`,
-            });
-            return null;
-          }
-
-          cappedRawText = cleanedTesseract.length > MAX_RAW_TEXT_LENGTH
-            ? cleanedTesseract.slice(0, MAX_RAW_TEXT_LENGTH)
-            : cleanedTesseract;
-
-          console.log(`[CvExtraction] Tesseract OCR extracted ${cappedRawText.length} characters (>= 50 threshold). Passing text to OpenRouter DeepSeek...`);
-          extracted = await callOpenRouterLLM(ctx, cappedRawText, cvUploadId, sourceChannel).catch((err) => {
-            console.error("[CvExtraction] OpenRouter DeepSeek call on Tesseract OCR text failed:", err.message || err);
-            return null;
-          });
-        } catch (tesseractErr: any) {
-          console.error("[CvExtraction] Tesseract OCR fallback attempt failed:", tesseractErr.message || tesseractErr);
-        }
       }
 
       if (!extracted) {
         throw new Error("LLM failed to extract candidate data (API timeout or invalid response)");
       }
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "validating" });
       // Embedding is always deferred — scheduled after candidate save below
       embedding = undefined;
     }
 
     if (extracted) {
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "saving" });
       // 29 Sep: a headhunted CV came back with no name (the model answered
       // fullName null) and showed as "Unnamed candidate". Read the name off the
       // CV's own first lines, then the file name, rather than leave it blank.
@@ -1501,6 +1490,7 @@ async function runCvExtractionLocked(
       status: "processed",
       fileHash,
       candidateId: resolvedCandidateId,
+      processingStage: "filing",
     }) as string | undefined | null;
 
     if (jobId) {
@@ -1563,6 +1553,12 @@ async function runCvExtractionLocked(
         candidateName: extracted?.fullName ?? undefined,
       });
     }
+
+    await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
+      cvUploadId,
+      processingStage: "completed",
+      completedAt: Date.now(),
+    });
     if (args.batchId) {
       await ctx.runMutation(internal.cvs.batches.updateBatchProgress, {
         batchId: args.batchId,
@@ -1683,6 +1679,8 @@ async function runCvExtractionLocked(
     await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
       cvUploadId,
       status: finalStatus,
+      processingStage: isNotACV ? "needs_review" : "failed",
+      completedAt: Date.now(),
       errorMessage: isInsufficientBalance
         ? "Processed raw text only (LLM extraction skipped due to insufficient credits)"
         : isNotACV
@@ -1731,7 +1729,14 @@ export const processCvExtraction = internalAction({
     const running = await ctx.runQuery(internal.cvs.cvUploads.runningExtractions, {}).catch(() => 0);
     // `running` includes this one.
     if (running > MAX_CONCURRENT_EXTRACTIONS) {
-      const later = 30_000 + Math.floor(Math.random() * 30_000);
+      // A file that missed a worker used to disappear into a random 30–60s
+      // wait. A short stagger keeps the three-slot safety ceiling without
+      // making a five-CV upload wait another minute between waves (21 Oct).
+      const later = 4_000 + Math.floor(Math.random() * 2_000);
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
+        cvUploadId: args.cvUploadId,
+        processingStage: "queued",
+      });
       await ctx.scheduler.runAfter(later, internal.cvs.cvExtraction.processCvExtraction, args);
       return null;
     }
@@ -1743,6 +1748,8 @@ export const processCvExtraction = internalAction({
         await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
           cvUploadId: args.cvUploadId,
           status: "failed",
+          processingStage: "failed",
+          completedAt: Date.now(),
           errorMessage: err?.message || String(err),
         });
       } catch (updateErr) {

@@ -122,6 +122,7 @@ export interface Opening {
    */
   targetGender: string | null;
   locations: string[];
+  workLocations?: import("@/lib/workLocations").WorkLocation[];
   headcount: number;
   priorityTier: PriorityTier;
   positionStatus: PositionStatus;
@@ -374,6 +375,7 @@ export const CHANNEL_LABEL: Record<SourcingChannel, string> = {
 };
 
 export interface Application {
+  workLocationId?: string;
   id: Id;
   openingId: Id;
   jobPostId: Id | null;
@@ -606,6 +608,9 @@ export interface PipelineEvent {
  * headers match normal replies without changing the recipient-facing subject.
  */
 export interface ReviewRound {
+  workLocationId?: string;
+  workLocationName?: string;
+  recoveryReopenedAt?: number;
   submissionType?: "midday" | "eod";
   id: Id;
   openingId: Id;
@@ -755,6 +760,7 @@ export interface LinkLevel {
 }
 
 export interface LinkVaultEntry {
+  workLocationId?: string;
   id: Id;
   openingId: Id;
   addedBy: Id;

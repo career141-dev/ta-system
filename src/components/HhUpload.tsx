@@ -21,6 +21,11 @@ type Row = {
   name: string | null;
   note: string | null;
   createdAt?: number;
+  stage?: string;
+  label?: string;
+  progress?: number;
+  elapsedMs?: number;
+  estimateSeconds?: number | null;
 };
 
 const LINE: Record<Row["state"], string> = {
@@ -32,7 +37,10 @@ const LINE: Record<Row["state"], string> = {
   missing: "Not found",
 };
 
-export function HhUpload({ openingId }: { openingId: string }) {
+const shortTime = (ms: number) => ms < 60_000 ? `${Math.max(1, Math.round(ms / 1000))}s` : `${Math.floor(ms / 60_000)}m ${Math.round((ms % 60_000) / 1000)}s`;
+
+export function HhUpload({ openingId, workLocationId }: { openingId: string; workLocationId?: string }) {
+  const queueKey = `hh-upload-queue:${openingId}${workLocationId ? `:${workLocationId}` : ""}`;
   const [open, setOpen] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
@@ -47,7 +55,7 @@ export function HhUpload({ openingId }: { openingId: string }) {
     if (loadedFromStorageRef.current) return;
     loadedFromStorageRef.current = true;
     try {
-      const raw = localStorage.getItem(`hh-upload-queue:${openingId}`);
+      const raw = localStorage.getItem(queueKey);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (!Array.isArray(parsed)) return;
@@ -80,22 +88,22 @@ export function HhUpload({ openingId }: { openingId: string }) {
     } catch {
       // Ignore storage errors
     }
-  }, [openingId]);
+  }, [openingId, queueKey]);
 
   // Keep queue synced to localStorage and notify listeners
   useEffect(() => {
     if (!loadedFromStorageRef.current) return;
     try {
       if (rows.length > 0) {
-        localStorage.setItem(`hh-upload-queue:${openingId}`, JSON.stringify(rows));
+        localStorage.setItem(queueKey, JSON.stringify(rows));
       } else {
-        localStorage.removeItem(`hh-upload-queue:${openingId}`);
+        localStorage.removeItem(queueKey);
       }
       window.dispatchEvent(new CustomEvent("hh-upload-sync", { detail: { openingId } }));
     } catch {
       // Ignore storage errors
     }
-  }, [rows, openingId]);
+  }, [rows, openingId, queueKey]);
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
 
@@ -117,20 +125,27 @@ export function HhUpload({ openingId }: { openingId: string }) {
       createdAt: Date.now(),
     }));
     setRows((rs) => [...fresh, ...rs]);
-    // One at a time: each is a stored file and a queued extraction.
-    for (let i = 0; i < picked.length; i++) {
-      const body = new FormData();
-      body.set("openingId", openingId);
-      body.set("file", picked[i]);
-      try {
-        const res = await fetch("/api/hh/upload", { method: "POST", body });
-        const json = (await res.json()) as { ok: boolean; id?: string; message?: string };
-        if (json.ok && json.id) patch(fresh[i].key, { id: json.id, state: "reading" });
-        else patch(fresh[i].key, { state: "failed", note: json.message ?? "The upload failed." });
-      } catch {
-        patch(fresh[i].key, { state: "failed", note: "The upload did not reach the server. Try again." });
+    // Three transfers at a time: enough to avoid serial upload delay without
+    // flooding the app server with ten multi-megabyte request bodies.
+    let next = 0;
+    const uploadNext = async () => {
+      while (next < picked.length) {
+        const i = next++;
+        const body = new FormData();
+        body.set("openingId", openingId);
+        if (workLocationId) body.set("workLocationId", workLocationId);
+        body.set("file", picked[i]);
+        try {
+          const res = await fetch("/api/hh/upload", { method: "POST", body });
+          const json = (await res.json()) as { ok: boolean; id?: string; message?: string };
+          if (json.ok && json.id) patch(fresh[i].key, { id: json.id, state: "reading", stage: "queued", label: "Waiting for a CV reader", progress: 8 });
+          else patch(fresh[i].key, { state: "failed", note: json.message ?? "The upload failed." });
+        } catch {
+          patch(fresh[i].key, { state: "failed", note: "The upload did not reach the server. Try again." });
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: Math.min(3, picked.length) }, uploadNext));
   }
 
   // Ask where the queued files are while any is still being read.
@@ -142,7 +157,7 @@ export function HhUpload({ openingId }: { openingId: string }) {
     const tick = async () => {
       try {
         const res = await fetch(`/api/hh/upload?openingId=${encodeURIComponent(openingId)}&ids=${encodeURIComponent(waitingKey)}`);
-        const json = (await res.json()) as { ok: boolean; files?: { id: string; state: Row["state"]; name: string | null; note: string | null }[] };
+        const json = (await res.json()) as { ok: boolean; files?: (Pick<Row, "state" | "name" | "note" | "stage" | "label" | "progress" | "elapsedMs" | "estimateSeconds"> & { id: string })[] };
         if (stop || !json.ok || !json.files) return;
         let landed = false;
         setRows((rs) =>
@@ -153,7 +168,7 @@ export function HhUpload({ openingId }: { openingId: string }) {
               seenDone.current.add(f.id);
               landed = true;
             }
-            return { ...r, state: f.state, name: f.name ?? r.name, note: f.note };
+            return { ...r, ...f, name: f.name ?? r.name };
           }),
         );
         if (landed) router.refresh();
@@ -255,6 +270,18 @@ export function HhUpload({ openingId }: { openingId: string }) {
                       <div className="truncate font-medium">{r.name ?? r.fileName}</div>
                       {r.name && <div className="truncate text-[11.5px] text-ink-faint">{r.fileName}</div>}
                       {r.note && <div className="text-[11.5px] text-ink-soft">{r.note}</div>}
+                      {r.state === "reading" && typeof r.progress === "number" && (
+                        <>
+                          <div className="mt-1.5 h-1.5 w-48 max-w-full overflow-hidden rounded-full bg-rule">
+                            <div className="h-full rounded-full bg-brand transition-[width] duration-300" style={{ width: `${r.progress}%` }} />
+                          </div>
+                          {typeof r.elapsedMs === "number" && (
+                            <div className="mt-1 text-[10.5px] text-ink-faint">
+                              {shortTime(r.elapsedMs)} elapsed{r.estimateSeconds ? ` · this step can take about ${shortTime(r.estimateSeconds * 1000)}` : ""}
+                            </div>
+                          )}
+                        </>
+                      )}
                     </div>
                     <span
                       className={`inline-flex shrink-0 items-center gap-1.5 ${
@@ -262,7 +289,7 @@ export function HhUpload({ openingId }: { openingId: string }) {
                       }`}
                     >
                       {(r.state === "uploading" || r.state === "reading") && <Spinner tone="dark" />}
-                      {LINE[r.state]}
+                      {r.state === "reading" ? (r.label ?? LINE.reading) : LINE[r.state]}
                     </span>
                   </li>
                 ))}

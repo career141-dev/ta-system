@@ -17,11 +17,13 @@ import { bulkStages } from "@/lib/bulkStages";
 import { SubmitButton } from "./Submit";
 import { confirmShortlist, removeApplications } from "@/app/actions";
 import { inLevelOrder } from "@/lib/levels";
+import { AssignWorkLocation, WorkLocationBulkControls } from "./AssignWorkLocation";
 
 const PAGE_SIZE = 25;
 const BULK_FORM = "bulk-applications";
 
 export type ListFilters = {
+  workLocation?: string;
   q?: string;
   minExp?: string;
   maxExp?: string;
@@ -239,7 +241,7 @@ export function CandidateList({
           <input key={k} type="hidden" name={k} value={v} />
         ))}
         {/* And the rail's fields, for the same reason — see FilterPanel. */}
-        {(["location", "maxExp", "company", "past", "skill", "school", "industry", "title", "nationality"] as const).map(
+        {(["workLocation", "location", "maxExp", "company", "past", "skill", "school", "industry", "title", "nationality"] as const).map(
           (k) => (filters[k] ? <input key={k} type="hidden" name={k} value={filters[k]} /> : null),
         )}
         <label className="relative min-w-[240px] flex-1 max-w-[320px]">
@@ -359,6 +361,7 @@ export function CandidateList({
           <div className="px-4 sm:px-8 pt-4">
             <BulkBar form={BULK_FORM} noun={["candidate", "candidates"]} action={canManage ? removeApplications : undefined}>
               <input type="hidden" name="openingId" value={openingId} />
+              {allows(currentUser, "opening.sourcing", { openingId, assignment }) && <WorkLocationBulkControls locations={opening?.workLocations} />}
               {claimable && (
                 <SubmitButton
                   formAction={confirmShortlist}
@@ -414,6 +417,7 @@ export function CandidateList({
                   </span>
                 </div>
               )}
+              {!locked && a.ownerTaId && <AssignWorkLocation openingId={openingId} locations={opening?.workLocations} selected={a.workLocationId} applicationId={a.id} />}
               <CandidateRow
                 app={a}
                 candidate={c}

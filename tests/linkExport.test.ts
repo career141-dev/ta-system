@@ -9,8 +9,9 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "c141-linkexport-"));
 process.chdir(tmp);
 
 const { repo } = await import("@/data/store");
-const { buildOpeningExcelAttachment, getScopedLinkVaultEntries, formatExportRowsForEntries } = await import("@/lib/linkExport");
+const { buildOpeningExcelAttachment, getScopedLinkVaultEntries, formatExportRowsForEntries, buildLinkExportLayout } = await import("@/lib/linkExport");
 import type { LinkVaultEntry, User } from "@/data/types";
+import { buildXlsx } from "@/lib/xlsx";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -129,6 +130,7 @@ const dummyLink3: LinkVaultEntry = {
 // Insert into store db.json
 const dbFile = path.join(tmp, ".data", "db.json");
 const db = JSON.parse(fs.readFileSync(dbFile, "utf8"));
+db.users.push(...[ta1, ta2, lead, director].filter(u => !db.users.some((saved: User) => saved.id === u.id)));
 db.linkVault.push(dummyLink1, dummyLink2, dummyLink3);
 // Wait a few ms so mtime changes
 const futureTime = new Date(Date.now() + 2000);
@@ -145,10 +147,9 @@ console.log("\n3. Format rows & note extraction");
 const ta1Rows = formatExportRowsForEntries(ta1Scoped.entries.filter((e) => e.id.startsWith("lv_test_")), ta1Scoped.facts, ta1Scoped.userNames, ta1Scoped.canSeeLeadNotes);
 eq("formats expected row count for TA1", ta1Rows.length, 2);
 eq("first row candidate name", ta1Rows[0][0], "Candidate One");
-eq("first row company", ta1Rows[0][2], "Apex Tech");
-eq("first row LinkedIn URL", ta1Rows[0][6], "https://www.linkedin.com/in/candidate-one");
-eq("first row sheet level", ta1Rows[0][7], "L1");
-eq("first row notes carries lead note", ta1Rows[0][12], "Strong systems design background");
+eq("first row LinkedIn URL", ta1Rows[0][1], "https://www.linkedin.com/in/candidate-one");
+eq("Shortlisted alone is still Pending", ta1Rows[0][2], "Pending");
+eq("first row notes carries lead note", ta1Rows[0][3], "Strong systems design background");
 
 console.log("\n4. Build Excel attachment with OpenXML hyperlinks");
 const attachment = buildOpeningExcelAttachment(opening.id, ta1, opening.title);
@@ -156,8 +157,8 @@ eq("attachment is returned", attachment !== null, true);
 if (attachment) {
   eq("contentType is OpenXML spreadsheet", attachment.contentType, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   const stamp = new Date().toISOString().slice(0, 10);
-  const safeTitle = opening.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  eq("filename has correct pattern", attachment.filename, `career141-${safeTitle}-excel-tables-${stamp}.xlsx`);
+  const { excelFilename } = await import("@/lib/excelFilename");
+  eq("filename has correct pattern", attachment.filename, excelFilename(repo.client(opening.clientId)?.name || "Client", opening.title, undefined, new Date(stamp)));
   eq("base64 is valid encoding of buffer", attachment.base64, attachment.buffer.toString("base64"));
   eq("rowCount is positive", attachment.rowCount > 0, true);
 
@@ -165,18 +166,47 @@ if (attachment) {
   eq("workbook has worksheet", files.has("xl/worksheets/sheet1.xml"), true);
   eq("worksheet rels exists for hyperlinks", files.has("xl/worksheets/_rels/sheet1.xml.rels"), true);
 
-  const relsXml = files.get("xl/worksheets/_rels/sheet1.xml.rels") || "";
+  const relsXml = [...files].filter(([name]) => /^xl\/worksheets\/_rels\//.test(name)).map(([, xml]) => xml).join("");
   eq("rels XML contains LinkedIn hyperlink relationship", relsXml.includes("https://www.linkedin.com/in/candidate-one"), true);
   eq("relationship has type Hyperlink", relsXml.includes("http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"), true);
 
   const sheetXml = files.get("xl/worksheets/sheet1.xml") || "";
   eq("sheet XML contains <hyperlinks> element", sheetXml.includes("<hyperlinks>"), true);
-  eq("sheet XML links cell G", sheetXml.includes('ref="G'), true);
+  eq("sheet XML links cell B", sheetXml.includes('ref="B'), true);
 
   const stylesXml = files.get("xl/styles.xml") || "";
   eq("styles contains hyperlink blue color #0563C1", stylesXml.includes('rgb="FF0563C1"'), true);
   eq("styles contains underline", stylesXml.includes("<u/>"), true);
 }
+
+console.log("\n5. Separate TAs, levels and interest sections");
+const entries = [
+  { ...dummyLink1, id: "z", name: "Zed", level: 1 },
+  { ...dummyLink1, id: "a", name: "Alice", level: 1 },
+  { ...dummyLink1, id: "b", name: "Bob", level: 1 },
+  { ...dummyLink1, id: "n", name: "No", level: 1, outcome: "declined" as const },
+  { ...dummyLink1, id: "l2", level: 2 },
+  { ...dummyLink1, id: "l10", level: 10 },
+  { ...dummyLink2, id: "other", level: 1 },
+  { ...dummyLink3, id: "unassigned", level: null },
+];
+const facts = new Map(entries.map(e => [e.id, { app: null, interest: e.id === "n" ? "not_interested" : ["a", "b"].includes(e.id) ? "interested" : "pending" }]));
+const names = { [ta1.id]: "Dilshan Perera", [ta2.id]: "Kasun Silva", [lead.id]: "Suresh Fernando" };
+const layout = buildLinkExportLayout(entries, facts, names, true);
+eq("TA levels sorted numerically and unassigned retained", layout.sheets.map(s => s.name), ["Dilshan Perera L1", "Dilshan Perera L2", "Dilshan Perera L10", "Kasun Silva L1", "Suresh Fernando Unassigned"]);
+const first = layout.sheets[0];
+eq("status sections in agreed order", first.sectionRows!.map(i => first.rows[i][0]), ["Interested", "Pending", "Not Interested"]);
+eq("each candidate appears once in correct group", first.rows.filter(r => r[1]).map(r => [r[0], r[2]]), [["Alice", "Interested"], ["Bob", "Interested"], ["Zed", "Pending"], ["No", "Not Interested"]]);
+eq("candidate count excludes headings and spacers", layout.rowCount, entries.length);
+eq("clipboard preserves TA/level labels", layout.clipboardRows.filter(r => r[0] === "Kasun Silva L1").length, 1);
+eq("only four columns in every row", layout.sheets.every(s => s.rows.every(r => r.length === 4)), true);
+eq("input records not changed", entries.map(e => e.id), ["z", "a", "b", "n", "l2", "l10", "other", "unassigned"]);
+eq("empty export has one header-only sheet", buildLinkExportLayout([], new Map(), names, true).sheets, [{ name: "Excel Tables", headers: ["Candidate Name", "Links", "Status", "Notes"], rows: [] }]);
+const own = getScopedLinkVaultEntries(opening.id, ta1);
+const ownLayout = buildLinkExportLayout(own.entries, own.facts, own.userNames, own.canSeeLeadNotes);
+eq("other TA's link absent after grouping", ownLayout.sheets.flatMap(s => s.rows).some(r => r[1] === dummyLink2.linkedinUrl), false);
+// ZIP timestamps can differ between calls; compare workbook parts instead.
+if (attachment) eq("email and download builder produce same workbook parts", [...unzipFiles(attachment.buffer)], [...unzipFiles(buildXlsx({ sheets: ownLayout.sheets }))]);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 if (fail > 0) process.exit(1);

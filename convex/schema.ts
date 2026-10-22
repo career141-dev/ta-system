@@ -7,6 +7,7 @@ export default defineSchema({
   // Drafts and transport acknowledgements share an id. A retry cannot create
   // a second original after Graph has accepted the first (16 Oct).
   dailyEmails: defineTable({
+    workLocationId: v.optional(v.string()), workLocationName: v.optional(v.string()),
     jobId: v.id("jobs"), userId: v.id("users"), date: v.string(),
     submissionType: v.union(v.literal("midday"), v.literal("eod")),
     number: v.number(), revision: v.number(),
@@ -20,6 +21,7 @@ export default defineSchema({
     finalizedAt: v.optional(v.number()), expiresAt: v.optional(v.number()),
     snapshot: v.optional(v.any()), trackedAt: v.optional(v.string()),
     reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
+    recoveryReopenedAt: v.optional(v.number()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
     .index("by_job", ["jobId"]).index("by_expires", ["expiresAt"])
     .index("by_user_accepted", ["userId", "acceptedAt"]),
@@ -43,6 +45,7 @@ export default defineSchema({
       leadId: v.optional(v.id("users")),
       modeHistory: v.array(v.object({ at: v.number(), workType: v.string() })),
       carried: v.optional(v.boolean()),
+      workLocationIds: v.optional(v.array(v.string())),
     })),
     completion: v.optional(v.any()),
   }).index("by_user", ["userId"]).index("by_user_finished", ["userId", "finishedAt"]).index("by_date", ["date"]).index("by_finished", ["finishedAt"]),
@@ -74,6 +77,7 @@ export default defineSchema({
     evidenceAt: v.number(),
   }).index("by_user_job", ["userId", "jobId"]),
   taWorkdayMail: defineTable({
+    workLocationId: v.optional(v.string()),
     dailyEmailId: v.optional(v.id("dailyEmails")),
     submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
     revised: v.optional(v.boolean()),
@@ -92,6 +96,7 @@ export default defineSchema({
     reconciledAt: v.optional(v.number()),
     reconciledBy: v.optional(v.id("users")),
     reconciliationReason: v.optional(v.string()),
+    recoveryReopenedAt: v.optional(v.number()),
   }).index("by_workday_job", ["workdayId", "jobId"]),
   taWorkdayActivity: defineTable({
     workdayId: v.id("taWorkdays"),
@@ -628,6 +633,7 @@ export default defineSchema({
     // place it can be worked from (`location` holds the first, for the engines).
     packageNotes: v.optional(v.string()),
     taLocations: v.optional(v.array(v.string())),
+    workLocations: v.optional(v.array(v.object({ id: v.string(), name: v.string(), vacancies: v.number(), archived: v.optional(v.boolean()) }))),
   })
     .index("by_keyword", ["keyword"])
     .index("by_status", ["status"])
@@ -765,6 +771,7 @@ export default defineSchema({
     .index("by_job_date", ["jobId", "reportDate"]),
 
   cvUploads: defineTable({
+    workLocationId: v.optional(v.string()),
     storageId: v.optional(v.id("_storage")),
     s3Key: v.optional(v.string()), // Added for Cloudflare R2
     storageProvider: v.optional(v.string()), // 'convex' | 'r2'
@@ -802,6 +809,29 @@ export default defineSchema({
     replacedByUploadId: v.optional(v.id("cvUploads")),
     /** An extraction is reading this upload right now (cvs/cvUploads.ts lockExtraction, 2 Oct). */
     extractionLockedAt: v.optional(v.number()),
+    /**
+     * The real step currently being performed. `status` remains the durable
+     * coarse result used by the older intake paths; this field lets an upload
+     * screen distinguish a queued file from OCR, AI reading and database
+     * filing without guessing from elapsed time (21 Oct).
+     */
+    processingStage: v.optional(v.union(
+      v.literal("queued"),
+      v.literal("downloading"),
+      v.literal("extracting_text"),
+      v.literal("ocr"),
+      v.literal("structuring"),
+      v.literal("validating"),
+      v.literal("saving"),
+      v.literal("filing"),
+      v.literal("completed"),
+      v.literal("needs_review"),
+      v.literal("failed"),
+    )),
+    queuedAt: v.optional(v.number()),
+    stageChangedAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+    textExtractionMethod: v.optional(v.string()),
     /** Set when a TA uploads a scoop CV from the opening's Scoops page
      *  (ta/scoopUpload.ts, 29 Sep): once the extraction has filed it on
      *  `assignToJob`, the application is flagged as a scoop. `scoopFromUserId`
@@ -1126,6 +1156,7 @@ export default defineSchema({
     }),
 
   applications: defineTable({
+    workLocationId: v.optional(v.string()),
     workdayReviewedAt: v.optional(v.number()),
     workdayReviewedBy: v.optional(v.id("users")),
     candidateId: v.id("candidates"),
@@ -2685,6 +2716,7 @@ export default defineSchema({
 
   /** LinkedIn profiles worth approaching — people we do not hold a CV for. */
   linkVault: defineTable({
+    workLocationId: v.optional(v.string()),
     openingId: v.id("jobs"),
     addedBy: v.id("users"),
     linkedinUrl: v.string(),
@@ -2959,6 +2991,7 @@ export default defineSchema({
    * replies are matched from Microsoft 365 thread and reply headers.
    */
   reviewRounds: defineTable({
+    workLocationId: v.optional(v.string()), workLocationName: v.optional(v.string()),
     submissionType: v.optional(v.union(v.literal("midday"), v.literal("eod"))),
     openingId: v.id("jobs"),
     kind: v.union(v.literal("director"), v.literal("client")),
@@ -2988,6 +3021,7 @@ export default defineSchema({
     /** Each time the TA sent this email again, corrected (8 Oct). The copies
      *  are cleared after a month (eodEmailCopies); this keeps the fact. */
     revisedAt: v.optional(v.array(v.number())),
+    recoveryReopenedAt: v.optional(v.number()),
     decisions: v.array(v.object({
       applicationId: v.id("applications"),
       outcome: v.union(

@@ -16,7 +16,11 @@ import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
 import { bulkStages } from "@/lib/bulkStages";
 import { BulkBar, BulkStageControls } from "./BulkSelect";
 import { SubmitButton } from "./Submit";
-import { addLinksToPipeline } from "@/app/actions";
+import { addLinksToPipeline, addLinkLevel } from "@/app/actions";
+import { inWorkLocation, workLocationView } from "@/lib/workLocations";
+import { WorkLocationTabs } from "./WorkLocationTabs";
+import { AssignWorkLocation, WorkLocationBulkControls } from "./AssignWorkLocation";
+import { LinkLevelItem } from "./LinkLevelItem";
 
 const PAGE_SIZE = 25;
 const BULK_FORM = "bulk-links";
@@ -40,6 +44,7 @@ export function LinkVaultTable({
   imark = false,
   by = "",
   page = 1,
+  location,
 }: {
   openingId: string;
   user: User;
@@ -56,6 +61,7 @@ export function LinkVaultTable({
   /** Only the rows this person added; "" is everyone's. */
   by?: string;
   page?: number;
+  location?: string;
 }) {
   const progress = new Map(visibleEyeMarked(openingId, user).items.map((item) => [item.id, item]));
   const users = repo.users();
@@ -64,7 +70,9 @@ export function LinkVaultTable({
   // TA's rows are not shown, even ones they have taken on (5 Oct). TA Support
   // reads every TA's rows on the job (9 Oct).
   const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
-  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
+  const opening = repo.opening(openingId)!;
+  const workLocationId = workLocationView(opening, location);
+  const everyRow = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id)).filter(({ row }) => inWorkLocation(row, workLocationId));
   // Leads, directors, admins and ops leave notes; TAs read them (25 Sep).
   const canNote = can(user, "link.note").ok;
   // Each row's application here and its interest, worked out once: the tabs,
@@ -72,7 +80,7 @@ export function LinkVaultTable({
   const facts = new Map(
     everyRow.map(({ row: r }) => {
       const found = r.candidateId
-        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId)
+        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId && inWorkLocation(a, r.workLocationId ?? ""))
         : undefined;
       // Someone moved back here from the pipeline is off it: the row offers
       // "Add to pipeline" again and reads Pending (29 Sep).
@@ -92,6 +100,7 @@ export function LinkVaultTable({
   const params = (next: Partial<F>) => {
     const f = { status, level, addons, imark, by, ...next };
     const out: Record<string, string> = {};
+    if (workLocationId !== undefined) out.location = workLocationId || "unassigned";
     if (q) out.q = q;
     if (f.status) out.status = f.status;
     if (f.level) out.level = String(f.level);
@@ -124,7 +133,7 @@ export function LinkVaultTable({
 
   const levelsMap = new Map<number, { n: number; at: number; name?: string }>();
   for (const uid of levelOwners) {
-    for (const l of repo.linkLevels(openingId, uid)) {
+    for (const l of repo.linkLevels(openingId, uid, workLocationId || undefined)) {
       if (!levelsMap.has(l.n)) {
         levelsMap.set(l.n, { ...l });
       }
@@ -135,14 +144,14 @@ export function LinkVaultTable({
   const rowsToCheck = by ? everyRow.filter(({ row }) => row.addedBy === by) : everyRow;
   for (const { row } of rowsToCheck) {
     if (typeof row.level === "number" && row.level > 0 && !levelsMap.has(row.level)) {
-      const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u)).find((l) => l.n === row.level);
+      const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u, workLocationId || undefined)).find((l) => l.n === row.level);
       levelsMap.set(row.level, { n: row.level, at: known?.at ?? 0, name: known?.name });
     }
   }
 
   // An L number from query params still gets a tab
   if (level && !levelsMap.has(level)) {
-    const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u)).find((l) => l.n === level);
+    const known = recentAdders.flatMap((u) => repo.linkLevels(openingId, u, workLocationId || undefined)).find((l) => l.n === level);
     levelsMap.set(level, { n: level, at: known?.at ?? 0, name: known?.name });
   }
 
@@ -163,11 +172,17 @@ export function LinkVaultTable({
 
   return (
     <>
-      <AddLinkForm openingId={openingId} canNote={canNote} />
+      <WorkLocationTabs locations={opening.workLocations} selected={workLocationId} basePath={`/openings/${openingId}/hh/links`} />
+      {workLocationId !== "" && !opening.workLocations?.find(l => l.id === workLocationId)?.archived && <AddLinkForm key={workLocationId ?? "legacy"} openingId={openingId} canNote={canNote} workLocationId={workLocationId} level={level} />}
+      {workLocationId === "" && <p className="mb-4 text-[13px] text-ink-soft">Select a location to add profiles. Assign existing rows below after checking where they belong.</p>}
+      {workLocationId !== "" && <form action={addLinkLevel} className="mb-3">
+        <input type="hidden" name="openingId" value={openingId} /><input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
+        <SubmitButton pendingLabel="Adding…" className="text-[12px] text-brand">+ Add L-sheet</SubmitButton>
+      </form>}
       {imark && (
         <div className="mb-4 text-[13px] text-ink-soft">
           <p className="mb-3">Call these candidates and request their CVs. Once received, add them to TA Follow-up and prepare them for Director Review.</p>
-          {can(user, "opening.act", { assignment: repo.assignmentFor(openingId, user.id) ?? null }).ok && <HhUpload openingId={openingId} />}
+          {workLocationId !== "" && can(user, "opening.act", { assignment: repo.assignmentFor(openingId, user.id) ?? null }).ok && <HhUpload key={workLocationId} openingId={openingId} workLocationId={workLocationId} />}
         </div>
       )}
 
@@ -175,7 +190,7 @@ export function LinkVaultTable({
       <div className="border-b border-rule">
         <nav aria-label="Sheets" className="flex min-w-0 flex-wrap items-end gap-0.5">
           {[{ n: 0, at: 0 } as { n: number; at: number; name?: string }, ...sheets].map((l) => (
-            <a key={l.n} href={keep({ level: l.n })} aria-current={level === l.n ? "page" : undefined} className={tab(level === l.n)}>
+            l.n && opening.workLocations?.length ? <LinkLevelItem key={`${workLocationId}:${l.n}`} openingId={openingId} workLocationId={workLocationId || undefined} href={keep({ level: l.n })} active={level === l.n} className={`${tab(level === l.n)} flex items-center gap-2`} level={{ n: l.n, label: l.at ? levelLabel(l) : `L${l.n}`, name: l.name ?? "", count: count({ level: l.n, status: "", addons: false }), canManage: workLocationId !== "" && !by && repo.linkLevels(openingId, user.id, workLocationId || undefined).some(own => own.n === l.n) }} /> : <a key={l.n} href={keep({ level: l.n })} aria-current={level === l.n ? "page" : undefined} className={tab(level === l.n)}>
               {l.n === 0 ? "All" : l.at ? levelLabel(l) : `L${l.n}`}{" "}
               <span className="tabular-nums font-normal text-ink-faint">{count({ level: l.n, status: "", addons: false })}</span>
             </a>
@@ -215,7 +230,7 @@ export function LinkVaultTable({
           />
           <LinkExportMenu
             openingId={openingId}
-            filters={{ q, status, level, addons, imark, by }}
+            filters={{ q, status, level, addons, imark, by, location: workLocationId === undefined ? undefined : workLocationId || "unassigned" }}
             matchingCount={matching.length}
           />
         </div>
@@ -244,12 +259,14 @@ export function LinkVaultTable({
             <div className="px-4 pt-4 sm:px-6">
               <BulkBar form={BULK_FORM} noun={["candidate", "candidates"]}>
                 <input type="hidden" name="openingId" value={openingId} />
+                <WorkLocationBulkControls locations={opening.workLocations} />
                 <SubmitButton formAction={addLinksToPipeline} pendingLabel="Adding…" className="rounded-full bg-brand px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60">Add selected to pipeline</SubmitButton>
                 <BulkStageControls stages={stages} />
               </BulkBar>
             </div>
             {rows.map((r) => (
               <div key={r.id} id={`eye-${r.id}`} className="scroll-mt-24">
+                {(r.addedBy === user.id || isDeskWide(user)) && <AssignWorkLocation openingId={openingId} locations={opening.workLocations} selected={r.workLocationId} linkId={r.id} />}
                 {imark && progress.has(r.id) && (
                   <p className={`px-5 pt-4 text-[12.5px] font-medium ${progress.get(r.id)!.blocked ? "text-warn" : "text-ink-soft"}`}>{progress.get(r.id)!.status}</p>
                 )}

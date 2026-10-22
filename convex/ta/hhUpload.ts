@@ -22,6 +22,8 @@ import { toTaStage } from "./stages";
 import { assertWorkdayScope } from "../lib/workdayScope";
 import { profileSlug } from "../lib/samePerson";
 import { refreshWorkdayChecks } from "./workdays";
+import { uploadProgress } from "../lib/cvUploadProgress";
+import { requireWorkLocation } from "../../src/lib/workLocations";
 
 /** The channel the pipeline records; the TA System reads it as HH (src/data/convex/map.ts). */
 export const HEADHUNT_CHANNEL = "headhunting";
@@ -31,6 +33,7 @@ export const queue = internalMutation({
   args: {
     actorId: v.string(),
     openingId: v.string(),
+    workLocationId: v.optional(v.string()),
     storageId: v.id("_storage"),
     fileName: v.string(),
     fileSize: v.number(),
@@ -43,6 +46,7 @@ export const queue = internalMutation({
     if (!job) throw new Error("That opening no longer exists.");
     await assertJobAccess(ctx, user, job._id, WORKS_THE_DESK);
     await assertWorkdayScope(ctx, user, job._id);
+    const location = requireWorkLocation(job, args.workLocationId);
 
     // As cvs/cvUploads.ts saveUpload + queueManualExtraction, in one step.
     const cvUploadId = await ctx.db.insert("cvUploads", {
@@ -55,7 +59,13 @@ export const queue = internalMutation({
       assignToJob: job._id as string,
       uploadedBy: user._id as string,
       headhuntedBy: user._id,
+      workLocationId: location?.id,
+      // Keep the coarse status as uploaded so the two-minute recovery queue can
+      // still claim this file if the immediate scheduled action is interrupted.
       status: "uploaded",
+      processingStage: "queued",
+      queuedAt: Date.now(),
+      stageChangedAt: Date.now(),
     });
     const logId = await ctx.db.insert("ingestionLog", {
       jobId: job._id,
@@ -105,6 +115,17 @@ export const fileHeadhunt = internalMutation({
       .filter((q) => q.eq(q.field("jobId"), jobId))
       .first();
     if (!app) return { handled: false };
+    if (upload.workLocationId && !app.workLocationId) {
+      const rounds = await ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", jobId)).collect();
+      if (rounds.some(r => r.applicationIds.includes(app._id))) {
+        await ctx.db.patch(upload._id, { routeNote: "This candidate has already been sent for review without a work location. Ask the TA Lead to review their existing application." });
+        return { handled: true, claimed: false };
+      }
+    }
+    if (app.workLocationId && upload.workLocationId && app.workLocationId !== upload.workLocationId) {
+      await ctx.db.patch(upload._id, { routeNote: "This candidate already belongs to another work location on this job. Ask the TA Lead to review the assignment." });
+      return { handled: true, claimed: false };
+    }
 
     // Owner first, as ta/scoopUpload.ts does. A refused claim used to still
     // relabel the owner's candidate HH and log them on the uploader's sheet
@@ -117,7 +138,7 @@ export const fileHeadhunt = internalMutation({
       });
       return { handled: true, claimed: false };
     }
-    await ctx.db.patch(app._id, { taSourcingChannel: "HH" });
+    await ctx.db.patch(app._id, { taSourcingChannel: "HH", ...(upload.workLocationId ? { workLocationId: upload.workLocationId } : {}) });
     const claimed = await claimForTa(ctx, user, app);
     if (!claimed.ok) {
       // Cannot happen inside this transaction after the check above; kept so
@@ -141,6 +162,7 @@ export const fileHeadhunt = internalMutation({
     const profiles = slug ? rows.filter((r) => !r.candidateId && r.addedBy === user._id && profileSlug(r.linkedinUrl) === slug) : [];
     const row = linked ?? (profiles.length === 1 ? profiles[0] : undefined);
     if (row) {
+      if (upload.workLocationId && !row.workLocationId) await ctx.db.patch(row._id, { workLocationId: upload.workLocationId, level: null });
       if (!row.candidateId) await ctx.db.patch(row._id, { candidateId: candidate._id });
       if (row.outcome !== "shortlisted" && row.outcome !== "cv_received") {
         await ctx.db.patch(row._id, { outcome: "cv_received" });
@@ -148,6 +170,7 @@ export const fileHeadhunt = internalMutation({
     } else {
       await ctx.db.insert("linkVault", {
         openingId: jobId,
+        workLocationId: upload.workLocationId,
         addedBy: user._id,
         linkedinUrl: candidate.linkedinUrl ?? "",
         name: candidate.fullName ?? null,
@@ -192,23 +215,17 @@ export const status = internalQuery({
               .filter((q) => q.eq(q.field("jobId"), jobId))
               .first()
           : null;
-      const failed = upload.status === "failed";
       const mine = !!app && app.ownerTaId === upload.headhuntedBy;
-      const state = failed
-        ? ("failed" as const)
-        : mine
-          ? ("done" as const)
-          : app && upload.routeNote
-            ? ("held" as const)
-            : ("reading" as const);
+      const businessState = mine ? ("done" as const) : app && upload.routeNote ? ("held" as const) : null;
+      const progress = uploadProgress(upload, businessState);
       out.push({
         id: raw,
-        state,
+        ...progress,
         fileName: upload.fileName,
         name: candidate?.fullName ?? null,
         applicationId: app ? (app._id as string) : null,
         stage: app ? toTaStage(app.currentStage) : null,
-        note: failed ? (upload.errorMessage ?? "The CV could not be read.") : (upload.routeNote ?? null),
+        note: progress.state === "failed" ? (upload.errorMessage ?? "The CV could not be read.") : (upload.routeNote ?? null),
       });
     }
     return out;

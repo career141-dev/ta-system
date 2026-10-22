@@ -18,6 +18,7 @@ import type { Id } from "../_generated/dataModel";
 import { requireActor, assertJobAccess, optionalActor, WORKS_THE_DESK } from "./guard";
 import { toTaStage } from "./stages";
 import { isScoopSender, scoopFlag } from "../lib/scoopMail";
+import { uploadProgress } from "../lib/cvUploadProgress";
 
 /** The pipeline's channel name for it; it reads as E in the TA System, like any uploaded CV. */
 export const SCOOP_CHANNEL = "scoop";
@@ -61,6 +62,9 @@ export const queue = internalMutation({
       scoopedBy: user._id,
       ...(fromUserId ? { scoopFromUserId: fromUserId } : {}),
       status: "uploaded",
+      processingStage: "queued",
+      queuedAt: Date.now(),
+      stageChangedAt: Date.now(),
     });
     const logId = await ctx.db.insert("ingestionLog", {
       jobId: job._id,
@@ -146,22 +150,16 @@ export const status = internalQuery({
               .filter((q) => q.eq(q.field("jobId"), jobId))
               .first()
           : null;
-      const failed = upload.status === "failed";
-      const state = failed
-        ? ("failed" as const)
-        : app?.scoopReceivedAt
-          ? upload.routeNote
-            ? ("held" as const)
-            : ("done" as const)
-          : ("reading" as const);
+      const businessState = app?.scoopReceivedAt ? (upload.routeNote ? ("held" as const) : ("done" as const)) : null;
+      const progress = uploadProgress(upload, businessState);
       out.push({
         id: raw,
-        state,
+        ...progress,
         fileName: upload.fileName,
         name: candidate?.fullName ?? null,
         applicationId: app ? (app._id as string) : null,
         stage: app ? toTaStage(app.currentStage) : null,
-        note: failed ? (upload.errorMessage ?? "The CV could not be read.") : (upload.routeNote ?? null),
+        note: progress.state === "failed" ? (upload.errorMessage ?? "The CV could not be read.") : (upload.routeNote ?? null),
       });
     }
     return out;

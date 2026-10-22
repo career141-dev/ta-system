@@ -11,6 +11,8 @@ import { validateResearchLink, checkResearchSubmission } from "../../src/lib/eod
 import { dailyEmailsFor, finalizeDailyEmail, middayRequired } from "../lib/dailyEmail";
 import { requiredChecks } from "../lib/workdayChecks";
 import { refreshWorkdayChecks } from "./workdays";
+import { requireWorkLocation, inWorkLocation } from "../../src/lib/workLocations";
+import { activeWorkLocationIds } from "../../src/lib/workLocations";
 
 type Ctx = QueryCtx | MutationCtx;
 const submissionType = v.union(v.literal("midday"), v.literal("eod"));
@@ -93,15 +95,17 @@ export const list = internalQuery({
 });
 
 export const createDraft = internalMutation({
-  args: { actorId: v.string(), jobId: v.id("jobs") },
+  args: { actorId: v.string(), jobId: v.id("jobs"), workLocationId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await access(ctx, args.actorId, args.jobId);
     await workday(ctx, user, args.jobId);
+    const location = requireWorkLocation((await ctx.db.get(args.jobId))!, args.workLocationId);
     const date = workdayDate(Date.now());
-    const emails = await dailyEmailsFor(ctx, user._id, args.jobId, date);
+    const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, date)).filter(e => inWorkLocation(e, location?.id ?? ""));
     const problem = dailySendProblem(emails, "midday", false);
     if (problem) throw new Error(problem);
     return ctx.db.insert("dailyEmails", { jobId: args.jobId, userId: user._id, date,
+      workLocationId: location?.id, workLocationName: location?.name,
       submissionType: "midday", number: Math.max(0, ...emails.filter(e => e.submissionType === "midday").map(e => e.number)) + 1,
       revision: 0, status: "draft", fields: {}, applicationIds: [], createdAt: Date.now(), expiresAt: Date.now() + 31 * 86400000 });
   },
@@ -124,28 +128,42 @@ export const saveDraft = internalMutation({
 
 export const begin = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), submissionType,
+    workLocationId: v.optional(v.string()),
     draftId: v.optional(v.id("dailyEmails")), revision: v.optional(v.number()), parentId: v.optional(v.id("dailyEmails")),
     applicationIds: v.array(v.id("applications")), snapshot: v.any(), confirmed: v.boolean(), previewConfirmed: v.optional(v.boolean()), trackedAt: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await access(ctx, args.actorId, args.jobId);
+    const job = (await ctx.db.get(args.jobId))!;
     const source = args.parentId ? await ctx.db.get(args.parentId) : null;
     if (args.parentId && (!source || source.userId !== user._id || source.jobId !== args.jobId || source.submissionType !== "eod" || args.submissionType !== "eod" || source.status !== "accepted" || !source.snapshot || (source.expiresAt ?? 0) <= Date.now()))
       throw new Error("Only your retained EOD emails can be corrected.");
     const parent = source;
+    const location = parent ? job.workLocations?.find(l => l.id === parent.workLocationId) : requireWorkLocation(job, args.workLocationId);
+    const locationId = parent ? parent.workLocationId : location?.id;
+    if (parent && args.workLocationId !== parent.workLocationId) throw new Error("A correction must keep its original work location.");
     if (parent && !args.previewConfirmed) throw new Error("Review and confirm the revised email preview before sending.");
     const day = parent ? null : await workday(ctx, user, args.jobId);
+    const workEntry = day?.jobs.find(j => j.jobId === args.jobId);
+    if (workEntry && location) {
+      if (workEntry.workLocationIds?.length && !workEntry.workLocationIds.includes(location.id)) throw new Error("This location was added after today's work started. Its daily emails begin tomorrow.");
+      if (!workEntry.workLocationIds?.length) await ctx.db.patch(day!._id, { jobs: day!.jobs.map(j => j.jobId === args.jobId ? { ...j, workLocationIds: activeWorkLocationIds(job) } : j) });
+    }
     const setup = day && args.submissionType === "eod" ? await requiredChecks(ctx, day, day.jobs.find(j => j.jobId === args.jobId)!) : null;
     const date = workdayDate(Date.now());
-    const emails = await dailyEmailsFor(ctx, user._id, args.jobId, date);
+    const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, date)).filter(e => inWorkLocation(e, locationId ?? ""));
     // Pending sends on older dates also hold the opening until reconciled.
     const all = await ctx.db.query("dailyEmails").withIndex("by_job", q => q.eq("jobId", args.jobId)).collect();
-    if (all.some(e => e.status === "sending" || e.status === "uncertain")) throw new Error("An email on this opening is still sending or needs reconciliation.");
+    if (all.some(e => (!e.workLocationId || e.workLocationId === locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("An email on this location is still sending or needs reconciliation.");
     const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent);
     if (problem) throw new Error(problem);
     const snapshot = args.snapshot as DailyEmailSnapshot;
+    for (const id of snapshot.workbookLinkIds ?? []) {
+      const row = await ctx.db.get(id as Id<"linkVault">);
+      if (!row || row.openingId !== args.jobId || !inWorkLocation(row, locationId ?? "")) throw new Error("A workbook row changed location. Reload and review the email before sending.");
+    }
     const entry = day?.jobs.find(j => j.jobId === args.jobId);
     if (day?.finishedAt !== undefined && entry?.workType === "100%") {
-      const already = emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId);
+      const already = emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId && !e.recoveryReopenedAt);
       if (!already) throw new Error("The workday clock has stopped. Change this unfinished position to Follow-up or Add-on before sending.");
     }
     const selectedMode = parent?.workType ?? parent?.snapshot?.workType ?? entry?.workType ?? "100%";
@@ -169,13 +187,13 @@ export const begin = internalMutation({
       if (!sameCandidateList(parent.applicationIds, args.applicationIds) || !parent.applicationIds.every((id, i) => id === args.applicationIds[i])) throw new Error("A correction must keep the original candidates and their order.");
     } else {
       const rounds = await ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", args.jobId)).collect();
-      const sent = new Set(rounds.filter(r => r.kind === "director").flatMap(r => r.applicationIds));
-      for (const e of all.filter(e => e.status === "accepted")) for (const id of e.applicationIds) sent.add(id);
+      const sent = new Set(rounds.filter(r => r.kind === "director" && !r.recoveryReopenedAt).flatMap(r => r.applicationIds));
+      for (const e of all.filter(e => e.status === "accepted" && !e.recoveryReopenedAt)) for (const id of e.applicationIds) sent.add(id);
       const apps = await ctx.db.query("applications").withIndex("by_jobId", q => q.eq("jobId", args.jobId)).collect();
       const entry = day?.jobs.find(j => j.jobId === args.jobId);
       const currentWorkType = entry?.workType ?? "100%";
       const sessionStart = entry ? workSessionStart(entry) : null;
-      const eligible = apps.filter(a => !sent.has(a._id) && (
+      const eligible = apps.filter(a => inWorkLocation(a, locationId ?? "") && !sent.has(a._id) && (
         args.submissionType === "eod"
           ? isEodCandidateEligible({
               stage: a.currentStage,
@@ -186,32 +204,34 @@ export const begin = internalMutation({
           : a.currentStage === "second_shortlist" && (!worker(user) || a.ownerTaId === user._id)
       ));
       if (!sameCandidateList(args.applicationIds, eligible.map(a => a._id))) throw new Error("The candidate list changed. Reload, review the updated list and send again.");
-      if (args.submissionType === "eod" && currentWorkType === "100%" && !args.applicationIds.length)
+      if (!location && args.submissionType === "eod" && currentWorkType === "100%" && !args.applicationIds.length)
         throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
       if (day && args.submissionType === "eod") {
-        const blockers = setup!.eodChecks.filter(c => !["director_cv", "chatgpt"].includes(c.key.split(":")[0]) && c.status !== "complete" && !c.exception);
+        const blockers = setup!.eodChecks.filter(c => !["director_cv", "chatgpt", "midday_email"].includes(c.key.split(":")[0]) && c.status !== "complete" && !c.exception);
         if (blockers.length) throw new Error(`Complete Today's Checks: ${blockers.map(c => c.label).join("; ")}`);
       }
     }
     // A legacy send still in flight must not be bypassed through the new UI.
     if (day) {
       const receipts = await ctx.db.query("taWorkdayMail").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", args.jobId)).collect();
-      if (receipts.some(r => ["sending", "uncertain"].includes(r.status) || (r.status === "accepted" && !r.finalizedAt))) throw new Error("An earlier email needs reconciliation before sending.");
-      if (!parent && receipts.some(r => r.status === "accepted" && !r.revised && (r.submissionType ?? "eod") === "eod")) throw new Error("The end-of-day email has already been sent today.");
+      if (receipts.some(r => (!r.workLocationId || r.workLocationId === locationId) && (["sending", "uncertain"].includes(r.status) || (r.status === "accepted" && !r.finalizedAt)))) throw new Error("An earlier email needs reconciliation before sending.");
+      if (!parent && receipts.some(r => inWorkLocation(r, locationId ?? "") && r.status === "accepted" && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod")) throw new Error("The end-of-day email has already been sent today for this location.");
     }
     const draft = args.draftId ? await ctx.db.get(args.draftId) : null;
     if (args.draftId && args.submissionType !== "midday") throw new Error("Only a midday email can use this draft.");
-    if (args.submissionType === "midday" && (!draft || draft.submissionType !== "midday" || draft.userId !== user._id || draft.jobId !== args.jobId || draft.date !== date || !["draft", "failed"].includes(draft.status) || draft.revision !== args.revision))
+    if (args.submissionType === "midday" && (!draft || !inWorkLocation(draft, locationId ?? "") || draft.submissionType !== "midday" || draft.userId !== user._id || draft.jobId !== args.jobId || draft.date !== date || !["draft", "failed"].includes(draft.status) || draft.revision !== args.revision))
       throw new Error("This midday draft changed. Reload it before sending.");
     const now = Date.now();
     const payload = { status: "sending" as const, startedAt: now, snapshot, applicationIds: args.applicationIds,
       trackedAt: args.trackedAt, workType: selectedMode, expiresAt: now + EMAIL_RETENTION_MS };
     const id = draft ? draft._id : await ctx.db.insert("dailyEmails", { jobId: args.jobId, userId: user._id, date: parent?.date ?? date,
+      workLocationId: locationId, workLocationName: parent?.workLocationName ?? location?.name,
       submissionType: "eod", number: 1, revision: 0, fields: {}, createdAt: now,
       ...(parent ? { parentId: parent.parentId ?? parent._id } : {}), ...payload });
     if (draft) await ctx.db.patch(id, { ...payload, revision: draft.revision + 1 });
     if (day) {
       const receiptId = await ctx.db.insert("taWorkdayMail", { workdayId: day._id, userId: user._id, jobId: args.jobId,
+        workLocationId: locationId,
         dailyEmailId: id, submissionType: args.submissionType, applicationIds: args.applicationIds,
         workType: selectedMode,
         status: "sending", startedAt: now, subject: snapshot.subject, sentTo: snapshot.to[0], researchLink: snapshot.researchLink });

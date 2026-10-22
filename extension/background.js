@@ -39,11 +39,11 @@ async function get(path) {
 }
 
 async function capture(profile) {
-  const { openingId, userId } = await settings();
+  const { openingId, userId, workLocationId } = await settings();
   if (!openingId) throw new Error("Pick an opening in the extension first");
   if (!userId) throw new Error("Pick who you are in the extension first");
 
-  const result = await post("/api/extension/capture", { openingId, userId, profile });
+  const result = await post("/api/extension/capture", { openingId, userId, workLocationId: workLocationId || undefined, profile });
 
   // A short local history, so the TA can see what went where without leaving
   // the page. Names only — the full capture lives in the platform.

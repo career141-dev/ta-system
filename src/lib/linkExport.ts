@@ -1,10 +1,12 @@
 import { repo } from "@/data/store";
 import type { LinkVaultEntry, User } from "@/data/types";
-import { can, isDeskWide } from "@/lib/auth";
+import { isDeskWide } from "@/lib/auth";
 import { scopeLinks } from "@/lib/visibility";
 import { interestOf } from "@/lib/linkViews";
 import { awaitingShortlist, movedBackToTables } from "@/lib/pipeline";
-import { buildXlsx, formatLinkVaultExportRows, EXCEL_TABLES_EXPORT_HEADERS } from "@/lib/xlsx";
+import { buildXlsx, formatLinkVaultExportRows, uniqueSheetNames, EXCEL_TABLES_EXPORT_HEADERS, type XlsxSheet } from "@/lib/xlsx";
+import { excelFilename } from "@/lib/excelFilename";
+import { inWorkLocation } from "./workLocations";
 
 export interface ExcelExportAttachment {
   filename: string;
@@ -12,6 +14,7 @@ export interface ExcelExportAttachment {
   buffer: Buffer;
   base64: string;
   rowCount: number;
+  linkIds: string[];
 }
 
 /**
@@ -21,6 +24,7 @@ export interface ExcelExportAttachment {
 export function getScopedLinkVaultEntries(
   openingId: string,
   user: User,
+  workLocationId?: string,
 ): {
   entries: LinkVaultEntry[];
   facts: Map<string, { app: ReturnType<typeof repo.application>; interest: string }>;
@@ -32,12 +36,12 @@ export function getScopedLinkVaultEntries(
   const userNames = Object.fromEntries(users.map((u) => [u.id, u.name]));
   const deskWide = new Set(users.filter(isDeskWide).map((u) => u.id));
   const scoped = scopeLinks(repo.linkVault(openingId), user, (id) => deskWide.has(id));
-  const entries = scoped.map((s) => s.row);
+  const entries = scoped.map((s) => s.row).filter(r => inWorkLocation(r, workLocationId));
 
   const facts = new Map(
     entries.map((r) => {
       const found = r.candidateId
-        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId)
+        ? repo.applicationsForCandidate(r.candidateId).find((a) => a.openingId === openingId && inWorkLocation(a, r.workLocationId ?? ""))
         : undefined;
       const app = found && !movedBackToTables(found) && !awaitingShortlist(found) ? found : null;
       return [r.id, { app, interest: interestOf(r, app) }] as const;
@@ -83,6 +87,56 @@ export function formatExportRowsForEntries(
   );
 }
 
+/** Group only already-scoped/filtered rows; never fetch broader data here. */
+export function buildLinkExportLayout(
+  entries: LinkVaultEntry[],
+  facts: Map<string, { app: ReturnType<typeof repo.application>; interest: string }>,
+  userNames: Record<string, string>,
+  canSeeLeadNotes: boolean,
+): { sheets: XlsxSheet[]; clipboardRows: string[][]; rowCount: number } {
+  const groups = new Map<string, { owner: string; level: number | null; entries: LinkVaultEntry[] }>();
+  for (const entry of entries) {
+    const level = entry.level && Number.isInteger(entry.level) && entry.level > 0 ? entry.level : null;
+    const key = JSON.stringify([entry.addedBy, level]);
+    if (!groups.has(key)) groups.set(key, { owner: entry.addedBy, level, entries: [] });
+    groups.get(key)!.entries.push(entry);
+  }
+  const ownerName = (id: string) => userNames[id] || "Unknown TA";
+  const ordered = [...groups.values()].sort((a, b) =>
+    ownerName(a.owner).localeCompare(ownerName(b.owner), "en") ||
+    a.owner.localeCompare(b.owner, "en") ||
+    (a.level ?? Infinity) - (b.level ?? Infinity));
+  // Reserve space for the level so a long TA name cannot hide L1 versus L2.
+  const names = uniqueSheetNames(ordered.map((group) => {
+    const suffix = group.level === null ? " Unassigned" : ` L${group.level}`;
+    return ownerName(group.owner).slice(0, 31 - suffix.length) + suffix;
+  }));
+  const sheets: XlsxSheet[] = ordered.map((group, i) => {
+    const orderedEntries = [...group.entries].sort((a, b) =>
+      (a.name || a.capture?.fullName || "—").localeCompare(b.name || b.capture?.fullName || "—", "en") ||
+      a.id.localeCompare(b.id, "en"));
+    const formatted = formatExportRowsForEntries(orderedEntries, facts, userNames, canSeeLeadNotes);
+    const rows: string[][] = [];
+    const sectionRows: number[] = [];
+    for (const status of ["Interested", "Pending", "Not Interested"]) {
+      const selected = formatted.filter((row) => row[2] === status);
+      if (!selected.length) continue;
+      if (rows.length) rows.push(["", "", "", ""]);
+      sectionRows.push(rows.length);
+      rows.push([status, "", "", ""], ...selected);
+    }
+    return { name: names[i], headers: [...EXCEL_TABLES_EXPORT_HEADERS], rows, sectionRows };
+  });
+  if (!sheets.length) sheets.push({ name: "Excel Tables", headers: [...EXCEL_TABLES_EXPORT_HEADERS], rows: [] });
+  // Clipboard formats cannot have tabs. Keep the same four columns with explicit sheet labels.
+  const clipboardRows = entries.length ? sheets.flatMap((sheet, i) => [
+    ...(i ? [["", "", "", ""]] : []),
+    [sheet.name!, "", "", ""],
+    ...sheet.rows,
+  ]) : [];
+  return { sheets, clipboardRows, rowCount: entries.length };
+}
+
 /**
  * Builds the Excel attachment (.xlsx) with clickable hyperlinks for an opening's scoped candidate links.
  * Returns null if the opening has no candidate links for this user.
@@ -91,30 +145,25 @@ export function buildOpeningExcelAttachment(
   openingId: string,
   user: User,
   openingTitle: string,
-  options?: { sheetName?: string },
+  workLocationId?: string,
 ): ExcelExportAttachment | null {
-  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user);
+  const { entries, facts, userNames, canSeeLeadNotes } = getScopedLinkVaultEntries(openingId, user, workLocationId);
   if (!entries.length) return null;
 
-  const formattedRows = formatExportRowsForEntries(entries, facts, userNames, canSeeLeadNotes);
-  if (!formattedRows.length) return null;
+  const layout = buildLinkExportLayout(entries, facts, userNames, canSeeLeadNotes);
 
-  const safeJobTitle = openingTitle.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
-  const stamp = new Date().toISOString().slice(0, 10);
-  const sheetName = options?.sheetName ?? "Excel Tables";
-  const filename = `career141-${safeJobTitle}-excel-tables-${stamp}.xlsx`;
+  const opening = repo.opening(openingId);
+  const location = opening?.workLocations?.find(l => l.id === workLocationId);
+  const filename = excelFilename(opening ? repo.client(opening.clientId)?.name || "Client" : "Client", openingTitle, location?.name);
 
-  const buffer = buildXlsx({
-    name: sheetName,
-    headers: [...EXCEL_TABLES_EXPORT_HEADERS],
-    rows: formattedRows,
-  });
+  const buffer = buildXlsx({ sheets: layout.sheets });
 
   return {
     filename,
     contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     buffer,
     base64: buffer.toString("base64"),
-    rowCount: formattedRows.length,
+    rowCount: layout.rowCount,
+    linkIds: entries.map(r => r.id),
   };
 }

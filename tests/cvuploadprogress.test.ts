@@ -1,0 +1,47 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import { uploadProgress } from "../convex/lib/cvUploadProgress";
+
+const base = { status: "processing", _creationTime: 1_000, queuedAt: 2_000, processingStartedAt: 3_000 };
+
+test("real extraction stages provide honest phase progress", () => {
+  const queued = uploadProgress({ ...base, status: "queued", processingStage: "queued" }, null, 13_000);
+  assert.equal(queued.state, "reading");
+  assert.equal(queued.progress, 8);
+  assert.match(queued.label, /Waiting/);
+
+  const ai = uploadProgress({ ...base, processingStage: "structuring" }, null, 13_000);
+  assert.equal(ai.state, "reading");
+  assert.equal(ai.progress, 62);
+  assert.match(ai.label, /all CV details/);
+  assert.equal(ai.elapsedMs, 10_000);
+});
+
+test("every terminal extraction failure stops the spinner", () => {
+  for (const status of ["failed", "failed_retry", "extraction_failed_permanent", "cancelled", "paused", "needs_review"]) {
+    assert.equal(uploadProgress({ ...base, status }, null, 13_000).state, "failed", status);
+  }
+});
+
+test("business completion wins only after the candidate is filed", () => {
+  const saving = uploadProgress({ ...base, processingStage: "saving" }, "done", 13_000);
+  assert.equal(saving.state, "reading");
+  const filed = uploadProgress({ ...base, processingStage: "completed", completedAt: 12_000 }, "done", 13_000);
+  assert.equal(filed.state, "done");
+  assert.equal(filed.progress, 100);
+  assert.equal(filed.elapsedMs, 9_000);
+});
+
+test("the extraction does not run OCR again after a full-text AI failure", () => {
+  const source = readFileSync(new URL("../convex/cvs/cvExtraction.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /if \(!extracted\)[\s\S]{0,300}extractTextWithTesseract/);
+  assert.match(source, /trimmed\.length < 50 && !ocrAttempted/);
+});
+
+test("a missed worker is handed back quickly instead of waiting a minute", () => {
+  const source = readFileSync(new URL("../convex/cvs/cvExtraction.ts", import.meta.url), "utf8");
+  assert.match(source, /const later = 4_000 \+ Math\.floor\(Math\.random\(\) \* 2_000\)/);
+  assert.doesNotMatch(source, /const later = 30_000 \+ Math\.floor\(Math\.random\(\) \* 30_000\)/);
+});
+

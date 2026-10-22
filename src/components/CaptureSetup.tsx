@@ -38,7 +38,7 @@ export function CaptureSetup() {
             <code className="rounded bg-paper px-1.5 py-0.5 text-[11.5px]">extension</code> folder in the project.
           </li>
           <li>Click the extension, open the ⚙, and paste the key opposite.</li>
-          <li>Choose who you are and which opening you are working.</li>
+          <li>Choose who you are, the opening, and its work location. For location capture, reload the extension using version 0.3.0 or later.</li>
         </ol>
 
         <div>
