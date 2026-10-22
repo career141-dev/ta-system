@@ -12,3 +12,31 @@ export function parseBody<T>(schema: z.ZodType<T>, body: unknown, problem: strin
   const parsed = schema.safeParse(body);
   return parsed.success ? { ok: true, value: parsed.data } : { ok: false, message: problem };
 }
+
+const text = (max: number) => z.string().max(max);
+
+export const openingDetailsBody = z
+  .object({
+    title: text(200),
+    salaryMin: text(40),
+    salaryMax: text(40),
+    salaryCurrency: text(10),
+    packageNotes: text(500),
+    locations: text(1000),
+    targetNationalities: text(500),
+    headcount: text(10),
+    priorityTier: text(4),
+  })
+  .strict();
+
+export const openingTeamBody = z
+  .object({
+    members: z
+      .array(z.object({ userId: z.string().trim().min(1).max(200), role: z.enum(["primary_recruiter", "supporting_recruiter", "director", "client_contact"]) }).strict())
+      .max(50),
+  })
+  .strict();
+
+export const emptyBody = z.object({}).strict();
+export const accessRequestBody = z.object({ reason: text(1000) }).strict();
+export const accessDecisionBody = z.object({ decision: z.enum(["approve", "reject"]), reason: text(1000) }).strict();

@@ -16,6 +16,8 @@ import {
   type OpeningStatusValue,
   type OpeningWriteDeps,
 } from "@/lib/openings/writes";
+import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
+import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
@@ -78,7 +80,7 @@ import { isTicked } from "@/lib/strategyPlanner";
 import { dateAt } from "@/lib/format";
 import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
-import { clearMatching, markMatching, matchFailureText } from "@/lib/matchingNow";
+import { markMatching } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexAction, convexActorForEmail, convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
@@ -1381,26 +1383,9 @@ function salaryNoteOf(o: import("@/data/types").Opening): string {
  * approval), then run matching against the result. Bounded: if extraction is
  * slow or failed, matching still runs on what the opening has.
  */
-async function rematchWhenRequirementsSettle(openingId: string, actorId: string, trigger: "jd_approved" | "manual" = "jd_approved") {
-  // Marked before the response by the caller (lib/matchingNow); cleared here
-  // however the run ends, so the page never says "running" for a dead run.
-  let failure: string | null = null;
-  try {
-    for (let i = 0; i < 30; i++) {
-      const row = await backend.opening({ id: actorId }, openingId).catch(() => null);
-      const status = (row?.opening as { requirementsStatus?: string | null } | undefined)?.requirementsStatus;
-      if (status !== "extracting") break;
-      await new Promise((res) => setTimeout(res, 3_000));
-    }
-    const { resetStore } = await import("@/data/prime");
-    resetStore();
-    await primeStore({ openingId });
-    const r = await findDatabaseMatches(openingId, trigger).catch((e: unknown) => ({ ok: false as const, reason: (e as Error).message }));
-    if (!r.ok) failure = matchFailureText(r.reason);
-  } finally {
-    clearMatching(openingId, failure);
-    revalidatePath(`/openings/${openingId}`, "layout");
-  }
+/** The matching run, shared with the mobile API (lib/openings/matching, 22 Oct). */
+function rematchWhenRequirementsSettle(openingId: string, actorId: string, trigger: "jd_approved" | "manual" = "jd_approved") {
+  return rematchShared(openingId, actorId, trigger, revalidatePath);
 }
 
 // Split the same way the backend does, so a comma inside brackets
@@ -2126,27 +2111,9 @@ export async function moveBackToTables(formData: FormData) {
 export async function requestOpeningAccess(formData: FormData) {
   await primeStore({});
   const user = await getCurrentUser();
-  if (!isTa(user)) await fail("Only a TA can request access to an opening.");
-  const openingId = String(formData.get("openingId") ?? "");
-  const reason = String(formData.get("reason") ?? "");
-  if (!openingId) await fail("Select an opening first.");
-  if (!isConvex()) await fail("Access requests need the connected system.");
-  let result: { ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean } | null = null;
-  try {
-    result = await convexMutation<{ ok: boolean; alreadyAssigned?: boolean; alreadyPending?: boolean }>(
-      "ta/openingAccess:request",
-      { actorId: user.id, openingId, reason: reason || undefined },
-    );
-  } catch (error) {
-    await fail(backendMessage(error, "The access request could not be sent."));
-  }
-  if (!result) await fail("The access request could not be sent.");
-  const outcome = result!;
-  revalidatePath("/openings");
-  revalidatePath("/api/notifications");
-  if (outcome.alreadyAssigned) await note("You already have access to that opening.");
-  if (outcome.alreadyPending) await note("Your access request is already waiting for approval.");
-  await done("Access request sent to the TA Lead.");
+  // Shared with the mobile API (lib/openings/admin, 22 Oct).
+  const r = await requestAccess(user, String(formData.get("openingId") ?? ""), String(formData.get("reason") ?? ""), OPENING_DEPS);
+  await (r.ok ? (r.tone === "note" ? note : done) : fail)(r.message);
 }
 
 /** Approving and assigning happen in one backend transaction, so a requester
@@ -2154,27 +2121,15 @@ export async function requestOpeningAccess(formData: FormData) {
 export async function decideOpeningAccess(formData: FormData) {
   await primeStore({});
   const user = await getCurrentUser();
-  const requestId = String(formData.get("requestId") ?? "");
-  const decision = String(formData.get("decision") ?? "");
-  if (decision !== "approve" && decision !== "reject") await fail("Choose Approve or Reject.");
-  const approve = decision === "approve";
-  const reason = String(formData.get("reason") ?? "");
-  if (!requestId) await fail("That access request no longer exists.");
-  if (!isConvex()) await fail("Access requests need the connected system.");
-  try {
-    await convexMutation("ta/openingAccess:decide", {
-      actorId: user.id,
-      requestId,
-      approve,
-      reason: reason || undefined,
-    });
-  } catch (error) {
-    await fail(backendMessage(error, "The access request could not be decided."));
-  }
-  markTablesStale();
-  revalidatePath("/openings", "layout");
-  revalidatePath("/api/notifications");
-  await done(approve ? "Access approved. The TA was added as a supporting recruiter." : "Access request rejected.");
+  // Shared with the mobile API (lib/openings/admin, 22 Oct).
+  const r = await decideAccess(
+    user,
+    String(formData.get("requestId") ?? ""),
+    String(formData.get("decision") ?? ""),
+    String(formData.get("reason") ?? ""),
+    OPENING_DEPS,
+  );
+  await (r.ok ? done : fail)(r.message);
 }
 
 export async function setOpeningStatus(formData: FormData) {
@@ -2207,53 +2162,9 @@ export async function setOpeningTeam(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const ids = formData.getAll("memberId").map(String);
   const roles = formData.getAll("memberRole").map(String);
-
-  const rows = ids
-    .map((userId, i) => ({
-      userId,
-      role: roles[i] as import("@/data/types").AssignmentRole,
-    }))
-    .filter((r) => r.userId && r.role);
-
-  // One person, one seat: the last row wins if somebody is listed twice.
-  const unique = [...new Map(rows.map((r) => [r.userId, r])).values()];
-  const recruiters = unique.filter(
-    (r) => r.role === "primary_recruiter" || r.role === "supporting_recruiter",
-  );
-  if (recruiters.length === 0) {
-    redirect(
-      `/openings/${openingId}?msg=${encodeURIComponent(
-        "A team needs at least one recruiter on it. Nothing was changed.",
-      )}`,
-    );
-  }
-
-  // Whoever is newly on the recruiting seats — not the reviewers alongside
-  // them — gets a bell notification. Captured before the write, since after
-  // it the old team is gone.
-  const previousTeam = new Set(repo.assignments(openingId).map((a) => a.userId));
-  const newlyAssigned = recruiters.filter((r) => r.userId !== user.id && !previousTeam.has(r.userId));
-
-  repo.setAssignments(openingId, unique, user.id);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  revalidatePath("/alerts");
-  revalidatePath("/api/notifications");
-
-  if (newlyAssigned.length) {
-    const opening = repo.opening(openingId);
-    const title = opening?.title ?? "an opening";
-    await Promise.all(
-      newlyAssigned.map((r) =>
-        convexMutation("ta/notifications:create", {
-          userId: r.userId,
-          type: "opening_assigned",
-          title: "You were assigned to an opening",
-          body: `${user.name} added you to ${title} as ${ASSIGNMENT_LABEL[r.role]}.`,
-          jobId: openingId,
-        }).catch((e) => console.error("[notifications] opening_assigned failed:", e)),
-      ),
-    );
-  }
+  // Shared with the mobile API (lib/openings/admin, 22 Oct).
+  const r = await writeOpeningTeam(user, openingId, ids.map((userId, i) => ({ userId, role: roles[i] })), OPENING_DEPS);
+  if (!r.ok) redirect(`/openings/${openingId}?msg=${encodeURIComponent(r.message)}`);
 }
 
 export async function addClient(formData: FormData) {
@@ -2468,40 +2379,26 @@ export async function updateOpening(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const list = (v: FormDataEntryValue | null) =>
-    String(v ?? "").split(",").map((x) => x.trim()).filter(Boolean);
-  // Commas and currency go; a minus sign does not. Stripping it turned "-5000"
-  // into 5000 (audit finding 40). A negative or zero amount is no amount.
-  const num = (v: FormDataEntryValue | null) => {
-    const n = Number(String(v ?? "").replace(/[^\d.\-]/g, ""));
-    return Number.isFinite(n) && n > 0 ? n : null;
-  };
-  const title = String(formData.get("title") ?? "").trim();
-  if (!title) await fail("An opening needs a title.");
-  const salaryMin = num(formData.get("salaryMin"));
-  const salaryMax = num(formData.get("salaryMax"));
-  if (salaryMin !== null && salaryMax !== null && salaryMin > salaryMax) {
-    await fail("The salary 'from' is higher than the 'to'.");
-  }
-  const tier = String(formData.get("priorityTier") ?? "P3");
-  if (!["P1", "P2", "P3", "P4", "P5"].includes(tier)) await fail("Pick a priority from the list.");
-  const currency = String(formData.get("salaryCurrency") ?? "LKR");
-  if (!/^[A-Z]{3}$/.test(currency)) await fail("Pick a currency from the list.");
-
+  const field = (name: string, fallback = "") => String(formData.get(name) ?? fallback);
   const workLocations = readWorkLocations(formData, repo.opening(openingId)?.workLocations);
-  repo.updateOpening(openingId, {
-    ...(workLocations ? { workLocations } : {}),
-    title,
-    salaryMin,
-    salaryMax,
-    salaryCurrency: currency,
-    packageNotes: String(formData.get("packageNotes") ?? "").trim(),
-    locations: workLocations ? workLocations.filter(l => !l.archived).map(l => l.name) : list(formData.get("locations")),
-    targetNationalities: list(formData.get("targetNationalities")),
-    headcount: workLocations ? workLocations.filter(l => !l.archived).reduce((n, l) => n + l.vacancies, 0) : Math.max(1, Number(formData.get("headcount") ?? 1) || 1),
-    priorityTier: String(formData.get("priorityTier") ?? "P3") as PriorityTier,
-  });
-  revalidatePath(`/openings/${openingId}`, "layout");
+  // Checked and saved by the code the mobile API uses too (lib/openings/admin, 22 Oct).
+  const r = writeOpeningDetails(
+    openingId,
+    {
+      title: field("title"),
+      salaryMin: field("salaryMin"),
+      salaryMax: field("salaryMax"),
+      salaryCurrency: field("salaryCurrency", "LKR"),
+      packageNotes: field("packageNotes"),
+      locations: field("locations"),
+      targetNationalities: field("targetNationalities"),
+      headcount: field("headcount", "1"),
+      priorityTier: field("priorityTier", "P3"),
+    },
+    workLocations,
+    OPENING_DEPS,
+  );
+  if (!r.ok) await fail(r.message);
   await back("Opening saved.");
 }
 
@@ -4651,11 +4548,8 @@ export async function findMatchesNow(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  if (repo.opening(openingId)?.jdStatus !== "approved") await fail(matchFailureText("jd_not_approved"));
-  markMatching(openingId);
-  after(() => rematchWhenRequirementsSettle(openingId, user.id, "manual"));
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Matching started — new matches appear here when it finishes.");
+  const r = startMatching(user, openingId, { revalidatePath, schedule: (work) => after(work) });
+  await (r.ok ? done : fail)(r.message);
 }
 
 /** The desk's standard questions — which are asked, and how they read. */

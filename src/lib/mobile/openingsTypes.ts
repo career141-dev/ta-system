@@ -200,3 +200,62 @@ export interface BinResult {
   binned: number;
   problems: string[];
 }
+
+// ─── Step 3, part 2: the Overview's admin actions ────────────────────────────
+//
+// `GET  /api/mobile/v1/openings/{id}/admin`             → OpeningAdminPayload
+// `POST /api/mobile/v1/openings/{id}/details`           ← OpeningDetailsBody  → ActionResult
+// `POST /api/mobile/v1/openings/{id}/team`              ← OpeningTeamBody     → ActionResult
+// `POST /api/mobile/v1/openings/{id}/matching`          ← {}                  → ActionResult
+// `POST /api/mobile/v1/openings/{id}/access-request`    ← AccessRequestBody   → ActionResult
+// `POST /api/mobile/v1/openings/access-requests/{requestId}` ← AccessDecisionBody → ActionResult
+
+export type AssignmentRole = "primary_recruiter" | "supporting_recruiter" | "director" | "client_contact";
+
+export interface OpeningAdminPayload {
+  apiVersion: 1;
+  /** opening.manage: may save details and the team. */
+  canManage: boolean;
+  details: {
+    title: string;
+    salaryMin: number | null;
+    salaryMax: number | null;
+    salaryCurrency: string;
+    packageNotes: string;
+    locations: string[];
+    targetNationalities: string[];
+    headcount: number;
+    priorityTier: string;
+    /** Set when the opening has work locations: locations and headcount come from them and are not edited here. */
+    workLocations: { id: string; name: string; vacancies: number }[] | null;
+  };
+  team: { userId: string; role: AssignmentRole }[];
+  people: { id: string; name: string; role: string }[];
+  roles: { value: AssignmentRole; label: string }[];
+}
+
+/** Every field as text, the way the web form sends it; the server checks them. */
+export interface OpeningDetailsBody {
+  title: string;
+  salaryMin: string;
+  salaryMax: string;
+  salaryCurrency: string;
+  packageNotes: string;
+  locations: string;
+  targetNationalities: string;
+  headcount: string;
+  priorityTier: string;
+}
+
+export interface OpeningTeamBody {
+  members: { userId: string; role: AssignmentRole }[];
+}
+
+export interface AccessRequestBody {
+  reason: string;
+}
+
+export interface AccessDecisionBody {
+  decision: "approve" | "reject";
+  reason: string;
+}
