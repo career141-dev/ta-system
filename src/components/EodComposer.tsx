@@ -19,7 +19,7 @@ import { resendEod, sendEod, sendDailyEmail, saveMiddayDraft } from "@/app/actio
 import type { SubmissionType } from "@/lib/dailyEmail";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
-import { decodeEodBrowserDraft, encodeEodBrowserDraft, eodDraftKeys } from "@/lib/eodDraft";
+import { applyCandidateDraft, candidateDraftBases, candidateDraftsFromFields, decodeEodBrowserDraft, editCandidateDraft, encodeEodBrowserDraft, eodDraftKeys, type CandidateDraft } from "@/lib/eodDraft";
 import type { WorkingStage } from "@/data/types";
 
 function noteLineToHtml(line: string): string {
@@ -475,9 +475,7 @@ export function EodComposer({
   const [researchExcused, setResearchExcused] = useState(false);
   const researchRequired = needsResearchLink && (midday || !(researchExcused && !researchLink.trim()));
   const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
-  const [shortlistDraft, setShortlistDraft] = useState<Record<string, Partial<ShortlistRow>>>(() => Object.fromEntries(initialRows.map(row => [row.applicationId,
-    Object.fromEntries(Object.keys(row).filter(key => savedFields[`shortlist_${row.applicationId}_${key}`] !== undefined).map(key => [key,
-      key === "notes" ? savedFields[`shortlist_${row.applicationId}_${key}`].split("\n") : savedFields[`shortlist_${row.applicationId}_${key}`]]))])));
+  const [shortlistDraft, setShortlistDraft] = useState<Record<string, CandidateDraft>>(() => candidateDraftsFromFields(initialRows, savedFields));
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
   // To or Cc, Add (30 Sep). The comma box let a typo sit unnoticed until Send.
   const [extraTo, setExtraTo] = useState<string[]>(savedFields.extraTo !== undefined ? parseAddressList(savedFields.extraTo).ok : resend?.extraTo ?? []);
@@ -505,6 +503,7 @@ export function EodComposer({
       /^(subject|introText|outroText|chatgptLink|extraTo|extraCc|removed|skipAttachments|shortlist_.+|effort_.+|target_.+)$/.test(key))) as Record<string, string>;
     fields.baseSubject = initialSubject;
     for (const [key, value] of Object.entries(effort)) if (typeof value !== "object") fields[`base_effort_${key}`] = value == null ? "" : String(value);
+    Object.assign(fields, candidateDraftBases(initialRows, fields));
     const serialized = JSON.stringify(fields);
     saveQueue.current = saveQueue.current.then(async previous => {
       if (!previous) return false;
@@ -524,7 +523,7 @@ export function EodComposer({
       }
     });
     return saveQueue.current;
-  }, [dailyDraft?.id, openingId, initialSubject, effort]);
+  }, [dailyDraft?.id, openingId, initialSubject, effort, initialRows]);
   useEffect(() => {
     if (!dailyDraft) return;
     let timer: ReturnType<typeof setTimeout>;
@@ -623,23 +622,11 @@ export function EodComposer({
   }, [restored, draftKey, subject, initialSubject, introText, outroText, researchLink, shortlistDraft, extraTo, extraCc, removed, skipAttachments]);
 
   const updateCandidateField = (appId: string, field: keyof ShortlistRow, value: any) => {
-    setShortlistDraft((prev) => ({
-      ...prev,
-      [appId]: {
-        ...prev[appId],
-        [field]: value,
-      },
-    }));
+    const row = initialRows.find((b) => b.applicationId === appId);
+    setShortlistDraft((prev) => ({ ...prev, [appId]: editCandidateDraft(prev[appId], row, field, value) }));
   };
 
-  const getCandidateRow = (r: ShortlistRow): ShortlistRow => {
-    const override = shortlistDraft[r.applicationId] || {};
-    return {
-      ...r,
-      ...override,
-      notes: override.notes !== undefined ? override.notes : r.notes,
-    };
-  };
+  const getCandidateRow = (r: ShortlistRow): ShortlistRow => applyCandidateDraft(r, shortlistDraft[r.applicationId]);
 
   const effectiveRows = initialRows.map(getCandidateRow);
   const [editingBoxAppId, setEditingBoxAppId] = useState<string | null>(null);
