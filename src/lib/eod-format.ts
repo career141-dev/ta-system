@@ -19,6 +19,8 @@ export interface ShortlistRow {
   currentRemuneration: string;
   expectedRemuneration: string;
   applicationId: Id;
+  /** Identifies this visit to the review stage, so earlier email edits expire. */
+  reviewStageChangedAt?: number;
   candidateId?: Id;
   pdfSrc?: string | null;
 }
