@@ -7,6 +7,15 @@ import { can, isDeskWide, isReadOnly, isTa, seesEveryTaRow, type Capability } fr
 import { otherHolders, rowCountsFor } from "@/lib/sharedLinks";
 import { readWorkCountry } from "@/lib/countries";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
+import {
+  binOpeningNamed as binOpeningShared,
+  binOpenings,
+  decideOn,
+  writeOpeningStatus,
+  writeWorkingStage,
+  type OpeningStatusValue,
+  type OpeningWriteDeps,
+} from "@/lib/openings/writes";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
@@ -18,7 +27,7 @@ import { linkedinPostUrl } from "@/lib/workdayRequirements";
 import { buildJd, extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
 import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
-import { invalidateCandidate, markTablesStale, withRealIds } from "@/data/primeState";
+import { invalidateCandidate, markTablesStale, resetStore, withRealIds } from "@/data/primeState";
 import { assignableTas } from "@/lib/assignable";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
@@ -183,15 +192,9 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
     if (!onIt) await fail("That candidate is not on this opening.");
   }
 
-  if (openingId && !repo.opening(openingId)) await fail("That opening no longer exists.");
-
-  const assignment = openingId ? repo.assignmentFor(openingId, user.id) ?? null : null;
-  const decision = can(user, capability, { openingId, assignment, ownerTaId });
+  // The decision itself is shared with the mobile API (lib/openings/writes, 22 Oct).
+  const decision = await decideOn(user, capability, { openingId, ownerTaId }, OPENING_DEPS);
   if (!decision.ok) await fail(decision.message);
-  if (openingId && isTa(user) && isConvex() && ["opening.act", "opening.sourcing"].includes(capability)) {
-    try { await convexQuery("ta/workdays:checkScope", { actorId: user.id, jobId: openingId }); }
-    catch (error) { await fail(backendMessage(error, "Check your workday before continuing.")); }
-  }
   return user;
 }
 
@@ -365,6 +368,16 @@ function reasonInWords(reason: string | undefined): string {
 function backendMessage(e: unknown, fallback: string): string {
   return safeErrorMessage(e, fallback);
 }
+
+/** What the shared opening writes (lib/openings/writes) need from this app. */
+const OPENING_DEPS: OpeningWriteDeps = {
+  revalidatePath,
+  convexQuery,
+  convexMutation,
+  markTablesStale,
+  // The same function @/data/prime re-exports; taken from primeState so it runs synchronously.
+  resetStore,
+};
 
 /** The primed copy is behind a backend write; drop it so the next read is fresh. */
 async function afterBackendWrite(openingId: string) {
@@ -2168,38 +2181,16 @@ export async function setOpeningStatus(formData: FormData) {
   await primeStore({ allApplications: true });
   await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const status = String(formData.get("status")) as "open" | "on_hold" | "closed" | "filled";
-  repo.setOpeningStatus(openingId, status);
-  revalidatePath("/openings", "layout");
-  revalidatePath(`/openings/${openingId}`, "layout");
+  const status = String(formData.get("status")) as OpeningStatusValue;
+  writeOpeningStatus(openingId, status, OPENING_DEPS);
 }
 
 export async function setWorkingStage(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
   const user = await authorize(formData, "opening.act", { opening: "openingId" });
-  const stage = String(formData.get("stage")) as WorkingStage;
-  if (!["100%", "Follow-up", "Add-on"].includes(stage)) return { ok: false as const, message: "Choose a valid working stage." };
-
-  if (isConvex()) {
-    try {
-      await convexMutation("ta/openings:setWorkingStage", {
-        actorId: user.id,
-        openingId,
-        stage,
-      });
-      markTablesStale();
-    } catch (e) {
-      return { ok: false as const, message: backendMessage(e, "The working stage could not be saved.") };
-    }
-  } else {
-    repo.setWorkingStage(openingId, user.id, stage);
-  }
-  // The openings list shows the stage on every row too (24 Sep).
-  revalidatePath("/openings");
-  revalidatePath(`/openings/${openingId}`, "layout");
-  revalidatePath(`/openings/${openingId}/eod`);
-  return { ok: true as const };
+  const r = await writeWorkingStage(user, openingId, String(formData.get("stage")), OPENING_DEPS);
+  return r.ok ? { ok: true as const } : { ok: false as const, message: r.message };
 }
 
 /** "We should be able to remove and add TAs" — answer 2, 11 Sep. */
@@ -2464,19 +2455,9 @@ export async function deleteOpening(formData: FormData) {
   );
 }
 
-/** Move one opening to the Bin, in whichever store is behind the app. */
-async function binOpeningNamed(
-  user: User,
-  openingId: string,
-): Promise<{ ok: true; title: string; purgeAt: number } | { ok: false; message: string }> {
-  if (isConvex()) {
-    try {
-      return await convexMutation<{ ok: true; title: string; purgeAt: number }>("ta/bin:binOpening", { actorId: user.id, openingId });
-    } catch (e) {
-      return { ok: false, message: backendMessage(e, "The opening could not be deleted.") };
-    }
-  }
-  return repo.binOpening(openingId, user.id);
+/** Move one opening to the Bin — shared with the mobile API (lib/openings/writes). */
+function binOpeningNamed(user: User, openingId: string) {
+  return binOpeningShared(user, openingId, OPENING_DEPS);
 }
 
 /**
@@ -2736,26 +2717,9 @@ export async function deleteOpenings(formData: FormData) {
   // lead or above, or a recruiter on that opening.
   const ids = formData.getAll("openingId").map(String);
   if (ids.length === 0) await fail("Tick at least one opening.");
-  let deleted = 0;
-  const problems: string[] = [];
-  for (const openingId of ids) {
-    const title = repo.opening(openingId)?.title ?? "An opening";
-    const allowed = can(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
-    if (!allowed.ok) {
-      problems.push(`${title}: ${allowed.message}`);
-      continue;
-    }
-    const r = await binOpeningNamed(user, openingId);
-    if (r.ok) deleted++;
-    else problems.push(`${title}: ${r.message}`);
-  }
-  if (isConvex()) {
-    const { resetStore } = await import("@/data/prime");
-    resetStore();
-  }
-  revalidatePath("/", "layout");
-  const said = `${deleted} ${deleted === 1 ? "opening" : "openings"} moved to the Bin. They can be restored for ${BIN_DAYS} days.`;
-  await (deleted ? (problems.length ? note : done) : fail)(problems.length ? `${said} Not deleted — ${problems.join("; ")}` : said);
+  // The same loop the mobile API runs (lib/openings/writes).
+  const { deleted, problems, message } = await binOpenings(user, ids, OPENING_DEPS);
+  await (deleted ? (problems.length ? note : done) : fail)(message);
 }
 
 export async function deleteClients(formData: FormData) {
