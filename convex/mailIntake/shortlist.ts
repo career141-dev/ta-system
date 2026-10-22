@@ -12,7 +12,7 @@ import { internalMutation, internalQuery } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { executeStageTransition, type PipelineStage } from "../pipeline/pipelineStateMachine";
 import { addressOf } from "../lib/postRouting";
-import { shouldMove, TARGET_STAGE, type OpeningLite } from "../lib/shortlistMail";
+import { DIRECTOR_MAILBOXES, shouldMove, TARGET_STAGE, type OpeningLite } from "../lib/shortlistMail";
 import { mapUser } from "../../src/data/convex/map";
 import { recordShortlistDecision } from "../lib/shortlistDecision";
 
@@ -27,12 +27,12 @@ export const context = internalQuery({
       .filter((j) => j.status === "active")
       .map((j) => ({ id: j._id as string, title: j.title, clientName: j.clientName, clientContactEmail: j.clientContactEmail ?? null }));
     const users = await ctx.db.query("users").collect();
-    const directorAddresses = users
+    const directorAddresses = [...DIRECTOR_MAILBOXES, ...users
       // The desk role, as decisions.context reads it: an explicit taRole wins
       // over the old backend role (22 Oct — the two places disagreed).
       .filter((u) => mapUser(u).role === "director" && u.isActive)
       .flatMap((u) => [addressOf(u.email), addressOf(u.routingEmail ?? null)])
-      .filter((a): a is string => Boolean(a));
+      .filter((a): a is string => Boolean(a))];
     return { openings, directorAddresses };
   },
 });
