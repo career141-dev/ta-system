@@ -8,6 +8,7 @@ import { ActionNote, SubmitButton, submitted, useInline } from "./Submit";
 import { ClientPicker, PeoplePicker, inputClass } from "./form";
 import { NewClientDialog, Spinner, type NewClient } from "./NewClientDialog";
 import type { Client, User } from "@/data/types";
+import { COUNTRIES, NATIONALITIES, localNationality } from "@/lib/intakeOptions";
 
 /**
  * Screen one. Short for everyone, and shorter still for a TA.
@@ -19,24 +20,6 @@ import type { Client, User } from "@/data/types";
  * Inside the create-client pop-up (`onCreated` given) the client is already
  * chosen, the save happens in place, and the pop-up decides what comes next.
  */
-const COUNTRIES = [
-  "Sri Lanka", "Bangladesh", "India", "Maldives", "Saudi Arabia",
-  "United Arab Emirates", "Qatar", "Oman", "Kuwait", "Bahrain",
-  "Singapore", "Malaysia", "Vietnam",
-];
-
-const NATIONALITIES = [
-  "Sri Lankan", "Bangladeshi", "Indian", "Pakistani", "Filipino",
-  "Nepali", "Maldivian", "Saudi", "Emirati",
-];
-
-const LOCAL: Record<string, string> = {
-  "Sri Lanka": "Sri Lankan", Bangladesh: "Bangladeshi", India: "Indian",
-  Maldives: "Maldivian", "Saudi Arabia": "Saudi", "United Arab Emirates": "Emirati",
-  Qatar: "Qatari", Oman: "Omani", Kuwait: "Kuwaiti", Bahrain: "Bahraini",
-  Singapore: "Singaporean", Malaysia: "Malaysian", Vietnam: "Vietnamese",
-};
-const localNationality = (c: string) => LOCAL[c] ?? c;
 
 const chev = (
   <svg width={14} height={14} viewBox="0 0 16 16" aria-hidden="true" className="pointer-events-none absolute right-3.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint">
