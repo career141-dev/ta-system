@@ -54,20 +54,28 @@ export function draftFieldText(value: unknown): string {
  * after a profile update that would drop every key the TA typed into the box.
  */
 export function editCandidateDraft(draft: CandidateDraft | undefined, row: ShortlistRow | undefined, field: keyof ShortlistRow, value: unknown): CandidateDraft {
-  if (row?.reviewStageChangedAt !== undefined && draft?._reviewStageChangedAt !== row.reviewStageChangedAt) draft = undefined;
+  if (fromEarlierVisit(row, draft)) draft = undefined;
   return { ...draft, [field]: value, _reviewStageChangedAt: row?.reviewStageChangedAt, _base: { ...draft?._base, ...(row ? { [field]: draftFieldText(row[field]) } : {}) } };
+}
+
+/**
+ * Edits made on an earlier visit to the review stage. A draft saved before
+ * visits were recorded (22 Oct) is taken as this visit's: resetting them
+ * meant releasing #243 during the day threw away every TA's unsent EOD box
+ * edits, and the original notes went to the Director. It is stamped with
+ * this visit on its next save.
+ */
+function fromEarlierVisit(row: ShortlistRow | undefined, draft: CandidateDraft | undefined): boolean {
+  return row?.reviewStageChangedAt !== undefined && draft?._reviewStageChangedAt !== undefined && draft._reviewStageChangedAt !== row.reviewStageChangedAt;
 }
 
 /**
  * The row the email carries. Edits belong to one visit to the review stage.
  * Within that visit, a field saved without a base keeps the TA's edit rather
- * than guessing which note lines the TA deliberately deleted. Old drafts
- * without a review timestamp reset once when used with a versioned row.
+ * than guessing which note lines the TA deliberately deleted.
  */
 export function applyCandidateDraft(row: ShortlistRow, draft: CandidateDraft | undefined): ShortlistRow {
-  if (!draft) return row;
-  // Unversioned drafts cannot establish which review visit they belong to.
-  if (row.reviewStageChangedAt !== undefined && draft._reviewStageChangedAt !== row.reviewStageChangedAt) return row;
+  if (!draft || fromEarlierVisit(row, draft)) return row;
   const out: Record<string, unknown> = { ...row };
   for (const [key, value] of Object.entries(draft)) {
     if (key === "_base" || key === "_reviewStageChangedAt" || key === "reviewStageChangedAt" || value === undefined) continue;
