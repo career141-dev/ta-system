@@ -5,7 +5,7 @@ import { ProjectSidebar } from "@/components/ProjectSidebar";
 import { ContextBar } from "@/components/ContextBar";
 import { getCurrentUser } from "@/lib/session";
 import { seatFor, visiblePosts, visibleToSeat } from "@/lib/visibility";
-import { allows, isDeskWide, isTa, seesEveryTaRow } from "@/lib/auth";
+import { allows, isTa } from "@/lib/auth";
 import { primeStore } from "@/data/prime";
 import { NO_SHEET } from "@/lib/linkViews";
 import { ownSheets } from "@/lib/openingSheets";

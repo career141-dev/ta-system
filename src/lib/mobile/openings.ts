@@ -4,7 +4,7 @@ import type { Application, Opening, Stage, User } from "@/data/types";
 import { openingFacts } from "@/lib/openingFacts";
 import { toCountry } from "@/lib/openingCountry";
 import { assignableTas } from "@/lib/assignable";
-import { allows, isDeskWide, isTa, seesEveryTaRow } from "@/lib/auth";
+import { allows, isDeskWide, isTa } from "@/lib/auth";
 import { colomboDaysBetween } from "@/lib/format";
 import { linkedinStatus } from "@/lib/linkedinStatus";
 import { ownSheets } from "@/lib/openingSheets";
