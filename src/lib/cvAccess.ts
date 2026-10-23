@@ -2,7 +2,7 @@ import "server-only";
 import type { User } from "@/data/types";
 import { repo } from "@/data/store";
 import { allows, can } from "@/lib/auth";
-import { seatFor } from "@/lib/visibility";
+import { seatFor, visibleToSeat } from "@/lib/visibility";
 import * as backend from "@/data/convex/backend";
 import { internalUploadUrl } from "@/lib/convexServer";
 
@@ -22,7 +22,24 @@ export function mayOpenCv(user: User, candidateId: string, appId: string | null)
   const assignment = repo.assignmentFor(app.openingId, user.id) ?? null;
   const onStrategy = repo.strategyAssignments(app.openingId).some((r) => r.doneBy.includes(user.id));
   const seat = seatFor(user, assignment?.role ?? null, onStrategy);
-  return allows(user, "opening.read", { openingId: app.openingId, assignment, onStrategy }) && (seat.stages === null || seat.stages.includes(app.stage));
+  return (
+    allows(user, "opening.read", { openingId: app.openingId, assignment, onStrategy }) &&
+    (seat.stages === null || seat.stages.includes(app.stage)) &&
+    visibleToSeat([app], seat).length === 1
+  );
+}
+
+/** Replacing a CV is also candidate-scoped: another TA's address is not authority. */
+export function mayChangeCv(user: User, applicationId: string): boolean {
+  const app = repo.application(applicationId);
+  if (!app) return false;
+  const assignment = repo.assignmentFor(app.openingId, user.id) ?? null;
+  const onStrategy = repo.strategyAssignments(app.openingId).some((row) => row.doneBy.includes(user.id));
+  const seat = seatFor(user, assignment?.role ?? null, onStrategy);
+  return (
+    allows(user, "opening.act", { openingId: app.openingId, assignment, onStrategy, ownerTaId: app.ownerTaId }) &&
+    visibleToSeat([app], seat).length === 1
+  );
 }
 
 export type CvBytes =

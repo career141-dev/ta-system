@@ -17,6 +17,11 @@ import {
   type OpeningWriteDeps,
 } from "@/lib/openings/writes";
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
+import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
+import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
+import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
+import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
+import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, RefereeCall, RefereeCallEmailRow, User, WorkingStage } from "@/data/types";
@@ -36,7 +41,6 @@ import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult"
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
 import type { DailyEmail, DailyEmailSnapshot, SubmissionType } from "@/lib/dailyEmail";
 import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from "@/lib/eod-format";
-import { noticePeriodToDays } from "@/lib/answered";
 import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
 import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 import { isEodCandidateEligible } from "@/lib/eodEligibility";
@@ -73,7 +77,6 @@ import { draftsFor } from "@/lib/followup";
 import { colomboDayFromValue, colomboDayStart, colomboLocalToInstant } from "@/lib/calendar";
 import { isTicked } from "@/lib/strategyPlanner";
 import { dateAt } from "@/lib/format";
-import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
 import { markMatching } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
@@ -197,82 +200,17 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
 
 export async function moveStage(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const stage = String(formData.get("stage")) as Stage;
   const openingId = String(formData.get("openingId"));
   const picked = String(formData.get("reason") ?? "");
   const other = String(formData.get("reasonOther") ?? "").trim();
   const reason = picked === "Other" ? other || "Other" : other ? `${picked} — ${other}` : picked;
-
-  // The collision lock is checked in `authorize`, alongside everything else.
-
-  // Director and client shortlists say somebody approved this person. Moving
-  // there by hand needs that authority — otherwise the reviewer's reply is the
-  // route, recorded on the end-of-day page (audit finding 12).
-  const decides =
-    stage === "director_shortlist" ? "decide.director" : stage === "client_shortlist" ? "decide.client" : null;
-  if (decides) {
-    const verdict = can(user, decides, {
-      openingId,
-      assignment: repo.assignmentFor(openingId, user.id) ?? null,
-    });
-    if (!verdict.ok) await fail(verdict.message);
-  }
-
-  // A rejection without a reason is a row nobody can learn from. The dedicated
-  // Reject form asked for one; the generic menu let you skip it.
-  if ((stage === "rejected" || stage === "dropped_out") && !reason.trim()) {
-    await fail(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
-  }
-
-  // Into TA Follow-up from an unclaimed stage (AI Follow-up, New CVs, Database
-  // matches) is a shortlist: the TA takes the person on, with their set number,
-  // exactly as the Shortlist button does. The plain move left them with no
-  // owner (review of PR #11, 22 September).
-  const from = repo.application(appId)?.stage;
-  if (stage === "ta_follow_up" && (from === "ai_follow_up" || from === "new_cv" || from === "matched")) {
-    if (isConvex()) {
-      let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
-      try {
-        r = await backend.shortlist({ id: user.id }, appId);
-      } catch (e) {
-        await fail(backendMessage(e, "They could not be shortlisted."));
-      }
-      await afterBackendWrite(openingId);
-      if (r && !r.ok) {
-        await fail(`Already shortlisted by ${userName(r.ownerTaId)}.`);
-      }
-      await done("Shortlisted — in TA Follow-up.");
-    }
-    repo.shortlist(appId, user.id);
-    revalidatePath(`/openings/${openingId}`, "layout");
-    await done("Shortlisted — in TA Follow-up.");
-  }
-
-  if (isConvex()) {
-    // The backend owns the pipeline: its state machine checks the move, stops
-    // any running follow-up on the way out, and (by design) sends nothing on
-    // the way in — follow-up is sent from the candidate's Chat tab.
-    // Into TA Follow-up with nobody's name on them, the backend claims them
-    // for whoever moved them, in the same transaction (1 Oct, one call since
-    // 2 Oct): the loser of a race is told who has them, not "Moved".
-    let r: Awaited<ReturnType<typeof backend.moveStage>> | null = null;
-    try {
-      r = await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
-    } catch (e) {
-      await fail(backendMessage(e, "That move could not be made."));
-    }
-    await afterBackendWrite(openingId);
-    if (r?.ownerTaId) await fail(`Already shortlisted by ${userName(r.ownerTaId)}.`);
-    await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
-  }
-  const unowned = stage === "ta_follow_up" && !repo.application(appId)?.ownerTaId;
-  const res = repo.moveStage(appId, stage, user.id, reason || undefined);
-  if (!res.ok) await fail(res.message);
-  if (unowned) repo.shortlist(appId, user.id);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
+  if (!appId) await fail("Something on this form was missing. Reload the page and try again.");
+  const result = await movePipelineCandidate(user, openingId, appId, stage, reason, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /** A user's name for a message, or a fair stand-in when they are not loaded. */
@@ -719,29 +657,26 @@ export async function addReviewNote(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
-  const text = String(formData.get("note") ?? "").trim();
-  if (!text) await fail("Write the note first.");
-  if (text.length > LEAD_NOTE_MAX) await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
-  if (!repo.addReviewNote(appId, user.id, user.role, text)) await fail("That application no longer exists.");
-  markTablesStale();
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Note added.");
+  const user = await getCurrentUser();
+  const result = await writeCandidateReview(user, openingId, appId, {
+    action: "add_note",
+    note: String(formData.get("note") ?? ""),
+  }, { ...OPENING_DEPS, invalidateCandidate, primeStore });
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 export async function removeReviewNote(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
-  const noteId = String(formData.get("noteId") ?? "");
-  const target = repo.application(appId)?.reviewNotes?.find((n) => n.id === noteId);
-  if (!target) await fail("That note is already gone.");
-  if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
-  repo.removeReviewNote(appId, noteId);
-  markTablesStale();
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Note removed.");
+  const user = await getCurrentUser();
+  const result = await writeCandidateReview(user, openingId, appId, {
+    action: "remove_note",
+    noteId: String(formData.get("noteId") ?? ""),
+  }, { ...OPENING_DEPS, invalidateCandidate, primeStore });
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */
@@ -2549,24 +2484,21 @@ export async function deleteFromBinNow(formData: FormData) {
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
   await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
-  await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
+  const candidateId = String(formData.get("candidateId"));
   const field = String(formData.get("field")) as "email" | "phone" | "name";
   if (field !== "email" && field !== "phone" && field !== "name") return;
-  const raw = String(formData.get("value") ?? "").trim().replace(/\s+/g, " ");
-  // The name, typed by the TA when the CV reading found none (30 Sep): a CV
-  // whose heading is a picture reads without one, and "Unnamed candidate" had
-  // no way to be put right.
-  if (field === "name") {
-    if (raw.length < 2 || /^unnamed candidate$/i.test(raw)) return fail("Type their full name.");
-    if (raw.length > 120) return fail("That name is too long — type just their full name.");
-    repo.updateCandidateContact(String(formData.get("candidateId")), { fullName: raw });
-    revalidatePath(`/openings/${openingId}`, "layout");
-    return back("Name saved.");
-  }
-  repo.updateCandidateContact(String(formData.get("candidateId")), { [field]: raw || null });
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await back(field === "email" ? "Email saved." : "Phone saved.");
+  const app = repo.applications(openingId).find((row) => row.candidateId === candidateId);
+  const result = await writeCandidateProfile(
+    user,
+    openingId,
+    app?.id ?? "",
+    { field, value: String(formData.get("value") ?? "") },
+    OPENING_DEPS,
+  );
+  if (!result.ok) return fail(result.message);
+  await back(result.message);
 }
 
 // ─── Interviews ──────────────────────────────────────────────────────────────
@@ -2581,62 +2513,52 @@ export async function updateCandidateContact(formData: FormData) {
  */
 export async function scheduleInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
-
-  const date = String(formData.get("date") ?? "").trim();
-  const time = String(formData.get("time") ?? "").trim();
-  if (!date || !time) await fail("An interview needs a date and a time.");
-
-  // Read as Colombo time, not the server's zone — a server in another region
-  // would otherwise shift every interview and every reminder (audit finding 16).
-  const scheduledAt = colomboLocalToInstant(`${date}T${time}`);
-  if (scheduledAt === null) return fail("That date or time could not be read.");
-
-  const wasInterviewing = repo.application(appId)?.stage === "interview";
-  const booked = repo.scheduleInterview({
-    applicationId: appId,
-    title: String(formData.get("title") ?? "").trim() || null,
-    scheduledAt,
+  const result = await writeCandidateInterview(user, openingId, appId, {
+    action: "schedule",
+    title: String(formData.get("title") ?? ""),
+    date: String(formData.get("date") ?? ""),
+    time: String(formData.get("time") ?? ""),
     timezone: String(formData.get("timezone") ?? "Asia/Colombo"),
     location: String(formData.get("location") ?? "").trim(),
     mode: String(formData.get("mode") ?? "in_person") as "in_person" | "video" | "phone",
     interviewers: String(formData.get("interviewers") ?? "")
       .split(",").map((x) => x.trim()).filter(Boolean),
     durationMins: Number(formData.get("durationMins")) || null,
-    notes: String(formData.get("notes") ?? "").trim() || null,
-    byUserId: user.id,
-  });
-  if (!booked.ok) await fail(booked.message);
-
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Interview booked for ${whenLabel(scheduledAt!)}${wasInterviewing ? "" : " — moved to Interview"}.`);
+    notes: String(formData.get("notes") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 export async function confirmInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  repo.confirmInterview(String(formData.get("interviewId")));
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  revalidatePath("/alerts");
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", { action: "confirm", interviewId }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
 }
 
 /** How it went, which is a different fact from whether they turned up. */
 export async function setInterviewResult(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
   const rating = String(formData.get("clientRating") ?? "").trim();
-  repo.setInterviewResult(String(formData.get("interviewId")), {
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "result",
+    interviewId,
     result: String(formData.get("result") ?? "pending") as
       | "pending"
       | "passed"
       | "failed"
       | "on_hold",
-    clientRating: rating ? Number(rating) : null,
-    clientFeedback: String(formData.get("clientFeedback") ?? "").trim() || null,
-  });
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
+    clientRating: rating ? Number(rating) as 1 | 2 | 3 | 4 | 5 : null,
+    clientFeedback: String(formData.get("clientFeedback") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
 }
 
 /**
@@ -2646,59 +2568,47 @@ export async function setInterviewResult(formData: FormData) {
  */
 export async function setInterviewOutcome(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  // The form speaks in statuses (completed); the record stores outcomes (attended).
-  const picked = String(formData.get("outcome")) as keyof typeof OUTCOME_FOR;
-  const outcome = Object.hasOwn(OUTCOME_FOR, picked) ? OUTCOME_FOR[picked] : null;
-  if (!outcome) return fail("Pick a status.");
-  repo.setInterviewOutcome(
-    String(formData.get("interviewId")),
-    outcome,
-    user.id,
-    String(formData.get("reason") ?? "").trim() || null,
-  );
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  revalidatePath("/alerts");
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const picked = String(formData.get("outcome"));
+  if (!["scheduled", "completed", "cancelled", "no_show"].includes(picked)) return fail("Pick a status.");
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "outcome", interviewId, outcome: picked as "scheduled" | "completed" | "cancelled" | "no_show", reason: String(formData.get("reason") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
 }
 
 /** A new date and time for the same interview; the old one stays on its history. */
 export async function rescheduleInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  const date = String(formData.get("date") ?? "").trim();
-  const time = String(formData.get("time") ?? "").trim();
-  if (!date || !time) await fail("Rescheduling needs the new date and time.");
-  const scheduledAt = colomboLocalToInstant(`${date}T${time}`);
-  if (scheduledAt === null) return fail("That date or time could not be read.");
-  const moved = repo.rescheduleInterview(String(formData.get("interviewId")), {
-    scheduledAt,
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "reschedule", interviewId,
+    date: String(formData.get("date") ?? ""),
+    time: String(formData.get("time") ?? ""),
     location: String(formData.get("location") ?? "").trim(),
     mode: String(formData.get("mode") ?? "in_person") as "in_person" | "video" | "phone",
-    reason: String(formData.get("reason") ?? "").trim() || null,
-    byUserId: user.id,
-  });
-  if (!moved.ok) await fail(moved.message);
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  revalidatePath("/alerts");
-  await done(`Interview moved to ${whenLabel(scheduledAt!)}. Confirm attendance again.`);
+    reason: String(formData.get("reason") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 /** The interview's name, interviewers, length and notes. */
 export async function editInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  repo.editInterview(
-    String(formData.get("interviewId")),
-    {
-      title: String(formData.get("title") ?? "").trim() || null,
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+      action: "edit", interviewId,
+      title: String(formData.get("title") ?? ""),
       interviewers: String(formData.get("interviewers") ?? "").split(",").map((x) => x.trim()).filter(Boolean),
       durationMins: Number(formData.get("durationMins")) || null,
-      notes: String(formData.get("notes") ?? "").trim() || null,
-    },
-    user.id,
-  );
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  await done("Interview details saved.");
+      notes: String(formData.get("notes") ?? ""),
+    }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 /**
@@ -2708,37 +2618,29 @@ export async function editInterview(formData: FormData) {
  */
 export async function saveInterviewFeedback(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "interview.feedback", { interview: "interviewId", opening: "openingId" });
+  const user = await getCurrentUser();
   const interviewId = String(formData.get("interviewId"));
   const iv = repo.interviews().find((i) => i.id === interviewId);
-  if (!iv) return fail("That interview no longer exists.");
   const forUserId = String(formData.get("forUserId") ?? "").trim() || user.id;
-  const existing = iv.feedback.find((f) => f.byUserId === forUserId);
-  if (forUserId !== user.id && !existing) await fail("That feedback no longer exists.");
-  if (!mayChangeFeedback(user, existing)) await fail("Only a lead, director or admin can change someone else's feedback.");
-
-  const score = (k: string) => {
+  const score = (k: string): 1 | 2 | 3 | 4 | 5 | null => {
     const n = Number(formData.get(k));
-    return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
+    return Number.isInteger(n) && n >= 1 && n <= 5 ? n as 1 | 2 | 3 | 4 | 5 : null;
   };
   const rec = String(formData.get("recommendation") ?? "");
-  const comments = String(formData.get("comments") ?? "").trim() || null;
   const ratings = {
     technical: score("technical"), communication: score("communication"), behaviour: score("behaviour"),
     performance: score("performance"), overall: score("overall"),
   };
-  if (!comments && Object.values(ratings).every((r) => r === null)) await fail("Give at least one score or a comment.");
-
-  repo.saveInterviewFeedback(interviewId, {
-    byUserId: forUserId,
-    interviewer: String(formData.get("interviewer") ?? "").trim() || existing?.interviewer || user.name,
+  const result = await writeCandidateInterview(user, String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "feedback", interviewId, forUserId,
+    interviewer: String(formData.get("interviewer") ?? ""),
     ratings,
     recommendation: (["hire", "next_round", "hold", "reject"].includes(rec) ? rec : null) as
       | "hire" | "next_round" | "hold" | "reject" | null,
-    comments,
-  });
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  await done(existing ? "Feedback updated." : "Feedback saved.");
+    comments: String(formData.get("comments") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 // ─── Director and client review rounds ───────────────────────────────────────
@@ -4032,91 +3934,24 @@ export async function saveFollowUpAnswers(formData: FormData) {
  */
 export async function saveReviewDetails(formData: FormData) {
   const applicationId = String(formData.get("applicationId"));
+  const openingId = String(formData.get("openingId"));
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
-  const app = repo.application(applicationId);
-  if (!app) return fail("That application no longer exists.");
-  invalidateCandidate(app.candidateId);
-  await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId });
-  // A bare amount is saved with the currency picked beside it: "25,000" alone
-  const withCurrency = (field: string) => {
-    const amount = String(formData.get(field) ?? "").trim();
-    const currency = String(formData.get(`${field}Currency`) ?? "").trim();
-    if (!amount) return "";
-    // Only a figure takes the currency: "Not disclosed" and "Negotiable" are
-    // words, and "LKR Negotiable" is what the Director saw when they did (28 Sep).
-    if (currency && /^\d/.test(amount) && !new RegExp(`^${currency}\\b`, "i").test(amount)) {
-      return `${currency} ${amount}`;
-    }
-    return amount;
-  };
-  const currentSalary = withCurrency("currentSalary");
-  const expectedSalary = withCurrency("expectedSalary");
-  const noticeRaw = String(formData.get("noticePeriod") ?? formData.get("noticePeriodDays") ?? "").trim();
-  let noticeDays: number | null = null;
-  let noticeText: string | null = null;
-
-  if (noticeRaw !== "") {
-    noticeText = noticeRaw;
-    const parsedDays = noticePeriodToDays(noticeRaw);
-    if (parsedDays !== null) {
-      noticeDays = parsedDays;
-    } else {
-      const n = Number(noticeRaw);
-      if (Number.isFinite(n) && n >= 0) {
-        noticeDays = Math.round(n);
-      }
-    }
-    // Words it cannot turn into days ("Not disclosed", "Negotiable") are an
-    // answer too: they are kept as said, with no days (owner, 28 Sep).
-  }
-
   const labels = formData.getAll("customLabel").map(String);
   const values = formData.getAll("customValue").map(String);
-  const customNotes: string[] = [];
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]?.trim();
-    if (!v) continue;
-    const l = labels[i]?.trim();
-    customNotes.push(l ? `${l}: ${v}` : v);
-  }
-
-  const patch: Parameters<typeof repo.saveReviewDetails>[3] = {
-    currentSalary: currentSalary || null,
-    expectedSalary: expectedSalary || null,
-    noticePeriodDays: noticeDays,
-    noticePeriod: noticeText || (noticeDays !== null ? (noticeDays === 0 ? "Immediate" : `${noticeDays} days`) : null),
-  };
-  // Designation and company come from the CV; the TA corrects them when the
-  // call says otherwise (9 Oct). Written only when changed, so a plain Save
-  // does not rewrite the CV's reading — or clear it from a form that lacks them.
-  const candidate = repo.candidate(app.candidateId);
-  for (const [field, key] of [["currentDesignation", "currentTitle"], ["currentCompany", "currentEmployer"]] as const) {
-    if (!formData.has(field)) continue;
-    const value = String(formData.get(field) ?? "").trim() || null;
-    if (value !== ((candidate?.[key] ?? "").trim() || null)) patch[key] = value;
-  }
-
-  try {
-    repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);
-  } catch (err) {
-    const msg = (err as Error).message || "";
-    if (msg.includes("Someone else changed this record") || msg.includes("conflict")) {
-      // Re-prime with latest DB values and retry the update once
-      invalidateCandidate(app.candidateId);
-      markTablesStale();
-      await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId, allApplications: true });
-      repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);
-    } else {
-      throw err;
-    }
-  }
-
-  markTablesStale();
-  invalidateCandidate(app.candidateId);
-  revalidatePath(`/openings/${app.openingId}`, "layout");
-  revalidatePath(`/candidates/${app.candidateId}`);
-  return done("Details saved.");
+  const user = await getCurrentUser();
+  const result = await writeCandidateReview(user, openingId, applicationId, {
+    action: "details",
+    currentSalary: String(formData.get("currentSalary") ?? ""),
+    currentSalaryCurrency: String(formData.get("currentSalaryCurrency") ?? ""),
+    expectedSalary: String(formData.get("expectedSalary") ?? ""),
+    expectedSalaryCurrency: String(formData.get("expectedSalaryCurrency") ?? ""),
+    noticePeriod: String(formData.get("noticePeriod") ?? formData.get("noticePeriodDays") ?? ""),
+    currentDesignation: String(formData.get("currentDesignation") ?? ""),
+    currentCompany: String(formData.get("currentCompany") ?? ""),
+    customDetails: values.map((value, index) => ({ label: labels[index] ?? "", value })),
+  }, { ...OPENING_DEPS, invalidateCandidate, primeStore });
+  if (!result.ok) await fail(result.message);
+  return done(result.message);
 }
 
 /**
@@ -4269,35 +4104,21 @@ export async function logFollowUpReply(formData: FormData) {
 
 // ─── Closing records ─────────────────────────────────────────────────────────
 
-const num = (fd: FormData, k: string): number | null => {
-  const raw = String(fd.get(k) ?? "").replace(/[^\d.]/g, "");
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-};
-
-/** A date typed into a form, as 09:00 Colombo on that day — not the server's zone. */
-const day = (fd: FormData, k: string): number | null => {
-  const v = String(fd.get(k) ?? "").trim();
-  return v ? colomboLocalToInstant(`${v}T09:00`) : null;
-};
-
 export async function makeOffer(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
-  const r = repo.makeOffer({
-    applicationId: appId,
-    salary: num(formData, "salary") ?? 0,
+  const rawSalary = String(formData.get("salary") ?? "").replace(/[^\d.]/g, "");
+  const salary = rawSalary && Number.isFinite(Number(rawSalary)) ? Number(rawSalary) : 0;
+  const r = await writeCandidateClosing(user, openingId, appId, {
+    action: "offer",
+    salary,
     salaryBasis: String(formData.get("salaryBasis") ?? "monthly") as "monthly" | "annual",
     currency: String(formData.get("currency") ?? "LKR") as "LKR" | "USD",
-    startDate: day(formData, "startDate"),
-    terms: String(formData.get("terms") ?? "").trim() || null,
-    byUserId: user.id,
-  });
-  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
-  revalidatePath("/placements");
+    startDate: String(formData.get("startDate") ?? ""),
+    terms: String(formData.get("terms") ?? ""),
+  }, OPENING_DEPS);
   redirect(
     `/openings/${openingId}/candidate/${appId}${r.ok ? "" : `?msg=${encodeURIComponent(r.message)}`}`,
   );
@@ -4305,17 +4126,15 @@ export async function makeOffer(formData: FormData) {
 
 export async function respondToOffer(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "applicationId", offer: "offerId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
-  const r = repo.respondToOffer({
+  const r = await writeCandidateClosing(user, openingId, appId, {
+    action: "respond",
     offerId: String(formData.get("offerId")),
     status: String(formData.get("status")) as "accepted" | "declined" | "withdrawn",
     reason: String(formData.get("reason") ?? ""),
-    byUserId: user.id,
-  });
-  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
-  revalidatePath("/placements");
+  }, OPENING_DEPS);
   redirect(
     `/openings/${openingId}/candidate/${appId}${r.ok ? "" : `?msg=${encodeURIComponent(r.message)}`}`,
   );
@@ -4323,24 +4142,17 @@ export async function respondToOffer(formData: FormData) {
 
 export async function recordPlacement(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
-  const joinDate = day(formData, "joinDate");
-  if (joinDate === null)
-    redirect(
-      `/openings/${openingId}/candidate/${appId}?msg=${encodeURIComponent("A placement needs a join date.")}`,
-    );
-  const r = repo.recordPlacement({
+  const r = await writeCandidateClosing(user, openingId, appId, {
+    action: "place",
     offerId: String(formData.get("offerId")),
-    joinDate,
-    salary: num(formData, "salary") ?? undefined,
-    byUserId: user.id,
-  });
-  revalidatePath("/placements");
+    joinDate: String(formData.get("joinDate") ?? ""),
+  }, OPENING_DEPS);
   if (!r.ok)
     redirect(`/openings/${openingId}/candidate/${appId}?msg=${encodeURIComponent(r.message)}`);
-  redirect(`/placements/${r.id}`);
+  redirect(`/placements/${r.placementId}`);
 }
 
 // ─── Screening calls ─────────────────────────────────────────────────────────
