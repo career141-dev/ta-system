@@ -2187,6 +2187,8 @@ export default defineSchema({
       v.literal("opening_access_rejected"),
       v.literal("scoop_received"),
       v.literal("strategy_assigned"),
+      // A shared mailbox not read for an hour (emailAgent.checkMailboxesRead, 23 Oct).
+      v.literal("mailbox_stalled"),
       v.literal("workday_started"), v.literal("workday_finished"),
       v.literal("workday_request"), v.literal("workday_decision"), v.literal("workday_exception")
     ),
@@ -2245,6 +2247,10 @@ export default defineSchema({
     lastEmailFetchTimestamp: v.optional(v.string()), // Added for email polling memory
     /** When this mailbox began to be read by the mailboxLog instead of the read flag (5 Oct). */
     mailLogSince: v.optional(v.string()),
+    /** The last run that read this mailbox in full and finished (23 Oct). */
+    mailPollOkAt: v.optional(v.string()),
+    /** When the desk was told this mailbox had stopped being read. */
+    mailStallReportedAt: v.optional(v.string()),
     channel_toggles: v.optional(v.object({
       whatsappIngestion: v.boolean(),
       emailIngestion: v.boolean(),

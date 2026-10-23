@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
-import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../lib/mailCursor";
+import { nextCursor, notYetHandled, oldestFirst, pollBatch, readsByLog, stalledUnreported } from "../lib/mailCursor";
 import { isNotAnApplication, parseApplicationEmail } from "../lib/mailParse";
 import { linkedinJobId, linkedinProjectId } from "../lib/postRouting";
 import { placeOnPosts } from "../mailIntake/process";
@@ -184,7 +184,12 @@ async function fetchAttachmentContent(inboxEmail: string, messageId: string, att
   }
 }
 
-/** The messages, and whether every page was read — a partial read must not move the cursor. */
+/**
+ * The messages since the cursor — id, read flag and date only — and whether
+ * every page was read; a partial list must not move the cursor. Bodies are
+ * fetched one at a time for the messages a run handles (fetchFullMessage):
+ * listing them all with bodies ran out of memory on linkedin@ (23 October).
+ */
 async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ignoreReadStatus: boolean = false): Promise<{ messages: any[]; fetchedAll: boolean }> {
   const token = await getGraphToken();
   if (!token) return { messages: [], fetchedAll: false };
@@ -204,7 +209,7 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
       filterClause = `isRead eq false and ` + filterClause;
     }
 
-    let url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/mailFolders/inbox/messages?$filter=${filterClause}&$select=id,subject,body,from,hasAttachments,isRead,receivedDateTime&$top=100`;
+    let url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/mailFolders/inbox/messages?$filter=${filterClause}&$select=id,isRead,receivedDateTime&$top=500`;
     
     const allMessages: any[] = [];
     let fetchedAll = true;
@@ -233,6 +238,19 @@ async function fetchInboxEmails(inboxEmail: string, lastFetch: string | null, ig
     console.error("[EmailAgent] Error fetching emails:", error);
     return { messages: [], fetchedAll: false };
   }
+}
+
+/** One message in full, for handling. Null when it was deleted meanwhile or cannot be read. */
+async function fetchFullMessage(inboxEmail: string, messageId: string): Promise<any | null> {
+  const token = await getGraphToken();
+  if (!token) return null;
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(inboxEmail)}/messages/${encodeURIComponent(messageId)}?$select=id,subject,body,from,hasAttachments,isRead,receivedDateTime`;
+  const response = await safeFetchWithRetry(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response || !response.ok) {
+    console.error(`[EmailAgent] Could not read message ${messageId.slice(-12)}:`, response ? response.status : "network error");
+    return null;
+  }
+  return response.json();
 }
 
 async function markEmailAsRead(inboxEmail: string, messageId: string) {
@@ -302,9 +320,10 @@ export const pollEmailInbox = internalAction({
     let messages = fetched.messages;
     if (byLog && messages.length > 0) {
       const logSince: string = await ctx.runMutation(internal.communications.emailAgent.startMailLog, { inboxEmail: targetInboxEmail });
-      const logged: string[] = await ctx.runQuery(internal.communications.emailAgent.loggedMessageIds, {
+      const oldest = oldestFirst(messages)[0]?.receivedDateTime ?? new Date(0).toISOString();
+      const logged: string[] = await ctx.runQuery(internal.communications.emailAgent.loggedSince, {
         inboxEmail: targetInboxEmail,
-        messageIds: messages.map((m: any) => m.id),
+        since: oldest,
       });
       messages = notYetHandled(messages, new Set(logged), logSince);
     }
@@ -329,9 +348,19 @@ export const pollEmailInbox = internalAction({
     }
     
     const allMessages = oldestFirst(messages);
-    const batch = allMessages.slice(0, POLL_BATCH);
-    if (allMessages.length > POLL_BATCH) {
-      console.log(`[EmailAgent] ${allMessages.length} unread emails found. Processing the oldest ${POLL_BATCH}; the cursor stays, so the remaining ${allMessages.length - POLL_BATCH} are fetched again next run.`);
+    const size = pollBatch(byLog);
+    const listed = allMessages.slice(0, size);
+    const waiting = allMessages.slice(size);
+    if (waiting.length > 0) {
+      console.log(`[EmailAgent] ${allMessages.length} emails waiting in ${targetInboxEmail}. Handling the oldest ${size}; the next run starts from the oldest of the other ${waiting.length}.`);
+    }
+    // The bodies, one at a time, for only the messages handled now. One that
+    // cannot be read stays waiting, so the cursor does not pass it.
+    const batch: any[] = [];
+    for (const m of listed) {
+      const full = await fetchFullMessage(targetInboxEmail, m.id);
+      if (full) batch.push(full);
+      else waiting.push(m);
     }
 
     let currentExtractionDelayMs = 0; // Stagger AI extractions by 10s
@@ -576,10 +605,15 @@ Respond ONLY with a valid JSON object in this exact format:
     // nothing was left behind (lib/mailCursor.ts, 5 October).
     // Read by the log, a held cursor cannot refetch the same mail forever, so the
     // outbound lock (mail left unread) does not matter there.
-    if (advanceCursor({ fetchedAll, found: allMessages.length, markReadDisabled: outboundLocked() && !byLog })) {
-      await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: currentFetchTime, inboxEmail: targetInboxEmail });
+    const cursor = nextCursor({ fetchedAll, waiting, runStart: currentFetchTime, markReadDisabled: outboundLocked() && !byLog });
+    if (cursor) {
+      await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: cursor, inboxEmail: targetInboxEmail });
+      // A run that read the mailbox in full and finished: the health check
+      // (checkMailboxesRead) warns the desk when this goes stale.
+      await ctx.runMutation(internal.communications.emailAgent.markMailboxRead, { inboxEmail: targetInboxEmail, at: currentFetchTime });
+      if (waiting.length > 0) console.log(`[EmailAgent] ${targetInboxEmail}: ${waiting.length} still waiting; the next run starts at ${cursor}.`);
     } else {
-      console.log(`[EmailAgent] ${targetInboxEmail}: cursor kept at ${lastFetch ?? "(none)"} — ${fetchedAll ? `${allMessages.length - POLL_BATCH} message(s) still waiting` : "the mailbox could not be read in full"}.`);
+      console.log(`[EmailAgent] ${targetInboxEmail}: cursor kept at ${lastFetch ?? "(none)"} — the mailbox could not be read in full.`);
     }
   },
 });
@@ -1008,19 +1042,67 @@ export const startMailLog = internalMutation({
   },
 });
 
-/** Which of these messages the log already holds. */
-export const loggedMessageIds = internalQuery({
-  args: { inboxEmail: v.string(), messageIds: v.array(v.string()) },
-  handler: async (ctx, { inboxEmail, messageIds }): Promise<string[]> => {
-    const out: string[] = [];
-    for (const messageId of messageIds) {
-      const hit = await ctx.db
-        .query("mailboxLog")
-        .withIndex("by_mailbox_message", (q) => q.eq("mailbox", inboxEmail).eq("messageId", messageId))
-        .first();
-      if (hit) out.push(messageId);
+/**
+ * The messages the log holds that were received since `since` — the oldest
+ * message this run listed. One range read, not a lookup per message: a run
+ * can list thousands while catching up (23 October). Handled oldest first, so
+ * the log rows inside the window stay few.
+ */
+export const loggedSince = internalQuery({
+  args: { inboxEmail: v.string(), since: v.string() },
+  handler: async (ctx, { inboxEmail, since }): Promise<string[]> => {
+    const rows = await ctx.db
+      .query("mailboxLog")
+      .withIndex("by_mailbox_received", (q) => q.eq("mailbox", inboxEmail).gte("receivedAt", since))
+      .take(8000);
+    return rows.map((r) => r.messageId);
+  },
+});
+
+/** The last run that read this mailbox in full and finished. */
+export const markMailboxRead = internalMutation({
+  args: { inboxEmail: v.string(), at: v.string() },
+  handler: async (ctx, { inboxEmail, at }) => {
+    const key = `email_fetch_${inboxEmail}`;
+    const row = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", key)).first();
+    if (row) await ctx.db.patch(row._id, { mailPollOkAt: at });
+    else await ctx.db.insert("appSettings", { key, mailPollOkAt: at });
+  },
+});
+
+/** The mailboxes whose silence the desk must hear about. */
+const WATCHED_MAILBOXES = ["linkedin@career141.com", "cv@career141.com", "job@career141.com"];
+
+/**
+ * Tell admins and TA leads when a mailbox has not been read for an hour
+ * (lib/mailCursor.ts stalledUnreported). linkedin@ went unread from 5 to 23
+ * October with nothing on any screen; this makes that an hour. Once per
+ * stall: told again only after it has recovered and stalled again.
+ */
+export const checkMailboxesRead = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    for (const inbox of WATCHED_MAILBOXES) {
+      const key = `email_fetch_${inbox}`;
+      const row = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", key)).first();
+      if (!row || !stalledUnreported({ okAt: row.mailPollOkAt, reportedAt: row.mailStallReportedAt, now })) continue;
+      const since = row.mailPollOkAt!;
+      const people = (await ctx.db.query("users").withIndex("by_active", (q) => q.eq("isActive", true)).collect())
+        .filter((u) => u.taRole === "admin" || u.taRole === "ta_lead" || u.role === "admin");
+      for (const u of people) {
+        await ctx.db.insert("notifications", {
+          userId: u._id,
+          type: "mailbox_stalled",
+          title: `${inbox} has not been read since ${since.slice(0, 16).replace("T", " ")} UTC`,
+          body: "Applications arriving there are not reaching TA System. They wait in the mailbox and come in once reading resumes. Tell the developer now.",
+          read: false,
+          createdAt: new Date(now).toISOString(),
+        });
+      }
+      await ctx.db.patch(row._id, { mailStallReportedAt: new Date(now).toISOString() });
+      console.warn(`[EmailAgent] ${inbox} not read since ${since}; ${people.length} people told.`);
     }
-    return out;
   },
 });
 
