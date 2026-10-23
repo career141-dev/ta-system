@@ -12,7 +12,9 @@ import { internalMutation, internalQuery } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { executeStageTransition, type PipelineStage } from "../pipeline/pipelineStateMachine";
 import { addressOf } from "../lib/postRouting";
-import { shouldMove, TARGET_STAGE, type OpeningLite } from "../lib/shortlistMail";
+import { DIRECTOR_MAILBOXES, shouldMove, TARGET_STAGE, type OpeningLite } from "../lib/shortlistMail";
+import { mapUser } from "../../src/data/convex/map";
+import { recordShortlistDecision } from "../lib/shortlistDecision";
 
 /** Openings a shortlist can be for, and the addresses the Director writes from. */
 export const context = internalQuery({
@@ -25,10 +27,12 @@ export const context = internalQuery({
       .filter((j) => j.status === "active")
       .map((j) => ({ id: j._id as string, title: j.title, clientName: j.clientName, clientContactEmail: j.clientContactEmail ?? null }));
     const users = await ctx.db.query("users").collect();
-    const directorAddresses = users
-      .filter((u) => u.role === "director" && u.isActive)
+    const directorAddresses = [...DIRECTOR_MAILBOXES, ...users
+      // The desk role, as decisions.context reads it: an explicit taRole wins
+      // over the old backend role (22 Oct — the two places disagreed).
+      .filter((u) => mapUser(u).role === "director" && u.isActive)
       .flatMap((u) => [addressOf(u.email), addressOf(u.routingEmail ?? null)])
-      .filter((a): a is string => Boolean(a));
+      .filter((a): a is string => Boolean(a))];
     return { openings, directorAddresses };
   },
 });
@@ -92,6 +96,11 @@ export const moveShortlisted = internalMutation({
         skipAutoOutreach: true,
         // The reviewer's mail is the decision; Director Review's details are not asked for.
         decidedByReviewer: true,
+      });
+      // The shortlist mail is the reviewer's decision; the round records it.
+      await recordShortlistDecision(ctx, {
+        applicationId: app._id, jobId: args.openingId, kind: args.kind, outcome: "shortlisted", confirmed: false,
+        note: `${args.kind === "director" ? "Director" : "Client"} shortlist mail: ${args.subject.slice(0, 160)}`,
       });
       moved.push(candidateId);
     }

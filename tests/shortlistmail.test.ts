@@ -3,7 +3,7 @@
  * a Director's subject names, and inferring the opening for a client's mail.
  * Pure — no Graph, no database.
  */
-import { inferOpening, matchHouseSubject, parseHouseSubject, shouldMove, stripReplyPrefixes, type OpeningLite } from "../convex/lib/shortlistMail";
+import { DIRECTOR_MAILBOXES, inferOpening, matchHouseSubject, parseHouseSubject, shouldMove, stripReplyPrefixes, type OpeningLite } from "../convex/lib/shortlistMail";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -18,6 +18,8 @@ eq("reply prefixes stripped", parseHouseSubject("RE: FW: Lanka Hospital > PA to 
 eq("app's own subject", parseHouseSubject("SET 1 - DELMO - BRAND MANAGER - 3 CVs"), { client: "DELMO", position: "BRAND MANAGER", setNumber: 1, cvCount: 3 });
 eq("hyphen inside a title survives", parseHouseSubject("SET 2 - DELMO - Sales-Retail Lead - 1 CV")?.position, "Sales-Retail Lead");
 eq("client subject is not a director subject", parseHouseSubject("CVs for the CFO assistant role"), null);
+// 22 Oct: "REVISED" was read as the client, so the resent email named no opening.
+eq("a revised email names the same opening", parseHouseSubject("RE: REVISED - SET 2 - DELMO - BRAND MANAGER - 3 CVs"), { client: "DELMO", position: "BRAND MANAGER", setNumber: 2, cvCount: 3 });
 eq("empty subject", parseHouseSubject(""), null);
 eq("set with no client and position", parseHouseSubject("SET 01"), null);
 eq("strip prefixes", stripReplyPrefixes("Re: RE: fwd: hi"), "hi");
@@ -87,6 +89,8 @@ eq("interview is not pulled back", shouldMove("interview", "client_review"), fal
 eq("rejected is left for a person", shouldMove("rejected", "director_shortlist"), false);
 eq("dropped out is left for a person", shouldMove("unresponsive", "client_review"), false);
 eq("no stage counts as new", shouldMove(undefined, "director_shortlist"), true);
+// 22 Oct: the Director replies from these and is not on People.
+eq("the Director's mailboxes", [...DIRECTOR_MAILBOXES], ["joborders@career141.com", "shamra@career141.com"]);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

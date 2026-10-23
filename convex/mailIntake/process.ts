@@ -347,14 +347,18 @@ async function handleShortlistMessage(
     && attached.senderAddresses.includes(fromAddress)
     && Math.abs(m.receivedAt - attached.sentAt) <= 60 * 60 * 1000,
   );
+  // The TA's own end-of-day email is copied here with its CVs attached. Until
+  // 22 Oct that copy was only recognised when it had no CVs — and it always
+  // has them — so it was filed as the Director's shortlist and moved everyone
+  // in it before the Director had read it.
+  if (originalTrackedCopy) {
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+      id: m._id, outcome: "skipped",
+      note: "Original tracked shortlist email; its Microsoft 365 thread identity was recorded.",
+    });
+    return;
+  }
   if (cvs.length === 0) {
-    if (originalTrackedCopy) {
-      await ctx.runMutation(internal.mailIntake.model.finishMessage, {
-        id: m._id, outcome: "skipped",
-        note: "Original tracked shortlist email; its Microsoft 365 thread identity was recorded.",
-      });
-      return;
-    }
     const reply = await ctx.runAction(internal.mailIntake.decisions.processReply, {
       sourceMessageId: m._id,
       graphMessageId: m.messageId,
@@ -378,9 +382,21 @@ async function handleShortlistMessage(
 
   const { openings, directorAddresses } = await ctx.runQuery(internal.mailIntake.shortlist.context, {});
   const house = parseHouseSubject(subject);
-  // The subject decides. A Director writing without it is still the Director,
-  // but then there is no subject to name the opening, so it is inferred.
-  const kind: ShortlistKind = house || directorAddresses.includes(fromAddress) ? "director" : "client";
+  const fromDirector = directorAddresses.includes(fromAddress);
+  // The house subject is also the app's own end-of-day subject, so on its own
+  // it proves nothing about who decided. Only a recorded Director's mail moves
+  // people to Director Shortlist; anyone else's is held for a lead, unread,
+  // because a TA's resent or untracked copy looks exactly like this (22 Oct).
+  if (house && !fromDirector) {
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+      id: m._id, outcome: "held",
+      note: `Shortlist subject with CVs from ${fromAddress}, which is not a recorded Director address. Nothing was read or moved; if this is the Director's shortlist, a lead moves the candidates.`,
+    });
+    return;
+  }
+  // A Director writing without the house subject is still the Director, but
+  // then there is no subject to name the opening, so it is inferred.
+  const kind: ShortlistKind = fromDirector ? "director" : "client";
   const match = house ? matchHouseSubject(house, openings) : null;
   const note: ShortlistNote = {
     kind,

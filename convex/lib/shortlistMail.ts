@@ -20,6 +20,15 @@ import { norm } from "./postRouting";
 
 export type ShortlistKind = "director" | "client";
 
+/**
+ * The Director's mailboxes (22 Oct). The Director answers the EOD email from
+ * these and never signs in to the TA System, so they are not on the People
+ * page — and a reply was only trusted from an active People entry with the
+ * Director role, which held every reply for a lead to confirm. A Director on
+ * People still counts as well.
+ */
+export const DIRECTOR_MAILBOXES = ["joborders@career141.com", "shamra@career141.com"] as const;
+
 export interface HouseSubject {
   client: string;
   position: string;
@@ -27,11 +36,15 @@ export interface HouseSubject {
   cvCount: number | null;
 }
 
-/** Forwards and replies stack "RE: FW:" in front; the subject proper is what follows. */
+/**
+ * Forwards and replies stack "RE: FW:" in front; the subject proper is what
+ * follows. A resent end-of-day email adds "REVISED - " (lib/eod-format
+ * revisedSubject), which until 22 Oct was read as the client's name.
+ */
 export function stripReplyPrefixes(subject: string): string {
   let s = (subject ?? "").trim();
   for (;;) {
-    const next = s.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "");
+    const next = s.replace(/^\s*(?:re|fw|fwd)\s*:\s*/i, "").replace(/^\s*revised\s*[-–—:]\s*/i, "");
     if (next === s) return s;
     s = next;
   }
