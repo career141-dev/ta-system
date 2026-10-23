@@ -18,6 +18,7 @@ import {
 } from "@/lib/openings/writes";
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
+import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -2485,24 +2486,21 @@ export async function deleteFromBinNow(formData: FormData) {
 /** Finding 13 — the edit and remove controls on a candidate's contact details. */
 export async function updateCandidateContact(formData: FormData) {
   await primeStore({ allApplications: true, candidateIds: candidateIdsIn(formData) });
-  await authorize(formData, "opening.act", { opening: "openingId", candidate: "candidateId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
+  const candidateId = String(formData.get("candidateId"));
   const field = String(formData.get("field")) as "email" | "phone" | "name";
   if (field !== "email" && field !== "phone" && field !== "name") return;
-  const raw = String(formData.get("value") ?? "").trim().replace(/\s+/g, " ");
-  // The name, typed by the TA when the CV reading found none (30 Sep): a CV
-  // whose heading is a picture reads without one, and "Unnamed candidate" had
-  // no way to be put right.
-  if (field === "name") {
-    if (raw.length < 2 || /^unnamed candidate$/i.test(raw)) return fail("Type their full name.");
-    if (raw.length > 120) return fail("That name is too long — type just their full name.");
-    repo.updateCandidateContact(String(formData.get("candidateId")), { fullName: raw });
-    revalidatePath(`/openings/${openingId}`, "layout");
-    return back("Name saved.");
-  }
-  repo.updateCandidateContact(String(formData.get("candidateId")), { [field]: raw || null });
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await back(field === "email" ? "Email saved." : "Phone saved.");
+  const app = repo.applications(openingId).find((row) => row.candidateId === candidateId);
+  const result = await writeCandidateProfile(
+    user,
+    openingId,
+    app?.id ?? "",
+    { field, value: String(formData.get("value") ?? "") },
+    OPENING_DEPS,
+  );
+  if (!result.ok) return fail(result.message);
+  await back(result.message);
 }
 
 // ─── Interviews ──────────────────────────────────────────────────────────────

@@ -121,3 +121,13 @@ export interface CandidateCvUploadResult {
   ok: boolean;
   message: string;
 }
+
+export interface CandidateProfileBody {
+  field: "email" | "phone" | "name";
+  value: string;
+}
+
+export interface CandidateProfileResult {
+  ok: boolean;
+  message: string;
+}
