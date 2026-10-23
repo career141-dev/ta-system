@@ -159,6 +159,7 @@ import type * as lib_validate from "../lib/validate.js";
 import type * as lib_vectorPayload from "../lib/vectorPayload.js";
 import type * as lib_voiceAgentWebhook from "../lib/voiceAgentWebhook.js";
 import type * as lib_webhookSecurity from "../lib/webhookSecurity.js";
+import type * as mailIntake_aiReader from "../mailIntake/aiReader.js";
 import type * as mailIntake_audit from "../mailIntake/audit.js";
 import type * as mailIntake_decisions from "../mailIntake/decisions.js";
 import type * as lib_within from "../lib/within.js";
@@ -404,6 +405,7 @@ declare const fullApi: ApiFromModules<{
   "lib/vectorPayload": typeof lib_vectorPayload;
   "lib/voiceAgentWebhook": typeof lib_voiceAgentWebhook;
   "lib/webhookSecurity": typeof lib_webhookSecurity;
+  "mailIntake/aiReader": typeof mailIntake_aiReader;
   "mailIntake/audit": typeof mailIntake_audit;
   "mailIntake/decisions": typeof mailIntake_decisions;
   "lib/within": typeof lib_within;

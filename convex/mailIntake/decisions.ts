@@ -15,6 +15,7 @@ import { resolveActor } from "../lib/auth";
 import { toTaStage } from "../ta/stages";
 import { getGraphToken } from "../lib/graphClient";
 import { DIRECTOR_MAILBOXES } from "../lib/shortlistMail";
+import type { AiReading } from "../lib/directorReplyAi";
 import { SHORTLIST_MAILBOX } from "./model";
 
 const decisionValidator = v.object({
@@ -280,8 +281,15 @@ export const requireReview = internalMutation({
  * be left where they are or taken back off a shortlist. One judgement for the
  * live reader, the repair's dry run and its real run.
  */
-function assessReply(message: { subject: string; body: string; conversationId?: string | null; inReplyTo?: string | null }, contexts: DecisionContext[]) {
-  const matched = matchReplyRound(message, contexts as ReplyRound[]);
+function assessReply(
+  message: { subject: string; body: string; conversationId?: string | null; inReplyTo?: string | null },
+  contexts: DecisionContext[],
+  pinnedRoundId?: string,
+) {
+  const pinned = pinnedRoundId ? contexts.find((round) => round.id === pinnedRoundId) : undefined;
+  const matched: ReturnType<typeof matchReplyRound> = pinned
+    ? { round: pinned, method: "conversation", note: "Matched by the TA's email with the CVs in the same thread." }
+    : matchReplyRound(message, contexts as ReplyRound[]);
   const chosen = matched.round ? contexts.find((round) => round.id === matched.round!.id) ?? null : null;
   const parsed = parseShortlistReply(message.body, chosen?.roster ?? []);
   const reviewReasons = [...parsed.reviewReasons];
@@ -305,17 +313,115 @@ function assessReply(message: { subject: string; body: string; conversationId?: 
   return { matched, chosen, parsed, reviewReasons: [...new Set(reviewReasons)], clear };
 }
 
+type ReplyArgs = {
+  sourceMessageId?: Id<"mailIntakeMessages">; graphMessageId: string; conversationId?: string; internetMessageId?: string;
+  inReplyTo?: string; receivedAt: number; fromAddress: string; subject: string; body: string; historical?: boolean;
+  /** Dry run only: the threads the TAs' copies would teach, round by conversation. */
+  taught?: { conversationId: string; roundId: string }[];
+};
+
+/**
+ * What a reply will do, decided once for the live reader and the catch-up
+ * alike (23 October):
+ *   1. its round — by thread, as before; or, for a set the TA emailed from
+ *      Outlook, rebuilt from the TA's email with the CVs in the same thread
+ *      (aiReader.findSetInThread; created only when not a dry run);
+ *   2. the strict reader (assessReply);
+ *   3. where that will not act alone, the AI reader against the set's names,
+ *      applied under the owner's rules when it reads every candidate clearly.
+ */
+async function planReply(ctx: ActionCtx, args: ReplyArgs, dryRun: boolean) {
+  let contexts: DecisionContext[] = (await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: args.fromAddress }))
+    .map((round: DecisionContext) => {
+      const conversationId = round.conversationId ? null : args.taught?.find((t) => t.roundId === round.id)?.conversationId;
+      return conversationId ? { ...round, conversationId } : round;
+    });
+  let assessed = assessReply(args, contexts);
+  let rebuilt: string | null = null;
+  if (!assessed.chosen && (DIRECTOR_MAILBOXES as readonly string[]).includes(normalAddress(args.fromAddress))) {
+    const set = await ctx.runAction(internal.mailIntake.aiReader.findSetInThread, {
+      conversationId: args.conversationId, subject: args.subject, before: args.receivedAt,
+    });
+    rebuilt = set.note;
+    if (set.found && set.openingId && set.sentBy && set.messageId) {
+      let roundId = `dry-run:${set.messageId}`;
+      if (dryRun) {
+        contexts = [...contexts, {
+          id: roundId, openingId: set.openingId, kind: "director", token: roundId, subject: set.subject ?? args.subject,
+          status: "awaiting", sentAt: set.sentAt ?? args.receivedAt, sentBy: set.sentBy, conversationId: set.conversationId ?? null,
+          internetMessageId: null, messageId: set.messageId, senderAuthorized: true,
+          openingTitle: "", clientName: "", roster: set.roster.map((r) => ({ ...r })),
+        }];
+      } else {
+        roundId = await ctx.runMutation(internal.mailIntake.aiReader.createRoundFromThread, {
+          openingId: set.openingId as Id<"jobs">, sentBy: set.sentBy as Id<"users">, sentAt: set.sentAt ?? args.receivedAt,
+          subject: set.subject ?? args.subject, messageId: set.messageId, conversationId: set.conversationId,
+          applicationIds: set.roster.map((r) => r.applicationId as Id<"applications">),
+        });
+        contexts = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: args.fromAddress });
+      }
+      assessed = assessReply(args, contexts, roundId);
+    }
+  }
+  let { decisions, reviewReasons, clear } = { decisions: assessed.parsed.decisions, reviewReasons: assessed.reviewReasons, clear: assessed.clear };
+  let readBy: "rules" | "ai" = "rules";
+  if (assessed.chosen && !clear && assessed.chosen.senderAuthorized) {
+    const ai: AiReading = await ctx.runAction(internal.mailIntake.aiReader.readDirectorReply, {
+      text: newestReplyText(args.body) || args.body,
+      roster: assessed.chosen.roster.map((row) => ({ applicationId: row.applicationId, name: row.name })),
+    });
+    if (ai.clear) {
+      decisions = ai.decisions;
+      reviewReasons = [];
+      clear = true;
+      readBy = "ai";
+    } else {
+      reviewReasons = [...new Set([...reviewReasons, ...ai.problems])];
+    }
+  }
+  if (!assessed.chosen && rebuilt) reviewReasons = [...new Set([...reviewReasons, rebuilt])];
+  return { ...assessed, decisions, reviewReasons, clear, readBy };
+}
+
 export const processReply = internalAction({
   args: {
-    sourceMessageId: v.id("mailIntakeMessages"), graphMessageId: v.string(),
+    sourceMessageId: v.optional(v.id("mailIntakeMessages")), graphMessageId: v.string(),
     conversationId: v.optional(v.string()), internetMessageId: v.optional(v.string()), inReplyTo: v.optional(v.string()),
     receivedAt: v.number(), fromAddress: v.string(), subject: v.string(), body: v.string(),
     historical: v.optional(v.boolean()),
     /** A historical reply that reads clearly is applied, not queued (reconcileFromMailbox). */
     applyClear: v.optional(v.boolean()),
+    /** Report what the reply would do; write nothing (the catch-up's dry run). */
+    dryRun: v.optional(v.boolean()),
+    taught: v.optional(v.array(v.object({ conversationId: v.string(), roundId: v.string() }))),
   },
-  handler: async (ctx, args): Promise<{ reviewId: string; status: "auto_applied" | "review_required"; note: string; openingId?: string; candidateIds: string[] }> => {
-    const prior = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId: args.sourceMessageId });
+  handler: async (ctx, args): Promise<{
+    reviewId: string; status: "auto_applied" | "review_required" | "would_move" | "would_review" | "unmatched"; note: string;
+    openingId?: string; candidateIds: string[];
+    plan?: { readBy: "rules" | "ai"; job: string | null; moves: { name: string; from: string; to: string; note: string }[]; reasons: string[] };
+  }> => {
+    if (args.dryRun) {
+      const plan = await planReply(ctx, args, true);
+      const names = new Map((plan.chosen?.roster ?? []).map((row) => [row.applicationId, row]));
+      const to = (o: string) => (o === "shortlisted" ? SHORTLIST_STAGE[plan.chosen?.kind ?? "director"] : o === "rejected" ? "rejected" : "stays (task noted)");
+      return {
+        reviewId: "", candidateIds: [], openingId: plan.chosen?.openingId,
+        status: !plan.chosen ? "unmatched" : plan.clear && (args.historical ? args.applyClear === true : true) ? "would_move" : "would_review",
+        note: plan.reviewReasons.join(" "),
+        plan: {
+          readBy: plan.readBy,
+          job: plan.chosen ? `${plan.chosen.clientName} · ${plan.chosen.openingTitle}`.replace(/^ · $/, "") || null : null,
+          moves: plan.clear ? plan.decisions.map((d) => ({
+            name: names.get(d.applicationId)?.name ?? d.applicationId, from: names.get(d.applicationId)?.stage ?? "?",
+            to: to(d.outcome), note: d.evidence,
+          })) : [],
+          reasons: plan.clear ? [] : plan.reviewReasons,
+        },
+      };
+    }
+    if (!args.sourceMessageId) throw new Error("A shortlist reply is recorded against its queue row.");
+    const sourceMessageId = args.sourceMessageId;
+    const prior = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId });
     if (prior) return {
       reviewId: prior._id as string,
       status: prior.status === "auto_applied" ? "auto_applied" : "review_required",
@@ -323,16 +429,16 @@ export const processReply = internalAction({
       openingId: prior.openingId as string | undefined,
       candidateIds: [],
     };
-    const contexts: DecisionContext[] = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: args.fromAddress });
-    const { matched, chosen, parsed, reviewReasons, clear } = assessReply(args, contexts);
-    const decisions = parsed.decisions.map((decision) => ({ ...decision, applicationId: decision.applicationId as Id<"applications"> }));
+    const plan = await planReply(ctx, args, false);
+    const { matched, chosen, reviewReasons, clear } = plan;
+    const decisions = plan.decisions.map((decision) => ({ ...decision, applicationId: decision.applicationId as Id<"applications"> }));
     const reviewId = await ctx.runMutation(internal.mailIntake.decisions.createReview, {
-      sourceMessageId: args.sourceMessageId, graphMessageId: args.graphMessageId,
+      sourceMessageId, graphMessageId: args.graphMessageId,
       conversationId: args.conversationId, internetMessageId: args.internetMessageId, inReplyTo: args.inReplyTo,
       receivedAt: args.receivedAt, fromAddress: args.fromAddress, subject: args.subject,
       replyText: args.body.slice(0, 20_000), roundId: chosen?.id as Id<"reviewRounds"> | undefined,
       openingId: chosen?.openingId as Id<"jobs"> | undefined, matchMethod: matched.method,
-      matchNote: matched.note, senderAuthorized: chosen?.senderAuthorized ?? false,
+      matchNote: plan.readBy === "ai" ? `${matched.note} Read by the AI reader.` : matched.note, senderAuthorized: chosen?.senderAuthorized ?? false,
       decisions, reviewReasons, historical: args.historical ?? false,
     });
     // A historical reply is applied only when the owner's repair asks for it
@@ -516,28 +622,20 @@ async function reconcileOne(
     historical: true,
   };
   if (m.dryRun) {
-    const contexts: DecisionContext[] = (await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: base.fromAddress }))
-      .map((round: DecisionContext) => {
-        // The thread the real run would teach this round first.
-        const taughtConversation = [...(m.taught ?? new Map<string, string>()).entries()].find(([, roundId]) => roundId === round.id)?.[0];
-        return round.conversationId || !taughtConversation ? round : { ...round, conversationId: taughtConversation };
-      });
-    const { matched, chosen, parsed, reviewReasons, clear } = assessReply(base, contexts);
-    const names = new Map((chosen?.roster ?? []).map((row) => [row.applicationId, row]));
+    const planned = await ctx.runAction(internal.mailIntake.decisions.processReply, {
+      ...base, dryRun: true, applyClear: m.applyClear,
+      taught: [...(m.taught ?? new Map<string, string>()).entries()].map(([conversationId, roundId]) => ({ conversationId, roundId })),
+    });
     return {
       messageId: m.graphMessageId,
       receivedAt: new Date(m.receivedAt).toISOString(),
       from: base.fromAddress,
       subject: base.subject,
-      result: !chosen ? "unmatched" : clear && m.applyClear ? "would_move" : "would_review",
-      job: chosen ? `${chosen.clientName} · ${chosen.openingTitle}` : null,
-      matchMethod: matched.method,
-      moves: clear ? parsed.decisions.map((d) => ({
-        name: names.get(d.applicationId)?.name ?? d.applicationId,
-        from: names.get(d.applicationId)?.stage ?? "?",
-        to: d.outcome === "shortlisted" ? SHORTLIST_STAGE[chosen!.kind] : d.outcome,
-      })) : [],
-      reviewReasons: clear ? [] : reviewReasons,
+      result: planned.status,
+      readBy: planned.plan?.readBy,
+      job: planned.plan?.job ?? null,
+      moves: planned.plan?.moves ?? [],
+      reviewReasons: planned.plan?.reasons ?? [],
     };
   }
   const sourceMessageId = m.sourceMessageId ?? await ctx.runMutation(internal.mailIntake.model.recordHistoricalShortlist, {
@@ -552,7 +650,7 @@ async function reconcileOne(
     const existing = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId });
     if (existing) return { messageId: m.graphMessageId, subject: base.subject, result: "already_recorded" };
   }
-  const result: { reviewId: string; status: "auto_applied" | "review_required" } = await ctx.runAction(
+  const result: { reviewId: string; status: string } = await ctx.runAction(
     internal.mailIntake.decisions.processReply,
     { ...base, sourceMessageId, applyClear: m.applyClear },
   );
