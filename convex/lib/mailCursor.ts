@@ -92,3 +92,28 @@ export function notYetHandled<T extends { id: string; isRead?: boolean; received
 ): T[] {
   return messages.filter((m) => !logged.has(m.id) && !(m.isRead && (m.receivedDateTime ?? "") < logSince));
 }
+
+/**
+ * Text with any half of an emoji (a lone surrogate) replaced by "�". Mail can
+ * carry one — LinkedIn cuts names and headlines short mid-emoji — and Convex
+ * refuses such a string as a function argument ("unexpected end of hex
+ * escape"). On 23 October one such email at the head of linkedin@'s backlog
+ * stopped every run at the same place. Pure, so it is tested alone.
+ */
+export function wellFormed(text: string): string {
+  return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+}
+
+/** A Graph message with its text fields made safe to pass on (wellFormed). */
+export function cleanMessage<T extends { subject?: string; bodyPreview?: string; body?: { content?: string }; from?: { emailAddress?: { address?: string; name?: string } } }>(m: T): T {
+  const clean = (s: string | undefined) => (typeof s === "string" ? wellFormed(s) : s);
+  return {
+    ...m,
+    subject: clean(m.subject),
+    bodyPreview: clean(m.bodyPreview),
+    body: m.body ? { ...m.body, content: clean(m.body.content) } : m.body,
+    from: m.from?.emailAddress
+      ? { ...m.from, emailAddress: { ...m.from.emailAddress, address: clean(m.from.emailAddress.address), name: clean(m.from.emailAddress.name) } }
+      : m.from,
+  };
+}

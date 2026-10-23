@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
-import { nextCursor, notYetHandled, oldestFirst, pollBatch, readsByLog, STALLED_AFTER_MS, stalledUnreported } from "../lib/mailCursor";
+import { cleanMessage, nextCursor, notYetHandled, oldestFirst, pollBatch, readsByLog, STALLED_AFTER_MS, stalledUnreported, wellFormed } from "../lib/mailCursor";
 import { isNotAnApplication, parseApplicationEmail } from "../lib/mailParse";
 import { linkedinJobId, linkedinProjectId } from "../lib/postRouting";
 import { placeOnPosts } from "../mailIntake/process";
@@ -154,7 +154,8 @@ async function fetchMessageAttachments(inboxEmail: string, messageId: string) {
     }
 
     const data = await response.json();
-    return data.value || [];
+    // Attachment names go to the scheduler; a half-emoji in one stops the run.
+    return (data.value || []).map((a: any) => ({ ...a, name: typeof a.name === "string" ? wellFormed(a.name) : a.name }));
   } catch (error) {
     console.error(`[EmailAgent] Error fetching attachments for message ${messageId}:`, error);
     return [];
@@ -250,7 +251,8 @@ async function fetchFullMessage(inboxEmail: string, messageId: string): Promise<
     console.error(`[EmailAgent] Could not read message ${messageId.slice(-12)}:`, response ? response.status : "network error");
     return null;
   }
-  return response.json();
+  // A half-emoji in the text stops every Convex call it is passed to (23 Oct).
+  return cleanMessage(await response.json());
 }
 
 async function markEmailAsRead(inboxEmail: string, messageId: string) {
@@ -328,7 +330,7 @@ export const pollEmailInbox = internalAction({
       messages = notYetHandled(messages, new Set(logged), logSince);
     }
     // Record each email once it has been handled, and mark it read for whoever opens the mailbox.
-    const finish = async (message: any, outcome: "cv" | "held" | "no_cv" | "reply", note?: string) => {
+    const finish = async (message: any, outcome: "cv" | "held" | "no_cv" | "reply" | "failed", note?: string) => {
       await markEmailAsRead(targetInboxEmail, message.id);
       if (!byLog) return;
       await ctx.runMutation(internal.communications.emailAgent.logMailboxMessage, {
@@ -366,6 +368,7 @@ export const pollEmailInbox = internalAction({
     let currentExtractionDelayMs = 0; // Stagger AI extractions by 10s
 
     for (const message of batch) {
+      try {
       console.log(`[EmailAgent] Processing message: ${message.subject} from ${message.from?.emailAddress?.address}`);
       let attachments = message.attachments || [];
       if (message.hasAttachments && attachments.length === 0) {
@@ -598,6 +601,15 @@ Respond ONLY with a valid JSON object in this exact format:
         }
       }
       */
+      } catch (e) {
+        // One email the system cannot handle must not hold up the rest: on 23
+        // October one at the head of linkedin@'s backlog stopped every run at
+        // the same place. It is recorded as failed — Settings shows it — and
+        // the run moves on.
+        const reason = wellFormed(((e as Error)?.message ?? String(e)).slice(0, 300));
+        console.error(`[EmailAgent] Could not handle "${message.subject ?? ""}" in ${targetInboxEmail}: ${reason}`);
+        await finish(message, "failed", `Could not be handled: ${reason}`).catch(() => undefined);
+      }
     }
 
     // Commit the fetch timestamp AFTER all messages are processed so a mid-batch crash
@@ -1090,7 +1102,7 @@ export const inboxHealth = internalQuery({
         .query("appSettings")
         .withIndex("by_key", (q) => q.eq("key", `email_fetch_${inbox}`))
         .first();
-      const today = { arrived: 0, toJob: 0, toDatabase: 0, noCv: 0, replies: 0 };
+      const today = { arrived: 0, toJob: 0, toDatabase: 0, noCv: 0, replies: 0, failed: 0 };
       if (row?.mailLogSince) {
         const rows = await ctx.db
           .query("mailboxLog")
@@ -1100,6 +1112,7 @@ export const inboxHealth = internalQuery({
           today.arrived++;
           if (r.outcome === "reply") today.replies++;
           else if (r.outcome === "no_cv") today.noCv++;
+          else if (r.outcome === "failed") today.failed++;
           else if (/database/i.test(r.note ?? "")) today.toDatabase++;
           else today.toJob++;
         }
@@ -1162,7 +1175,7 @@ export const logMailboxMessage = internalMutation({
     receivedAt: v.string(),
     subject: v.string(),
     fromAddress: v.optional(v.string()),
-    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply")),
+    outcome: v.union(v.literal("cv"), v.literal("held"), v.literal("no_cv"), v.literal("reply"), v.literal("failed")),
     note: v.optional(v.string()),
   },
   handler: async (ctx, a) => {
@@ -1175,10 +1188,10 @@ export const logMailboxMessage = internalMutation({
       mailbox: a.inboxEmail,
       messageId: a.messageId,
       receivedAt: a.receivedAt,
-      subject: a.subject.slice(0, 300),
+      subject: wellFormed(a.subject.slice(0, 300)),
       fromAddress: a.fromAddress,
       outcome: a.outcome,
-      note: a.note?.slice(0, 500),
+      note: a.note === undefined ? undefined : wellFormed(a.note.slice(0, 500)),
       loggedAt: Date.now(),
     });
   },
@@ -1213,7 +1226,7 @@ async function searchInbox(inboxEmail: string, term: string): Promise<any[]> {
       break;
     }
     const data = await res.json();
-    out.push(...(data.value ?? []));
+    out.push(...(data.value ?? []).map(cleanMessage));
     url = data["@odata.nextLink"];
   }
   return out;

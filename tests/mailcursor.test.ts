@@ -3,7 +3,7 @@
  * burst of more than 15 applications lost all but 15: the cursor moved past
  * the rest and no later run fetched them. Pure — no Graph, no database.
  */
-import { nextCursor, notYetHandled, oldestFirst, pollBatch, POLL_BATCH, readsByLog, stalledUnreported } from "../convex/lib/mailCursor";
+import { cleanMessage, nextCursor, notYetHandled, oldestFirst, pollBatch, POLL_BATCH, readsByLog, stalledUnreported, wellFormed } from "../convex/lib/mailCursor";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -73,6 +73,20 @@ eq(
   notYetHandled(box, new Set(["logged"]), since).map((m) => m.id),
   ["opened-today", "unread-today", "left-unread-before"],
 );
+
+console.log("\nhalf an emoji is cleaned, so one email cannot stop the run (23 Oct)");
+const half = "Nimal \uD83D"; // LinkedIn cut the name short mid-emoji
+eq("a lone half is replaced", wellFormed(half), "Nimal �");
+eq("a whole emoji is kept", wellFormed("Nimal 😀"), "Nimal 😀");
+eq("a stray second half is replaced too", wellFormed("\uDE00x"), "�x");
+eq("ordinary text is untouched", wellFormed("Brand Manager – Colombo"), "Brand Manager – Colombo");
+const msg = cleanMessage({
+  subject: "New application: " + half,
+  body: { content: "<p>" + half + "</p>" },
+  from: { emailAddress: { address: "jobs-noreply@linkedin.com", name: half } },
+});
+const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+eq("subject, body and sender name are all cleaned", [msg.subject, msg.body?.content, msg.from?.emailAddress?.name].some((t) => lone.test(t ?? "")), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;
