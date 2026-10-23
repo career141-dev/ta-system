@@ -24,6 +24,9 @@ export function classifyFeedback(feedback: string): CallResult {
     /\bwrong\s+number\b/,
     /\b(?:overseas|abroad)\b/,
     /\bnot\s+available\b/,
+    // "Not interested" contains the positive word "interested" (review, 23 Oct).
+    /\bnot\s+interested\b/,
+    /\bno\s+interest\b/,
     /\bcan(?:not|'t)\s+give\b/,
     /\b(?:refused|declined)\b/,
     /\bswitched\s+off\b/,

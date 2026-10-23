@@ -25,6 +25,8 @@ const examples: [string, "positive" | "negative"][] = [
   ["Currently overseas", "negative"],
   ["Previously worked in nawaloka, no contact available", "negative"],
   ["spoke to him", "negative"],
+  ["Not interested", "negative"],
+  ["He is not interested in moving", "negative"],
 ];
 for (const [feedback, expected] of examples) eq(`classifies “${feedback}”`, classifyFeedback(feedback), expected);
 eq("an explicit preview move wins", resultOf({ feedback: "No answer", result: "positive" }), "positive");
