@@ -166,6 +166,7 @@ export default async function OpeningsPage({
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {allows(user, "tables.readAll") && <Link href="/support-tables" className="rounded-full border border-brand px-4 py-2 text-sm font-medium text-brand">All positions’ Excel Tables</Link>}
           {isTa(user) && <RequestOpeningAccess openings={availableOpenings} />}
           <Link
             href="/openings/new"
