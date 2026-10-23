@@ -81,7 +81,9 @@ export const listForUser = internalQuery({
               ? "/openings"
               : n.type === "strategy_assigned" && n.jobId
                 ? `/openings/${n.jobId}/strategies`
-                : null,
+                : n.type === "mailbox_stalled"
+                  ? "/settings?tab=mailboxes"
+                  : null,
         read: n.read,
         createdAt: n.createdAt,
       })),

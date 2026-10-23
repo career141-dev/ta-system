@@ -3,7 +3,7 @@ import { pageUser } from "@/lib/session";
 import { isConvex } from "@/data/mode";
 import { primeStore } from "@/data/prime";
 import { repo } from "@/data/store";
-import { mailIntakeStatus, type MailIntakeStatus } from "@/data/convex/backend";
+import { inboxHealth, mailIntakeStatus, type InboxHealth, type MailIntakeStatus } from "@/data/convex/backend";
 import { setMailboxEnabled, syncMailboxNow } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { AutoRefresh } from "./AutoRefresh";
@@ -46,11 +46,12 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const active = TABS.find((t) => t.id === tab)?.id ?? "mailboxes";
 
   let status: MailIntakeStatus | null = null;
+  let health: InboxHealth[] | null = null;
   let problem: string | null = null;
   if (!isConvex()) problem = "Mailboxes need the Convex backend; this build is running on the file store.";
   else {
     try {
-      status = await mailIntakeStatus();
+      [status, health] = await Promise.all([mailIntakeStatus(), inboxHealth()]);
     } catch (e) {
       problem = safeErrorMessage(e, "The mailbox status could not be read. Try again.");
     }
@@ -176,8 +177,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             <p className="mb-5 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-[12.5px] text-warn">{problem}</p>
           )}
 
+          {health && <ApplicationInboxes health={health} />}
+
           {status && (
             <>
+              <h3 className="mb-3 text-[13.5px] font-semibold">Scoops and shortlists mailboxes</h3>
               <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2 xl:grid-cols-4">
                 {status.mailboxes.filter((m) => m.kind !== "ta").map(mailboxCard)}
               </div>
@@ -264,5 +268,84 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </section>
       )}
     </main>
+  );
+}
+
+/**
+ * The three application inboxes, as the reader that files LinkedIn and emailed
+ * applications sees them (23 October). linkedin@ went unread from 5 to 23
+ * October and nothing on this page said so: the cards below describe a
+ * different reader. A stopped inbox is shown in red, in plain words.
+ */
+function ApplicationInboxes({ health }: { health: InboxHealth[] }) {
+  const stopped = health.filter((h) => h.stalled);
+  const at = (iso: string | null) => (iso ? when(Date.parse(iso)) : "never");
+  return (
+    <div className="mb-8">
+      {stopped.length > 0 && (
+        <div className="mb-4 rounded-xl border border-danger/30 bg-danger-soft px-4 py-3 text-[13px] leading-relaxed text-danger">
+          <p className="font-semibold">
+            {stopped.map((h) => h.mailbox).join(" and ")} {stopped.length > 1 ? "have" : "has"} stopped.
+          </p>
+          <p className="mt-1">
+            New applications from {stopped.length > 1 ? "them" : "it"} are not reaching the jobs. Nothing is lost: they wait
+            in the mailbox and come in once it works again. Please tell the developer.
+          </p>
+        </div>
+      )}
+      <h3 className="mb-3 text-[13.5px] font-semibold">Application inboxes</h3>
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-3">
+        {health.map((h) => {
+          const state = h.stalled ? "Stopped" : h.waiting > 0 ? "Catching up" : h.okAt ? "Working" : "Not started";
+          const tone = h.stalled
+            ? "bg-danger-soft text-danger"
+            : h.waiting > 0
+              ? "bg-warn-soft text-warn"
+              : h.okAt
+                ? "bg-brand-soft text-brand"
+                : "bg-tag text-ink-faint";
+          return (
+            <div key={h.mailbox} className={`rounded-2xl border bg-surface p-5 ${h.stalled ? "border-danger/40" : "border-rule"}`}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[14px] font-semibold">{h.mailbox}</p>
+                  <p className="mt-0.5 text-[11.5px] text-ink-soft">
+                    {h.stalled
+                      ? `Not read since ${at(h.okAt)}`
+                      : h.okAt
+                        ? `Read ${at(h.okAt)}`
+                        : "No successful read yet"}
+                  </p>
+                  {h.waiting > 0 && !h.stalled && (
+                    <p className="mt-0.5 text-[11.5px] text-warn">
+                      {h.waiting.toLocaleString()} older emails still to go, oldest first
+                    </p>
+                  )}
+                </div>
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${tone}`}>{state}</span>
+              </div>
+              {h.logged && (
+                <dl className="mt-4 grid grid-cols-4 gap-y-3 text-center">
+                  {[
+                    ["Today", h.today.arrived],
+                    ["To a job", h.today.toJob],
+                    ["Database", h.today.toDatabase],
+                    ["No CV", h.today.noCv],
+                  ].map(([label, n]) => (
+                    <div key={label as string}>
+                      <dt className="text-[10.5px] uppercase tracking-wider text-ink-faint">{label}</dt>
+                      <dd className="tabular text-[17px] font-semibold">{(n as number).toLocaleString()}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11.5px] text-ink-faint">
+        Checked every few minutes. If one stops for an hour, admins and TA leads get a notification.
+      </p>
+    </div>
   );
 }
