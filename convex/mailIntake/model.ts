@@ -205,6 +205,42 @@ export const recordMessages = internalMutation({
   },
 });
 
+/**
+ * A Director reply from before shortlists@ was read (23 October), recorded as
+ * already handled so the queue never picks it up and applies it: it goes to a
+ * lead's review instead (decisions.reconcileFromMailbox). Returns the row,
+ * existing or new.
+ */
+export const recordHistoricalShortlist = internalMutation({
+  args: {
+    messageId: v.string(),
+    receivedAt: v.number(),
+    subject: v.string(),
+    fromAddress: v.string(),
+    conversationId: v.optional(v.string()),
+    internetMessageId: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const seen = await ctx.db.query("mailIntakeMessages").withIndex("by_messageId", (q) => q.eq("messageId", args.messageId)).first();
+    if (seen) return seen._id;
+    return ctx.db.insert("mailIntakeMessages", {
+      ...args,
+      mailbox: SHORTLIST_MAILBOX,
+      hasAttachments: false,
+      status: "done",
+      outcome: "no_cv",
+      note: "A Director reply from before shortlists@ was read — queued for a lead to confirm, not applied.",
+      attempts: 0,
+      nextAttemptAt: args.receivedAt,
+      openingIds: [],
+      candidateIds: [],
+      cvUploadIds: [],
+      createdAt: Date.now(),
+      processedAt: Date.now(),
+    });
+  },
+});
+
 /** Complete transport metadata after the full Graph message has been read. */
 export const noteTransport = internalMutation({
   args: {

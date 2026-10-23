@@ -3,7 +3,7 @@
 // machine with the source email kept as evidence.
 
 import { v } from "convex/values";
-import { internalAction, internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
+import { internalAction, internalMutation, internalQuery, type ActionCtx, type MutationCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { executeStageTransition, type PipelineStage } from "../pipeline/pipelineStateMachine";
@@ -15,6 +15,7 @@ import { resolveActor } from "../lib/auth";
 import { toTaStage } from "../ta/stages";
 import { getGraphToken } from "../lib/graphClient";
 import { DIRECTOR_MAILBOXES } from "../lib/shortlistMail";
+import { SHORTLIST_MAILBOX } from "./model";
 
 const decisionValidator = v.object({
   applicationId: v.id("applications"),
@@ -425,56 +426,143 @@ export const reconcileRecent = internalAction({
     const token = await getGraphToken();
     const rows: Record<string, unknown>[] = [];
     for (const message of messages) {
-      const existing = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId: message._id });
-      if (existing) {
-        rows.push({ messageId: message.messageId, subject: message.subject, result: "already_recorded" });
-        continue;
-      }
-      const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(message.mailbox)}/messages/${encodeURIComponent(message.messageId)}?$select=subject,body,from,conversationId,internetMessageId,internetMessageHeaders`;
-      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (!response.ok) {
-        rows.push({ messageId: message.messageId, subject: message.subject, result: `graph_${response.status}` });
-        continue;
-      }
-      const graph = await response.json() as {
-        subject?: string; body?: { content?: string }; conversationId?: string; internetMessageId?: string;
-        internetMessageHeaders?: { name?: string; value?: string }[];
-        from?: { emailAddress?: { address?: string } };
-      };
-      const inReplyTo = graph.internetMessageHeaders?.find((header) => header.name?.toLowerCase() === "in-reply-to")?.value;
-      const input = {
-        sourceMessageId: message._id,
+      rows.push(await reconcileOne(ctx, token, {
+        mailbox: message.mailbox,
         graphMessageId: message.messageId,
-        conversationId: graph.conversationId,
-        internetMessageId: graph.internetMessageId,
-        inReplyTo,
         receivedAt: message.receivedAt,
-        fromAddress: normalAddress(graph.from?.emailAddress?.address || message.fromAddress),
-        subject: graph.subject ?? message.subject,
-        body: newestReplyText(graph.body?.content ?? "") || graph.subject || message.subject,
-        historical: true,
-      };
-      if (args.dryRun) {
-        const contexts: DecisionContext[] = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: input.fromAddress });
-        const matched = matchReplyRound(input, contexts as ReplyRound[]);
-        const chosen = matched.round ? contexts.find((round) => round.id === matched.round!.id) : null;
-        const parsed = parseShortlistReply(input.body, chosen?.roster ?? []);
-        rows.push({
-          messageId: message.messageId,
-          subject: input.subject,
-          result: chosen ? "would_queue" : "unmatched",
-          matchMethod: matched.method,
-          matchNote: matched.note,
-          openingId: chosen?.openingId ?? null,
-          decisions: parsed.decisions,
-          reviewReasons: parsed.reviewReasons,
-          stages: chosen?.roster.map((candidate) => ({ applicationId: candidate.applicationId, name: candidate.name, stage: candidate.stage })) ?? [],
-        });
-      } else {
-        const result: { reviewId: string; status: "auto_applied" | "review_required" } = await ctx.runAction(internal.mailIntake.decisions.processReply, input);
-        rows.push({ messageId: message.messageId, subject: input.subject, result: result.status, reviewId: result.reviewId });
-      }
+        fromAddress: message.fromAddress,
+        subject: message.subject,
+        sourceMessageId: message._id,
+        dryRun: args.dryRun,
+      }));
     }
     return { dryRun: args.dryRun, days, scanned: messages.length, rows };
+  },
+});
+
+/**
+ * One historical Director reply, read again from Graph: in a dry run, what it
+ * would queue; otherwise queued for a lead's review (`historical` — never
+ * applied automatically). A reply with no queue row yet gets one first, marked
+ * done so the queue never picks it up (model.recordHistoricalShortlist).
+ */
+async function reconcileOne(
+  ctx: ActionCtx,
+  token: string | null,
+  m: {
+    mailbox: string; graphMessageId: string; receivedAt: number; fromAddress: string; subject: string;
+    sourceMessageId: Id<"mailIntakeMessages"> | null; dryRun: boolean;
+  },
+): Promise<Record<string, unknown>> {
+  if (m.sourceMessageId) {
+    const existing = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId: m.sourceMessageId });
+    if (existing) return { messageId: m.graphMessageId, subject: m.subject, result: "already_recorded" };
+  }
+  const url = `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(m.mailbox)}/messages/${encodeURIComponent(m.graphMessageId)}?$select=subject,body,from,conversationId,internetMessageId,internetMessageHeaders`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) return { messageId: m.graphMessageId, subject: m.subject, result: `graph_${response.status}` };
+  const graph = await response.json() as {
+    subject?: string; body?: { content?: string }; conversationId?: string; internetMessageId?: string;
+    internetMessageHeaders?: { name?: string; value?: string }[];
+    from?: { emailAddress?: { address?: string } };
+  };
+  const inReplyTo = graph.internetMessageHeaders?.find((header) => header.name?.toLowerCase() === "in-reply-to")?.value;
+  const base = {
+    graphMessageId: m.graphMessageId,
+    conversationId: graph.conversationId,
+    internetMessageId: graph.internetMessageId,
+    inReplyTo,
+    receivedAt: m.receivedAt,
+    fromAddress: normalAddress(graph.from?.emailAddress?.address || m.fromAddress),
+    subject: graph.subject ?? m.subject,
+    body: newestReplyText(graph.body?.content ?? "") || graph.subject || m.subject,
+    historical: true,
+  };
+  if (m.dryRun) {
+    const contexts: DecisionContext[] = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: base.fromAddress });
+    const matched = matchReplyRound(base, contexts as ReplyRound[]);
+    const chosen = matched.round ? contexts.find((round) => round.id === matched.round!.id) : null;
+    const parsed = parseShortlistReply(base.body, chosen?.roster ?? []);
+    return {
+      messageId: m.graphMessageId,
+      receivedAt: new Date(m.receivedAt).toISOString(),
+      from: base.fromAddress,
+      subject: base.subject,
+      result: chosen ? "would_queue" : "unmatched",
+      matchMethod: matched.method,
+      matchNote: matched.note,
+      openingId: chosen?.openingId ?? null,
+      decisions: parsed.decisions,
+      reviewReasons: parsed.reviewReasons,
+      stages: chosen?.roster.map((candidate) => ({ applicationId: candidate.applicationId, name: candidate.name, stage: candidate.stage })) ?? [],
+    };
+  }
+  const sourceMessageId = m.sourceMessageId ?? await ctx.runMutation(internal.mailIntake.model.recordHistoricalShortlist, {
+    messageId: m.graphMessageId,
+    receivedAt: m.receivedAt,
+    subject: base.subject,
+    fromAddress: base.fromAddress,
+    conversationId: base.conversationId,
+    internetMessageId: base.internetMessageId,
+  });
+  if (!m.sourceMessageId) {
+    const existing = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId });
+    if (existing) return { messageId: m.graphMessageId, subject: base.subject, result: "already_recorded" };
+  }
+  const result: { reviewId: string; status: "auto_applied" | "review_required" } = await ctx.runAction(
+    internal.mailIntake.decisions.processReply,
+    { ...base, sourceMessageId },
+  );
+  return { messageId: m.graphMessageId, subject: base.subject, result: result.status, reviewId: result.reviewId };
+}
+
+/**
+ * Director replies that reached shortlists@ before it was read (23 October).
+ * The reader only reads mail from the moment it was switched on — this
+ * morning — so every earlier reply was never seen, and 67 review rounds sat
+ * "awaiting". This lists them straight from the mailbox: replies from a
+ * Director address, with no attachments (the TA's own end-of-day copy carries
+ * the CVs), received in the last `days` and before the reader started.
+ *
+ * Pipeline-only; `dryRun` is required. A real run queues each reply for a
+ * lead to confirm on Shortlist decisions — it never moves a candidate.
+ */
+export const reconcileFromMailbox = internalAction({
+  args: { dryRun: v.boolean(), days: v.optional(v.number()) },
+  handler: async (ctx, args): Promise<{ dryRun: boolean; days: number; listed: number; fromDirectors: number; rows: Record<string, unknown>[] }> => {
+    const days = Math.min(Math.max(Math.floor(args.days ?? 21), 1), 60);
+    const box = await ctx.runQuery(internal.mailIntake.model.mailbox, { mailbox: SHORTLIST_MAILBOX });
+    const since = new Date(Date.now() - days * 86_400_000).toISOString();
+    const until = new Date(box?.backfillFrom ?? Date.now()).toISOString();
+    const token = await getGraphToken();
+    const directors = new Set<string>(DIRECTOR_MAILBOXES);
+    const listed: { id: string; subject?: string; receivedDateTime?: string; hasAttachments?: boolean; from?: { emailAddress?: { address?: string } } }[] = [];
+    let url: string | undefined =
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(SHORTLIST_MAILBOX)}/mailFolders/inbox/messages` +
+      `?$filter=receivedDateTime ge ${since} and receivedDateTime lt ${until}` +
+      `&$select=id,subject,from,receivedDateTime,hasAttachments&$top=200`;
+    for (let page = 0; url && page < 20; page++) {
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!response.ok) throw new Error(`shortlists@ could not be listed: Graph ${response.status} ${(await response.text()).slice(0, 200)}`);
+      const data = await response.json() as { value?: typeof listed; "@odata.nextLink"?: string };
+      listed.push(...(data.value ?? []));
+      url = data["@odata.nextLink"];
+    }
+    const replies = listed
+      .filter((m) => !m.hasAttachments && directors.has(normalAddress(m.from?.emailAddress?.address)))
+      .sort((a, b) => (a.receivedDateTime ?? "").localeCompare(b.receivedDateTime ?? ""));
+    const rows: Record<string, unknown>[] = [];
+    for (const m of replies) {
+      rows.push(await reconcileOne(ctx, token, {
+        mailbox: SHORTLIST_MAILBOX,
+        graphMessageId: m.id,
+        receivedAt: Date.parse(m.receivedDateTime ?? new Date().toISOString()),
+        fromAddress: normalAddress(m.from?.emailAddress?.address),
+        subject: m.subject ?? "",
+        sourceMessageId: null,
+        dryRun: args.dryRun,
+      }));
+    }
+    return { dryRun: args.dryRun, days, listed: listed.length, fromDirectors: replies.length, rows };
   },
 });
