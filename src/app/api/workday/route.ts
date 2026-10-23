@@ -20,6 +20,7 @@ export async function GET(request: Request) {
       actorId: user.id,
       detail: new URL(request.url).searchParams.get("detail") === "1",
       cursor: new URL(request.url).searchParams.get("cursor") || undefined,
+      taId: new URL(request.url).searchParams.get("ta") || undefined,
       date: new URL(request.url).searchParams.get("date") || undefined,
       focusWorkday: new URL(request.url).searchParams.get("checkDay") || undefined,
     });

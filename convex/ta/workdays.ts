@@ -1084,14 +1084,14 @@ export const emailPreflight = internalMutation({
 });
 
 export const dashboard = internalQuery({
-  args: { actorId: v.string(), detail: v.optional(v.boolean()), cursor: v.optional(v.string()), date: v.optional(v.string()), focusWorkday: v.optional(v.string()) },
+  args: { actorId: v.string(), detail: v.optional(v.boolean()), cursor: v.optional(v.string()), date: v.optional(v.string()), focusWorkday: v.optional(v.string()), taId: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     const role = roleOf(user);
     const worker = ["ta", "ta_support"].includes(role);
     const lead = canLead(user);
     const review = canReviewWorkdays(role);
-    const deskWide = role === "admin" || role === "director";
+    const deskWide = role === "admin" || role === "director" || role === "ta_lead";
     if (!worker && !review) throw new Error("You cannot access workdays.");
     const now = Date.now();
     const active = worker ? await activeFor(ctx, user._id) : null;
@@ -1178,7 +1178,7 @@ export const dashboard = internalQuery({
       : [];
     let recent: Doc<"taWorkdays">[] = [];
     let nextCursor: string | null = null;
-    if (review) {
+    if (review && !args.date && !args.focusWorkday) {
       if (deskWide) {
         const [working, page] = await Promise.all([
           ctx.db
@@ -1214,6 +1214,31 @@ export const dashboard = internalQuery({
         );
       }
     }
+    // Filter the date before pagination; filtering a recent page hid older days.
+    if (review && args.date && !args.focusWorkday) {
+      const taId = args.taId ? ctx.db.normalizeId("users", args.taId) : null;
+      let query = ctx.db.query("taWorkdays")
+        .withIndex("by_date", q => q.eq("date", args.date!));
+      if (args.taId) query = query.filter(q => q.eq(q.field("userId"), taId));
+      const page = await query.order("desc").paginate({ cursor: args.cursor ?? null, numItems: 20 });
+      recent = page.page;
+      nextCursor = page.isDone ? null : page.continueCursor;
+    }
+    // Assignment choices must exist even before a TA starts a workday.
+    const reviewJobs = !review ? [] : deskWide
+      ? await ctx.db.query("jobs").collect()
+      : await ctx.db.query("jobs").filter(q => q.eq(q.field("taLeadId"), user._id)).collect();
+    const teamAssignments = review ? await Promise.all(reviewJobs
+      .filter(job => !isGone(job) && (deskWide || job.taLeadId === user._id))
+      .map(async job => {
+        const assigned = await ctx.db.query("jobAssignments")
+          .withIndex("by_jobId", q => q.eq("jobId", job._id)).collect();
+        const ids = new Set([...(job.assignedTaIds ?? []), ...assigned
+          .filter(a => a.isActive && recruiters.includes(a.assignmentRole)).map(a => a.userId)]);
+        const users = await Promise.all([...ids].map(id => ctx.db.get(id)));
+        return users.filter((ta): ta is Doc<"users"> => !!ta && ta.isActive && ["ta", "ta_support"].includes(roleOf(ta)))
+          .map(ta => ({ userId: ta._id, name: mapUser(ta).name, jobId: job._id, title: job.title }));
+      })) : [];
     const team: WorkdayView[] = [];
     // Notification links can target older workdays outside the current page.
     // The normal per-job visibility checks below still apply.
@@ -1237,7 +1262,7 @@ export const dashboard = internalQuery({
           ? requests
           : requests.filter((r) => r.leadId === user._id);
       if (!visibleJobs.length && !visibleRequests.length) continue;
-      // Build only the lead's jobs: a second job may belong to another team.
+      // Reviewers can inspect all teams; management rights remain per job.
       const scoped = { ...day, jobs: visibleJobs, completion: undefined };
       const result =
         day.finishedAt !== undefined && day.completion && !(day.closureReason === "eod" && day.date === workdayDate(now))
@@ -1252,6 +1277,8 @@ export const dashboard = internalQuery({
         visibleRequests.some((v) => v._id === r.id),
       );
       if (!result.jobs.length && !result.requests.length) continue;
+      for (const job of result.jobs) job.canManage = lead && (role === "admin" || day.jobs.some(entry => entry.jobId === job.jobId && entry.leadId === user._id));
+      for (const request of result.requests) request.canManage = lead && (role === "admin" || visibleRequests.some(entry => entry._id === request.id && entry.leadId === user._id));
       team.push(withoutReturningTasks(result));
     }
     return {
@@ -1268,6 +1295,10 @@ export const dashboard = internalQuery({
           .map((d) => view(ctx, d, now)),
       ),
       team,
+      teamAssignments: teamAssignments.flat(),
+      teamMembers: review ? (await ctx.db.query("users").collect())
+        .filter(ta => ta.isActive && ["ta", "ta_support"].includes(roleOf(ta)))
+        .map(ta => ({ userId: ta._id, name: mapUser(ta).name })) : [],
       options,
       nextCursor,
     };
