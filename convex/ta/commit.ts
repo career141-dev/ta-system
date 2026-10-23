@@ -53,7 +53,7 @@ export const apply = internalMutation({
     if (args.actorId) {
       const { user } = await resolveActor(ctx, args.actorId);
       actorUser = user;
-      const workTables = new Set(["applications", "linkVault", "researchReports", "benchmarks", "reviewRounds"]);
+      const workTables = new Set(["applications", "linkVault", "refereeCalls", "researchReports", "benchmarks", "reviewRounds"]);
       const jobs = new Set<string>();
       for (const op of args.ops) {
         if (!workTables.has(op.table)) continue;
@@ -120,7 +120,7 @@ export const apply = internalMutation({
       // The row's own temporary id is not a reference to resolve; it is what is being created.
       const { id: _own, ...fields } = ready.after as Row;
       const row: Row = { ...(rename(fields) as Row), id: ready.key };
-      if (["applications", "linkVault"].includes(ready.table) && row.workLocationId) {
+      if (["applications", "linkVault", "refereeCalls"].includes(ready.table) && row.workLocationId) {
         const job = await ctx.db.get(row.openingId as Id<"jobs">);
         if (!job) throw new Error("Opening not found.");
         requireWorkLocation(job, String(row.workLocationId));

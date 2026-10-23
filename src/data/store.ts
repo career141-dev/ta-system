@@ -40,6 +40,7 @@ import type {
   LeadNote,
   TaNote,
   LinkVaultEntry,
+  RefereeCall,
   LinkOutcome,
   Role,
   BenchmarkEntry,
@@ -211,7 +212,7 @@ let cacheSize = 0;
 function backfill(db: Partial<Database>): Database {
   const empty = {
     users: [], briefs: [], clients: [], openings: [], jobPosts: [], candidates: [],
-    referees: [], applications: [], callFeedback: [], interviews: [], linkVault: [],
+    referees: [], applications: [], callFeedback: [], interviews: [], linkVault: [], refereeCalls: [],
     assignments: [], pipelineEvents: [], reviewRounds: [],
     alerts: [], savedSearches: [], savedReports: [], researchReports: [], benchmarks: [], suggestions: [], chat: [], jdChat: [],
     intake: [], outreach: [], offers: [], placements: [], esaRecords: [], aiCalls: [], settings: [],
@@ -609,6 +610,7 @@ function takeOpening(db: Database, id: Id): Pick<BinEntry, "rows" | "intake"> {
     ["applications", (r) => r.openingId === id],
     ["jobPosts", (r) => r.openingId === id],
     ["linkVault", (r) => r.openingId === id],
+    ["refereeCalls", (r) => r.openingId === id],
     ["suggestions", (r) => r.openingId === id],
     ["benchmarks", (r) => r.openingId === id],
     ["researchReports", (r) => r.openingId === id],
@@ -1014,6 +1016,20 @@ const rawRepo = {
     load()
       .linkVault.filter((l) => l.openingId === openingId)
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
+
+  refereeCall: (id: Id): RefereeCall | null => load().refereeCalls.find((r) => r.id === id) ?? null,
+
+  refereeCalls(
+    openingId: Id,
+    filters: { userId?: Id; date?: string; workLocationId?: string } = {},
+  ): RefereeCall[] {
+    return load().refereeCalls
+      .filter((r) => r.openingId === openingId)
+      .filter((r) => !filters.userId || r.addedBy === filters.userId)
+      .filter((r) => !filters.date || r.date === filters.date)
+      .filter((r) => filters.workLocationId === undefined || (r.workLocationId ?? "") === filters.workLocationId)
+      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+  },
 
   callFeedback: (applicationId: Id) =>
     load()
@@ -2547,6 +2563,33 @@ const rawRepo = {
       });
     });
     return id;
+  },
+
+  addRefereeCall(input: Omit<RefereeCall, "id" | "createdAt" | "updatedAt">): RefereeCall {
+    const id = `rc_${Math.random().toString(36).slice(2, 10)}`;
+    const now = Date.now();
+    mutate((db) => {
+      db.refereeCalls.push({ ...input, id, createdAt: now, updatedAt: now });
+    });
+    return load().refereeCalls.find((r) => r.id === realId(id))!;
+  },
+
+  updateRefereeCall(
+    id: Id,
+    patch: Partial<Pick<RefereeCall, "company" | "referral" | "contactNumber" | "feedback" | "result">>,
+  ): RefereeCall | null {
+    mutate((db) => {
+      const row = db.refereeCalls.find((r) => r.id === id);
+      if (!row) return;
+      Object.assign(row, patch, { updatedAt: Date.now() });
+    });
+    return load().refereeCalls.find((r) => r.id === realId(id)) ?? null;
+  },
+
+  removeRefereeCall(id: Id): void {
+    mutate((db) => {
+      db.refereeCalls = db.refereeCalls.filter((r) => r.id !== id);
+    });
   },
 
   /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */

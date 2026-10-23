@@ -1,3 +1,4 @@
+import type { RefereeCallEmailRow } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
 import type { WorkType } from "./workday";
 
@@ -18,6 +19,7 @@ export interface DailyEmailSnapshot {
   workType?: WorkType;
   rows: ShortlistRow[];
   effort: EffortRow;
+  refereeCalls?: RefereeCallEmailRow[];
   introText: string;
   outroText: string;
   researchLink: string;

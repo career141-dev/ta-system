@@ -82,7 +82,7 @@ export const normalizeRetention = internalMutation({
           ...(root ? { parentId: root } : {}), workType, createdAt: copy.sentAt, acceptedAt: copy.sentAt, finalizedAt: copy.sentAt,
           expiresAt: copy.sentAt + EMAIL_RETENTION_MS,
           snapshot: { ...copy, from: sender?.email ?? "", workType, attachmentNames: [],
-            html: eodEmailHtml({ rows: copy.rows, effort: copy.effort, senderName: sender?.fullName ?? "", introText: copy.introText, outroText: copy.outroText, researchLink: copy.researchLink }) },
+            html: eodEmailHtml({ rows: copy.rows, effort: copy.effort, senderName: sender?.fullName ?? "", introText: copy.introText, outroText: copy.outroText, researchLink: copy.researchLink, refereeCalls: copy.refereeCalls }) },
         });
         if (!root) roots.set(copy.roundId, id);
       }

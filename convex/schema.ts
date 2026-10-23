@@ -2786,6 +2786,29 @@ export default defineSchema({
     .index("by_workday_outcome", ["openingId", "addedBy", "outcome"])
     .index("by_url", ["linkedinUrl"]),
 
+  /** Calls made to find a contact number for somebody being headhunted. */
+  refereeCalls: defineTable({
+    openingId: v.id("jobs"),
+    workLocationId: v.optional(v.string()),
+    addedBy: v.id("users"),
+    /** The Colombo work day (YYYY-MM-DD) the call belongs to. */
+    date: v.string(),
+    company: v.string(),
+    referral: v.string(),
+    contactNumber: v.optional(v.string()),
+    feedback: v.string(),
+    /** Stored for a later search workflow; deliberately not shown in the grid yet. */
+    lookingFor: v.optional(v.union(v.string(), v.null())),
+    /** Present only after the TA overrides the feedback classifier in EOD preview. */
+    result: v.optional(v.union(v.literal("positive"), v.literal("negative"), v.null())),
+    refereeId: v.optional(v.union(v.id("referees"), v.null())),
+    candidateId: v.optional(v.union(v.id("candidates"), v.null())),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_opening", ["openingId"])
+    .index("by_opening_user_date", ["openingId", "addedBy", "date"]),
+
   /** Company research for an opening. Cached rather than regenerated per view:
    *  searches cost money and four tab opens should not pay four times. */
   researchReports: defineTable({
@@ -3111,6 +3134,8 @@ export default defineSchema({
     })),
     /** The L-sheet line as the TA left it, targets included (lib/eod-format EffortRow). */
     effort: v.any(),
+    /** Referee calls exactly as they appeared in this sent version. */
+    refereeCalls: v.optional(v.any()),
     extraTo: v.array(v.string()),
     extraCc: v.array(v.string()),
     removed: v.array(v.string()),
