@@ -2568,13 +2568,51 @@ const rawRepo = {
     return id;
   },
 
-  addRefereeCall(input: Omit<RefereeCall, "id" | "createdAt" | "updatedAt">): RefereeCall {
-    const id = `rc_${Math.random().toString(36).slice(2, 10)}`;
+  /**
+   * One Save of the Referee Calls sheet (23 Oct): its new rows, changed rows
+   * and removed rows as one write, so a save is all there or not there at all.
+   * The caller has checked the rows are the TA's own.
+   */
+  saveRefereeCalls(
+    scope: { openingId: Id; addedBy: Id; date: string; workLocationId?: string },
+    changes: {
+      add: Pick<RefereeCall, "company" | "referral" | "contactNumber" | "feedback">[];
+      update: (Pick<RefereeCall, "id" | "company" | "referral" | "contactNumber" | "feedback">)[];
+      remove: Id[];
+    },
+  ): void {
     const now = Date.now();
-    mutate((db) => {
-      db.refereeCalls.push({ ...input, id, createdAt: now, updatedAt: now });
+    const text = (r: { company: string; referral: string; contactNumber?: string; feedback: string }) => ({
+      company: r.company,
+      referral: r.referral,
+      ...(r.contactNumber ? { contactNumber: r.contactNumber } : { contactNumber: undefined }),
+      feedback: r.feedback,
     });
-    return load().refereeCalls.find((r) => r.id === realId(id))!;
+    mutate((db) => {
+      const gone = new Set(changes.remove);
+      db.refereeCalls = db.refereeCalls.filter((r) => !gone.has(r.id));
+      for (const u of changes.update) {
+        const row = db.refereeCalls.find((r) => r.id === u.id);
+        if (row) Object.assign(row, text(u), { updatedAt: now });
+      }
+      // A millisecond apart, so the rows keep the order they were typed or pasted in.
+      changes.add.forEach((a, i) => {
+        db.refereeCalls.push({
+          id: `rc_${Math.random().toString(36).slice(2, 10)}`,
+          openingId: scope.openingId,
+          ...(scope.workLocationId ? { workLocationId: scope.workLocationId } : {}),
+          addedBy: scope.addedBy,
+          date: scope.date,
+          ...text(a),
+          lookingFor: null,
+          result: null,
+          refereeId: null,
+          candidateId: null,
+          createdAt: now + i,
+          updatedAt: now + i,
+        });
+      });
+    });
   },
 
   updateRefereeCall(
@@ -2587,12 +2625,6 @@ const rawRepo = {
       Object.assign(row, patch, { updatedAt: Date.now() });
     });
     return load().refereeCalls.find((r) => r.id === realId(id)) ?? null;
-  },
-
-  removeRefereeCall(id: Id): void {
-    mutate((db) => {
-      db.refereeCalls = db.refereeCalls.filter((r) => r.id !== id);
-    });
   },
 
   /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */

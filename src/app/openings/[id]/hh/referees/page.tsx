@@ -44,7 +44,7 @@ export default async function RefereeCallsPage({
     <WorkLocationTabs locations={opening.workLocations} selected={workLocationId} basePath={`/openings/${id}/hh/referees`} params={{ day }} />
     <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <p className="text-[13px] text-ink-soft">Log calls made to find a headhunting contact number. The result is sorted from the feedback when the end-of-day email is prepared.</p>
+        <p className="text-[13px] text-ink-soft">Type or paste the calls, then click Save. The end-of-day email sorts them into Positive and Not successful from the Feedback.</p>
         {!editable && <p className="mt-1 text-[12px] text-ink-faint">Read-only — calls are entered by the TA who made them.</p>}
       </div>
       <form className="flex items-end gap-2">
@@ -64,9 +64,9 @@ export default async function RefereeCallsPage({
       openingId={id}
       actorId={user.id}
       workLocationId={workLocationId || undefined}
+      day={day}
       calls={calls}
-      editable={editable}
-      canAdd={editable && workLocationId !== "" && day === today}
+      canEdit={editable && workLocationId !== "" && day === today}
       showTa={seesEveryone}
       userNames={userNames}
     />

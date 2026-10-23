@@ -4356,9 +4356,13 @@ const refereeText = (formData: FormData, field: string, max: number): string => 
   return value;
 };
 
-/** A TA's grid writes only their own rows; desk-wide seats read the page. */
-export async function addRefereeCall(formData: FormData): Promise<RefereeCallActionResult> {
-  let call: RefereeCall | undefined;
+/**
+ * Save on the Referee Calls sheet (23 Oct): every row the TA added, changed or
+ * cleared since the last save, in one write. A TA writes only their own rows;
+ * desk-wide seats read the page.
+ */
+export async function saveRefereeCalls(formData: FormData): Promise<ActionResult & { calls?: RefereeCall[] }> {
+  let calls: RefereeCall[] | undefined;
   const result = await inline(async () => {
     const openingId = String(formData.get("openingId") ?? "");
     await primeStore({ openingId });
@@ -4367,30 +4371,47 @@ export async function addRefereeCall(formData: FormData): Promise<RefereeCallAct
     const opening = repo.opening(openingId);
     if (!opening) return fail("That opening no longer exists.");
     const location = requireWorkLocation(opening, String(formData.get("workLocationId") ?? "") || undefined);
-    const company = refereeText(formData, "company", 200);
-    const referral = refereeText(formData, "referral", 200);
-    const contactNumber = refereeText(formData, "contactNumber", 100);
-    const feedback = refereeText(formData, "feedback", 2000);
-    if (![company, referral, contactNumber, feedback].some(Boolean)) await fail("Type something in the row before saving it.");
     const { workdayDate } = await import("@/lib/workday");
-    call = repo.addRefereeCall({
-      openingId,
-      ...(location ? { workLocationId: location.id } : {}),
-      addedBy: user.id,
-      date: workdayDate(Date.now()),
-      company,
-      referral,
-      ...(contactNumber ? { contactNumber } : {}),
-      feedback,
-      lookingFor: null,
-      result: null,
-      refereeId: null,
-      candidateId: null,
-    });
-    revalidatePath(`/openings/${openingId}`, "layout");
+    const { FIELD_MAX, GRID_FIELDS, MAX_GRID_ROWS, isBlankRow } = await import("@/lib/refereeGrid");
+    const date = workdayDate(Date.now());
+    if (String(formData.get("day") ?? date) !== date) await fail("Only today's calls can be changed. Open today in Work day.");
+
+    const raw = String(formData.get("changes") ?? "");
+    if (raw.length > 400_000) await fail(`That is too much to save at once — save at most ${MAX_GRID_ROWS} rows at a time.`);
+    let parsed: { add?: unknown; update?: unknown; remove?: unknown };
+    try { parsed = JSON.parse(raw || "{}"); } catch { return fail("The changes could not be read. Reload the page and try again."); }
+    const list = (v: unknown) => (Array.isArray(v) ? v : []);
+    const clean = (row: Record<string, unknown>) => {
+      const out = {} as Record<(typeof GRID_FIELDS)[number], string>;
+      for (const f of GRID_FIELDS) {
+        const value = String(row[f] ?? "").trim();
+        const label = f === "contactNumber" ? "Contact number" : f[0].toUpperCase() + f.slice(1);
+        if (value.length > FIELD_MAX[f]) throw new Error(`${label} is too long (at most ${FIELD_MAX[f]} characters).`);
+        out[f] = value;
+      }
+      return out;
+    };
+    const add = list(parsed.add).map((r) => clean(r as Record<string, unknown>)).filter((r) => !isBlankRow(r));
+    const update = list(parsed.update).map((r) => ({ id: String((r as { id?: unknown }).id ?? ""), ...clean(r as Record<string, unknown>) }));
+    const remove = list(parsed.remove).map(String);
+    if (add.length + update.length > MAX_GRID_ROWS) await fail(`Save at most ${MAX_GRID_ROWS} rows at a time.`);
+    for (const id of [...update.map((u) => u.id), ...remove]) {
+      const held = repo.refereeCall(id);
+      if (!held || held.openingId !== openingId) await fail("One of these calls no longer exists. Reload the page.");
+      if (held!.addedBy !== user.id) await fail("Only the TA who logged a call can change it.");
+    }
+
+    if (add.length || update.length || remove.length) {
+      repo.saveRefereeCalls(
+        { openingId, addedBy: user.id, date, ...(location ? { workLocationId: location.id } : {}) },
+        { add, update, remove },
+      );
+      revalidatePath(`/openings/${openingId}`, "layout");
+    }
+    calls = repo.refereeCalls(openingId, { userId: user.id, date, workLocationId: location?.id ?? "" });
     await done("Saved.");
   }, "Saved.");
-  return { ...result, ...(result.ok && call ? { call } : {}) };
+  return { ...result, ...(result.ok && calls ? { calls } : {}) };
 }
 
 export async function updateRefereeCall(formData: FormData): Promise<RefereeCallActionResult> {
@@ -4418,21 +4439,6 @@ export async function updateRefereeCall(formData: FormData): Promise<RefereeCall
     await done("Saved.");
   }, "Saved.");
   return { ...result, ...(result.ok && call ? { call } : {}) };
-}
-
-export async function removeRefereeCall(formData: FormData): Promise<ActionResult> {
-  return inline(async () => {
-    const openingId = String(formData.get("openingId") ?? "");
-    const callId = String(formData.get("callId") ?? "");
-    await primeStore({ openingId });
-    const user = await authorize(formData, "opening.act", { opening: "openingId" });
-    const held = repo.refereeCall(callId);
-    if (!held || held.openingId !== openingId) return fail("That referee call no longer exists.");
-    if (!isTa(user) || held.addedBy !== user.id) await fail("Only the TA who logged this call can remove it.");
-    repo.removeRefereeCall(callId);
-    revalidatePath(`/openings/${openingId}`, "layout");
-    await done("Removed.");
-  }, "Removed.");
 }
 
 export async function addMiddayEmail(formData: FormData) {
