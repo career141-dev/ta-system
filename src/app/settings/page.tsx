@@ -331,6 +331,7 @@ function ApplicationInboxes({ health }: { health: InboxHealth[] }) {
                     ["To a job", h.today.toJob],
                     ["Database", h.today.toDatabase],
                     ["No CV", h.today.noCv],
+                    ...(h.today.failed ? [["Failed", h.today.failed] as const] : []),
                   ].map(([label, n]) => (
                     <div key={label as string}>
                       <dt className="text-[10.5px] uppercase tracking-wider text-ink-faint">{label}</dt>

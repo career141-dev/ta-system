@@ -817,7 +817,7 @@ export interface InboxHealth {
   stalled: boolean;
   /** Whether today's numbers are kept for it (linkedin@ and cv@). */
   logged: boolean;
-  today: { arrived: number; toJob: number; toDatabase: number; noCv: number; replies: number };
+  today: { arrived: number; toJob: number; toDatabase: number; noCv: number; replies: number; failed: number };
 }
 
 /** linkedin@, cv@ and job@ as the application reader sees them (convex/communications/emailAgent.ts inboxHealth). */
