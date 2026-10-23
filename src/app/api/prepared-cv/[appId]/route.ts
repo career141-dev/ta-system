@@ -4,9 +4,8 @@ import { preparedCvFileName } from "@/lib/pdf";
 import { boxContent } from "@/lib/preparedCv";
 import { preparedCvFile } from "@/lib/preparedCvFile";
 import { currentUser } from "@/lib/session";
-import { allows } from "@/lib/auth";
-import { seatFor } from "@/lib/visibility";
 import { primeStore } from "@/data/prime";
+import { mayOpenCv } from "@/lib/cvAccess";
 
 export async function GET(
   req: Request,
@@ -21,12 +20,7 @@ export async function GET(
 
   // A CV is the candidate's personal data. Only somebody who can see this
   // application on its opening gets the file — the same test as the page.
-  const assignment = repo.assignmentFor(app.openingId, user.id) ?? null;
-  const seat = seatFor(user, assignment?.role ?? null);
-  if (
-    !allows(user, "opening.read", { openingId: app.openingId, assignment }) ||
-    (seat.stages !== null && !seat.stages.includes(app.stage))
-  ) {
+  if (!mayOpenCv(user, app.candidateId, app.id)) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
 

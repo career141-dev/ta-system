@@ -116,3 +116,8 @@ export interface CandidatePayload {
   referees: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; relationship: string | null }[];
   companyReferences: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; kind: "candidate" | "referee" }[];
 }
+
+export interface CandidateCvUploadResult {
+  ok: boolean;
+  message: string;
+}

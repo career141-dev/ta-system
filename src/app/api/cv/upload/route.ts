@@ -4,7 +4,7 @@ import { primeStore, resetStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { repo } from "@/data/store";
 import { currentUser } from "@/lib/session";
-import { allows } from "@/lib/auth";
+import { mayChangeCv } from "@/lib/cvAccess";
 import { convexMutation, internalUploadUrl } from "@/lib/convexServer";
 import { safeErrorMessage } from "@/lib/userError";
 
@@ -50,9 +50,8 @@ export async function POST(req: NextRequest) {
   if (!user) return answer(false, "Your session has ended. Sign in again.", 401);
   const app = repo.application(applicationId);
   if (!app) return answer(false, "That application no longer exists. Reload the page.", 404);
-  const assignment = repo.assignmentFor(app.openingId, user.id) ?? null;
-  if (!allows(user, "opening.act", { openingId: app.openingId, assignment })) {
-    return answer(false, "You are not on this opening, so you cannot add a CV to it.", 403);
+  if (!mayChangeCv(user, app.id)) {
+    return answer(false, "You cannot change this candidate's CV through this opening.", 403);
   }
 
   if (!isConvex()) {
