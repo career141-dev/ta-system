@@ -18,7 +18,7 @@ assert.equal(find("excel_profiles").status, "incomplete");
 assert.equal(find("excel_profiles", { profiles: { count: 1, at: 123 } }).completedAt, 123);
 assert.equal(find("excel_profiles", { profiles: { count: 1 } }).status, "complete");
 assert.equal(find("excel_profiles", { profiles: { count: 1 } }).progress, "1/1");
-assert.equal(find("director_cv", { noCandidateReason: "No suitable candidates", noCandidateAt: 42 }).status, "incomplete", "An explanation cannot replace a Director Review CV");
+assert.equal(find("director_cv").status, "complete", "100% work allows activity-only EOD without CVs or a reason");
 assert.equal(find("director_cv", { ready: 1 }).status, "complete");
 assert.equal(find("director_cv", { submitted: 1 }).status, "complete");
 assert.equal(find("suggestions", { suggestions: { successful: false, pending: 0, count: 0, version: "r1", emptyReason: "No profiles" } }).status, "incomplete");
@@ -48,12 +48,12 @@ assert.equal(linkedinPostUrl("https://www.linkedin.com/jobs/view/123"), true);
 assert.equal(linkedinPostUrl("https://linkedin.com.evil.test/jobs/view/123"), false);
 assert.equal(linkedinPostUrl("https://linkedin.com/in/person"), false);
 const jobs = [{ checks: evaluate() }] as any;
-assert.equal(completionBlockers(jobs).length, 7);
-assert.equal(emailBlockers(jobs).length, 6);
+assert.equal(completionBlockers(jobs).length, 6);
+assert.equal(emailBlockers(jobs).length, 5);
 assert.equal(confirmedResearchLink([{ ...find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678", confirmedAt: 123 }) }]), "https://chatgpt.com/share/12345678", "The composer can reuse a saved, completed share-link check");
 assert.equal(confirmedResearchLink([find("chatgpt", { chatgptLink: "https://chatgpt.com/share/12345678" })]), null, "An unconfirmed saved link must not be reused as confirmed");
 assert.equal(confirmedResearchLink([{ ...find("chatgpt"), status: "complete", evidence: "https://chatgpt.com/c/private123" }]), null);
-assert.deepEqual(emailBlockers(jobs).map(c => c.key.split(":")[0]), ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "director_cv", "chatgpt"]);
+assert.deepEqual(emailBlockers(jobs).map(c => c.key.split(":")[0]), ["jd_review", "linkedin_post", "suggestions", "excel_profiles", "chatgpt"]);
 assert.equal(linkedinPostUrl("https://www.linkedin.com/talent/hire/1528413625/overview"), true);
 assert.equal(linkedinPostUrl("https://www.linkedin.com/jobs/search?currentJobId=1528413625"), true);
 assert.equal(linkedinPostUrl("https://www.linkedin.com/jobs/search/?currentJobId=1528413625"), true);
@@ -72,6 +72,6 @@ const mixed = [
   { workType: "Follow-up", checks: evaluate({ workType: "Follow-up" }), eodChecks: evaluate({ workType: "Follow-up" }) },
   { workType: "Add-on", checks: evaluate({ workType: "Add-on" }), eodChecks: evaluate({ workType: "Add-on" }) },
 ] as any;
-assert.equal(completionBlockers(mixed).length, 11, "Returning positions also require their ChatGPT link and EOD email");
-assert.equal(emailBlockers(mixed).length, 8, "Returning positions block sending only on their ChatGPT link");
+assert.equal(completionBlockers(mixed).length, 10, "Returning positions also require their ChatGPT link and EOD email");
+assert.equal(emailBlockers(mixed).length, 7, "Returning positions block sending only on their ChatGPT link");
 console.log("Workday setup evidence, thresholds, exceptions, invalidation and email gates passed.");

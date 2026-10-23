@@ -244,5 +244,21 @@ try {
   await assign("ta", { linkId: "unknown-link-2" });
   assert.equal((await db.get("unknown-link-2"))!.level, 1, "Moving the same legacy batch reuses its imported level");
   assert.equal(rows("activityLog").filter(r => r.action === "work_location_assigned").length, 2);
+  // 23 Oct: a non-location 100% job can close with links and activity alone.
+  now += 86400000;
+  await db.patch("job", { workLocations: undefined });
+  tables.set("applications", []);
+  put("taWorkdays", { _id: "activity-100-day", userId: "ta", date: workdayDate(now), startedAt: now,
+    jobs: [{ jobId: "job", workType: "100%", addedAt: now, leadId: "lead", modeHistory: [] }] });
+  await assert.rejects(() => begin([]), /Today's Checks/, "100% setup requirements still apply without CVs");
+  checks = await requiredChecks(ctx, await db.get("activity-100-day") as any, (await db.get("activity-100-day"))!.jobs[0]);
+  for (const check of checks.eodChecks.filter(c => c.exceptionVersion)) put("taWorkdayExceptions", { _id: `activity-exception:${check.key}`, workdayId: "activity-100-day", jobId: "job", key: check.key,
+    version: check.exceptionVersion, action: "submit", at: now, by: "ta", reason: "Synthetic setup exception" });
+  const roundCount = rows("reviewRounds").length;
+  const emptyEod = await begin([], undefined, { snapshot: { ...snapshot([]), attachmentNames: [] } });
+  await run("result", { id: emptyEod.id, status: "accepted" });
+  assert.equal((await db.get("activity-100-day"))!.finishedAt, now, "100% activity-only EOD completes attendance");
+  assert.equal(rows("reviewRounds").length, roundCount, "No candidate round is created without CVs");
+  await assert.rejects(() => begin([]), /already been sent/);
   console.log("Location rosters, independent drafts/send guards, uncertainty, corrections and activity-only EOD passed.");
 } finally { Date.now = originalNow; }

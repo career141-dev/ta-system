@@ -73,10 +73,9 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
       e.suggestions.count === 0 && !e.suggestions.emptyReason?.trim();
     add("excel_profiles", "Own Excel Tables profiles", `${base}/hh/links`, e.profiles.count >= MIN_OWN_EXCEL_PROFILES, `${e.profiles.count}/${MIN_OWN_EXCEL_PROFILES}`, e.profiles.at, e.userId, String(e.profiles.count));
   }
-  const hasDirectorCv = e.ready > 0 || e.submitted > 0;
-  const candidateRequired = e.workType === "100%";
-  add("director_cv", e.workType === "100%" ? "Director Review CV" : "Eligible Director Review candidates", `${base}/pipeline/director_review`, !candidateRequired || hasDirectorCv,
-    e.submitted ? `${e.submitted} submitted` : e.ready ? `${e.ready} ready` : candidateRequired ? "Move at least one candidate with a CV to Director Review before sending" : "No eligible candidates today — a link-only activity email is allowed",
+  // 23 Oct: every work type can report activity and research without new CVs.
+  add("director_cv", "Eligible Director Review candidates", `${base}/pipeline/director_review`, true,
+    e.submitted ? `${e.submitted} submitted` : e.ready ? `${e.ready} ready` : "No eligible candidates today \u2014 a link-only activity email is allowed",
     undefined, e.userId);
   const validLink = validateResearchLink(e.chatgptLink);
   add("chatgpt", "ChatGPT research link", `${base}/eod`, validLink.ok && !!e.confirmedAt,
