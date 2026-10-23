@@ -3,7 +3,7 @@
  * burst of more than 15 applications lost all but 15: the cursor moved past
  * the rest and no later run fetched them. Pure — no Graph, no database.
  */
-import { advanceCursor, notYetHandled, oldestFirst, POLL_BATCH, readsByLog } from "../convex/lib/mailCursor";
+import { nextCursor, notYetHandled, oldestFirst, pollBatch, POLL_BATCH, readsByLog, stalledUnreported } from "../convex/lib/mailCursor";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -12,12 +12,38 @@ const eq = (l: string, got: unknown, want: unknown) => {
   console.log(`${ok ? "  ok  " : "  FAIL"} ${l}${ok ? "" : `  got ${JSON.stringify(got)} want ${JSON.stringify(want)}`}`);
 };
 
-console.log("\nwhen the cursor may move");
-eq("everything fetched and handled: it moves", advanceCursor({ fetchedAll: true, found: 3, markReadDisabled: false }), true);
-eq("exactly a batch: it moves", advanceCursor({ fetchedAll: true, found: POLL_BATCH, markReadDisabled: false }), true);
-eq("a burst of 40: it stays, the other 25 are fetched next run", advanceCursor({ fetchedAll: true, found: 40, markReadDisabled: false }), false);
-eq("the mailbox read failed part-way: it stays", advanceCursor({ fetchedAll: false, found: 0, markReadDisabled: false }), false);
-eq("staging leaves mail unread, so it moves as before", advanceCursor({ fetchedAll: true, found: 40, markReadDisabled: true }), true);
+console.log("\nwhere the cursor goes");
+const start = "2026-10-23T09:00:00Z";
+eq("nothing waiting: to the run's start", nextCursor({ fetchedAll: true, waiting: [], runStart: start, markReadDisabled: false }), start);
+eq(
+  "some waiting: to the oldest of them, so nothing is skipped",
+  nextCursor({ fetchedAll: true, waiting: [{ receivedDateTime: "2026-10-06T10:00:00Z" }, { receivedDateTime: "2026-10-05T16:00:00Z" }], runStart: start, markReadDisabled: false }),
+  "2026-10-05T16:00:00Z",
+);
+eq("the mailbox could not be listed in full: left where it is", nextCursor({ fetchedAll: false, waiting: [], runStart: start, markReadDisabled: false }), null);
+eq("staging leaves mail unread, so it moves to the start as before", nextCursor({ fetchedAll: true, waiting: [{ receivedDateTime: "2026-10-05T16:00:00Z" }], runStart: start, markReadDisabled: true }), start);
+
+console.log("\na backlog of 10,000 is worked through, not held at its start (23 Oct)");
+{
+  // linkedin@ from 5 to 23 October: each run lists the backlog, handles the
+  // oldest batch, and the next run starts where the waiting ones begin.
+  const backlog = Array.from({ length: 10_000 }, (_, i) => ({ id: `m${i}`, receivedDateTime: new Date(Date.parse("2026-10-05T16:00:00Z") + i * 60_000).toISOString() }));
+  const size = pollBatch(true);
+  const waiting = backlog.slice(size);
+  const cursor = nextCursor({ fetchedAll: true, waiting, runStart: start, markReadDisabled: false })!;
+  eq("the shared mailboxes take 40 a run", size, 40);
+  eq("the next run starts at the 41st message", cursor, backlog[40].receivedDateTime);
+  eq("…so it lists fewer each run", backlog.filter((m) => m.receivedDateTime >= cursor).length, 9_960);
+  eq("job@ keeps 15 a run", pollBatch(false), POLL_BATCH);
+}
+
+console.log("\nthe desk is told once when a mailbox stops being read");
+const now = Date.parse("2026-10-23T09:00:00Z");
+eq("read 10 minutes ago: fine", stalledUnreported({ okAt: "2026-10-23T08:50:00Z", now }), false);
+eq("not read for 2 hours: tell them", stalledUnreported({ okAt: "2026-10-23T07:00:00Z", now }), true);
+eq("already told about this stall: not again", stalledUnreported({ okAt: "2026-10-23T07:00:00Z", reportedAt: "2026-10-23T08:05:00Z", now }), false);
+eq("recovered, then stalled again: tell them again", stalledUnreported({ okAt: "2026-10-23T07:30:00Z", reportedAt: "2026-10-22T10:00:00Z", now }), true);
+eq("never read by this deployment (staging): nothing to say", stalledUnreported({ okAt: null, now }), false);
 
 console.log("\nthe oldest are handled first");
 const msgs = [

@@ -705,6 +705,16 @@ crons.interval(
   { inboxEmail: "job@career141.com" }
 );
 
+// Tell admins and TA leads when one of the three mailboxes above has not been
+// read for an hour. linkedin@ went unread from 5 to 23 October and nothing on
+// any screen said so (emailAgent.checkMailboxesRead).
+crons.interval(
+  "check-mailboxes-read",
+  { minutes: 30 },
+  internal.communications.emailAgent.checkMailboxesRead,
+  {}
+);
+
 // Poll per-job dedicated email inboxes (configured via job channel settings) every 17 minutes.
 // System inboxes (linkedin@, cv@, job@) are excluded from this run — they have their own cron entries above.
 crons.interval(

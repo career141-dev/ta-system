@@ -24,6 +24,8 @@ const NOTIFICATION_TYPE = v.union(
   v.literal("scoop_received"),
   // A TA Lead gave the TA strategies on a job (Strategy Planner, 8 Oct).
   v.literal("strategy_assigned"),
+  // A shared mailbox not read for an hour (emailAgent.checkMailboxesRead, 23 Oct).
+  v.literal("mailbox_stalled"),
 );
 
 export const create = internalMutation({
