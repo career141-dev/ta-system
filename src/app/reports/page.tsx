@@ -13,6 +13,7 @@ import { sanitizeSpec,
   type ChartKind, type ReportSpec,
 } from "@/lib/reporting";
 import { FAILURE_MESSAGE } from "@/lib/ai";
+import { resolveTaPerformanceQuestion, taPerformanceSpec } from "@/lib/reportAsk";
 import type { AiFailure } from "@/lib/ai";
 import { primeStore } from "@/data/prime";
 import { can, isDeskWide, isTa } from "@/lib/auth";
@@ -42,9 +43,11 @@ export default async function ReportsPage({
   }>;
 }) {
   const sp = await searchParams;
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, alwaysFresh: true });
   const user = await pageUser("report.read");
   const saved = repo.savedReports(user.id);
+  const taChoiceResult = sp.askErr === "ambiguous_ta" ? resolveTaPerformanceQuestion(sp.q ?? "", repo.users()) : null;
+  const taChoices = taChoiceResult?.kind === "ambiguous" ? taChoiceResult.users : [];
   const canUseMasterSheet = isDeskWide(user) || isTa(user);
   const defaultPreset = canUseMasterSheet ? PRESETS[0] : PRESETS.find((preset) => preset.key === "by-client")!;
 
@@ -76,8 +79,15 @@ export default async function ReportsPage({
     title = defaultPreset.label;
   }
 
-  const isMasterSheet = (title === "Master Sheet" || title === "My Master Sheet") && spec.dataset === "openings";
-  if (isMasterSheet && !canUseMasterSheet) {
+  // Old saved Master Sheet links used the openings dataset. Upgrade their row
+  // grain before access checks, including links shared with individual TAs.
+  if ((title === "Master Sheet" || title === "My Master Sheet") && spec.dataset === "openings") {
+    spec = { ...spec, dataset: "ta_jobs" };
+  }
+
+  const isMasterSheet = (title === "Master Sheet" || title === "My Master Sheet") && spec.dataset === "ta_jobs";
+  const isTaPerformance = spec.dataset === "ta_jobs" && !isMasterSheet;
+  if (spec.dataset === "ta_jobs" && !canUseMasterSheet) {
     return (
       <ProblemState
         title="This report is unavailable"
@@ -92,9 +102,22 @@ export default async function ReportsPage({
   // scope or producing a grid with no opening identity to link and save.
   if (isMasterSheet && spec.groupBy) spec = { ...spec, groupBy: null, metrics: [] };
   const ds = datasetFor(spec.dataset);
-  const isPersonalMasterSheet = isMasterSheet && isTa(user);
-  if (isPersonalMasterSheet) title = "My Master Sheet";
-  const result = runReport(spec, isPersonalMasterSheet ? { openingUserId: user.id } : {});
+  const isPersonalMasterSheet = spec.dataset === "ta_jobs" && isTa(user);
+  if (isPersonalMasterSheet && isMasterSheet) title = "My Master Sheet";
+  if (isPersonalMasterSheet) spec = { ...spec, subjectTaId: user.id };
+  if (spec.subjectTaId && (!repo.user(spec.subjectTaId) || !isTa(repo.user(spec.subjectTaId)))) {
+    return <ProblemState title="TA not found" message="Choose a TA from the current team and try again." primaryHref="/reports" primaryLabel="Go to Reports" />;
+  }
+  const result = runReport(spec);
+  const performanceTotals = isTaPerformance && !spec.groupBy && spec.subjectTaId ? [
+    ["Jobs", result.rows.length],
+    ["LinkedIn links", result.rows.reduce((n, row) => n + Number(row.hunted ?? 0), 0)],
+    ["Eye marks", result.rows.reduce((n, row) => n + Number(row.eyeMarked ?? 0), 0)],
+    ["Sent to director", result.rows.reduce((n, row) => n + Number(row.cvsSent ?? 0), 0)],
+    ["Internal shortlists", result.rows.reduce((n, row) => n + Number(row.internalShortlistTotal ?? 0), 0)],
+    ["Interviews", result.rows.reduce((n, row) => n + Number(row.interviewed ?? 0), 0)],
+    ["Placed", result.rows.reduce((n, row) => n + Number(row.placed ?? 0), 0)],
+  ] as const : [];
   const specJson = JSON.stringify(spec);
   const canEditById = isMasterSheet && isDeskWide(user)
     ? Object.fromEntries(result.rows.map((row) => {
@@ -165,6 +188,16 @@ export default async function ReportsPage({
         <p className="mb-6 rounded-xl border border-warn/35 bg-warn-soft px-5 py-3.5 text-[12.5px] text-warn">
           {sp.askErr === "empty" ? (
             "Type a question first — for example “roles open more than 30 days”."
+          ) : sp.askErr === "ambiguous_ta" ? (
+            <>Several TAs match that name. Choose one: {taChoices.map((ta) => (
+                <Link key={ta.id} className="ml-2 underline" href={`/reports?${new URLSearchParams({ spec: JSON.stringify(taPerformanceSpec(ta.id)), name: `${ta.name} performance` })}`}>
+                  {ta.name}
+                </Link>
+              ))}</>
+          ) : sp.askErr === "unknown_ta" ? (
+            "No TA matches that name. Use their full name and try again."
+          ) : sp.askErr === "ta_access" ? (
+            "You can request your own TA performance report."
           ) : (
             <>
               {FAILURE_MESSAGE[sp.askErr as AiFailure] ?? "That did not come back as a report."}{" "}
@@ -309,6 +342,16 @@ export default async function ReportsPage({
             grouped={Boolean(spec.groupBy)}
           />
 
+          {performanceTotals.length > 0 && <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+            {performanceTotals.map(([label, value]) => <div key={label} className="rounded-xl border border-rule bg-surface p-3">
+              <div className="text-[11px] text-ink-soft">{label}</div>
+              <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+            </div>)}
+          </div>}
+          {isTaPerformance && spec.period !== "all" && <p className="mb-4 text-[12px] text-ink-soft">
+            Activity counts use the selected period. Job status and commercial values show their current values. Older eye marks and shortlist decisions without a recorded date appear in the “date unknown” columns.
+          </p>}
+
           {groupLabel ? (
             <Picture
               columns={result.columns}
@@ -325,7 +368,7 @@ export default async function ReportsPage({
             // Nothing to compare across, so show the shape of the one number
             // that is worth looking at — the spread of notice periods says more
             // than a column of them.
-            histoColumn && (
+            !isTaPerformance && histoColumn && (
               <Histogram
                 values={result.rows.map((r) => Number(r[histoColumn.key])).filter((n) => Number.isFinite(n))}
                 label={histoColumn.label}
@@ -343,7 +386,7 @@ export default async function ReportsPage({
                 {result.truncated && ` of ${result.matched} — raise the limit to see the rest`}
               </span>
             </div>
-            {isMasterSheet ? (
+            {(isMasterSheet || isTaPerformance) && !spec.groupBy ? (
               <MasterSheetTable
                 columns={result.columns}
                 rows={result.rows}

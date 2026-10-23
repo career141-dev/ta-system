@@ -2735,6 +2735,7 @@ export default defineSchema({
     title: v.optional(v.union(v.string(), v.null())),
     company: v.optional(v.union(v.string(), v.null())),
     isEyeMarked: v.boolean(),
+    eyeMarkedAt: v.optional(v.union(v.number(), v.null())),
     phoneNumber: v.optional(v.union(v.string(), v.null())),
     phoneSource: v.optional(v.union(v.string(), v.null())),
     sourcingChannel: v.string(),
@@ -3061,6 +3062,7 @@ export default defineSchema({
       outcome: v.union(
         v.literal("shortlisted"), v.literal("rejected"), v.literal("hold"),
       ),
+      decidedAt: v.optional(v.number()),
       note: v.union(v.string(), v.null()),
       /** True when a person confirmed it, not the parse alone. */
       confirmed: v.boolean(),

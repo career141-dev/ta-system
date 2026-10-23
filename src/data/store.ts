@@ -2346,7 +2346,10 @@ const rawRepo = {
   toggleEyeMark(entryId: Id) {
     mutate((db) => {
       const e = db.linkVault.find((l) => l.id === entryId);
-      if (e) e.isEyeMarked = !e.isEyeMarked;
+      if (e) {
+        e.isEyeMarked = !e.isEyeMarked;
+        e.eyeMarkedAt = e.isEyeMarked ? Date.now() : null;
+      }
     });
   },
 
@@ -2923,7 +2926,7 @@ const rawRepo = {
 
       if (d.outcome === "hold") {
         held += 1;
-        applied.push(d);
+        applied.push({ ...d, decidedAt: Date.now() });
         continue;
       }
 
@@ -2948,7 +2951,7 @@ const rawRepo = {
         force: true,
       });
       if (res.ok) {
-        applied.push(d);
+        applied.push({ ...d, decidedAt: Date.now() });
         if (d.outcome === "shortlisted") moved += 1;
         else rejected += 1;
       }
