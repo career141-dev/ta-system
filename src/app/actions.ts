@@ -22,6 +22,7 @@ import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
 import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
+import { writeCandidateCall } from "@/lib/candidates/callWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -447,20 +448,16 @@ export async function confirmShortlist(formData: FormData) {
 
 export async function logCall(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
-  repo.recordCall({
-    applicationId: appId,
+  const result = await writeCandidateCall(user, openingId, appId, {
     kind: String(formData.get("kind")) as CallKind,
     outcome: String(formData.get("outcome")) as CallOutcome,
     body: String(formData.get("body") ?? ""),
-    structured: null,
-    source: "manual",
-    recordedBy: user.id,
-  });
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Call logged.");
+  }, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
+  await back(result.message);
 }
 
 /** What the match found, as the start of the message after adding a profile. */
