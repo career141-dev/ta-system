@@ -22,7 +22,7 @@ export const PARTNER_READ_TABLES = [
   "nvidiaTokenLogs", "tokenStatsCache", "dailyTokenStats", "messageTemplates",
   "whatsappNumbers", "cvScans", "locationResolutionCache", "criteriaExpansionCache",
   "cvScanResults", "mailboxScanJobResults", "mailboxCheckpoints", "sept5ReextractionState",
-  "clients", "jobPosts", "briefs", "intakeItems", "linkVault", "researchReports",
+  "clients", "jobPosts", "briefs", "intakeItems", "linkVault", "refereeCalls", "researchReports",
   "benchmarks", "profileSuggestions", "sourcingChat", "jdChat", "savedSearches",
   "savedReports", "matchRuns", "matchExclusions", "strategies", "strategyAssignments",
   "reviewRounds", "shortlistDecisionReviews", "eodEmailCopies", "callFeedback", "taAlerts", "taOutreach",

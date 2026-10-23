@@ -680,6 +680,8 @@ export interface EodEmailCopy {
   applicationIds: Id[];
   rows: ShortlistRow[];
   effort: EffortRow;
+  /** Referee calls exactly as they appeared in this sent version. */
+  refereeCalls?: RefereeCallEmailRow[];
   /** The composer's recipient state, so a resend rebuilds the lines the same way. */
   extraTo: string[];
   extraCc: string[];
@@ -710,6 +712,37 @@ export interface Referee {
   contactable: boolean;
   lastContactedAt: number | null;
   extractedAt: number;
+}
+
+export type RefereeCallResult = "positive" | "negative";
+
+/** One manually logged attempt to obtain a headhunting contact number. */
+export interface RefereeCall {
+  id: Id;
+  openingId: Id;
+  workLocationId?: string;
+  addedBy: Id;
+  date: string;
+  company: string;
+  referral: string;
+  contactNumber?: string;
+  feedback: string;
+  lookingFor?: string | null;
+  result?: RefereeCallResult | null;
+  refereeId?: Id | null;
+  candidateId?: Id | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** The compact form retained with and rendered into an EOD email. */
+export interface RefereeCallEmailRow {
+  id?: Id;
+  company: string;
+  referral: string;
+  contactNumber: string;
+  feedback: string;
+  result: RefereeCallResult;
 }
 
 // ─── Headhunting (spec §4.5) ─────────────────────────────────────────────────
@@ -1583,6 +1616,7 @@ export interface Database {
   pipelineEvents: PipelineEvent[];
   reviewRounds: ReviewRound[];
   linkVault: LinkVaultEntry[];
+  refereeCalls: RefereeCall[];
   alerts: Alert[];
   savedSearches: SavedSearch[];
   savedReports: SavedReport[];

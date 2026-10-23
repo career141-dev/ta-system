@@ -717,6 +717,7 @@ export const TABLES: Record<string, TableModel> = {
   })(),
   reviewRounds: identity("reviewRounds", ["messageId", "conversationId", "internetMessageId", "setNumber", "trackedAt", "returnedAt", "replyBody", "researchLink"]),
   linkVault: identity("linkVault", ["name", "title", "company", "phoneNumber", "phoneSource", "candidateId", "capture"]),
+  refereeCalls: identity("refereeCalls", ["lookingFor", "result", "refereeId", "candidateId"]),
   savedSearches: identity("savedSearches", ["openingId", "lastRunAt", "lastResultCount", "intent", "turns", "referenceProfile"]),
   savedReports: identity("savedReports", []),
   researchReports: identity("researchReports", ["clientId"]),

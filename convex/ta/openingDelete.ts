@@ -67,6 +67,7 @@ const OPENING_CHILDREN: [table: string, index: string, field: string][] = [
   ["jobPosts", "by_opening", "openingId"],
   ["briefs", "by_opening", "openingId"],
   ["linkVault", "by_opening", "openingId"],
+  ["refereeCalls", "by_opening", "openingId"],
   ["researchReports", "by_opening", "openingId"],
   ["benchmarks", "by_opening", "openingId"],
   ["profileSuggestions", "by_opening", "openingId"],
