@@ -150,6 +150,24 @@ export interface CandidatePayload {
     answers: { question: string; answer: string }[];
     notes: { id: string; note: string; byUserId: string; byName: string; byRole: string; at: number; canRemove: boolean }[];
   };
+  callAccess: {
+    canLog: boolean;
+    defaultKind: "pre_interview" | "post_offer" | "ad_hoc";
+  };
+  aiCallResults: {
+    id: string;
+    status: string;
+    calledAt: number | null;
+    durationSeconds: number | null;
+    consent: string | null;
+    currentSalary: number | null;
+    currentSalaryCurrency: string | null;
+    expectedSalary: number | null;
+    expectedSalaryCurrency: string | null;
+    noticePeriodDays: number | null;
+    transcript: string;
+    endedReason: string | null;
+  }[];
   tabs: { key: CandidateTab; label: string; count: number | null }[];
   cv: { available: boolean; fileName: string | null };
   history: { id: string; label: string; detail: string | null; at: number; actorName: string | null }[];
@@ -170,6 +188,17 @@ export interface CandidateProfileBody {
 }
 
 export interface CandidateProfileResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface CandidateCallBody {
+  kind: "pre_interview" | "post_interview" | "post_offer" | "ad_hoc";
+  outcome: "reached" | "no_answer" | "rescheduled" | "declined";
+  body: string;
+}
+
+export interface CandidateCallResult {
   ok: boolean;
   message: string;
 }

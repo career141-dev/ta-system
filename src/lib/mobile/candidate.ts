@@ -273,6 +273,12 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       answers: Object.entries(app.answers).map(([question, answer]) => ({ question: questions.get(question) ?? question, answer })),
       notes: reviewNotes,
     },
+    callAccess: {
+      canLog: canManageInterviews,
+      defaultKind: repo.interviews(app.id).length > 0 ? "pre_interview" : app.stage === "offer" ? "post_offer" : "ad_hoc",
+    },
+    // The route fills this from ta/voice:callsFor on the connected Convex store.
+    aiCallResults: [],
     tabs: [
       { key: "cv", label: TAB_LABEL.cv, count: null },
       { key: "prepared", label: TAB_LABEL.prepared, count: null },
