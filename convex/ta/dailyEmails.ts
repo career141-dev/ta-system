@@ -204,8 +204,6 @@ export const begin = internalMutation({
           : a.currentStage === "second_shortlist" && (!worker(user) || a.ownerTaId === user._id)
       ));
       if (!sameCandidateList(args.applicationIds, eligible.map(a => a._id))) throw new Error("The candidate list changed. Reload, review the updated list and send again.");
-      if (!location && args.submissionType === "eod" && currentWorkType === "100%" && !args.applicationIds.length)
-        throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
       if (day && args.submissionType === "eod") {
         const blockers = setup!.eodChecks.filter(c => !["director_cv", "chatgpt", "midday_email"].includes(c.key.split(":")[0]) && c.status !== "complete" && !c.exception);
         if (blockers.length) throw new Error(`Complete Today's Checks: ${blockers.map(c => c.label).join("; ")}`);

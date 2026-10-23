@@ -1302,8 +1302,6 @@ export const beginMail = internalMutation({
     await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId)!;
     if (day.finishedAt !== undefined && entry.workType === "100%") throw new Error("The workday clock has stopped. Change an unfinished position to Follow-up or Add-on, or edit and resend its saved EOD.");
-    if (!args.applicationIds.length && entry.workType === "100%")
-      throw new Error("Include at least one CV from Director Review before sending the end-of-day email.");
     const current = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([current]).filter(c => !c.key.startsWith("mail:"));
     if (blockers.length) throw new Error(`Complete Today's Checks before sending: ${blockers.map(c => c.label).join("; ")}.`);

@@ -287,7 +287,7 @@ try {
   assert.equal(await suggestionsBlocked(), false, "Select/not-selected decisions complete human review");
   await db.patch("requiredApp:ta:job1", { cvFileId: undefined });
   await db.patch("requiredCandidate:ta:job1", { cvUploadId: undefined });
-  assert.ok((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("Director Review CV")), "A stage label or no-candidate explanation cannot replace an actual linked CV");
+  assert.equal((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).ok, true, "100% preflight permits activity-only email without linked CVs");
   await db.patch("requiredApp:ta:job1", { cvFileId: "synthetic-cv" });
   await db.patch("requiredCandidate:ta:job1", { cvUploadId: "synthetic-cv" });
   // One eligible own profile is sufficient when all other send requirements pass.
@@ -311,7 +311,7 @@ try {
   put("applications", { _id: "temporary:unreviewed", jobId: "job1", candidateId: "temporary:candidate", currentStage: "new_cvs", sourceChannel: "SCOOP", createdAt: clock, lastStageChangedAt: clock });
   assert.ok((await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true })).blockers.some((b: string) => b.includes("LinkedIn")), "A LinkedIn link is compulsory even when other requirements pass");
   await assert.rejects(() => run("beginMail", { actorId: "ta", jobId: "job1", applicationIds: ["requiredApp:ta:job1"], subject: "Synthetic update", sentTo: "director@example.invalid" }), /LinkedIn/);
-  await assert.rejects(() => run("beginMail", { actorId: "ta", jobId: "job1", applicationIds: [], subject: "Synthetic update", sentTo: "director@example.invalid" }), /at least one CV/);
+  await assert.rejects(() => run("beginMail", { actorId: "ta", jobId: "job1", applicationIds: [], subject: "Synthetic update", sentTo: "director@example.invalid" }), /LinkedIn/);
   tables.set("jobPosts", savedPosts);
   // Missing research fields and unrelated candidate work do not block an EOD
   // that contains a Director Review CV and has human-reviewed Suggestions.
@@ -841,8 +841,10 @@ try {
     await run("taskException", { ...reasonArgs, key: `${prefix}:exceptionJob`, reason: `${prefix} unavailable today` });
   }
   assert.equal(await run("researchExceptionAllowed", { actorId: "exceptionTa", jobId: "exceptionJob" }), true);
-  assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, false, "A reason cannot substitute for a CV");
-  await assert.rejects(() => run("beginMail", { actorId: "exceptionTa", jobId: "exceptionJob", applicationIds: [], subject: "Synthetic", sentTo: "director@example.invalid" }), /at least one CV/);
+  assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, true, "100% activity email requires no CV when other checks pass");
+  const activityMail = await run("beginMail", { actorId: "exceptionTa", jobId: "exceptionJob", applicationIds: [], subject: "Synthetic", sentTo: "director@example.invalid" });
+  assert.ok(activityMail.id, "100% activity-only mail can be reserved without CVs");
+  await run("mailResult", { id: activityMail.id, status: "failed", error: "Synthetic failure" });
   put("candidates", { _id: "exceptionCandidate", fullName: "Synthetic", cvUploadId: "synthetic-cv" });
   put("applications", { _id: "exceptionApp", jobId: "exceptionJob", ownerTaId: "exceptionTa", workdayReviewedAt: clock, candidateId: "exceptionCandidate", currentStage: "second_shortlist", cvFileId: "synthetic-cv", lastStageChangedAt: clock });
   assert.equal((await run("emailPreflight", { actorId: "exceptionTa", jobId: "exceptionJob", link: "", confirmed: false })).ok, true);

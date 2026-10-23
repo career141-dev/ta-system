@@ -59,23 +59,19 @@ the JD, LinkedIn, Suggestions or Excel setup requirements. They track only
 eligible Director Review candidates, the confirmed ChatGPT link and the EOD
 email. Leads see the actor, time and event history.
 
-100% requires a Director Review CV or a CV already submitted during that work
-session. Follow-up and Add-on show their eligible Director Review count, but
-zero candidates is valid and does not block the EOD email. Add-on includes only
-the TA's candidates tagged Add-on and progressed to Director Review during the
-current Add-on session. General 100% candidate work remains grouped; Director
-Review CV readiness is a separate sidebar check. Each selected/carried job
-needs its daily email and confirmed ChatGPT research share link. Returning
-emails can follow the 100% email after the clock stops.
+All work types, including 100%, allow an activity-only EOD with zero candidates.
+A reason for having no CVs is not required. Add-on includes only the TA's candidates tagged
+Add-on and progressed to Director Review during the current Add-on session.
+Each selected/carried job needs its daily email and confirmed ChatGPT research
+share link. Returning emails can follow the 100% email after the clock stops.
 
 100% EOD sending requires confirmed review of the approved JD, a valid LinkedIn
 job, post or Recruiter project link, completed human Suggestions review, one own
-Excel profile, a Director Review CV, and a confirmed ChatGPT research share
-link. Follow-up and Add-on require the confirmed ChatGPT link and retain
-duplicate/uncertain-mail safeguards without repeating first-day setup. An empty
-activity email is allowed only for Follow-up and Add-on; it keeps the normal
-effort section and ChatGPT link without a candidate table or attachments. When
-candidates are included, selected-candidate validation and successful CV
+Excel profile, and a confirmed ChatGPT research share link. Follow-up and Add-on
+require the confirmed ChatGPT link without repeating first-day setup. All modes
+retain duplicate/uncertain-mail safeguards. An empty activity email keeps the
+normal effort section and ChatGPT link without a candidate table or attachments.
+When candidates are included, selected-candidate validation and successful CV
 attachment preparation remain enforced.
 The composer fills the ChatGPT link from today's saved confirmation. Editing
 that link clears confirmation, and revised emails require confirmation again.
