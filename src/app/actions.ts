@@ -17,6 +17,7 @@ import {
   type OpeningWriteDeps,
 } from "@/lib/openings/writes";
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
+import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -197,82 +198,17 @@ async function authorize(formData: FormData, capability: Capability, ref: Ref = 
 
 export async function moveStage(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const stage = String(formData.get("stage")) as Stage;
   const openingId = String(formData.get("openingId"));
   const picked = String(formData.get("reason") ?? "");
   const other = String(formData.get("reasonOther") ?? "").trim();
   const reason = picked === "Other" ? other || "Other" : other ? `${picked} — ${other}` : picked;
-
-  // The collision lock is checked in `authorize`, alongside everything else.
-
-  // Director and client shortlists say somebody approved this person. Moving
-  // there by hand needs that authority — otherwise the reviewer's reply is the
-  // route, recorded on the end-of-day page (audit finding 12).
-  const decides =
-    stage === "director_shortlist" ? "decide.director" : stage === "client_shortlist" ? "decide.client" : null;
-  if (decides) {
-    const verdict = can(user, decides, {
-      openingId,
-      assignment: repo.assignmentFor(openingId, user.id) ?? null,
-    });
-    if (!verdict.ok) await fail(verdict.message);
-  }
-
-  // A rejection without a reason is a row nobody can learn from. The dedicated
-  // Reject form asked for one; the generic menu let you skip it.
-  if ((stage === "rejected" || stage === "dropped_out") && !reason.trim()) {
-    await fail(stage === "rejected" ? "Say why they were rejected." : "Say why they dropped out.");
-  }
-
-  // Into TA Follow-up from an unclaimed stage (AI Follow-up, New CVs, Database
-  // matches) is a shortlist: the TA takes the person on, with their set number,
-  // exactly as the Shortlist button does. The plain move left them with no
-  // owner (review of PR #11, 22 September).
-  const from = repo.application(appId)?.stage;
-  if (stage === "ta_follow_up" && (from === "ai_follow_up" || from === "new_cv" || from === "matched")) {
-    if (isConvex()) {
-      let r: Awaited<ReturnType<typeof backend.shortlist>> | null = null;
-      try {
-        r = await backend.shortlist({ id: user.id }, appId);
-      } catch (e) {
-        await fail(backendMessage(e, "They could not be shortlisted."));
-      }
-      await afterBackendWrite(openingId);
-      if (r && !r.ok) {
-        await fail(`Already shortlisted by ${userName(r.ownerTaId)}.`);
-      }
-      await done("Shortlisted — in TA Follow-up.");
-    }
-    repo.shortlist(appId, user.id);
-    revalidatePath(`/openings/${openingId}`, "layout");
-    await done("Shortlisted — in TA Follow-up.");
-  }
-
-  if (isConvex()) {
-    // The backend owns the pipeline: its state machine checks the move, stops
-    // any running follow-up on the way out, and (by design) sends nothing on
-    // the way in — follow-up is sent from the candidate's Chat tab.
-    // Into TA Follow-up with nobody's name on them, the backend claims them
-    // for whoever moved them, in the same transaction (1 Oct, one call since
-    // 2 Oct): the loser of a race is told who has them, not "Moved".
-    let r: Awaited<ReturnType<typeof backend.moveStage>> | null = null;
-    try {
-      r = await backend.moveStage({ id: user.id }, appId, stage, reason || undefined);
-    } catch (e) {
-      await fail(backendMessage(e, "That move could not be made."));
-    }
-    await afterBackendWrite(openingId);
-    if (r?.ownerTaId) await fail(`Already shortlisted by ${userName(r.ownerTaId)}.`);
-    await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
-  }
-  const unowned = stage === "ta_follow_up" && !repo.application(appId)?.ownerTaId;
-  const res = repo.moveStage(appId, stage, user.id, reason || undefined);
-  if (!res.ok) await fail(res.message);
-  if (unowned) repo.shortlist(appId, user.id);
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Moved to ${STAGE_LABEL[stage] ?? stage}.`);
+  if (!appId) await fail("Something on this form was missing. Reload the page and try again.");
+  const result = await movePipelineCandidate(user, openingId, appId, stage, reason, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /** A user's name for a message, or a fair stand-in when they are not loaded. */

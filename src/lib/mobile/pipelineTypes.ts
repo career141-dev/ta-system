@@ -77,3 +77,10 @@ export interface PipelineUploadResult {
   uploadId?: string;
 }
 
+export interface PipelineMoveResult {
+  ok: boolean;
+  message: string;
+  moved: number;
+  notMoved: number;
+}
+

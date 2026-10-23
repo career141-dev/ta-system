@@ -12,6 +12,8 @@ process.chdir(tmp);
 const { repo } = await import("@/data/store");
 const { mobilePipeline, MOBILE_PIPELINE_STAGES } = await import("@/lib/mobile/pipeline");
 const { mayUploadHeadHuntCv, queueHeadHuntCv } = await import("@/lib/openings/hhUpload");
+const { MOBILE_DIRECT_MOVE_STAGES, movePipelineCandidate, movePipelineCandidates } = await import("@/lib/openings/pipelineWrites");
+const { ALLOWED_TRANSITIONS } = await import("@/lib/pipeline");
 const { seatFor, visibleToSeat } = await import("@/lib/visibility");
 repo.reset();
 
@@ -96,5 +98,47 @@ test("the shared upload refuses invalid files before storage", async () => {
   const wrong = await queueHeadHuntCv(admin, opening.id, undefined, file("cv.exe", 12, "application/octet-stream"), deps);
   assert.equal(wrong.ok, false);
   assert.match(!wrong.ok ? wrong.message : "", /not a PDF or a Word document/);
+});
+
+test("the shared move keeps website permissions, reasons and bulk results", async () => {
+  const admin = synthetic("admin");
+  let reprimes = 0;
+  const deps = {
+    convexQuery: async <T,>() => undefined as T,
+    convexMutation: async <T,>() => undefined as T,
+    resetStore: () => undefined,
+    revalidatePath: () => undefined,
+    primeApplications: async () => {
+      reprimes++;
+    },
+  };
+  const app = repo
+    .openings()
+    .flatMap((opening) => repo.applications(opening.id))
+    .find((row) =>
+      MOBILE_DIRECT_MOVE_STAGES.some(
+        (next) => next !== "rejected" && next !== "dropped_out" && ALLOWED_TRANSITIONS[row.stage]?.includes(next),
+      ),
+    );
+  assert(app, "the seed has a directly movable application");
+  const target = MOBILE_DIRECT_MOVE_STAGES.find(
+    (next) => next !== "rejected" && next !== "dropped_out" && ALLOWED_TRANSITIONS[app.stage]?.includes(next),
+  )!;
+
+  const missingReason = await movePipelineCandidate(admin, app.openingId, app.id, "rejected", "", deps);
+  assert.equal(missingReason.ok, false);
+  assert.match(!missingReason.ok ? missingReason.message : "", /Say why/);
+
+  const wrongOpening = repo.openings().find((opening) => opening.id !== app.openingId)!;
+  const crossed = await movePipelineCandidate(admin, wrongOpening.id, app.id, target, "", deps);
+  assert.equal(crossed.ok, false);
+  assert.match(!crossed.ok ? crossed.message : "", /different opening/);
+
+  const result = await movePipelineCandidates(admin, app.openingId, [app.id, "missing-application"], target, "", deps);
+  assert.equal(result.ok, 1);
+  assert.equal(result.notOk, 1);
+  assert.equal(reprimes, 1);
+  assert.equal(repo.application(app.id)?.stage, target);
+  assert.match(result.message, /^1 moved to /);
 });
 
