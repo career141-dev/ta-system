@@ -3,7 +3,7 @@
 // machine with the source email kept as evidence.
 
 import { v } from "convex/values";
-import { internalAction, internalMutation, internalQuery, type ActionCtx, type MutationCtx } from "../_generated/server";
+import { internalAction, internalMutation, internalQuery, type ActionCtx, type MutationCtx, type QueryCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { executeStageTransition, type PipelineStage } from "../pipeline/pipelineStateMachine";
@@ -105,6 +105,33 @@ export const existing = internalQuery({
     .withIndex("by_source_message", (q) => q.eq("sourceMessageId", args.sourceMessageId)).first(),
 });
 
+/**
+ * The review round a TA's own copy of an end-of-day email belongs to: the same
+ * subject, from the TA who sent the round, within an hour of it. Exactly one,
+ * or none.
+ */
+async function roundForCopy(
+  ctx: QueryCtx,
+  args: { subject: string; fromAddress: string; receivedAt: number },
+): Promise<Doc<"reviewRounds"> | null> {
+  const subject = args.subject.trim().replace(/\s+/g, " ").toLowerCase();
+  const candidates = [];
+  for (const candidate of (await ctx.db.query("reviewRounds").collect()).filter((row) => row.status !== "returned")) {
+    if (candidate.subject.trim().replace(/\s+/g, " ").toLowerCase() !== subject) continue;
+    if (Math.abs(args.receivedAt - candidate.sentAt) > 60 * 60 * 1000) continue;
+    const sender = await ctx.db.get(candidate.sentBy);
+    const addresses = [normalAddress(sender?.email), normalAddress(sender?.routingEmail)].filter(Boolean);
+    if (addresses.includes(normalAddress(args.fromAddress))) candidates.push(candidate);
+  }
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+/** Read-only: the round a historical copy would teach, for a dry run. */
+export const findRoundForCopy = internalQuery({
+  args: { subject: v.string(), fromAddress: v.string(), receivedAt: v.number() },
+  handler: async (ctx, args) => (await roundForCopy(ctx, args))?._id ?? null,
+});
+
 /** The copy of the original email received at shortlists@ teaches the round its Graph thread. */
 export const attachRoundTransport = internalMutation({
   args: {
@@ -120,18 +147,7 @@ export const attachRoundTransport = internalMutation({
     let round = args.token
       ? await ctx.db.query("reviewRounds").withIndex("by_token", (q) => q.eq("token", args.token!)).first()
       : null;
-    if (!round) {
-      const subject = args.subject.trim().replace(/\s+/g, " ").toLowerCase();
-      const candidates = [];
-      for (const candidate of (await ctx.db.query("reviewRounds").collect()).filter((row) => row.status !== "returned")) {
-        if (candidate.subject.trim().replace(/\s+/g, " ").toLowerCase() !== subject) continue;
-        if (Math.abs(args.receivedAt - candidate.sentAt) > 60 * 60 * 1000) continue;
-        const sender = await ctx.db.get(candidate.sentBy);
-        const addresses = [normalAddress(sender?.email), normalAddress(sender?.routingEmail)].filter(Boolean);
-        if (addresses.includes(normalAddress(args.fromAddress))) candidates.push(candidate);
-      }
-      if (candidates.length === 1) round = candidates[0];
-    }
+    if (!round) round = await roundForCopy(ctx, args);
     if (!round) return { attached: false };
     const sender = await ctx.db.get(round.sentBy);
     await ctx.db.patch(round._id, {
@@ -257,12 +273,46 @@ export const requireReview = internalMutation({
   },
 });
 
+/**
+ * What a reply says and whether it can be applied without a person: matched to
+ * exactly one round by its thread (not by subject alone), from the recorded
+ * Director or client contact, read without doubt, and nobody it names would
+ * be left where they are or taken back off a shortlist. One judgement for the
+ * live reader, the repair's dry run and its real run.
+ */
+function assessReply(message: { subject: string; body: string; conversationId?: string | null; inReplyTo?: string | null }, contexts: DecisionContext[]) {
+  const matched = matchReplyRound(message, contexts as ReplyRound[]);
+  const chosen = matched.round ? contexts.find((round) => round.id === matched.round!.id) ?? null : null;
+  const parsed = parseShortlistReply(message.body, chosen?.roster ?? []);
+  const reviewReasons = [...parsed.reviewReasons];
+  if (!chosen) reviewReasons.push(matched.note);
+  if (chosen && !chosen.senderAuthorized) reviewReasons.push("The sender is not the recorded Director or client contact.");
+  if (matched.method === "subject") reviewReasons.push("This legacy reply matched only by subject and needs confirmation.");
+  // Anybody the reply would leave where they are, or would take back off a
+  // shortlist, is for a person: an automatic read never undoes a move.
+  for (const decision of chosen ? parsed.decisions : []) {
+    const row = chosen!.roster.find((candidate) => candidate.applicationId === decision.applicationId);
+    if (!row) continue;
+    const how = placement(chosen!.kind, row.stage, decision.outcome, false);
+    if (how === "left" && decision.outcome === "rejected" && row.stage === SHORTLIST_STAGE[chosen!.kind]) {
+      reviewReasons.push(`${row.name} is already in ${chosen!.kind === "director" ? "Director" : "Client"} Shortlist, but the reply says not selected. Confirm to take them off.`);
+    } else if (how === "left") {
+      reviewReasons.push(`${row.name} is at ${toTaStage(row.stage).replace(/_/g, " ")}, so the reply's ${decision.outcome === "rejected" ? "not selected" : decision.outcome} is not applied there.`);
+    }
+  }
+  const clear = Boolean(chosen?.senderAuthorized) && parsed.autoSafe && reviewReasons.length === 0
+    && matched.method !== "none" && matched.method !== "subject";
+  return { matched, chosen, parsed, reviewReasons: [...new Set(reviewReasons)], clear };
+}
+
 export const processReply = internalAction({
   args: {
     sourceMessageId: v.id("mailIntakeMessages"), graphMessageId: v.string(),
     conversationId: v.optional(v.string()), internetMessageId: v.optional(v.string()), inReplyTo: v.optional(v.string()),
     receivedAt: v.number(), fromAddress: v.string(), subject: v.string(), body: v.string(),
     historical: v.optional(v.boolean()),
+    /** A historical reply that reads clearly is applied, not queued (reconcileFromMailbox). */
+    applyClear: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ reviewId: string; status: "auto_applied" | "review_required"; note: string; openingId?: string; candidateIds: string[] }> => {
     const prior = await ctx.runQuery(internal.mailIntake.decisions.existing, { sourceMessageId: args.sourceMessageId });
@@ -274,25 +324,7 @@ export const processReply = internalAction({
       candidateIds: [],
     };
     const contexts: DecisionContext[] = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: args.fromAddress });
-    const matched = matchReplyRound(args, contexts as ReplyRound[]);
-    const chosen = matched.round ? contexts.find((round) => round.id === matched.round!.id) : null;
-    const parsed = parseShortlistReply(args.body, chosen?.roster ?? []);
-    const reviewReasons = [...parsed.reviewReasons];
-    if (!chosen) reviewReasons.push(matched.note);
-    if (chosen && !chosen.senderAuthorized) reviewReasons.push("The sender is not the recorded Director or client contact.");
-    if (matched.method === "subject") reviewReasons.push("This legacy reply matched only by subject and needs confirmation.");
-    // Anybody the reply would leave where they are, or would take back off a
-    // shortlist, is for a person: an automatic read never undoes a move.
-    for (const decision of chosen ? parsed.decisions : []) {
-      const row = chosen!.roster.find((candidate) => candidate.applicationId === decision.applicationId);
-      if (!row) continue;
-      const how = placement(chosen!.kind, row.stage, decision.outcome, false);
-      if (how === "left" && decision.outcome === "rejected" && row.stage === SHORTLIST_STAGE[chosen!.kind]) {
-        reviewReasons.push(`${row.name} is already in ${chosen!.kind === "director" ? "Director" : "Client"} Shortlist, but the reply says not selected. Confirm to take them off.`);
-      } else if (how === "left") {
-        reviewReasons.push(`${row.name} is at ${toTaStage(row.stage).replace(/_/g, " ")}, so the reply's ${decision.outcome === "rejected" ? "not selected" : decision.outcome} is not applied there.`);
-      }
-    }
+    const { matched, chosen, parsed, reviewReasons, clear } = assessReply(args, contexts);
     const decisions = parsed.decisions.map((decision) => ({ ...decision, applicationId: decision.applicationId as Id<"applications"> }));
     const reviewId = await ctx.runMutation(internal.mailIntake.decisions.createReview, {
       sourceMessageId: args.sourceMessageId, graphMessageId: args.graphMessageId,
@@ -301,18 +333,19 @@ export const processReply = internalAction({
       replyText: args.body.slice(0, 20_000), roundId: chosen?.id as Id<"reviewRounds"> | undefined,
       openingId: chosen?.openingId as Id<"jobs"> | undefined, matchMethod: matched.method,
       matchNote: matched.note, senderAuthorized: chosen?.senderAuthorized ?? false,
-      decisions, reviewReasons: [...new Set(reviewReasons)], historical: args.historical ?? false,
+      decisions, reviewReasons, historical: args.historical ?? false,
     });
-    const automatic = process.env.C141_SHORTLIST_AUTO_APPLY === "on"
-      && !args.historical && Boolean(chosen?.senderAuthorized) && parsed.autoSafe
-      && reviewReasons.length === 0
-      && matched.method !== "none" && matched.method !== "subject";
+    // A historical reply is applied only when the owner's repair asks for it
+    // (reconcileFromMailbox with applyClear, 23 October) and it reads clearly.
+    const automatic = clear && (args.historical ? args.applyClear === true : process.env.C141_SHORTLIST_AUTO_APPLY === "on");
     if (automatic) {
       const result: ApplyResult = await ctx.runMutation(internal.mailIntake.decisions.applyAutomatic, { reviewId });
       return { reviewId: reviewId as string, status: "auto_applied", note: `${result.moved} shortlisted, ${result.rejected} rejected; ${result.stale} stale.`, openingId: chosen?.openingId, candidateIds: chosen?.roster.map((row) => row.candidateId).filter(Boolean) as string[] ?? [] };
     }
     await ctx.runMutation(internal.mailIntake.decisions.requireReview, { reviewId });
-    if (chosen) {
+    // A historical catch-up queues dozens at once; they are on Shortlist
+    // decisions, without a notification each.
+    if (chosen && !args.historical) {
       for (const userId of [...new Set([chosen.sentBy, chosen.taLeadId].filter((id): id is string => Boolean(id)))]) {
         await ctx.runMutation(internal.ta.notifications.create, {
           userId, type: "candidate_replied", title: "Shortlist reply needs review",
@@ -321,7 +354,7 @@ export const processReply = internalAction({
         });
       }
     }
-    return { reviewId: reviewId as string, status: "review_required", note: [...new Set(reviewReasons)].join(" ") || "Check the proposed decisions.", openingId: chosen?.openingId, candidateIds: chosen?.roster.map((row) => row.candidateId).filter(Boolean) as string[] ?? [] };
+    return { reviewId: reviewId as string, status: "review_required", note: reviewReasons.join(" ") || "Check the proposed decisions.", openingId: chosen?.openingId, candidateIds: chosen?.roster.map((row) => row.candidateId).filter(Boolean) as string[] ?? [] };
   },
 });
 
@@ -452,6 +485,10 @@ async function reconcileOne(
   m: {
     mailbox: string; graphMessageId: string; receivedAt: number; fromAddress: string; subject: string;
     sourceMessageId: Id<"mailIntakeMessages"> | null; dryRun: boolean;
+    /** Apply a reply that reads clearly instead of queueing it. */
+    applyClear?: boolean;
+    /** Dry run only: threads the copies would teach, round id by conversation. */
+    taught?: Map<string, string>;
   },
 ): Promise<Record<string, unknown>> {
   if (m.sourceMessageId) {
@@ -479,22 +516,28 @@ async function reconcileOne(
     historical: true,
   };
   if (m.dryRun) {
-    const contexts: DecisionContext[] = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: base.fromAddress });
-    const matched = matchReplyRound(base, contexts as ReplyRound[]);
-    const chosen = matched.round ? contexts.find((round) => round.id === matched.round!.id) : null;
-    const parsed = parseShortlistReply(base.body, chosen?.roster ?? []);
+    const contexts: DecisionContext[] = (await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: base.fromAddress }))
+      .map((round: DecisionContext) => {
+        // The thread the real run would teach this round first.
+        const taughtConversation = [...(m.taught ?? new Map<string, string>()).entries()].find(([, roundId]) => roundId === round.id)?.[0];
+        return round.conversationId || !taughtConversation ? round : { ...round, conversationId: taughtConversation };
+      });
+    const { matched, chosen, parsed, reviewReasons, clear } = assessReply(base, contexts);
+    const names = new Map((chosen?.roster ?? []).map((row) => [row.applicationId, row]));
     return {
       messageId: m.graphMessageId,
       receivedAt: new Date(m.receivedAt).toISOString(),
       from: base.fromAddress,
       subject: base.subject,
-      result: chosen ? "would_queue" : "unmatched",
+      result: !chosen ? "unmatched" : clear && m.applyClear ? "would_move" : "would_review",
+      job: chosen ? `${chosen.clientName} · ${chosen.openingTitle}` : null,
       matchMethod: matched.method,
-      matchNote: matched.note,
-      openingId: chosen?.openingId ?? null,
-      decisions: parsed.decisions,
-      reviewReasons: parsed.reviewReasons,
-      stages: chosen?.roster.map((candidate) => ({ applicationId: candidate.applicationId, name: candidate.name, stage: candidate.stage })) ?? [],
+      moves: clear ? parsed.decisions.map((d) => ({
+        name: names.get(d.applicationId)?.name ?? d.applicationId,
+        from: names.get(d.applicationId)?.stage ?? "?",
+        to: d.outcome === "shortlisted" ? SHORTLIST_STAGE[chosen!.kind] : d.outcome,
+      })) : [],
+      reviewReasons: clear ? [] : reviewReasons,
     };
   }
   const sourceMessageId = m.sourceMessageId ?? await ctx.runMutation(internal.mailIntake.model.recordHistoricalShortlist, {
@@ -511,7 +554,7 @@ async function reconcileOne(
   }
   const result: { reviewId: string; status: "auto_applied" | "review_required" } = await ctx.runAction(
     internal.mailIntake.decisions.processReply,
-    { ...base, sourceMessageId },
+    { ...base, sourceMessageId, applyClear: m.applyClear },
   );
   return { messageId: m.graphMessageId, subject: base.subject, result: result.status, reviewId: result.reviewId };
 }
@@ -528,19 +571,28 @@ async function reconcileOne(
  * lead to confirm on Shortlist decisions — it never moves a candidate.
  */
 export const reconcileFromMailbox = internalAction({
-  args: { dryRun: v.boolean(), days: v.optional(v.number()) },
-  handler: async (ctx, args): Promise<{ dryRun: boolean; days: number; listed: number; fromDirectors: number; rows: Record<string, unknown>[] }> => {
+  args: {
+    dryRun: v.boolean(),
+    days: v.optional(v.number()),
+    /** Apply the Director replies that read clearly; the rest go to review (owner, 23 Oct). */
+    applyClear: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args): Promise<{
+    dryRun: boolean; days: number; listed: number; copiesTaught: number; fromDirectors: number;
+    summary: Record<string, number>; clientReplies: { receivedAt: string; from: string; subject: string }[];
+    rows: Record<string, unknown>[];
+  }> => {
     const days = Math.min(Math.max(Math.floor(args.days ?? 21), 1), 60);
     const box = await ctx.runQuery(internal.mailIntake.model.mailbox, { mailbox: SHORTLIST_MAILBOX });
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
     const until = new Date(box?.backfillFrom ?? Date.now()).toISOString();
     const token = await getGraphToken();
     const directors = new Set<string>(DIRECTOR_MAILBOXES);
-    const listed: { id: string; subject?: string; receivedDateTime?: string; hasAttachments?: boolean; from?: { emailAddress?: { address?: string } } }[] = [];
+    const listed: { id: string; subject?: string; receivedDateTime?: string; hasAttachments?: boolean; conversationId?: string; internetMessageId?: string; from?: { emailAddress?: { address?: string } } }[] = [];
     let url: string | undefined =
       `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(SHORTLIST_MAILBOX)}/mailFolders/inbox/messages` +
       `?$filter=receivedDateTime ge ${since} and receivedDateTime lt ${until}` +
-      `&$select=id,subject,from,receivedDateTime,hasAttachments&$top=200`;
+      `&$select=id,subject,from,receivedDateTime,hasAttachments,conversationId,internetMessageId&$top=200`;
     for (let page = 0; url && page < 20; page++) {
       const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
       if (!response.ok) throw new Error(`shortlists@ could not be listed: Graph ${response.status} ${(await response.text()).slice(0, 200)}`);
@@ -548,21 +600,53 @@ export const reconcileFromMailbox = internalAction({
       listed.push(...(data.value ?? []));
       url = data["@odata.nextLink"];
     }
-    const replies = listed
-      .filter((m) => !m.hasAttachments && directors.has(normalAddress(m.from?.emailAddress?.address)))
-      .sort((a, b) => (a.receivedDateTime ?? "").localeCompare(b.receivedDateTime ?? ""));
+    const oldestFirst = (a: { receivedDateTime?: string }, b: { receivedDateTime?: string }) => (a.receivedDateTime ?? "").localeCompare(b.receivedDateTime ?? "");
+    const from = (m: (typeof listed)[number]) => normalAddress(m.from?.emailAddress?.address);
+
+    // 1. The TAs' own copies of their end-of-day emails teach each round its
+    //    thread, so a Director reply matches its round exactly — not by
+    //    subject alone, which would always need a person to confirm.
+    const taught = new Map<string, string>();
+    for (const m of listed.filter((x) => x.hasAttachments && from(x).endsWith("@career141.com") && !directors.has(from(x))).sort(oldestFirst)) {
+      const copy = { subject: m.subject ?? "", fromAddress: from(m), receivedAt: Date.parse(m.receivedDateTime ?? "") };
+      if (args.dryRun) {
+        const roundId = await ctx.runQuery(internal.mailIntake.decisions.findRoundForCopy, copy);
+        if (roundId && m.conversationId) taught.set(m.conversationId, roundId);
+      } else {
+        const r = await ctx.runMutation(internal.mailIntake.decisions.attachRoundTransport, {
+          ...copy, conversationId: m.conversationId, internetMessageId: m.internetMessageId, messageId: m.id,
+        });
+        if (r.attached && m.conversationId) taught.set(m.conversationId, r.roundId as string);
+      }
+    }
+
+    // 2. The Director's replies, oldest first.
+    const replies = listed.filter((m) => !m.hasAttachments && directors.has(from(m))).sort(oldestFirst);
     const rows: Record<string, unknown>[] = [];
     for (const m of replies) {
       rows.push(await reconcileOne(ctx, token, {
         mailbox: SHORTLIST_MAILBOX,
         graphMessageId: m.id,
         receivedAt: Date.parse(m.receivedDateTime ?? new Date().toISOString()),
-        fromAddress: normalAddress(m.from?.emailAddress?.address),
+        fromAddress: from(m),
         subject: m.subject ?? "",
         sourceMessageId: null,
         dryRun: args.dryRun,
+        applyClear: args.applyClear,
+        taught,
       }));
     }
-    return { dryRun: args.dryRun, days, listed: listed.length, fromDirectors: replies.length, rows };
+
+    // 3. Client replies. Client sets are sent outside the system, so no round
+    //    records who was in them; they are listed for a person to act on.
+    const clientReplies = listed
+      .filter((m) => !m.hasAttachments && !from(m).endsWith("@career141.com"))
+      .sort(oldestFirst)
+      .map((m) => ({ receivedAt: m.receivedDateTime ?? "", from: from(m), subject: m.subject ?? "" }));
+
+    const summary: Record<string, number> = {};
+    for (const row of rows) summary[String(row.result)] = (summary[String(row.result)] ?? 0) + 1;
+    for (const row of rows) for (const move of (row.moves as { to: string }[] | undefined) ?? []) summary[`move to ${move.to}`] = (summary[`move to ${move.to}`] ?? 0) + 1;
+    return { dryRun: args.dryRun, days, listed: listed.length, copiesTaught: taught.size, fromDirectors: replies.length, summary, clientReplies, rows };
   },
 });
