@@ -3,7 +3,7 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { getOpenAI, getModelForTask } from "../lib/llm";
 import { postRoutingOn, routeByPosts, type EmailRoute } from "../pipeline/postFiling";
-import { nextCursor, notYetHandled, oldestFirst, pollBatch, readsByLog, stalledUnreported } from "../lib/mailCursor";
+import { nextCursor, notYetHandled, oldestFirst, pollBatch, readsByLog, STALLED_AFTER_MS, stalledUnreported } from "../lib/mailCursor";
 import { isNotAnApplication, parseApplicationEmail } from "../lib/mailParse";
 import { linkedinJobId, linkedinProjectId } from "../lib/postRouting";
 import { placeOnPosts } from "../mailIntake/process";
@@ -610,7 +610,7 @@ Respond ONLY with a valid JSON object in this exact format:
       await ctx.runMutation(internal.communications.emailAgent.updateLastEmailFetchTimestamp, { timestamp: cursor, inboxEmail: targetInboxEmail });
       // A run that read the mailbox in full and finished: the health check
       // (checkMailboxesRead) warns the desk when this goes stale.
-      await ctx.runMutation(internal.communications.emailAgent.markMailboxRead, { inboxEmail: targetInboxEmail, at: currentFetchTime });
+      await ctx.runMutation(internal.communications.emailAgent.markMailboxRead, { inboxEmail: targetInboxEmail, at: currentFetchTime, waiting: waiting.length });
       if (waiting.length > 0) console.log(`[EmailAgent] ${targetInboxEmail}: ${waiting.length} still waiting; the next run starts at ${cursor}.`);
     } else {
       console.log(`[EmailAgent] ${targetInboxEmail}: cursor kept at ${lastFetch ?? "(none)"} — the mailbox could not be read in full.`);
@@ -1061,12 +1061,61 @@ export const loggedSince = internalQuery({
 
 /** The last run that read this mailbox in full and finished. */
 export const markMailboxRead = internalMutation({
-  args: { inboxEmail: v.string(), at: v.string() },
-  handler: async (ctx, { inboxEmail, at }) => {
+  args: { inboxEmail: v.string(), at: v.string(), waiting: v.optional(v.number()) },
+  handler: async (ctx, { inboxEmail, at, waiting }) => {
     const key = `email_fetch_${inboxEmail}`;
     const row = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", key)).first();
-    if (row) await ctx.db.patch(row._id, { mailPollOkAt: at });
-    else await ctx.db.insert("appSettings", { key, mailPollOkAt: at });
+    const patch = { mailPollOkAt: at, mailWaiting: waiting ?? 0 };
+    if (row) await ctx.db.patch(row._id, patch);
+    else await ctx.db.insert("appSettings", { key, ...patch });
+  },
+});
+
+/**
+ * Settings → Mailboxes: how each application inbox is doing (23 October).
+ * The cards below it describe the newer mail reader; these three are read by
+ * the poller above, and linkedin@ went unread for 18 days with nothing on
+ * that page to say so.
+ */
+export const inboxHealth = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const now = Date.now();
+    // Today in Colombo, from its midnight.
+    const colomboDate = new Date(now + 5.5 * 3600_000).toISOString().slice(0, 10);
+    const todayFrom = new Date(Date.parse(`${colomboDate}T00:00:00+05:30`)).toISOString();
+    const out = [];
+    for (const inbox of WATCHED_MAILBOXES) {
+      const row = await ctx.db
+        .query("appSettings")
+        .withIndex("by_key", (q) => q.eq("key", `email_fetch_${inbox}`))
+        .first();
+      const today = { arrived: 0, toJob: 0, toDatabase: 0, noCv: 0, replies: 0 };
+      if (row?.mailLogSince) {
+        const rows = await ctx.db
+          .query("mailboxLog")
+          .withIndex("by_mailbox_received", (q) => q.eq("mailbox", inbox).gte("receivedAt", todayFrom))
+          .take(5000);
+        for (const r of rows) {
+          today.arrived++;
+          if (r.outcome === "reply") today.replies++;
+          else if (r.outcome === "no_cv") today.noCv++;
+          else if (/database/i.test(r.note ?? "")) today.toDatabase++;
+          else today.toJob++;
+        }
+      }
+      const okAt = row?.mailPollOkAt ?? null;
+      out.push({
+        mailbox: inbox,
+        okAt,
+        readUpTo: row?.lastEmailFetchTimestamp ?? null,
+        waiting: row?.mailWaiting ?? 0,
+        stalled: !!okAt && now - Date.parse(okAt) >= STALLED_AFTER_MS,
+        logged: !!row?.mailLogSince,
+        today,
+      });
+    }
+    return out;
   },
 });
 
@@ -1094,8 +1143,8 @@ export const checkMailboxesRead = internalMutation({
         await ctx.db.insert("notifications", {
           userId: u._id,
           type: "mailbox_stalled",
-          title: `${inbox} has not been read since ${since.slice(0, 16).replace("T", " ")} UTC`,
-          body: "Applications arriving there are not reaching TA System. They wait in the mailbox and come in once reading resumes. Tell the developer now.",
+          title: `Problem: ${inbox} has stopped`,
+          body: `TA System has not read ${inbox} since ${since.slice(0, 16).replace("T", " ")} UTC, so new applications from it are not reaching the jobs. Nothing is lost: they wait in the mailbox and come in once it works again. Please tell the developer.`,
           read: false,
           createdAt: new Date(now).toISOString(),
         });

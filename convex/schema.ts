@@ -2251,6 +2251,8 @@ export default defineSchema({
     mailPollOkAt: v.optional(v.string()),
     /** When the desk was told this mailbox had stopped being read. */
     mailStallReportedAt: v.optional(v.string()),
+    /** Messages still waiting after the last run — the catch-up, for Settings. */
+    mailWaiting: v.optional(v.number()),
     channel_toggles: v.optional(v.object({
       whatsappIngestion: v.boolean(),
       emailIngestion: v.boolean(),

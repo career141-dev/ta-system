@@ -806,6 +806,25 @@ export async function unmatchedCvs(days = 14): Promise<UnmatchedCv[]> {
   return convexQuery<UnmatchedCv[]>("ta/unmatched:list", { days });
 }
 
+export interface InboxHealth {
+  mailbox: string;
+  /** The last run that read it in full and finished. */
+  okAt: string | null;
+  readUpTo: string | null;
+  /** Emails still waiting after the last run (a catch-up in progress). */
+  waiting: number;
+  /** Not read for an hour or more. */
+  stalled: boolean;
+  /** Whether today's numbers are kept for it (linkedin@ and cv@). */
+  logged: boolean;
+  today: { arrived: number; toJob: number; toDatabase: number; noCv: number; replies: number };
+}
+
+/** linkedin@, cv@ and job@ as the application reader sees them (convex/communications/emailAgent.ts inboxHealth). */
+export async function inboxHealth(): Promise<InboxHealth[]> {
+  return convexQuery<InboxHealth[]>("communications/emailAgent:inboxHealth", {});
+}
+
 export async function setMailboxEnabled(mailbox: string, enabled: boolean) {
   return convexMutation<{ ok: boolean }>("mailIntake/model:setEnabled", { mailbox, enabled });
 }
