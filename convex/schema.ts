@@ -23,7 +23,7 @@ export default defineSchema({
     reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
     recoveryReopenedAt: v.optional(v.number()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
-    .index("by_job", ["jobId"]).index("by_expires", ["expiresAt"])
+    .index("by_job", ["jobId"]).index("by_job_date", ["jobId", "date"]).index("by_expires", ["expiresAt"])
     .index("by_user_accepted", ["userId", "acceptedAt"]),
   // Independent copies of sent PDFs. Candidate CV replacement never owns these files.
   dailyEmailAttachments: defineTable({

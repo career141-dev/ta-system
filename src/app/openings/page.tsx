@@ -17,7 +17,7 @@ import { Pager } from "@/components/Pager";
 import { matchesQuery, pageFrom, pageLink, slicePage } from "@/lib/paging";
 import { BulkBar, BulkConfirm, RowCheck } from "@/components/BulkSelect";
 import { deleteOpenings } from "@/app/actions";
-import { OPENING_BUCKETS, statusMatchesBucket, type OpeningBucket } from "@/lib/openingStatus";
+import { OPENING_BUCKETS, OPENING_STATUS_LABEL, statusMatchesBucket, type OpeningBucket } from "@/lib/openingStatus";
 import { isConvex } from "@/data/mode";
 import { convexQuery } from "@/lib/convexServer";
 // Shared with the mobile API, so a country filter picks the same rows (22 Oct).
@@ -48,11 +48,14 @@ export default async function OpeningsPage({
 }) {
   const sp = await searchParams;
   const { bucket: requestedBucket = "mine", q = "", country, location = country, industry, clientId, taId } = sp;
-  const bucket = OPENING_BUCKETS.some((item) => item.key === requestedBucket)
+  let bucket = OPENING_BUCKETS.some((item) => item.key === requestedBucket)
     ? requestedBucket as OpeningBucket
     : "mine";
   await primeStore({ allApplications: true });
   const user = await getCurrentUser();
+  const supportReview = allows(user, "tables.readAll");
+  if (supportReview && !sp.bucket) bucket = "all";
+  const readOnlyList = supportReview && bucket !== "mine";
   const [availableOpenings, pendingAccessRequests] = isConvex()
     ? await Promise.all([
         isTa(user)
@@ -68,12 +71,12 @@ export default async function OpeningsPage({
   const mine = repo.openingsForUser(user);
   // "All" is the desk's list for someone who reviews the desk, and their own
   // list for anyone else — a list of roles they cannot open is no use to them.
-  const all = isDeskWide(user) ? repo.openings() : mine;
+  const all = isDeskWide(user) || supportReview ? repo.openings() : mine;
   const liveAlerts = computeAlerts();
-  const showTaFilter = isDeskWide(user);
+  const showTaFilter = isDeskWide(user) || supportReview;
   // Who may move an opening to the Bin: the same test the delete action makes.
   const mayBin = (openingId: string) =>
-    allows(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
+    !readOnlyList && allows(user, "opening.manage", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null });
 
   // Extract dynamic clean country options for filters
   const locationOptions = Array.from(
@@ -243,7 +246,7 @@ export default async function OpeningsPage({
             // next to the status so it can be changed without opening the job.
             // It is what the end-of-day L-sheet reports. Everyone who works
             // the job has one, not only its TAs (25 Sep).
-            const canStage = allows(user, "opening.act", { assignment: repo.assignmentFor(o.id, user.id) });
+            const canStage = !readOnlyList && allows(user, "opening.act", { assignment: repo.assignmentFor(o.id, user.id) });
             const workingStage = repo.workingStage(o.id, user.id);
 
             return (
@@ -257,7 +260,7 @@ export default async function OpeningsPage({
                 className="relative rounded-xl border border-rule bg-surface px-7 py-5 transition-colors hover:border-rule-strong has-[[aria-expanded=true]]:z-20"
               >
                 <Link
-                  href={`/openings/${o.id}`}
+                  href={readOnlyList ? `/support-tables?position=${encodeURIComponent(o.id)}` : `/openings/${o.id}`}
                   aria-label={`${client?.name ?? ""} — ${o.title}`}
                   className="absolute inset-0 z-0 rounded-xl"
                 />
@@ -276,7 +279,7 @@ export default async function OpeningsPage({
                         {o.priorityTier}
                       </span>
                       <span className="pointer-events-auto relative z-10">
-                        <StatusMenu openingId={o.id} status={o.status as OpeningStatus} size="small" />
+                        {readOnlyList ? <span className="text-xs text-ink-soft">{OPENING_STATUS_LABEL[o.status]}</span> : <StatusMenu openingId={o.id} status={o.status as OpeningStatus} size="small" />}
                       </span>
                       {canStage && (
                         <span className="pointer-events-auto relative z-10">
