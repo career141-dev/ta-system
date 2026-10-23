@@ -16,6 +16,8 @@ import {
 import { EffortSheet } from "./EffortSheet";
 import { inputClass } from "./form";
 import { resendEod, sendEod, sendDailyEmail, saveMiddayDraft } from "@/app/actions";
+import { RefereeCallsEmailSection } from "./RefereeCallsEmailSection";
+import type { RefereeCallEmailRow } from "@/data/types";
 import type { SubmissionType } from "@/lib/dailyEmail";
 import { SubmitButton } from "./Submit";
 import { PreparedCvEditor } from "./PreparedCvEditor";
@@ -403,8 +405,10 @@ export function EodComposer({
   actorId,
   allowActivityOnly = false,
   draftDate,
+  refereeCalls = [],
 }: {
   draftDate?: string;
+  refereeCalls?: RefereeCallEmailRow[];
   workLocationId?: string;
   actorId?: string;
   allowActivityOnly?: boolean;
@@ -1056,6 +1060,8 @@ export function EodComposer({
               openingId={openingId}
             />
           </div>
+
+          {!midday && <RefereeCallsEmailSection openingId={openingId} calls={refereeCalls} />}
 
           {/* Editable Sign-off / Outro */}
           <div className="mt-8">

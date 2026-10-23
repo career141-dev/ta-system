@@ -1,6 +1,7 @@
 import type { Candidate, Id, Role } from "@/data/types";
 import { noticePeriodToDays } from "./answered";
 import { externalUrl } from "./url";
+import type { RefereeCallEmailRow } from "@/data/types";
 
 /**
  * The shape and column names of the end-of-day email, with no data access —
@@ -327,6 +328,8 @@ export function eodEmailHtml(input: {
   attachmentNote?: string | null;
   /** The TA's ChatGPT research link; checked again here, so only a share link is ever written as an address. */
   researchLink?: string | null;
+  /** Calls logged by this TA today; omitted entirely when there are none. */
+  refereeCalls?: RefereeCallEmailRow[] | null;
 }): string {
   const th = 'style="border:1px solid #cfd6d1;background:#eef2ef;padding:6px 8px;text-align:left;font-size:11px;font-weight:600;white-space:nowrap"';
   const td = 'style="border:1px solid #cfd6d1;padding:6px 8px;vertical-align:top;font-size:12px"';
@@ -361,6 +364,19 @@ export function eodEmailHtml(input: {
         : ""),
   );
 
+  const refereeCalls = input.refereeCalls?.length
+    ? `<div style="margin:16px 0 12px"><div style="font-size:13px;font-weight:700;margin-bottom:8px">Referee calls</div>${([
+        { result: "positive", label: "Positive – contacts available", background: "#e8f5ec", color: "#1b5e36", border: "#b7dcc4" },
+        { result: "negative", label: "Not successful", background: "#fcebea", color: "#8a1f1b", border: "#f0c4c1" },
+      ] as const).map((group) => {
+        const rows = input.refereeCalls!.filter((call) => call.result === group.result);
+        if (!rows.length) return "";
+        const head = ["#", "Company", "Referral", "Contact Number", "Feedback"].map((h) => `<th ${th}>${esc(h)}</th>`).join("");
+        const body = rows.map((call, i) => `<tr><td ${td}>${i + 1}</td><td ${td}>${esc(call.company)}</td><td ${td}>${esc(call.referral)}</td><td ${td}>${esc(call.contactNumber)}</td><td ${td}>${esc(call.feedback)}</td></tr>`).join("");
+        return `<div style="margin:0 0 12px"><div style="background:${group.background};color:${group.color};border:1px solid ${group.border};padding:7px 9px;font-size:12px;font-weight:700">${group.label}</div>${table(head, body)}</div>`;
+      }).join("")}</div>`
+    : "";
+
   const formatParagraph = (text: string) =>
     text
       .split(/\n{2,}/)
@@ -389,6 +405,7 @@ export function eodEmailHtml(input: {
 ${intro}
 ${input.rows.length ? shortlist : ""}
 ${effort}
+${refereeCalls}
 ${research}
 ${input.attachmentNote ? `<p style="color:#6b736d">${esc(input.attachmentNote)}</p>` : ""}
 ${outro}

@@ -19,7 +19,7 @@ import {
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
-import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
+import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, RefereeCall, RefereeCallEmailRow, User, WorkingStage } from "@/data/types";
 import type { CallKind, CallOutcome, ExtractedBrief, PriorityTier, Stage } from "@/data/types";
 import type { FeedbackCategory, FeedbackPriority, FeedbackStatus, FeedbackItem } from "@/data/types";
 import { ASSIGNMENT_LABEL, STAGE_LABEL } from "@/data/types";
@@ -4479,6 +4479,130 @@ async function eodWorkContext(user: User, openingId: string): Promise<{ workType
   return { workType: repo.workingStage(openingId, user.id), sessionStart: colomboDayStart(Date.now()) };
 }
 
+function refereeCallsFromForm(formData: FormData, calls: RefereeCallEmailRow[]): RefereeCallEmailRow[] {
+  if (formData.get("includeRefereeCalls") === "no") return [];
+  let moved: Record<string, unknown> = {};
+  try {
+    const raw = String(formData.get("refereeCallResults") ?? "");
+    if (raw.length > 20_000) throw new Error("too large");
+    const parsed = raw ? JSON.parse(raw) : {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) moved = parsed;
+  } catch {
+    moved = {};
+  }
+  return calls.map((call) => {
+    const override = call.id ? moved[call.id] : undefined;
+    return { ...call, result: override === "positive" || override === "negative" ? override : call.result };
+  });
+}
+
+async function currentRefereeCalls(
+  formData: FormData,
+  openingId: string,
+  userId: string,
+  workLocationId?: string,
+  saved?: RefereeCallEmailRow[],
+): Promise<RefereeCallEmailRow[]> {
+  const { resultOf } = await import("@/lib/refereeCalls");
+  const { workdayDate } = await import("@/lib/workday");
+  const base = saved ?? repo.refereeCalls(openingId, { userId, date: workdayDate(Date.now()), workLocationId }).map((call) => ({
+    id: call.id,
+    company: call.company,
+    referral: call.referral,
+    contactNumber: call.contactNumber ?? "",
+    feedback: call.feedback,
+    result: resultOf(call),
+  }));
+  return refereeCallsFromForm(formData, base);
+}
+
+type RefereeCallActionResult = ActionResult & { call?: RefereeCall };
+
+const refereeText = (formData: FormData, field: string, max: number): string => {
+  const value = String(formData.get(field) ?? "").trim();
+  if (value.length > max) throw new Error(`${field === "contactNumber" ? "Contact number" : field[0].toUpperCase() + field.slice(1)} is too long.`);
+  return value;
+};
+
+/** A TA's grid writes only their own rows; desk-wide seats read the page. */
+export async function addRefereeCall(formData: FormData): Promise<RefereeCallActionResult> {
+  let call: RefereeCall | undefined;
+  const result = await inline(async () => {
+    const openingId = String(formData.get("openingId") ?? "");
+    await primeStore({ openingId });
+    const user = await authorize(formData, "opening.act", { opening: "openingId" });
+    if (!isTa(user)) await fail("Referee calls are entered by the TA working the opening.");
+    const opening = repo.opening(openingId);
+    if (!opening) return fail("That opening no longer exists.");
+    const location = requireWorkLocation(opening, String(formData.get("workLocationId") ?? "") || undefined);
+    const company = refereeText(formData, "company", 200);
+    const referral = refereeText(formData, "referral", 200);
+    const contactNumber = refereeText(formData, "contactNumber", 100);
+    const feedback = refereeText(formData, "feedback", 2000);
+    if (![company, referral, contactNumber, feedback].some(Boolean)) await fail("Type something in the row before saving it.");
+    const { workdayDate } = await import("@/lib/workday");
+    call = repo.addRefereeCall({
+      openingId,
+      ...(location ? { workLocationId: location.id } : {}),
+      addedBy: user.id,
+      date: workdayDate(Date.now()),
+      company,
+      referral,
+      ...(contactNumber ? { contactNumber } : {}),
+      feedback,
+      lookingFor: null,
+      result: null,
+      refereeId: null,
+      candidateId: null,
+    });
+    revalidatePath(`/openings/${openingId}`, "layout");
+    await done("Saved.");
+  }, "Saved.");
+  return { ...result, ...(result.ok && call ? { call } : {}) };
+}
+
+export async function updateRefereeCall(formData: FormData): Promise<RefereeCallActionResult> {
+  let call: RefereeCall | undefined;
+  const result = await inline(async () => {
+    const openingId = String(formData.get("openingId") ?? "");
+    const callId = String(formData.get("callId") ?? "");
+    await primeStore({ openingId });
+    const user = await authorize(formData, "opening.act", { opening: "openingId" });
+    const held = repo.refereeCall(callId);
+    if (!held || held.openingId !== openingId) return fail("That referee call no longer exists.");
+    if (!isTa(user) || held.addedBy !== user.id) await fail("Only the TA who logged this call can change it.");
+    const field = String(formData.get("field") ?? "") as "company" | "referral" | "contactNumber" | "feedback" | "result";
+    if (!["company", "referral", "contactNumber", "feedback", "result"].includes(field)) await fail("That referee call field cannot be changed.");
+    if (field === "result") {
+      const value = String(formData.get("value") ?? "");
+      if (value !== "positive" && value !== "negative") return fail("Choose Positive or Not successful.");
+      call = repo.updateRefereeCall(callId, { result: value }) ?? undefined;
+    } else {
+      const max = field === "feedback" ? 2000 : field === "contactNumber" ? 100 : 200;
+      call = repo.updateRefereeCall(callId, { [field]: refereeText(formData, "value", max) }) ?? undefined;
+    }
+    if (!call) await fail("That referee call no longer exists.");
+    revalidatePath(`/openings/${openingId}`, "layout");
+    await done("Saved.");
+  }, "Saved.");
+  return { ...result, ...(result.ok && call ? { call } : {}) };
+}
+
+export async function removeRefereeCall(formData: FormData): Promise<ActionResult> {
+  return inline(async () => {
+    const openingId = String(formData.get("openingId") ?? "");
+    const callId = String(formData.get("callId") ?? "");
+    await primeStore({ openingId });
+    const user = await authorize(formData, "opening.act", { opening: "openingId" });
+    const held = repo.refereeCall(callId);
+    if (!held || held.openingId !== openingId) return fail("That referee call no longer exists.");
+    if (!isTa(user) || held.addedBy !== user.id) await fail("Only the TA who logged this call can remove it.");
+    repo.removeRefereeCall(callId);
+    revalidatePath(`/openings/${openingId}`, "layout");
+    await done("Removed.");
+  }, "Removed.");
+}
+
 export async function addMiddayEmail(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
   await primeStore({ openingId });
@@ -4542,6 +4666,9 @@ export async function sendDailyEmail(formData: FormData) {
     const ids = parent ? parent.applicationIds : String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
     const rows = shortlistRowsFromForm(formData, baseRows);
     const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user, new Date(), workLocationId));
+    const refereeCalls = type === "eod"
+      ? await currentRefereeCalls(formData, openingId, user.id, workLocationId, parent?.snapshot?.refereeCalls)
+      : [];
     const submittedMode = parent?.workType ?? parent?.snapshot?.workType ?? context?.workType;
     if (submittedMode) effort.hundredOrFollowUp = submittedMode;
     const extraTo = parseAddressList(String(formData.get("extraTo") ?? ""));
@@ -4567,6 +4694,7 @@ export async function sendDailyEmail(formData: FormData) {
     const skipAttachments = formData.get("skipAttachments") === "yes";
     const result = await emailEod({ openingId, user, workLocationId, applicationIds: ids, to: recipients.to[0], extraTo: recipients.to.slice(1),
       cc: recipients.cc, subject, effort, rows, baseRows, researchLink: research.url,
+      refereeCalls,
       introText: String(formData.get("introText") ?? ""), outroText: String(formData.get("outroText") ?? ""),
       activityOnly: ids.length === 0, skipAttachments: type === "midday" && skipAttachments, daily: { submissionType: type, draftId: draftId || undefined,
         revision: draftId ? Number(formData.get("dailyDraftRevision")) : undefined, parentId: parentId || undefined,
@@ -4680,6 +4808,7 @@ export async function sendEod(formData: FormData) {
     const effort = effortFromForm(formData, effortRow(openingId, user));
     const baseRows = shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined);
     const editedRows = shortlistRowsFromForm(formData, baseRows);
+    const refereeCalls = await currentRefereeCalls(formData, openingId, user.id, location?.id);
     const introText = formData.has("introText") ? String(formData.get("introText")) : undefined;
     const outroText = formData.has("outroText") ? String(formData.get("outroText")) : undefined;
 
@@ -4710,6 +4839,7 @@ export async function sendEod(formData: FormData) {
       // The counts and targets as the TA corrected them (plan 6.3).
       effort,
       rows: editedRows,
+      refereeCalls,
       baseRows,
       introText,
       outroText,
@@ -4735,6 +4865,7 @@ export async function sendEod(formData: FormData) {
       applicationIds: fresh,
       rows: sentRows,
       effort,
+      refereeCalls,
       extraTo: toList.ok,
       extraCc: ccList.ok,
       removed: parseAddressList(String(formData.get("removed") ?? "")).ok,
@@ -4868,6 +4999,7 @@ export async function resendEod(formData: FormData) {
     // since the first send was put back to the month-old value (review, 8 Oct).
     const sentRows = baseRows.map((b) => prev.rows.find((r) => r.applicationId === b.applicationId) ?? b);
     const effort = effortFromForm(formData, prev.effort);
+    const refereeCalls = await currentRefereeCalls(formData, openingId, user.id, undefined, prev.refereeCalls);
     const subject = revisedSubject(typed);
     const introText = formData.has("introText") ? String(formData.get("introText")) : prev.introText;
     const outroText = formData.has("outroText") ? String(formData.get("outroText")) : prev.outroText;
@@ -4881,6 +5013,7 @@ export async function resendEod(formData: FormData) {
       cc: recipients.cc,
       subject,
       effort,
+      refereeCalls,
       rows: editedRows,
       baseRows: sentRows,
       revised: true,
@@ -4907,6 +5040,7 @@ export async function resendEod(formData: FormData) {
         applicationIds: ids,
         rows: editedRows,
         effort,
+        refereeCalls,
         extraTo: toList.ok,
         extraCc: ccList.ok,
         removed,
@@ -4971,6 +5105,7 @@ async function emailEod(input: {
   cc: string[];
   subject: string;
   effort?: EffortRow;
+  refereeCalls?: RefereeCallEmailRow[];
   rows?: ShortlistRow[];
   /** The rows as built from the records, before the TA's edits. A resend passes
    *  its own: shortlistRows no longer lists people already in a round. */
@@ -5097,6 +5232,7 @@ async function emailEod(input: {
     introText: input.introText,
     outroText: input.outroText,
     researchLink: input.researchLink,
+    refereeCalls: input.refereeCalls,
     attachmentNote: null,
   });
 
@@ -5113,6 +5249,7 @@ async function emailEod(input: {
         attachments: savedAttachments,
         workType: input.workType,
         effort: input.effort ?? effortRow(openingId, user), introText: input.introText ?? "", outroText: input.outroText ?? "",
+        refereeCalls: input.refereeCalls,
         researchLink: input.researchLink ?? "", extraTo: input.daily.extraTo, extraCc: input.daily.extraCc, removed: input.daily.removed };
       const reservation = await convexMutation<{ id: string }>("ta/dailyEmails:begin", { actorId: user.id, jobId: openingId,
         workLocationId: input.workLocationId,

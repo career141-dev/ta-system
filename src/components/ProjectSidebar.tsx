@@ -168,6 +168,7 @@ export function ProjectSidebar({
     { href: `${base}/hh/research`, label: "Research" },
     { href: `${base}/hh/suggestions`, label: "Suggestions" },
     { href: `${base}/hh/links`, label: "Excel Tables" },
+    { href: `${base}/hh/referees`, label: "Referee Calls" },
   ];
 
   return (

@@ -32,6 +32,7 @@ import type { WorkingStage } from "@/data/types";
 import { workLocationView, inWorkLocation } from "@/lib/workLocations";
 import { WorkLocationTabs } from "@/components/WorkLocationTabs";
 import { eodDraftKeys } from "@/lib/eodDraft";
+import { resultOf } from "@/lib/refereeCalls";
 
 const PAGE_SIZE = 10;
 
@@ -159,6 +160,19 @@ export default async function EodPage({
     : sp.view && !viewCopy
       ? "That email is more than a month old, so its copy has been cleared."
       : null;
+
+  const savedRefereeCalls = correction?.snapshot?.refereeCalls ?? resendCopy?.refereeCalls;
+  const refereeCalls = !midday && kind === "director"
+    ? (savedRefereeCalls ?? repo.refereeCalls(id, { userId: user.id, date: workdayDate(Date.now()), workLocationId }))
+        .map((call) => ({
+          id: call.id,
+          company: call.company,
+          referral: call.referral,
+          contactNumber: call.contactNumber ?? "",
+          feedback: call.feedback,
+          result: resultOf(call),
+        }))
+    : [];
 
   const rawRows = correction?.snapshot?.rows ?? (resendCopy ? resendCopy.rows : rows);
   const candidateIds = rawRows
@@ -407,6 +421,7 @@ export default async function EodPage({
         canAddRecipients={kind === "director"}
         rows={composerRows}
         effort={correction?.snapshot?.effort ?? (resendCopy ? resendCopy.effort : effort)}
+        refereeCalls={refereeCalls}
         senderName={user.name}
         alreadyOut={!!awaiting}
         needsResearchLink={midday || needsResearchLink(user.role, kind, workType)}
@@ -619,6 +634,7 @@ function SentEmail({ copy, openingId }: { copy: EodEmailCopy; openingId: string 
     introText: copy.introText,
     outroText: copy.outroText,
     researchLink: copy.researchLink,
+    refereeCalls: copy.refereeCalls,
   });
   const line = (label: string, value: string) => (
     <div className="flex gap-3">
