@@ -74,9 +74,13 @@ export const context = internalQuery({
           stage: application?.currentStage ?? "missing",
         });
       }
+      // The client: its recorded contact, or anyone at the company the set
+      // was sent to — never a Career141 address (23 October).
+      const domain = (address?: string | null) => normalAddress(address).split("@")[1] ?? "";
       const senderAuthorized = round.kind === "director"
         ? directorAddresses.has(normalAddress(args.fromAddress))
-        : normalAddress(job?.clientContactEmail) === normalAddress(args.fromAddress);
+        : normalAddress(job?.clientContactEmail) === normalAddress(args.fromAddress)
+          || (domain(args.fromAddress) !== "" && domain(args.fromAddress) !== "career141.com" && domain(args.fromAddress) === domain(round.sentTo));
       out.push({
         id: round._id as string,
         openingId: round.openingId as string,
@@ -338,16 +342,19 @@ async function planReply(ctx: ActionCtx, args: ReplyArgs, dryRun: boolean) {
     });
   let assessed = assessReply(args, contexts);
   let rebuilt: string | null = null;
-  if (!assessed.chosen && (DIRECTOR_MAILBOXES as readonly string[]).includes(normalAddress(args.fromAddress))) {
+  const fromDirector = (DIRECTOR_MAILBOXES as readonly string[]).includes(normalAddress(args.fromAddress));
+  const fromClient = !normalAddress(args.fromAddress).endsWith("@career141.com");
+  if (!assessed.chosen && (fromDirector || fromClient)) {
     const set = await ctx.runAction(internal.mailIntake.aiReader.findSetInThread, {
       conversationId: args.conversationId, subject: args.subject, before: args.receivedAt,
+      ...(fromClient ? { clientAddress: normalAddress(args.fromAddress) } : {}),
     });
     rebuilt = set.note;
     if (set.found && set.openingId && set.sentBy && set.messageId) {
       let roundId = `dry-run:${set.messageId}`;
       if (dryRun) {
         contexts = [...contexts, {
-          id: roundId, openingId: set.openingId, kind: "director", token: roundId, subject: set.subject ?? args.subject,
+          id: roundId, openingId: set.openingId, kind: fromClient ? "client" : "director", token: roundId, subject: set.subject ?? args.subject,
           status: "awaiting", sentAt: set.sentAt ?? args.receivedAt, sentBy: set.sentBy, conversationId: set.conversationId ?? null,
           internetMessageId: null, messageId: set.messageId, senderAuthorized: true,
           openingTitle: "", clientName: "", roster: set.roster.map((r) => ({ ...r })),
@@ -357,6 +364,7 @@ async function planReply(ctx: ActionCtx, args: ReplyArgs, dryRun: boolean) {
           openingId: set.openingId as Id<"jobs">, sentBy: set.sentBy as Id<"users">, sentAt: set.sentAt ?? args.receivedAt,
           subject: set.subject ?? args.subject, messageId: set.messageId, conversationId: set.conversationId,
           applicationIds: set.roster.map((r) => r.applicationId as Id<"applications">),
+          kind: fromClient ? "client" : "director", sentTo: set.sentTo,
         });
         contexts = await ctx.runQuery(internal.mailIntake.decisions.context, { fromAddress: args.fromAddress });
       }
@@ -369,6 +377,7 @@ async function planReply(ctx: ActionCtx, args: ReplyArgs, dryRun: boolean) {
     const ai: AiReading = await ctx.runAction(internal.mailIntake.aiReader.readDirectorReply, {
       text: newestReplyText(args.body) || args.body,
       roster: assessed.chosen.roster.map((row) => ({ applicationId: row.applicationId, name: row.name })),
+      reviewer: assessed.chosen.kind,
     });
     if (ai.clear) {
       decisions = ai.decisions;
@@ -674,6 +683,8 @@ export const reconcileFromMailbox = internalAction({
     days: v.optional(v.number()),
     /** Apply the Director replies that read clearly; the rest go to review (owner, 23 Oct). */
     applyClear: v.optional(v.boolean()),
+    /** Also read the client replies, after the Director's. */
+    clients: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{
     dryRun: boolean; days: number; listed: number; copiesTaught: number; fromDirectors: number;
@@ -735,12 +746,27 @@ export const reconcileFromMailbox = internalAction({
       }));
     }
 
-    // 3. Client replies. Client sets are sent outside the system, so no round
-    //    records who was in them; they are listed for a person to act on.
-    const clientReplies = listed
-      .filter((m) => !m.hasAttachments && !from(m).endsWith("@career141.com"))
-      .sort(oldestFirst)
-      .map((m) => ({ receivedAt: m.receivedDateTime ?? "", from: from(m), subject: m.subject ?? "" }));
+    // 3. Client replies, after the Director's (they act on the Director's
+    //    shortlist). With `clients`, each is read like the Director's: the set
+    //    rebuilt from the email sent to that client in the thread, the AI
+    //    reader, Client shortlist or Rejected (23 October). Otherwise listed.
+    const clientMail = listed.filter((m) => !m.hasAttachments && !from(m).endsWith("@career141.com")).sort(oldestFirst);
+    if (args.clients) {
+      for (const m of clientMail) {
+        rows.push({ kind: "client", ...(await reconcileOne(ctx, token, {
+          mailbox: SHORTLIST_MAILBOX,
+          graphMessageId: m.id,
+          receivedAt: Date.parse(m.receivedDateTime ?? new Date().toISOString()),
+          fromAddress: from(m),
+          subject: m.subject ?? "",
+          sourceMessageId: null,
+          dryRun: args.dryRun,
+          applyClear: args.applyClear,
+          taught,
+        })) });
+      }
+    }
+    const clientReplies = clientMail.map((m) => ({ receivedAt: m.receivedDateTime ?? "", from: from(m), subject: m.subject ?? "" }));
 
     const summary: Record<string, number> = {};
     for (const row of rows) summary[String(row.result)] = (summary[String(row.result)] ?? 0) + 1;
