@@ -3,6 +3,7 @@ import { STAGE_LABEL, type User } from "@/data/types";
 import { allows } from "@/lib/auth";
 import { interviewStatus, mayChangeFeedback } from "@/lib/interviews";
 import type { CandidatePayload } from "@/lib/mobile/candidateTypes";
+import { isSystemNote } from "@/lib/pdf";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 
 export type MobileCandidateResult =
@@ -22,6 +23,18 @@ const TAB_LABEL: Record<CandidatePayload["tabs"][number]["key"], string> = {
 
 function initials(name: string): string {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("");
+}
+
+function reviewDetail(note: string, index: number): { label: string; value: string } | null {
+  const trimmed = note.replace(/^[->•*]\s*/, "").trim();
+  if (!trimmed) return null;
+  const colon = trimmed.indexOf(":");
+  const dash = trimmed.indexOf(" - ");
+  if (colon > 0 && (dash === -1 || colon < dash)) {
+    return { label: trimmed.slice(0, colon).trim(), value: trimmed.slice(colon + 1).trim() };
+  }
+  if (dash > 0) return { label: trimmed.slice(0, dash).trim(), value: trimmed.slice(dash + 3).trim() };
+  return { label: index >= 0 ? "Note" : "", value: trimmed };
 }
 
 /** The website candidate drawer, as one seat-scoped native payload. */
@@ -90,9 +103,11 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
   const reviewNotes = (app.reviewNotes ?? []).map((note) => ({
     id: note.id,
     note: note.note,
+    byUserId: note.by,
     byName: userName(note.by) ?? "Unknown",
     byRole: note.byRole,
     at: note.at,
+    canRemove: note.by === user.id,
   }));
   const messages = outreach.filter((row): row is typeof row & { channel: "whatsapp" | "email" } => row.channel !== "ai_call");
   const tags = [
@@ -103,6 +118,20 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
   ].filter((value): value is string => Boolean(value));
   const canManageInterviews = allows(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId });
   const canGiveInterviewFeedback = allows(user, "interview.feedback", { openingId, assignment });
+  const reviewStages = ["new_cv", "matched", "ai_follow_up", "ta_follow_up"];
+  const showReviewDetails = reviewStages.includes(app.stage);
+  const canAddReviewNote = app.stage === "director_review" && allows(user, "review.note", { openingId, assignment });
+  const hasCv = Boolean(candidate.cvFileName || app.cvFileName);
+  const noticePeriod = candidate.noticePeriod ?? (candidate.noticePeriodDays === null ? "" : candidate.noticePeriodDays === 0 ? "Immediate" : `${candidate.noticePeriodDays} days`);
+  const missingReviewDetails = [
+    !hasCv ? "CV" : null,
+    !candidate.expectedSalary?.trim() ? "expected salary" : null,
+    !noticePeriod.trim() ? "notice period" : null,
+  ].filter((value): value is string => Boolean(value));
+  const customDetails = (app.notes ?? [])
+    .filter((note) => !isSystemNote(note))
+    .map(reviewDetail)
+    .filter((detail): detail is { label: string; value: string } => Boolean(detail?.value));
 
   const payload: CandidatePayload = {
     apiVersion: 1,
@@ -224,6 +253,23 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       } : null,
     },
     review: {
+      access: {
+        showDetails: showReviewDetails,
+        canSaveDetails: showReviewDetails && canManageInterviews,
+        showNotes: app.stage === "director_review" || reviewNotes.length > 0,
+        canAddNote: canAddReviewNote,
+      },
+      details: {
+        hasCv,
+        ready: missingReviewDetails.length === 0,
+        missing: missingReviewDetails,
+        currentSalary: candidate.currentSalary ?? "",
+        expectedSalary: candidate.expectedSalary ?? "",
+        noticePeriod,
+        currentDesignation: candidate.currentTitle ?? "",
+        currentCompany: candidate.currentEmployer ?? "",
+        customDetails,
+      },
       answers: Object.entries(app.answers).map(([question, answer]) => ({ question: questions.get(question) ?? question, answer })),
       notes: reviewNotes,
     },

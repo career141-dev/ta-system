@@ -50,3 +50,21 @@ export const candidateClosingBody = z.discriminatedUnion("action", [
     joinDate: z.string().max(20),
   }).strict(),
 ]);
+
+const reviewDetail = z.object({ label: z.string().max(120), value: z.string().max(1000) }).strict();
+
+export const candidateReviewBody = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("details"),
+    currentSalary: z.string().max(200),
+    currentSalaryCurrency: z.string().max(3),
+    expectedSalary: z.string().max(200),
+    expectedSalaryCurrency: z.string().max(3),
+    noticePeriod: z.string().max(200),
+    currentDesignation: z.string().max(500),
+    currentCompany: z.string().max(500),
+    customDetails: z.array(reviewDetail).max(30),
+  }).strict(),
+  z.object({ action: z.literal("add_note"), note: z.string() }).strict(),
+  z.object({ action: z.literal("remove_note"), noteId: z.string().min(1).max(100) }).strict(),
+]);

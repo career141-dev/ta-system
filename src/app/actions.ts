@@ -21,6 +21,7 @@ import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
+import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -40,7 +41,6 @@ import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult"
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
 import type { DailyEmail, DailyEmailSnapshot, SubmissionType } from "@/lib/dailyEmail";
 import { EOD_TO, checkResearchSubmission, eodRecipients, parseAddressList } from "@/lib/eod-format";
-import { noticePeriodToDays } from "@/lib/answered";
 import { parseReferenceProfile, referenceProfileFromBlueprint, serializeReferenceProfile } from "@/lib/referenceSearchProfile";
 import { referenceCvFileProblem } from "@/lib/referenceCvFile";
 import { isEodCandidateEligible } from "@/lib/eodEligibility";
@@ -657,29 +657,26 @@ export async function addReviewNote(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
-  const text = String(formData.get("note") ?? "").trim();
-  if (!text) await fail("Write the note first.");
-  if (text.length > LEAD_NOTE_MAX) await fail(`That note is ${text.length} characters. Keep it under ${LEAD_NOTE_MAX}.`);
-  if (!repo.addReviewNote(appId, user.id, user.role, text)) await fail("That application no longer exists.");
-  markTablesStale();
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Note added.");
+  const user = await getCurrentUser();
+  const result = await writeCandidateReview(user, openingId, appId, {
+    action: "add_note",
+    note: String(formData.get("note") ?? ""),
+  }, { ...OPENING_DEPS, invalidateCandidate, primeStore });
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 export async function removeReviewNote(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "review.note", { application: "appId", opening: "openingId" });
-  const noteId = String(formData.get("noteId") ?? "");
-  const target = repo.application(appId)?.reviewNotes?.find((n) => n.id === noteId);
-  if (!target) await fail("That note is already gone.");
-  if (target!.by !== user.id) await fail("Only the person who wrote a note can remove it.");
-  repo.removeReviewNote(appId, noteId);
-  markTablesStale();
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Note removed.");
+  const user = await getCurrentUser();
+  const result = await writeCandidateReview(user, openingId, appId, {
+    action: "remove_note",
+    noteId: String(formData.get("noteId") ?? ""),
+  }, { ...OPENING_DEPS, invalidateCandidate, primeStore });
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /** The Add-on tag on an Excel Tables row, by hand (28 Sep). */
@@ -3937,91 +3934,24 @@ export async function saveFollowUpAnswers(formData: FormData) {
  */
 export async function saveReviewDetails(formData: FormData) {
   const applicationId = String(formData.get("applicationId"));
+  const openingId = String(formData.get("openingId"));
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
-  const app = repo.application(applicationId);
-  if (!app) return fail("That application no longer exists.");
-  invalidateCandidate(app.candidateId);
-  await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId });
-  // A bare amount is saved with the currency picked beside it: "25,000" alone
-  const withCurrency = (field: string) => {
-    const amount = String(formData.get(field) ?? "").trim();
-    const currency = String(formData.get(`${field}Currency`) ?? "").trim();
-    if (!amount) return "";
-    // Only a figure takes the currency: "Not disclosed" and "Negotiable" are
-    // words, and "LKR Negotiable" is what the Director saw when they did (28 Sep).
-    if (currency && /^\d/.test(amount) && !new RegExp(`^${currency}\\b`, "i").test(amount)) {
-      return `${currency} ${amount}`;
-    }
-    return amount;
-  };
-  const currentSalary = withCurrency("currentSalary");
-  const expectedSalary = withCurrency("expectedSalary");
-  const noticeRaw = String(formData.get("noticePeriod") ?? formData.get("noticePeriodDays") ?? "").trim();
-  let noticeDays: number | null = null;
-  let noticeText: string | null = null;
-
-  if (noticeRaw !== "") {
-    noticeText = noticeRaw;
-    const parsedDays = noticePeriodToDays(noticeRaw);
-    if (parsedDays !== null) {
-      noticeDays = parsedDays;
-    } else {
-      const n = Number(noticeRaw);
-      if (Number.isFinite(n) && n >= 0) {
-        noticeDays = Math.round(n);
-      }
-    }
-    // Words it cannot turn into days ("Not disclosed", "Negotiable") are an
-    // answer too: they are kept as said, with no days (owner, 28 Sep).
-  }
-
   const labels = formData.getAll("customLabel").map(String);
   const values = formData.getAll("customValue").map(String);
-  const customNotes: string[] = [];
-  for (let i = 0; i < values.length; i++) {
-    const v = values[i]?.trim();
-    if (!v) continue;
-    const l = labels[i]?.trim();
-    customNotes.push(l ? `${l}: ${v}` : v);
-  }
-
-  const patch: Parameters<typeof repo.saveReviewDetails>[3] = {
-    currentSalary: currentSalary || null,
-    expectedSalary: expectedSalary || null,
-    noticePeriodDays: noticeDays,
-    noticePeriod: noticeText || (noticeDays !== null ? (noticeDays === 0 ? "Immediate" : `${noticeDays} days`) : null),
-  };
-  // Designation and company come from the CV; the TA corrects them when the
-  // call says otherwise (9 Oct). Written only when changed, so a plain Save
-  // does not rewrite the CV's reading — or clear it from a form that lacks them.
-  const candidate = repo.candidate(app.candidateId);
-  for (const [field, key] of [["currentDesignation", "currentTitle"], ["currentCompany", "currentEmployer"]] as const) {
-    if (!formData.has(field)) continue;
-    const value = String(formData.get(field) ?? "").trim() || null;
-    if (value !== ((candidate?.[key] ?? "").trim() || null)) patch[key] = value;
-  }
-
-  try {
-    repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);
-  } catch (err) {
-    const msg = (err as Error).message || "";
-    if (msg.includes("Someone else changed this record") || msg.includes("conflict")) {
-      // Re-prime with latest DB values and retry the update once
-      invalidateCandidate(app.candidateId);
-      markTablesStale();
-      await primeStore({ candidateIds: [app.candidateId], openingId: app.openingId, allApplications: true });
-      repo.saveReviewDetails(app.id, app.candidateId, customNotes, patch);
-    } else {
-      throw err;
-    }
-  }
-
-  markTablesStale();
-  invalidateCandidate(app.candidateId);
-  revalidatePath(`/openings/${app.openingId}`, "layout");
-  revalidatePath(`/candidates/${app.candidateId}`);
-  return done("Details saved.");
+  const user = await getCurrentUser();
+  const result = await writeCandidateReview(user, openingId, applicationId, {
+    action: "details",
+    currentSalary: String(formData.get("currentSalary") ?? ""),
+    currentSalaryCurrency: String(formData.get("currentSalaryCurrency") ?? ""),
+    expectedSalary: String(formData.get("expectedSalary") ?? ""),
+    expectedSalaryCurrency: String(formData.get("expectedSalaryCurrency") ?? ""),
+    noticePeriod: String(formData.get("noticePeriod") ?? formData.get("noticePeriodDays") ?? ""),
+    currentDesignation: String(formData.get("currentDesignation") ?? ""),
+    currentCompany: String(formData.get("currentCompany") ?? ""),
+    customDetails: values.map((value, index) => ({ label: labels[index] ?? "", value })),
+  }, { ...OPENING_DEPS, invalidateCandidate, primeStore });
+  if (!result.ok) await fail(result.message);
+  return done(result.message);
 }
 
 /**

@@ -130,8 +130,25 @@ export interface CandidatePayload {
     } | null;
   };
   review: {
+    access: {
+      showDetails: boolean;
+      canSaveDetails: boolean;
+      showNotes: boolean;
+      canAddNote: boolean;
+    };
+    details: {
+      hasCv: boolean;
+      ready: boolean;
+      missing: string[];
+      currentSalary: string;
+      expectedSalary: string;
+      noticePeriod: string;
+      currentDesignation: string;
+      currentCompany: string;
+      customDetails: { label: string; value: string }[];
+    };
     answers: { question: string; answer: string }[];
-    notes: { id: string; note: string; byName: string; byRole: string; at: number }[];
+    notes: { id: string; note: string; byUserId: string; byName: string; byRole: string; at: number; canRemove: boolean }[];
   };
   tabs: { key: CandidateTab; label: string; count: number | null }[];
   cv: { available: boolean; fileName: string | null };
@@ -180,4 +197,14 @@ export interface CandidateClosingResult {
   ok: boolean;
   message: string;
   placementId?: string;
+}
+
+export type CandidateReviewBody =
+  | { action: "details"; currentSalary: string; currentSalaryCurrency: string; expectedSalary: string; expectedSalaryCurrency: string; noticePeriod: string; currentDesignation: string; currentCompany: string; customDetails: { label: string; value: string }[] }
+  | { action: "add_note"; note: string }
+  | { action: "remove_note"; noteId: string };
+
+export interface CandidateReviewResult {
+  ok: boolean;
+  message: string;
 }
