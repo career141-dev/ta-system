@@ -194,6 +194,10 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       })),
     })),
     closing: {
+      access: {
+        canManage: canManageInterviews,
+        canMakeOffer: canManageInterviews && ["client_shortlist", "interview", "offer", "placed"].includes(app.stage),
+      },
       offer: offer ? {
         id: offer.id,
         salary: offer.salary,
@@ -203,6 +207,8 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
         terms: offer.terms,
         status: offer.status,
         declineReason: offer.declineReason,
+        createdAt: offer.createdAt,
+        respondedAt: offer.respondedAt,
       } : null,
       placement: placement ? {
         id: placement.id,

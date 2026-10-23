@@ -100,6 +100,10 @@ export interface CandidatePayload {
     history: { at: number; byName: string; kind: string; detail: string; reason: string | null }[];
   }[];
   closing: {
+    access: {
+      canManage: boolean;
+      canMakeOffer: boolean;
+    };
     offer: {
       id: string;
       salary: number;
@@ -109,6 +113,8 @@ export interface CandidatePayload {
       terms: string | null;
       status: "pending" | "accepted" | "declined" | "withdrawn";
       declineReason: string | null;
+      createdAt: number;
+      respondedAt: number | null;
     } | null;
     placement: {
       id: string;
@@ -163,4 +169,15 @@ export type CandidateInterviewBody =
 export interface CandidateInterviewResult {
   ok: boolean;
   message: string;
+}
+
+export type CandidateClosingBody =
+  | { action: "offer"; salary: number; salaryBasis: "monthly" | "annual"; currency: "LKR" | "USD"; startDate: string; terms: string }
+  | { action: "respond"; offerId: string; status: "accepted" | "declined" | "withdrawn"; reason: string }
+  | { action: "place"; offerId: string; joinDate: string };
+
+export interface CandidateClosingResult {
+  ok: boolean;
+  message: string;
+  placementId?: string;
 }

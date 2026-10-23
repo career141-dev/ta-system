@@ -28,3 +28,25 @@ export const candidateInterviewBody = z.discriminatedUnion("action", [
     recommendation: z.enum(["hire", "next_round", "hold", "reject"]).nullable(), comments: z.string().max(4000),
   }).strict(),
 ]);
+
+export const candidateClosingBody = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("offer"),
+    salary: z.number().finite(),
+    salaryBasis: z.enum(["monthly", "annual"]),
+    currency: z.enum(["LKR", "USD"]),
+    startDate: z.string().max(20),
+    terms: z.string().max(4000),
+  }).strict(),
+  z.object({
+    action: z.literal("respond"),
+    offerId: z.string().min(1).max(100),
+    status: z.enum(["accepted", "declined", "withdrawn"]),
+    reason: z.string().max(1000),
+  }).strict(),
+  z.object({
+    action: z.literal("place"),
+    offerId: z.string().min(1).max(100),
+    joinDate: z.string().max(20),
+  }).strict(),
+]);

@@ -20,6 +20,7 @@ import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } fr
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
+import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -4173,35 +4174,21 @@ export async function logFollowUpReply(formData: FormData) {
 
 // ─── Closing records ─────────────────────────────────────────────────────────
 
-const num = (fd: FormData, k: string): number | null => {
-  const raw = String(fd.get(k) ?? "").replace(/[^\d.]/g, "");
-  if (!raw) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-};
-
-/** A date typed into a form, as 09:00 Colombo on that day — not the server's zone. */
-const day = (fd: FormData, k: string): number | null => {
-  const v = String(fd.get(k) ?? "").trim();
-  return v ? colomboLocalToInstant(`${v}T09:00`) : null;
-};
-
 export async function makeOffer(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
-  const r = repo.makeOffer({
-    applicationId: appId,
-    salary: num(formData, "salary") ?? 0,
+  const rawSalary = String(formData.get("salary") ?? "").replace(/[^\d.]/g, "");
+  const salary = rawSalary && Number.isFinite(Number(rawSalary)) ? Number(rawSalary) : 0;
+  const r = await writeCandidateClosing(user, openingId, appId, {
+    action: "offer",
+    salary,
     salaryBasis: String(formData.get("salaryBasis") ?? "monthly") as "monthly" | "annual",
     currency: String(formData.get("currency") ?? "LKR") as "LKR" | "USD",
-    startDate: day(formData, "startDate"),
-    terms: String(formData.get("terms") ?? "").trim() || null,
-    byUserId: user.id,
-  });
-  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
-  revalidatePath("/placements");
+    startDate: String(formData.get("startDate") ?? ""),
+    terms: String(formData.get("terms") ?? ""),
+  }, OPENING_DEPS);
   redirect(
     `/openings/${openingId}/candidate/${appId}${r.ok ? "" : `?msg=${encodeURIComponent(r.message)}`}`,
   );
@@ -4209,17 +4196,15 @@ export async function makeOffer(formData: FormData) {
 
 export async function respondToOffer(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "applicationId", offer: "offerId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
-  const r = repo.respondToOffer({
+  const r = await writeCandidateClosing(user, openingId, appId, {
+    action: "respond",
     offerId: String(formData.get("offerId")),
     status: String(formData.get("status")) as "accepted" | "declined" | "withdrawn",
     reason: String(formData.get("reason") ?? ""),
-    byUserId: user.id,
-  });
-  revalidatePath(`/openings/${openingId}/candidate/${appId}`);
-  revalidatePath("/placements");
+  }, OPENING_DEPS);
   redirect(
     `/openings/${openingId}/candidate/${appId}${r.ok ? "" : `?msg=${encodeURIComponent(r.message)}`}`,
   );
@@ -4227,24 +4212,17 @@ export async function respondToOffer(formData: FormData) {
 
 export async function recordPlacement(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "applicationId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("applicationId"));
   const openingId = String(formData.get("openingId"));
-  const joinDate = day(formData, "joinDate");
-  if (joinDate === null)
-    redirect(
-      `/openings/${openingId}/candidate/${appId}?msg=${encodeURIComponent("A placement needs a join date.")}`,
-    );
-  const r = repo.recordPlacement({
+  const r = await writeCandidateClosing(user, openingId, appId, {
+    action: "place",
     offerId: String(formData.get("offerId")),
-    joinDate,
-    salary: num(formData, "salary") ?? undefined,
-    byUserId: user.id,
-  });
-  revalidatePath("/placements");
+    joinDate: String(formData.get("joinDate") ?? ""),
+  }, OPENING_DEPS);
   if (!r.ok)
     redirect(`/openings/${openingId}/candidate/${appId}?msg=${encodeURIComponent(r.message)}`);
-  redirect(`/placements/${r.id}`);
+  redirect(`/placements/${r.placementId}`);
 }
 
 // ─── Screening calls ─────────────────────────────────────────────────────────
