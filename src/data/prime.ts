@@ -86,6 +86,8 @@ export interface PrimeScope {
    * "as of 10:42". Its per-person rate limit is what keeps this bounded.
    */
   fresh?: boolean;
+  /** Reports must reflect writes from other app processes on every request. */
+  alwaysFresh?: boolean;
 }
 
 /** How old "fresh" may be — enough that one burst of questions shares a read. */
@@ -225,7 +227,7 @@ async function refresh(scope: PrimeScope): Promise<void> {
    * A refresh that fails keeps the rows already held. They are thirty seconds
    * old; an empty list of users is not an improvement on that.
    */
-  const ttl = scope.fresh ? FRESH_MS : TABLES_TTL_MS;
+  const ttl = scope.alwaysFresh ? -1 : scope.fresh ? FRESH_MS : TABLES_TTL_MS;
   if (!state.snapshot || now - state.tablesAt > ttl) {
     const w = state.writes;
     try {

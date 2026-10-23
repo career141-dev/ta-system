@@ -2,6 +2,7 @@ import { primeStore } from "@/data/prime";
 import { reportCsv, DEFAULT_SPEC, sanitizeSpec, type ReportSpec } from "@/lib/reporting";
 import { currentUser } from "@/lib/session";
 import { can, isDeskWide, isTa } from "@/lib/auth";
+import { repo } from "@/data/store";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   // Load the store before reading it — this route has no page to do it first.
-  await primeStore({ allApplications: true });
+  await primeStore({ allApplications: true, alwaysFresh: true });
   const user = await currentUser();
   if (!user) return new Response("Sign in first.", { status: 401 });
   if (!can(user, "report.read").ok) return new Response("Not allowed.", { status: 403 });
@@ -26,17 +27,21 @@ export async function GET(req: Request) {
       // Fall through to the default rather than failing the download.
     }
   }
-  const masterSheet = url.searchParams.get("view") === "master";
+  const legacyMasterSheet = url.searchParams.get("view") === "master" && spec.dataset === "openings";
+  const masterSheet = spec.dataset === "ta_jobs" || legacyMasterSheet;
   if (masterSheet && !isDeskWide(user) && !isTa(user)) {
     return new Response("Not allowed.", { status: 403 });
   }
-  const scope = masterSheet && isTa(user) ? { openingUserId: user.id } : {};
+  if (spec.dataset === "ta_jobs" && isTa(user)) spec = { ...spec, subjectTaId: user.id };
+  if (masterSheet && spec.subjectTaId && !isTa(repo.user(spec.subjectTaId))) {
+    return new Response("TA not found.", { status: 400 });
+  }
   const name = (url.searchParams.get("name") ?? "report")
     .replace(/[^a-z0-9]+/gi, "-")
     .toLowerCase();
   const stamp = new Date().toISOString().slice(0, 10);
 
-  return new Response("﻿" + reportCsv(spec, scope), {
+  return new Response("﻿" + reportCsv(spec, legacyMasterSheet && isTa(user) ? { openingUserId: user.id } : {}), {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="career141-${name}-${stamp}.csv"`,

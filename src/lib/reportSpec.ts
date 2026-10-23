@@ -11,9 +11,15 @@ import { COLOMBO_OFFSET_MS, TIMEZONE } from "./calendar";
 
 // ─── the spec ────────────────────────────────────────────────────────────────
 
-export type DatasetKey = "openings" | "candidates" | "outreach" | "placements";
+export type DatasetKey = "openings" | "ta_jobs" | "candidates" | "outreach" | "placements";
 export type FieldType = "text" | "number" | "date" | "enum";
 export type Agg = "count" | "count_distinct" | "sum" | "avg" | "min" | "max";
+
+/** Repeated on every TA row for context; aggregating them inflates job totals. */
+export const SHARED_TA_JOB_FIELDS = new Set([
+  "headcount", "salaryMin", "salaryMax", "daysOpen", "targetDays", "daysOverTarget", "posts",
+  "valueInProgress", "valuePlaced", "valueLost", "valueOnHold",
+]);
 
 export type FilterOp =
   | "contains" | "not_contains" | "is" | "is_not"
@@ -40,6 +46,8 @@ export type Bucket = "day" | "week" | "month" | "quarter";
 
 export interface ReportSpec {
   dataset: DatasetKey;
+  /** Resolved server-side from a named TA; never supplied by the model. */
+  subjectTaId?: string;
   /** Detail columns. Ignored when grouping. */
   columns: string[];
   filters: Filter[];
@@ -59,6 +67,7 @@ export interface ReportSpec {
 
 export const PERIODS = [
   { key: "all", label: "All time", days: null },
+  { key: "month", label: "This month", days: null },
   { key: "7", label: "Last 7 days", days: 7 },
   { key: "30", label: "Last 30 days", days: 30 },
   { key: "90", label: "Last 90 days", days: 90 },
@@ -242,6 +251,21 @@ export const DATASETS: DatasetMeta[] = [
 ];
 
 
+// Keep ordinary openings reports at one row per job. This dataset shares the
+// catalogue but counts each recruiter's own activity on each job.
+DATASETS.splice(1, 0, {
+  ...DATASETS[0]!,
+  key: "ta_jobs",
+  label: "TA work by job",
+  note: "One row for each TA's work on a job, including past credited work.",
+  fields: [
+    ...DATASETS[0]!.fields.map((field) => field.key === "hunted" ? { ...field, label: "LinkedIn links" } : field),
+    F("eyeMarkedDateUnknown", "Eye marks: date unknown", "number"),
+    F("internalShortlistDateUnknown", "Internal shortlists: date unknown", "number"),
+    F("externalShortlistDateUnknown", "Client shortlists: date unknown", "number"),
+  ],
+});
+
 export const datasetMeta = (k: DatasetKey) => DATASETS.find((d) => d.key === k) ?? DATASETS[0];
 export interface Column {
   key: string;
@@ -360,7 +384,7 @@ export const PRESETS: Preset[] = [
     label: "Master Sheet",
     note: "The old workbook, calculated from live system activity instead of typed twice.",
     spec: base({
-      dataset: "openings",
+      dataset: "ta_jobs",
       columns: [
         "client", "title", "positionStatus", "ta",
         "eyeMarked", "contacted", "hunted",
@@ -372,7 +396,7 @@ export const PRESETS: Preset[] = [
         "set3Date", "set3Cvs", "set4Date", "set4Cvs", "cvsSent",
         "internalShortlist1", "internalShortlist2", "internalShortlist3", "internalShortlist4", "internalShortlistTotal",
         "externalShortlist1", "externalShortlist2", "externalShortlist3", "externalShortlist4", "externalShortlistTotal",
-        "interviewed", "withdrawn", "finalists",
+        "interviewed", "withdrawn", "finalists", "placed",
       ],
       sort: { field: "client", dir: "asc" },
     }),
@@ -530,7 +554,8 @@ export function sanitizeSpec(input: unknown, fallback: ReportSpec): ReportSpec {
     ? x.metrics
         .filter((m): m is Record<string, unknown> => !!m && typeof m === "object")
         .map((m) => ({ field: str(m.field), agg: str(m.agg) as Agg }))
-        .filter((m) => known.has(m.field) && AGG_KEYS.includes(m.agg))
+        .filter((m) => known.has(m.field) && AGG_KEYS.includes(m.agg) &&
+          !(ds.key === "ta_jobs" && SHARED_TA_JOB_FIELDS.has(m.field) && m.agg !== "count_distinct"))
     : [];
   const groupBy = typeof x.groupBy === "string" && known.has(x.groupBy) ? x.groupBy : null;
   const sortIn = x.sort as Record<string, unknown> | null | undefined;
@@ -544,5 +569,7 @@ export function sanitizeSpec(input: unknown, fallback: ReportSpec): ReportSpec {
   const chart = (["auto", "bar", "column", "line", "donut", "funnel", "none"] as const).find((c) => c === x.chart);
   const dateField = typeof x.dateField === "string" && known.has(x.dateField) ? x.dateField : undefined;
 
-  return { dataset: ds.key, columns, filters, groupBy, metrics, sort, period, limit, bucket, chart, dateField };
+  const subjectTaId = ds.key === "ta_jobs" && typeof x.subjectTaId === "string" && x.subjectTaId.length < 128
+    ? x.subjectTaId : undefined;
+  return { dataset: ds.key, subjectTaId, columns, filters, groupBy, metrics, sort, period, limit, bucket, chart, dateField };
 }

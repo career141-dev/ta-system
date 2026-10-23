@@ -692,6 +692,8 @@ export interface EodEmailCopy {
 export interface ReviewDecision {
   applicationId: Id;
   outcome: "shortlisted" | "rejected" | "hold";
+  /** When this decision was recorded; absent on older replies. */
+  decidedAt?: number;
   note: string | null;
   /** True when a person confirmed it rather than the parse alone. */
   confirmed: boolean;
@@ -779,6 +781,8 @@ export interface LinkVaultEntry {
   title: string | null;
   company: string | null;
   isEyeMarked: boolean;
+  /** When the current eye mark was added; absent on older rows. */
+  eyeMarkedAt?: number | null;
   phoneNumber: string | null;
   phoneSource: "mutual_connection" | "reception_call" | "internal_db" | "profile" | "other" | null;
   sourcingChannel: SourcingChannel;

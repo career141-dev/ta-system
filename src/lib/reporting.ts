@@ -24,6 +24,7 @@ import {
 import type { Stage as PipelineStage } from "@/data/types";
 import {
   levelSlot,
+  masterSheetActorIds,
   MASTER_SHEET_SLOTS,
   masterSheetApplicationsForUser,
   masterSheetRoundsForApplications,
@@ -41,43 +42,59 @@ const STAGES: Stage[] = [
   "interview", "offer", "placed", "rejected", "dropped_out",
 ];
 
-function openingRows(userId?: string): Row[] {
+function openingRows(userId?: string, perTa = false, since?: number): Row[] {
   const clients = repo.clients();
   const users = repo.users();
   const interviews = repo.interviews();
   const name = (id: string) => users.find((u) => u.id === id)?.name ?? null;
 
   const openings = repo.openings().filter((opening) => {
-    if (!userId) return true;
+    if (!userId || perTa) return true;
     const assignment = repo.assignmentFor(opening.id, userId);
     return opening.assignedTaIds.includes(userId) ||
       assignment?.role === "primary_recruiter" || assignment?.role === "supporting_recruiter";
   });
 
-  return openings.map((o) => {
+  return openings.flatMap((o) => {
     const allApps = repo.applications(o.id);
-    const apps = userId ? masterSheetApplicationsForUser(allApps, userId) : allApps;
-    const c = {} as Record<Stage, number>;
-    for (const app of apps) c[app.stage] = (c[app.stage] ?? 0) + 1;
-    const sets = setsForOpening(o.id, userId);
     const allVault = repo.linkVault(o.id);
-    const vault = userId ? allVault.filter((row) => row.addedBy === userId) : allVault;
+    const allActors = perTa ? masterSheetActorIds(o, allApps, allVault, users) : [];
+    const taIds = new Set(allActors.filter((id): id is string => id !== null));
+    const actors = perTa
+      ? allActors.filter((id) => !userId || id === userId)
+      : [userId ?? null];
+    return actors.map((actorId) => {
+    const apps = perTa
+      ? allApps.filter((a) => actorId === null ? !a.ownerTaId || !taIds.has(a.ownerTaId) : a.ownerTaId === actorId)
+      : userId ? masterSheetApplicationsForUser(allApps, userId) : allApps;
+    const vault = perTa
+      ? allVault.filter((v) => actorId === null ? !taIds.has(v.addedBy) : v.addedBy === actorId)
+      : userId ? allVault.filter((v) => v.addedBy === userId) : allVault;
+    const periodVault = perTa && since !== undefined ? vault.filter((v) => v.createdAt >= since) : vault;
+    const periodApps = perTa && since !== undefined ? apps.filter((app) => app.lastStageChangedAt >= since) : apps;
+    const c = {} as Record<Stage, number>;
+    for (const app of periodApps) c[app.stage] = (c[app.stage] ?? 0) + 1;
+    const sets = perTa && actorId === null ? [] : setsForOpening(o.id, perTa ? actorId ?? undefined : userId);
     const appIds = new Set(apps.map((app) => app.id));
     const openingInterviews = interviews.filter((interview) => appIds.has(interview.applicationId));
     const allRounds = repo.reviewRounds(o.id);
-    const rounds = userId
+    const rounds = perTa || userId
       ? masterSheetRoundsForApplications(allRounds, appIds)
       : allRounds;
-    const levelOwners = new Set(userId ? [userId] : [...o.assignedTaIds, ...vault.map((row) => row.addedBy)]);
-    const levels = [...levelOwners].flatMap((userId) => repo.allLinkLevels(o.id, userId));
-    const [l1, l2, l3, l4] = MASTER_SHEET_SLOTS.map((n) => levelSlot(levels, vault, n));
-    const [set1, set2, set3, set4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "director", n));
-    const [client1, client2, client3, client4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "client", n));
+    const levelOwners = new Set(perTa ? actorId ? [actorId] : [] : userId ? [userId] : [...o.assignedTaIds, ...vault.map((row) => row.addedBy)]);
+    const locations = [undefined, ...(o.workLocations ?? []).map((location) => location.id)];
+    const allLevels = [...levelOwners].flatMap((owner) => locations.flatMap((location) => repo.linkLevels(o.id, owner, location)));
+    const levels = perTa && since !== undefined ? allLevels.filter((level) => level.at >= since) : allLevels;
+    const [l1, l2, l3, l4] = MASTER_SHEET_SLOTS.map((n) => levelSlot(levels, periodVault, n));
+    const [set1, set2, set3, set4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "director", n, perTa ? since : undefined));
+    const [client1, client2, client3, client4] = MASTER_SHEET_SLOTS.map((n) => roundSlot(rounds, "client", n, perTa ? since : undefined));
     const target = PRIORITY_TARGET[o.priorityTier].days;
     const days = o.assignedAt ? colomboDaysBetween(o.assignedAt) : null;
 
     return {
       id: o.id,
+      rowKey: perTa ? `${o.id}:${actorId ?? "unassigned"}` : o.id,
+      taId: perTa ? actorId : null,
       title: o.title,
       client: clients.find((x) => x.id === o.clientId)?.name ?? null,
       industry: clients.find((x) => x.id === o.clientId)?.industry ?? null,
@@ -88,7 +105,7 @@ function openingRows(userId?: string): Row[] {
       locations: o.locations.join(", ") || null,
       nationality: o.targetNationalities.join(", ") || null,
       headcount: o.headcount,
-      ta: userId ? name(userId) : o.assignedTaIds.map(name).filter(Boolean).join(", ") || null,
+      ta: perTa ? actorId ? name(actorId) : "Unassigned" : userId ? name(userId) : o.assignedTaIds.map(name).filter(Boolean).join(", ") || null,
       lead: name(o.taLeadId),
       salaryMin: o.salaryMin,
       salaryMax: o.salaryMax,
@@ -102,18 +119,23 @@ function openingRows(userId?: string): Row[] {
       posts: repo.jobPosts(o.id).length,
       // Every CV on the opening. Summing set members left out everyone not yet
       // in a set — which is every new applicant (audit finding 29).
-      totalCvs: apps.filter((a) => a.sourcingChannel !== "SCOOP").length,
+      totalCvs: apps.filter((a) => a.sourcingChannel !== "SCOOP" && (since === undefined || !perTa || a.createdAt >= since)).length,
       setsClosed: sets.filter((s) => s.status === "closed").length,
       // A hunted profile exists before its CV reaches the pipeline. Counting
       // only HH applications hid everyone still being contacted in Excel Tables.
-      hunted: vault.length,
-      eyeMarked: vault.filter((v) => v.isEyeMarked).length,
-      contacted: vault.filter((v) => v.outcome !== "no_contact" || v.conversationLog.length > 0).length,
-      approached: vault.filter((v) => v.outcome !== "no_contact" || v.conversationLog.length > 0).length,
-      inPipeline: apps.length,
+      hunted: periodVault.length,
+      eyeMarked: vault.filter((v) => v.isEyeMarked && (since === undefined || !perTa || (v.eyeMarkedAt !== undefined && v.eyeMarkedAt !== null && v.eyeMarkedAt >= since))).length,
+      eyeMarkedDateUnknown: since === undefined ? 0 : vault.filter((v) => v.isEyeMarked && v.eyeMarkedAt === undefined).length,
+      contacted: vault.filter((v) => since === undefined || !perTa
+        ? v.outcome !== "no_contact" || v.conversationLog.length > 0
+        : (v.outcomeAt !== undefined && v.outcomeAt >= since) || v.conversationLog.some((entry) => entry.at >= since)).length,
+      approached: vault.filter((v) => since === undefined || !perTa
+        ? v.outcome !== "no_contact" || v.conversationLog.length > 0
+        : (v.outcomeAt !== undefined && v.outcomeAt >= since) || v.conversationLog.some((entry) => entry.at >= since)).length,
+      inPipeline: since === undefined || !perTa ? apps.length : apps.filter((a) => a.createdAt >= since).length,
       directorShortlist: c.director_shortlist ?? 0,
       clientShortlist: c.client_shortlist ?? 0,
-      interviewed: new Set(openingInterviews.filter((i) => i.outcome === "attended").map((i) => i.applicationId)).size,
+      interviewed: new Set(openingInterviews.filter((i) => i.outcome === "attended" && (since === undefined || !perTa || i.scheduledAt >= since)).map((i) => i.applicationId)).size,
       placed: c.placed ?? 0,
       rejected: (c.rejected ?? 0) + (c.dropped_out ?? 0),
       valueInProgress: o.valueOnProgressing,
@@ -125,29 +147,32 @@ function openingRows(userId?: string): Row[] {
       l2Date: l2.at, l2Profiles: l2.count,
       l3Date: l3.at, l3Profiles: l3.count,
       l4Date: l4.at, l4Profiles: l4.count,
-      totalLs: vault.filter((row) => row.level !== null && row.level !== undefined).length,
+      totalLs: perTa ? levels.length : vault.filter((row) => row.level !== null && row.level !== undefined).length,
       set1Date: set1.at, set1Cvs: set1.count,
       set2Date: set2.at, set2Cvs: set2.count,
       set3Date: set3.at, set3Cvs: set3.count,
       set4Date: set4.at, set4Cvs: set4.count,
-      cvsSent: uniqueSubmitted(rounds),
+      cvsSent: uniqueSubmitted(rounds, perTa ? since : undefined),
       internalShortlist1: set1.shortlisted,
       internalShortlist2: set2.shortlisted,
       internalShortlist3: set3.shortlisted,
       internalShortlist4: set4.shortlisted,
       internalShortlistTotal: set1.shortlisted + set2.shortlisted + set3.shortlisted + set4.shortlisted,
+      internalShortlistDateUnknown: (set1.dateUnknown ?? 0) + (set2.dateUnknown ?? 0) + (set3.dateUnknown ?? 0) + (set4.dateUnknown ?? 0),
       externalShortlist1: client1.shortlisted,
       externalShortlist2: client2.shortlisted,
       externalShortlist3: client3.shortlisted,
       externalShortlist4: client4.shortlisted,
       externalShortlistTotal: client1.shortlisted + client2.shortlisted + client3.shortlisted + client4.shortlisted,
-      withdrawn: apps.filter((app) => app.stage === "dropped_out").length,
+      externalShortlistDateUnknown: (client1.dateUnknown ?? 0) + (client2.dateUnknown ?? 0) + (client3.dateUnknown ?? 0) + (client4.dateUnknown ?? 0),
+      withdrawn: periodApps.filter((app) => app.stage === "dropped_out").length,
       finalists: new Set(
         openingInterviews
-          .filter((i) => i.outcome !== "cancelled" && (i.round >= 3 || /\bfinal\b/i.test(i.title ?? "")))
+          .filter((i) => i.outcome !== "cancelled" && (i.round >= 3 || /\bfinal\b/i.test(i.title ?? "")) && (since === undefined || !perTa || i.scheduledAt >= since))
           .map((i) => i.applicationId),
       ).size,
     };
+    });
   });
 }
 
@@ -241,6 +266,7 @@ function placementRows(): Row[] {
 
 const ROWS: Record<DatasetKey, () => Row[]> = {
   openings: openingRows,
+  ta_jobs: () => openingRows(undefined, true),
   candidates: candidateRows,
   outreach: outreachRows,
   placements: placementRows,
@@ -351,15 +377,24 @@ export function runReport(spec: ReportSpec, scope: ReportScope = {}): ReportResu
   const typeOf = (k: string) => ds.fields.find((f) => f.key === k)?.type ?? "text";
   const labelOf = (k: string) => ds.fields.find((f) => f.key === k)?.label ?? k;
 
-  let rows = spec.dataset === "openings" && scope.openingUserId
-    ? openingRows(scope.openingUserId)
-    : ds.rows();
+  const days = PERIODS.find((p) => p.key === spec.period)?.days ?? null;
+  const monthParts = spec.period === "month"
+    ? new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Colombo", year: "numeric", month: "2-digit" }).formatToParts(new Date())
+    : [];
+  const year = monthParts.find((part) => part.type === "year")?.value;
+  const month = monthParts.find((part) => part.type === "month")?.value;
+  const since = year && month ? Date.parse(`${year}-${month}-01T00:00:00+05:30`)
+    : days ? Date.now() - days * 86_400_000 : undefined;
+  let rows = spec.dataset === "ta_jobs"
+    ? openingRows(spec.subjectTaId, true, since)
+    : spec.dataset === "openings" && scope.openingUserId
+      ? openingRows(scope.openingUserId)
+      : ds.rows();
 
   // Period first — it is the filter people forget they left on.
-  const days = PERIODS.find((p) => p.key === spec.period)?.days ?? null;
-  if (days) {
+  if (since !== undefined && spec.dataset !== "ta_jobs") {
     const field = spec.dateField ?? ds.dateField;
-    const cutoff = Date.now() - days * 86_400_000;
+    const cutoff = since;
     rows = rows.filter((r) => {
       const v = Number(r[field]);
       return Number.isFinite(v) && v >= cutoff;
@@ -484,7 +519,7 @@ export function runReport(spec: ReportSpec, scope: ReportScope = {}): ReportResu
     columns = cols.map((k) => ({ key: k, label: labelOf(k), type: typeOf(k) }));
     // Keep the source id beside the visible cells. It is not a report column or
     // an export cell; interactive report views use it to open or edit the row.
-    out = rows.map((r) => ({ id: r.id ?? null, ...Object.fromEntries(cols.map((k) => [k, r[k] ?? null])) }) as Row);
+    out = rows.map((r) => ({ id: r.id ?? null, rowKey: r.rowKey ?? null, taId: r.taId ?? null, ...Object.fromEntries(cols.map((k) => [k, r[k] ?? null])) }) as Row);
   }
 
   if (spec.sort) {
@@ -498,12 +533,17 @@ export function runReport(spec: ReportSpec, scope: ReportScope = {}): ReportResu
       const nx = Number(x);
       const ny = Number(y);
       if (Number.isFinite(nx) && Number.isFinite(ny)) return (nx - ny) * sign;
-      return String(x).localeCompare(String(y)) * sign;
+      const compared = String(x).localeCompare(String(y)) * sign;
+      return compared || (spec.dataset === "ta_jobs"
+        ? String(a.client ?? "").localeCompare(String(b.client ?? "")) ||
+          String(a.title ?? "").localeCompare(String(b.title ?? "")) ||
+          String(a.ta ?? "").localeCompare(String(b.ta ?? "") ) : 0);
     });
   }
 
-  const truncated = out.length > spec.limit;
-  return { columns, rows: out.slice(0, spec.limit), matched, truncated, order, sequence };
+  const unlimited = spec.dataset === "ta_jobs";
+  const truncated = !unlimited && out.length > spec.limit;
+  return { columns, rows: unlimited ? out : out.slice(0, spec.limit), matched, truncated, order, sequence };
 }
 
 

@@ -2787,11 +2787,31 @@ export async function askReport(formData: FormData) {
   // because that is where they are actually read; asking for them again here
   // first only delayed the model call for no reason (17 September).
   await primeStore();
-  await authorize(formData, "report.read");
+  const user = await authorize(formData, "report.read");
   const question = String(formData.get("question") ?? "").trim();
   // An empty box did nothing at all (21 Sep).
   if (!question) redirect(`/reports?askErr=empty`);
-  const { askForReport } = await import("@/lib/reportAsk");
+  const { askForReport, resolveTaPerformanceQuestion, taPerformanceSpec } = await import("@/lib/reportAsk");
+  const namedTa = resolveTaPerformanceQuestion(question, repo.users());
+  if (namedTa.kind === "ambiguous" || namedTa.kind === "unknown") {
+    redirect(`/reports?askErr=${namedTa.kind === "ambiguous" ? "ambiguous_ta" : "unknown_ta"}&q=${encodeURIComponent(question)}`);
+  }
+  if (namedTa.kind === "found") {
+    if (!isDeskWide(user) && namedTa.user.id !== user.id) {
+      redirect(`/reports?askErr=ta_access&q=${encodeURIComponent(question)}`);
+    }
+    const period = /\bthis month\b/i.test(question) ? "month" as const
+      : /\b(this week|last 7 days)\b/i.test(question) ? "7" as const
+      : /\b(last 30 days)\b/i.test(question) ? "30" as const
+      : /\b(this quarter|last 90 days)\b/i.test(question) ? "90" as const
+      : /\b(this year|last 12 months)\b/i.test(question) ? "365" as const : "all" as const;
+    const q = new URLSearchParams({
+      spec: JSON.stringify(taPerformanceSpec(namedTa.user.id, period)),
+      name: `${namedTa.user.name} performance`,
+      q: question,
+    });
+    redirect(`/reports?${q}`);
+  }
   const res = await askForReport(question);
 
   if (!res.ok || !res.spec) {

@@ -15,7 +15,7 @@ const EDITABLE = new Set([
 
 const GROUP: Record<string, string> = {
   client: "Opening", title: "Opening", positionStatus: "Opening", ta: "Opening",
-  contacted: "Sourcing", hunted: "Sourcing",
+  eyeMarked: "Sourcing", contacted: "Sourcing", hunted: "Sourcing",
   valueInProgress: "Commercial value", valuePlaced: "Commercial value", valueLost: "Commercial value", valueOnHold: "Commercial value",
   assignedAt: "Dates", closedAt: "Dates",
   l1Date: "Search levels", l1Profiles: "Search levels", l2Date: "Search levels", l2Profiles: "Search levels",
@@ -27,9 +27,9 @@ const GROUP: Record<string, string> = {
   interviewed: "Outcome", withdrawn: "Outcome", finalists: "Outcome", placed: "Outcome",
 };
 
-function sourceHref(openingId: string, key: string): string {
-  if (key === "contacted" || key === "hunted" || /^l[1-4](Date|Profiles)?$/.test(key) || key === "totalLs") {
-    return `/openings/${openingId}/hh/links`;
+function sourceHref(openingId: string, key: string, taId?: string): string {
+  if (key === "eyeMarked" || key === "contacted" || key === "hunted" || /^l[1-4](Date|Profiles)?$/.test(key) || key === "totalLs") {
+    return `/openings/${openingId}/hh/links${taId ? `?by=${encodeURIComponent(taId)}` : ""}`;
   }
   if (/^set[1-4](Date|Cvs)?$/.test(key) || /^internalShortlist[1-4]$/.test(key) || key === "cvsSent" || key === "internalShortlistTotal") {
     return `/openings/${openingId}/pipeline/director_review`;
@@ -125,8 +125,9 @@ export function MasterSheetTable({
     <>
       {editableSheet && rows.map((row) => {
         const openingId = String(row.id ?? "");
+        const rowKey = String(row.rowKey ?? openingId);
         return (
-          <form key={openingId} id={`master-sheet-${openingId}`} action={updateMasterSheetOpening}>
+          <form key={rowKey} id={`master-sheet-${rowKey}`} action={updateMasterSheetOpening}>
             <input type="hidden" name="openingId" value={openingId} />
           </form>
         );
@@ -172,10 +173,11 @@ export function MasterSheetTable({
           <tbody>
             {rows.map((row, index) => {
               const openingId = String(row.id ?? "");
-              const formId = `master-sheet-${openingId}`;
+              const rowKey = String(row.rowKey ?? openingId);
+              const formId = `master-sheet-${rowKey}`;
               const canEdit = Boolean(canEditById[openingId]);
               return (
-                <tr key={openingId || index} className="group hover:bg-blue-50/40">
+                <tr key={rowKey || index} className="group hover:bg-blue-50/40">
                   {columns.map((column) => {
                     const editable = canEdit && EDITABLE.has(column.key);
                     const sourceField = EDITABLE.has(column.key);
@@ -189,13 +191,13 @@ export function MasterSheetTable({
                         title={editable
                           ? "Editable source field"
                           : sourceField
-                            ? "Shared opening field; management edits this on the combined Master Sheet"
+                            ? "Shared job field; editing any TA row updates the same job"
                             : "Calculated from the live workflow; click to open its source"}
                       >
                         {editable ? (
                           <EditableCell column={column} row={row} formId={formId} />
                         ) : (
-                          <Link href={sourceHref(openingId, column.key)} className="block min-h-8 min-w-[96px] whitespace-nowrap px-1 py-1.5 text-ink hover:text-brand hover:underline">
+                          <Link href={sourceHref(openingId, column.key, typeof row.taId === "string" ? row.taId : undefined)} className="block min-h-8 min-w-[96px] whitespace-nowrap px-1 py-1.5 text-ink hover:text-brand hover:underline">
                             {cellText(row[column.key], column.type) || "—"}
                           </Link>
                         )}

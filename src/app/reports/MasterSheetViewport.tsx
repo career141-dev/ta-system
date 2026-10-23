@@ -51,6 +51,7 @@ export function MasterSheetViewport({
           <span className="font-medium text-ink">Read-only Master Sheet</span>
         )}
         <span><span className="mr-1.5 inline-block h-2.5 w-2.5 rounded-sm border border-rule bg-surface" />Calculated cells follow live workflow records</span>
+        <span>Job status, dates and commercial values are shared across its TA rows.</span>
         <span>Click a calculated value to open its source.</span>
         {editable && (
           <span className="lg:ml-auto" title="The reason is kept in the audit history with who made the change and when.">
