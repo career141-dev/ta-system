@@ -423,7 +423,7 @@ function DailyReview({
           </div>
           {canFinish && !job.eodSentAt && <div className="flex items-center gap-3"><span className="text-xs">Work type</span><WorkingStageMenu openingId={job.jobId} stage={job.workType} /></div>}
           {job.eodSentAt && <p className="text-sm text-brand">EOD sent {workdayTime(job.eodSentAt)} · {job.workType}</p>}
-          {job.workType === "100%" && <details><summary className="cursor-pointer text-xs text-ink-soft">Activity details</summary>
+          {(reviewer || job.workType === "100%") && <details open={reviewer}><summary className="cursor-pointer text-xs text-ink-soft">Activity details</summary>
           <p className="mt-2 text-sm text-ink-soft">
             {job.activity.cvReviews} CV reviews · {job.activity.profilesAdded}{" "}
             LinkedIn profiles added · {job.activity.profilesWorked} profiles
@@ -481,7 +481,7 @@ function DailyReview({
             <summary className="cursor-pointer text-xs text-ink-soft">Candidate task details</summary>
             <ul>{job.detailChecks.filter(c => !job.checks.some(summary => summary.key === c.key)).map(check => <Check key={check.key} check={check} dayId={day.id} readOnly />)}</ul>
           </details>}
-          {canManage && !job.eodSentAt && (day.finishedAt === null || day.closureReason === "eod") && job.detailChecks.some(c => (c.kind === "cv_review" && c.status !== "complete") || c.key.startsWith("mail:")) && <details>
+          {canManage && job.canManage !== false && !job.eodSentAt && (day.finishedAt === null || day.closureReason === "eod") && job.detailChecks.some(c => (c.kind === "cv_review" && c.status !== "complete") || c.key.startsWith("mail:")) && <details>
             <summary className="cursor-pointer text-xs text-brand">Review actions</summary>
           {canManage &&
             (day.finishedAt === null || day.closureReason === "eod") &&
@@ -569,7 +569,7 @@ function DailyReview({
 }
 
 export function WorkdayDashboard() {
-  const [date, setDate] = useSavedChoice("workday-date");
+  const [date, setDate] = useSavedChoice("workday-date", workdayDate(Date.now()));
   const [ta, setTa] = useSavedChoice("workday-ta");
   const [jobFilter, setJobFilter] = useSavedChoice("workday-filter-job");
   const [status, setStatus] = useSavedChoice("workday-filter-status");
@@ -580,9 +580,12 @@ export function WorkdayDashboard() {
   const requestedFocus = `${requestedDay}:${requestedJob}:${params.get("checkTask")}`;
   const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
   const focus = requestedDay && dismissedFocus !== requestedFocus ? { day: requestedDay, job: requestedJob } : null;
-  const { data, error, load } = useWorkday(true, true, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}`);
+  const { data, error, load } = useWorkday(true, true, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}&ta=${encodeURIComponent(ta)}`);
+  const teamChoices = [...(data?.teamAssignments ?? []), ...(data?.team ?? []).flatMap(day => day.jobs.map(job => ({ userId: day.userId, name: day.name, jobId: job.jobId, title: job.title })))];
+  const taChoices = [...new Map([...(data?.teamMembers ?? []), ...teamChoices].map(choice => [choice.userId, choice.name])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const positionChoices = [...new Map(teamChoices.filter(choice => !ta || choice.userId === ta).map(choice => [choice.jobId, choice.title])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const finishedToday = data?.lastFinishedDate === workdayDate(Date.now());
-  const team = (data?.team ?? []).filter(day => focus ? day.id === focus.day : (!ta || day.userId === ta) && (!date || day.date === date)).map(day => ({ ...day, jobs: day.jobs.filter(job => focus ? !focus.job || job.jobId === focus.job : !jobFilter || job.jobId === jobFilter).map(job => ({ ...job, checks: job.checks.filter(c => focus || !status || (c.exception ? "excused" : c.waiting ? "waiting" : c.status ?? "incomplete") === status) })) })).filter(day => day.jobs.length > 0 || day.requests.length > 0);
+  const team = (data?.team ?? []).filter(day => focus ? day.id === focus.day : (!ta || day.userId === ta) && (!date || day.date === date)).map(day => ({ ...day, requests: day.requests.filter(request => focus ? !focus.job || request.jobId === focus.job : !jobFilter || request.jobId === jobFilter), jobs: day.jobs.filter(job => focus ? !focus.job || job.jobId === focus.job : !jobFilter || job.jobId === jobFilter).map(job => ({ ...job, checks: job.checks.filter(c => focus || !status || (c.exception ? "excused" : c.waiting ? "waiting" : c.status ?? "incomplete") === status) })) })).filter(day => day.jobs.length > 0 || day.requests.length > 0);
   return (
     <div className="space-y-6">
       {error && (
@@ -658,10 +661,10 @@ export function WorkdayDashboard() {
       {(data?.canReview ?? data?.canLead) && data && (
         <>
           <h2 className="text-lg font-semibold">Team checks</h2>{focus && <button className="text-xs text-brand underline" onClick={() => setDismissedFocus(requestedFocus)}>Show all workdays</button>}
-          <details><summary className="cursor-pointer text-sm text-brand">Filter team checks</summary><div className="mt-3 space-y-3">
+          <details open><summary className="cursor-pointer text-sm text-brand">Filter team checks</summary><div className="mt-3 space-y-3">
           <label className="block text-xs">Day<input type="date" value={date} onChange={e => { setDate(e.target.value); setCursor(""); }} className={inputClass} /></label>
-          <label className="block text-xs">TA<select value={ta} onChange={e => setTa(e.target.value)} className={inputClass}><option value="">All TAs</option>{[...new Map(data.team.map(d => [d.userId, d.name])).entries()].map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
-          <label className="block text-xs">Job<select value={jobFilter} onChange={e => setJobFilter(e.target.value)} className={inputClass}><option value="">All jobs</option>{[...new Map(data.team.flatMap(d => d.jobs.map(j => [j.jobId, j.title] as const))).entries()].map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
+          <label className="block text-xs">TA<select value={ta} onChange={e => { setTa(e.target.value); setJobFilter(""); setCursor(""); }} className={inputClass}><option value="">All TAs</option>{taChoices.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></label>
+          <label className="block text-xs">Position<select value={jobFilter} onChange={e => setJobFilter(e.target.value)} className={inputClass}><option value="">All positions</option>{positionChoices.map(([id, title]) => <option key={id} value={id}>{title}</option>)}</select></label>
           <label className="block text-xs">Task status<select value={status} onChange={e => setStatus(e.target.value)} className={inputClass}><option value="">All tasks</option><option value="incomplete">Incomplete</option><option value="complete">Complete</option><option value="waiting">Waiting</option><option value="excused">Reason submitted</option></select></label>
           </div></details>
           <p className="text-sm text-ink-soft">
@@ -670,15 +673,15 @@ export function WorkdayDashboard() {
           </p>
           {!team.length && (
             <p className="text-sm">
-              No workdays have been recorded for your jobs yet.
+              No workday activity was recorded for this selection. Choose another TA, position or day.
             </p>
           )}
           {team.map((day) => (
-            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={false} title={<>{day.name} · {day.date} · {day.closureReason === "expired" ? "Incomplete (expired)" : day.finishedAt ? "Finished" : "Working"}</>}>
+            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={!!ta} title={<>{day.name} · {day.date} · {day.closureReason === "expired" ? "Incomplete (expired)" : day.finishedAt ? "Finished" : "Working"}</>}>
               <DailyReview day={day} reviewer canManage={data.canLead} />
               {data.canLead && day.finishedAt === null &&
                 day.requests
-                  .filter((r) => r.status === "pending")
+                  .filter((r) => r.status === "pending" && r.canManage !== false)
                   .map((request) => (
                     <details
                       key={request.id}

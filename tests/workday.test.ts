@@ -220,13 +220,14 @@ try {
     ).pending,
     false,
   );
-  // A lead sees only their jobs, even when support works across two teams.
+  // A lead sees work across teams, with management rights on their own jobs.
   const leaderView = await run("dashboard", { actorId: "lead", detail: true });
   const supportView = leaderView.team.find((d: Row) => d.userId === "support");
   assert.deepEqual(
     supportView.jobs.map((j: Row) => j.jobId),
-    ["job1"],
+    ["job1", "job3"],
   );
+  assert.equal(supportView.jobs.find((job: Row) => job.jobId === "job3").canManage, false);
   // New mandatory setup is evaluated from saved evidence, not a browser tick.
   const blocked = await run("emailPreflight", { actorId: "ta", jobId: "job1", link: "https://chatgpt.com/share/12345678", confirmed: true });
   assert.equal(blocked.ok, false);
@@ -881,7 +882,22 @@ try {
   user("viewerSeat", "viewer");
   await assert.rejects(() => run("dashboard", { actorId: "viewerSeat", detail: true }), /cannot access/);
   const unauthorizedFocus = await run("dashboard", { actorId: "otherLead", detail: true, focusWorkday: exceptionDay.id });
-  assert.equal(unauthorizedFocus.team.length, 0, "Notification deep links cannot bypass lead scope");
+  assert.equal(unauthorizedFocus.team[0].id, exceptionDay.id, "TA leads can inspect another lead's workday");
+  assert.equal(unauthorizedFocus.team[0].jobs[0].canManage, false, "Cross-team viewing does not grant review actions");
+  assert.equal(focused.team[0].jobs[0].canManage, true, "The assigned lead keeps review actions");
+  // Assignment selectors remain available before a TA records any work.
+  user("notStartedTa", "ta");
+  put("jobs", { _id: "notStartedJob", title: "Not started position", taLeadId: "lead", assignedTaIds: ["notStartedTa"] });
+  user("unassignedTa", "ta");
+  const selectorView = await run("dashboard", { actorId: "lead", detail: true, date: workdayDate(clock), taId: "notStartedTa" });
+  assert.ok(selectorView.teamAssignments.some((a: Row) => a.userId === "notStartedTa" && a.jobId === "notStartedJob"));
+  assert.ok(selectorView.teamMembers.some((member: Row) => member.userId === "unassignedTa"), "All active TAs appear even without assigned positions");
+  assert.equal(selectorView.team.length, 0, "An assignment must not invent workday activity");
+  const otherSelectorView = await run("dashboard", { actorId: "otherLead", detail: true, date: workdayDate(clock), taId: "notStartedTa" });
+  assert.ok(otherSelectorView.teamAssignments.some((a: Row) => a.jobId === "notStartedJob"), "TA leads see positions across teams");
+  assert.equal(otherSelectorView.team.length, 0, "A TA with no recorded work has no activity");
+  const datedView = await run("dashboard", { actorId: "lead", detail: true, date: finishedException!.date, taId: "exceptionTa" });
+  assert.ok(datedView.team.some((day: Row) => day.id === exceptionDay.id), "Selected TA activity is fetched for the chosen date");
   // The same job on a later workday must not inherit any exception.
   clock += 86400000;
   await run("start", { actorId: "exceptionTa", jobId: "exceptionJob", workType: "100%" });
