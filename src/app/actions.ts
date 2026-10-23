@@ -19,6 +19,7 @@ import {
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
+import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -75,7 +76,6 @@ import { draftsFor } from "@/lib/followup";
 import { colomboDayFromValue, colomboDayStart, colomboLocalToInstant } from "@/lib/calendar";
 import { isTicked } from "@/lib/strategyPlanner";
 import { dateAt } from "@/lib/format";
-import { OUTCOME_FOR, mayChangeFeedback, whenLabel } from "@/lib/interviews";
 import { findDatabaseMatches } from "@/lib/dbMatch";
 import { markMatching } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
@@ -2515,62 +2515,52 @@ export async function updateCandidateContact(formData: FormData) {
  */
 export async function scheduleInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
   const appId = String(formData.get("appId"));
-
-  const date = String(formData.get("date") ?? "").trim();
-  const time = String(formData.get("time") ?? "").trim();
-  if (!date || !time) await fail("An interview needs a date and a time.");
-
-  // Read as Colombo time, not the server's zone — a server in another region
-  // would otherwise shift every interview and every reminder (audit finding 16).
-  const scheduledAt = colomboLocalToInstant(`${date}T${time}`);
-  if (scheduledAt === null) return fail("That date or time could not be read.");
-
-  const wasInterviewing = repo.application(appId)?.stage === "interview";
-  const booked = repo.scheduleInterview({
-    applicationId: appId,
-    title: String(formData.get("title") ?? "").trim() || null,
-    scheduledAt,
+  const result = await writeCandidateInterview(user, openingId, appId, {
+    action: "schedule",
+    title: String(formData.get("title") ?? ""),
+    date: String(formData.get("date") ?? ""),
+    time: String(formData.get("time") ?? ""),
     timezone: String(formData.get("timezone") ?? "Asia/Colombo"),
     location: String(formData.get("location") ?? "").trim(),
     mode: String(formData.get("mode") ?? "in_person") as "in_person" | "video" | "phone",
     interviewers: String(formData.get("interviewers") ?? "")
       .split(",").map((x) => x.trim()).filter(Boolean),
     durationMins: Number(formData.get("durationMins")) || null,
-    notes: String(formData.get("notes") ?? "").trim() || null,
-    byUserId: user.id,
-  });
-  if (!booked.ok) await fail(booked.message);
-
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Interview booked for ${whenLabel(scheduledAt!)}${wasInterviewing ? "" : " — moved to Interview"}.`);
+    notes: String(formData.get("notes") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 export async function confirmInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  repo.confirmInterview(String(formData.get("interviewId")));
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  revalidatePath("/alerts");
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", { action: "confirm", interviewId }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
 }
 
 /** How it went, which is a different fact from whether they turned up. */
 export async function setInterviewResult(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
   const rating = String(formData.get("clientRating") ?? "").trim();
-  repo.setInterviewResult(String(formData.get("interviewId")), {
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "result",
+    interviewId,
     result: String(formData.get("result") ?? "pending") as
       | "pending"
       | "passed"
       | "failed"
       | "on_hold",
-    clientRating: rating ? Number(rating) : null,
-    clientFeedback: String(formData.get("clientFeedback") ?? "").trim() || null,
-  });
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
+    clientRating: rating ? Number(rating) as 1 | 2 | 3 | 4 | 5 : null,
+    clientFeedback: String(formData.get("clientFeedback") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
 }
 
 /**
@@ -2580,59 +2570,47 @@ export async function setInterviewResult(formData: FormData) {
  */
 export async function setInterviewOutcome(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  // The form speaks in statuses (completed); the record stores outcomes (attended).
-  const picked = String(formData.get("outcome")) as keyof typeof OUTCOME_FOR;
-  const outcome = Object.hasOwn(OUTCOME_FOR, picked) ? OUTCOME_FOR[picked] : null;
-  if (!outcome) return fail("Pick a status.");
-  repo.setInterviewOutcome(
-    String(formData.get("interviewId")),
-    outcome,
-    user.id,
-    String(formData.get("reason") ?? "").trim() || null,
-  );
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  revalidatePath("/alerts");
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const picked = String(formData.get("outcome"));
+  if (!["scheduled", "completed", "cancelled", "no_show"].includes(picked)) return fail("Pick a status.");
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "outcome", interviewId, outcome: picked as "scheduled" | "completed" | "cancelled" | "no_show", reason: String(formData.get("reason") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
 }
 
 /** A new date and time for the same interview; the old one stays on its history. */
 export async function rescheduleInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  const date = String(formData.get("date") ?? "").trim();
-  const time = String(formData.get("time") ?? "").trim();
-  if (!date || !time) await fail("Rescheduling needs the new date and time.");
-  const scheduledAt = colomboLocalToInstant(`${date}T${time}`);
-  if (scheduledAt === null) return fail("That date or time could not be read.");
-  const moved = repo.rescheduleInterview(String(formData.get("interviewId")), {
-    scheduledAt,
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "reschedule", interviewId,
+    date: String(formData.get("date") ?? ""),
+    time: String(formData.get("time") ?? ""),
     location: String(formData.get("location") ?? "").trim(),
     mode: String(formData.get("mode") ?? "in_person") as "in_person" | "video" | "phone",
-    reason: String(formData.get("reason") ?? "").trim() || null,
-    byUserId: user.id,
-  });
-  if (!moved.ok) await fail(moved.message);
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  revalidatePath("/alerts");
-  await done(`Interview moved to ${whenLabel(scheduledAt!)}. Confirm attendance again.`);
+    reason: String(formData.get("reason") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 /** The interview's name, interviewers, length and notes. */
 export async function editInterview(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { interview: "interviewId", opening: "openingId" });
-  repo.editInterview(
-    String(formData.get("interviewId")),
-    {
-      title: String(formData.get("title") ?? "").trim() || null,
+  const interviewId = String(formData.get("interviewId"));
+  const iv = repo.interviews().find((row) => row.id === interviewId);
+  const result = await writeCandidateInterview(await getCurrentUser(), String(formData.get("openingId")), iv?.applicationId ?? "", {
+      action: "edit", interviewId,
+      title: String(formData.get("title") ?? ""),
       interviewers: String(formData.get("interviewers") ?? "").split(",").map((x) => x.trim()).filter(Boolean),
       durationMins: Number(formData.get("durationMins")) || null,
-      notes: String(formData.get("notes") ?? "").trim() || null,
-    },
-    user.id,
-  );
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  await done("Interview details saved.");
+      notes: String(formData.get("notes") ?? ""),
+    }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 /**
@@ -2642,37 +2620,29 @@ export async function editInterview(formData: FormData) {
  */
 export async function saveInterviewFeedback(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "interview.feedback", { interview: "interviewId", opening: "openingId" });
+  const user = await getCurrentUser();
   const interviewId = String(formData.get("interviewId"));
   const iv = repo.interviews().find((i) => i.id === interviewId);
-  if (!iv) return fail("That interview no longer exists.");
   const forUserId = String(formData.get("forUserId") ?? "").trim() || user.id;
-  const existing = iv.feedback.find((f) => f.byUserId === forUserId);
-  if (forUserId !== user.id && !existing) await fail("That feedback no longer exists.");
-  if (!mayChangeFeedback(user, existing)) await fail("Only a lead, director or admin can change someone else's feedback.");
-
-  const score = (k: string) => {
+  const score = (k: string): 1 | 2 | 3 | 4 | 5 | null => {
     const n = Number(formData.get(k));
-    return Number.isInteger(n) && n >= 1 && n <= 5 ? n : null;
+    return Number.isInteger(n) && n >= 1 && n <= 5 ? n as 1 | 2 | 3 | 4 | 5 : null;
   };
   const rec = String(formData.get("recommendation") ?? "");
-  const comments = String(formData.get("comments") ?? "").trim() || null;
   const ratings = {
     technical: score("technical"), communication: score("communication"), behaviour: score("behaviour"),
     performance: score("performance"), overall: score("overall"),
   };
-  if (!comments && Object.values(ratings).every((r) => r === null)) await fail("Give at least one score or a comment.");
-
-  repo.saveInterviewFeedback(interviewId, {
-    byUserId: forUserId,
-    interviewer: String(formData.get("interviewer") ?? "").trim() || existing?.interviewer || user.name,
+  const result = await writeCandidateInterview(user, String(formData.get("openingId")), iv?.applicationId ?? "", {
+    action: "feedback", interviewId, forUserId,
+    interviewer: String(formData.get("interviewer") ?? ""),
     ratings,
     recommendation: (["hire", "next_round", "hold", "reject"].includes(rec) ? rec : null) as
       | "hire" | "next_round" | "hold" | "reject" | null,
-    comments,
-  });
-  revalidatePath(`/openings/${String(formData.get("openingId"))}`, "layout");
-  await done(existing ? "Feedback updated." : "Feedback saved.");
+    comments: String(formData.get("comments") ?? ""),
+  }, OPENING_DEPS);
+  if (!result.ok) return fail(result.message);
+  await done(result.message);
 }
 
 // ─── Director and client review rounds ───────────────────────────────────────

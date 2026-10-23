@@ -1,6 +1,7 @@
 import { repo } from "@/data/store";
 import { STAGE_LABEL, type User } from "@/data/types";
 import { allows } from "@/lib/auth";
+import { interviewStatus, mayChangeFeedback } from "@/lib/interviews";
 import type { CandidatePayload } from "@/lib/mobile/candidateTypes";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
 
@@ -100,6 +101,8 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
     app.sourcingChannel === "HH" ? "Headhunted" : null,
     !app.ownerTaId ? "Unclaimed" : null,
   ].filter((value): value is string => Boolean(value));
+  const canManageInterviews = allows(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId });
+  const canGiveInterviewFeedback = allows(user, "interview.feedback", { openingId, assignment });
 
   const payload: CandidatePayload = {
     apiVersion: 1,
@@ -114,6 +117,13 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       total: siblings.length,
       previousApplicationId: index > 0 ? siblings[index - 1]?.id ?? null : null,
       nextApplicationId: index >= 0 && index < siblings.length - 1 ? siblings[index + 1]?.id ?? null : null,
+      interviewAccess: {
+        canBook: canManageInterviews && (app.stage === "client_shortlist" || app.stage === "interview"),
+        canManage: canManageInterviews,
+        canFeedback: canGiveInterviewFeedback,
+        userId: user.id,
+        userName: user.name,
+      },
     },
     profile: {
       candidateId: candidate.id,
@@ -135,7 +145,7 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       setNumber: app.setNumber,
       rating: app.rating,
       tags,
-      canAct: allows(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId }),
+      canAct: canManageInterviews,
     },
     onOpenings: repo.applicationsForCandidate(candidate.id).map((row) => {
       const rowOpening = repo.opening(row.openingId);
@@ -163,7 +173,25 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       result: row.result,
       clientRating: row.clientRating,
       clientFeedback: row.clientFeedback,
-      feedbackCount: row.feedback.length,
+      status: interviewStatus(row),
+      feedback: row.feedback.map((entry) => ({
+        byUserId: entry.byUserId,
+        byName: userName(entry.byUserId) ?? "Unknown",
+        interviewer: entry.interviewer,
+        ratings: entry.ratings,
+        recommendation: entry.recommendation,
+        comments: entry.comments,
+        at: entry.at,
+        updatedAt: entry.updatedAt,
+        canEdit: canGiveInterviewFeedback && mayChangeFeedback(user, entry),
+      })),
+      history: [...row.history].reverse().map((entry) => ({
+        at: entry.at,
+        byName: userName(entry.byUserId) ?? "Unknown",
+        kind: entry.kind,
+        detail: entry.detail,
+        reason: entry.reason,
+      })),
     })),
     closing: {
       offer: offer ? {
