@@ -760,7 +760,7 @@ export interface MailIntakeStatus {
     mailbox: string;
     /** ta: a TA's own mailbox, read only for scoops (27 Sep). shortlist: shortlists@,
      *  where the Director's and the clients' shortlists arrive (29 Sep). */
-    kind: "shared" | "ta" | "shortlist";
+    kind: "shared" | "ta" | "shortlist" | "interview";
     taName: string | null;
     enabled: boolean;
     synced: boolean;

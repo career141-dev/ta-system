@@ -69,6 +69,11 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               Director and client shortlists — moves people on their opening, never files new applicants
             </p>
           )}
+          {m.kind === "interview" && (
+            <p className="mt-0.5 text-[11.5px] text-ink-soft">
+              Client interview invitations — moves people to Interview and notes their answer, never files new applicants
+            </p>
+          )}
           <p className="mt-0.5 text-[11.5px] text-ink-faint">
             {m.enabled
               ? m.lastSyncError

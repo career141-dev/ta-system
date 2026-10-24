@@ -162,6 +162,7 @@ import type * as lib_webhookSecurity from "../lib/webhookSecurity.js";
 import type * as mailIntake_aiReader from "../mailIntake/aiReader.js";
 import type * as mailIntake_audit from "../mailIntake/audit.js";
 import type * as mailIntake_decisions from "../mailIntake/decisions.js";
+import type * as mailIntake_interviews from "../mailIntake/interviews.js";
 import type * as lib_within from "../lib/within.js";
 import type * as lib_workdayChecks from "../lib/workdayChecks.js";
 import type * as lib_workLocationEmails from "../lib/workLocationEmails.js";
@@ -408,6 +409,7 @@ declare const fullApi: ApiFromModules<{
   "mailIntake/aiReader": typeof mailIntake_aiReader;
   "mailIntake/audit": typeof mailIntake_audit;
   "mailIntake/decisions": typeof mailIntake_decisions;
+  "mailIntake/interviews": typeof mailIntake_interviews;
   "lib/within": typeof lib_within;
   "lib/workdayChecks": typeof lib_workdayChecks;
   "lib/workLocationEmails": typeof lib_workLocationEmails;

@@ -21,6 +21,9 @@ export const DEFAULT_MAILBOXES = ["linkedin@career141.com", "cv@career141.com", 
  */
 export const SHORTLIST_MAILBOX = "shortlists@career141.com";
 
+/** Where the TAs' client-interview invitations and the candidates' answers arrive (24 Oct). */
+export const INTERVIEW_MAILBOX = "interviews@career141.com";
+
 /**
  * A mailbox takes only mail received after it was switched on.
  *
@@ -68,6 +71,18 @@ export const ensureMailboxes = internalMutation({
       await ctx.db.insert("mailIntakeMailboxes", {
         mailbox: SHORTLIST_MAILBOX,
         kind: "shortlist",
+        enabled: false,
+        backfillFrom: now,
+        totals: { ...EMPTY_TOTALS },
+        updatedAt: now,
+      });
+    }
+    // interviews@ (24 Oct): invitations move people to Interview — convex/mailIntake/interviews.ts.
+    const interviews = await ctx.db.query("mailIntakeMailboxes").withIndex("by_mailbox", (q) => q.eq("mailbox", INTERVIEW_MAILBOX)).first();
+    if (!interviews) {
+      await ctx.db.insert("mailIntakeMailboxes", {
+        mailbox: INTERVIEW_MAILBOX,
+        kind: "interview",
         enabled: false,
         backfillFrom: now,
         totals: { ...EMPTY_TOTALS },
