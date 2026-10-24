@@ -69,6 +69,8 @@ const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9
 export function sameClient(subjectClient: string, clientName: string): boolean {
   const a = words(subjectClient), b = words(clientName);
   if (!a.length || !b.length) return false;
+  // "DELTA SPIKE" is "DeltaSpike".
+  if (a.join("") === b.join("")) return true;
   const [short, long] = a.length <= b.length ? [a, b] : [b, a];
   return short.every((w) => long.includes(w));
 }
