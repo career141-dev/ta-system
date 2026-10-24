@@ -718,22 +718,40 @@ export const reconcileFromMailbox = internalAction({
       }
     }
 
-    // 2. The Director's replies, oldest first.
+    // 2. The Director's replies, oldest first within each thread. One at a
+    //    time, 115 replies with the AI reader ran past the pipeline's limit
+    //    and the run failed with nothing to show (23 October); threads are
+    //    read six at a time, and one reply that throws is reported, not fatal.
     const replies = listed.filter((m) => !m.hasAttachments && directors.has(from(m))).sort(oldestFirst);
+    const threads = new Map<string, typeof replies>();
+    for (const m of replies) threads.set(m.conversationId ?? m.id, [...(threads.get(m.conversationId ?? m.id) ?? []), m]);
+    const queue = [...threads.values()];
     const rows: Record<string, unknown>[] = [];
-    for (const m of replies) {
-      rows.push(await reconcileOne(ctx, token, {
-        mailbox: SHORTLIST_MAILBOX,
-        graphMessageId: m.id,
-        receivedAt: Date.parse(m.receivedDateTime ?? new Date().toISOString()),
-        fromAddress: from(m),
-        subject: m.subject ?? "",
-        sourceMessageId: null,
-        dryRun: args.dryRun,
-        applyClear: args.applyClear,
-        taught,
-      }));
-    }
+    const readThreads = async () => {
+      for (let thread = queue.shift(); thread; thread = queue.shift()) {
+        for (const m of thread) {
+          const receivedAt = Date.parse(m.receivedDateTime ?? new Date().toISOString());
+          try {
+            rows.push({ receivedAt, ...(await reconcileOne(ctx, token, {
+              mailbox: SHORTLIST_MAILBOX,
+              graphMessageId: m.id,
+              receivedAt,
+              fromAddress: from(m),
+              subject: m.subject ?? "",
+              sourceMessageId: null,
+              dryRun: args.dryRun,
+              applyClear: args.applyClear,
+              taught,
+            })) });
+          } catch (e) {
+            rows.push({ receivedAt, messageId: m.id, subject: m.subject ?? "", result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) });
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, readThreads));
+    rows.sort((a, b) => (a.receivedAt as number) - (b.receivedAt as number));
+    for (const row of rows) row.receivedAt = new Date(row.receivedAt as number).toISOString();
 
     // 3. Client replies. Client sets are sent outside the system, so no round
     //    records who was in them; they are listed for a person to act on.
