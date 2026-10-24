@@ -57,7 +57,9 @@ export function readAnswer(body: string): InterviewAnswer {
   return "replied";
 }
 
-const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter((w) => w.length >= 2);
+// "LANKA HOSPITAL" is the subject's, "Lanka Hospitals" the opening's: a plural s is not a different word.
+const words = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
+  .filter((w) => w.length >= 2).map((w) => (w.length > 3 ? w.replace(/s$/, "") : w));
 
 /**
  * Whether the subject's client is this opening's client: every word of the

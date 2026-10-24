@@ -41,6 +41,7 @@ console.log("\nthe opening");
 eq("Q COLLECTION ~ Q COLLECTION (SL)", sameClient("Q COLLECTION", "Q COLLECTION (SL)"), true);
 eq("DELMO ~ DELMO - HOLDING", sameClient("DELMO", "DELMO - HOLDING"), true);
 eq("MELWA ≠ MELWIRE", sameClient("MELWA", "Melwire"), false);
+eq("LANKA HOSPITAL ~ Lanka Hospitals", sameClient("LANKA HOSPITAL", "Lanka Hospitals"), true);
 eq("role words", roleOverlap("SENIOR MANAGER - IT OPERATIONS", "Senior Manager IT Operations"), 3);
 
 console.log(`\n${pass} passed, ${fail} failed`);
