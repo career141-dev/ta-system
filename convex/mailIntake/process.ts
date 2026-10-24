@@ -130,10 +130,11 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
     subject?: string;
     body?: { contentType?: string; content?: string };
     from?: { emailAddress?: { address?: string } };
+    toRecipients?: { emailAddress?: { address?: string } }[];
     conversationId?: string;
     internetMessageId?: string;
     internetMessageHeaders?: { name?: string; value?: string }[];
-  }>(token, `${mailboxPath}?$select=subject,body,from,conversationId,internetMessageId,internetMessageHeaders`);
+  }>(token, `${mailboxPath}?$select=subject,body,from,toRecipients,conversationId,internetMessageId,internetMessageHeaders`);
   if (msg.status === 404 || !msg.body) {
     await ctx.runMutation(internal.mailIntake.model.finishMessage, { id: m._id, outcome: "skipped", note: "The message was deleted before it could be read." });
     return;
@@ -159,6 +160,25 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
   if (box?.kind === "ta") {
     await ctx.runMutation(internal.mailIntake.model.finishMessage, {
       id: m._id, outcome: "skipped", note: "A TA's mailbox is not read any more — scoops are uploaded on the opening's Scoops page.",
+    });
+    return;
+  }
+
+  // interviews@ (24 Oct): an invitation moves the candidate to Interview; an
+  // answer or a cancellation is noted. Never an application.
+  if (box?.kind === "interview") {
+    const row = await ctx.runAction(internal.mailIntake.interviews.readOne, {
+      messageId: m.messageId, subject, fromAddress,
+      to: (msg.body.toRecipients ?? []).map((r) => (r.emailAddress?.address ?? "").toLowerCase()),
+      body: newestReplyText(html || plain) || parsed.text, receivedAt: m.receivedAt,
+    });
+    await ctx.runMutation(internal.mailIntake.model.finishMessage, {
+      id: m._id,
+      outcome: row.result === "moved" || row.result === "noted" || row.result === "already_recorded" ? "filed" : "skipped",
+      note: row.result === "moved" ? `Moved ${row.candidate} to Interview (${row.job}).`
+        : row.result === "noted" ? `Noted on ${row.candidate} (${row.job}).`
+        : row.result === "left" ? `Invitation for ${row.candidate}, who is at ${row.stage} — not moved.`
+        : String(row.note ?? row.result),
     });
     return;
   }
