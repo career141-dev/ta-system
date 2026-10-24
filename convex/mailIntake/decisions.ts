@@ -680,6 +680,10 @@ export const reconcileFromMailbox = internalAction({
     summary: Record<string, number>; clientReplies: { receivedAt: string; from: string; subject: string }[];
     rows: Record<string, unknown>[];
   }> => {
+    // A run is stopped at five minutes: the real run on 24 October was cut
+    // off mid-way with a bare "Error". No reply is started after four; a real
+    // run hands the rest to a fresh run, which skips what this one recorded.
+    const deadline = Date.now() + 4 * 60_000;
     const days = Math.min(Math.max(Math.floor(args.days ?? 21), 1), 60);
     const box = await ctx.runQuery(internal.mailIntake.model.mailbox, { mailbox: SHORTLIST_MAILBOX });
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
@@ -731,7 +735,7 @@ export const reconcileFromMailbox = internalAction({
     const queue = [...threads.values()];
     const rows: Record<string, unknown>[] = [];
     const readThreads = async () => {
-      for (let thread = queue.shift(); thread; thread = queue.shift()) {
+      for (let thread = Date.now() < deadline ? queue.shift() : undefined; thread; thread = Date.now() < deadline ? queue.shift() : undefined) {
         for (const m of thread) {
           const receivedAt = Date.parse(m.receivedDateTime ?? new Date().toISOString());
           for (let attempt = 1; ; attempt++) {
@@ -759,6 +763,8 @@ export const reconcileFromMailbox = internalAction({
       }
     };
     await Promise.all(Array.from({ length: 2 }, readThreads));
+    const notReached = queue.reduce((n, thread) => n + thread.length, 0);
+    if (notReached && !args.dryRun) await ctx.scheduler.runAfter(0, internal.mailIntake.decisions.reconcileFromMailbox, args);
     rows.sort((a, b) => (a.receivedAt as number) - (b.receivedAt as number));
     for (const row of rows) row.receivedAt = new Date(row.receivedAt as number).toISOString();
 
@@ -772,6 +778,8 @@ export const reconcileFromMailbox = internalAction({
     const summary: Record<string, number> = {};
     for (const row of rows) summary[String(row.result)] = (summary[String(row.result)] ?? 0) + 1;
     for (const row of rows) for (const move of (row.moves as { to: string }[] | undefined) ?? []) summary[`move to ${move.to}`] = (summary[`move to ${move.to}`] ?? 0) + 1;
+    if (notReached) summary[args.dryRun ? "not reached (time)" : "continued in a new run"] = notReached;
+    console.log(`reconcileFromMailbox ${args.dryRun ? "dry run" : "run"}: ${JSON.stringify(summary)}`);
     return { dryRun: args.dryRun, days, listed: listed.length, copiesTaught: taught.size, fromDirectors: replies.length, summary, clientReplies, rows };
   },
 });
