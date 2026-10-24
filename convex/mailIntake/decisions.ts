@@ -740,10 +740,16 @@ export const reconcileFromMailbox = internalAction({
     //    The backend runs six actions at once, the crons' included: six
     //    threads failed 45 replies with "Too many concurrent requests" (24
     //    October), so two, and a busy backend or Graph 429 is tried again.
+    //    Client replies (3.) join the same queue after the Director's.
     const replies = listed.filter((m) => !m.hasAttachments && directors.has(from(m))).sort(oldestFirst);
-    const threads = new Map<string, typeof replies>();
-    for (const m of replies) threads.set(m.conversationId ?? m.id, [...(threads.get(m.conversationId ?? m.id) ?? []), m]);
-    const queue = [...threads.values()];
+    const clientMail = listed.filter((m) => !m.hasAttachments && !from(m).endsWith("@career141.com")).sort(oldestFirst);
+    const byThread = (mail: typeof replies) => {
+      const threads = new Map<string, typeof replies>();
+      for (const m of mail) threads.set(m.conversationId ?? m.id, [...(threads.get(m.conversationId ?? m.id) ?? []), m]);
+      return [...threads.values()];
+    };
+    const clientIds = new Set(clientMail.map((m) => m.id));
+    const queue = [...byThread(replies), ...(args.clients ? byThread(clientMail) : [])];
     const rows: Record<string, unknown>[] = [];
     const readThreads = async () => {
       for (let thread = Date.now() < deadline ? queue.shift() : undefined; thread; thread = Date.now() < deadline ? queue.shift() : undefined) {
@@ -767,7 +773,7 @@ export const reconcileFromMailbox = internalAction({
               row = { messageId: m.id, subject: m.subject ?? "", result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) };
             }
             const busy = row.result === "graph_429" || /too many concurrent/i.test(String(row.error ?? ""));
-            if (!busy || attempt === 5) { rows.push({ receivedAt, ...row }); break; }
+            if (!busy || attempt === 5) { rows.push({ receivedAt, ...(clientIds.has(m.id) ? { kind: "client" } : {}), ...row }); break; }
             await new Promise((resolve) => setTimeout(resolve, attempt * 3_000));
           }
         }
@@ -779,26 +785,9 @@ export const reconcileFromMailbox = internalAction({
     rows.sort((a, b) => (a.receivedAt as number) - (b.receivedAt as number));
     for (const row of rows) row.receivedAt = new Date(row.receivedAt as number).toISOString();
 
-    // 3. Client replies, after the Director's (they act on the Director's
-    //    shortlist). With `clients`, each is read like the Director's: the set
+    // 3. Client replies, read in step 2's queue when `clients` is set: the set
     //    rebuilt from the email sent to that client in the thread, the AI
     //    reader, Client shortlist or Rejected (23 October). Otherwise listed.
-    const clientMail = listed.filter((m) => !m.hasAttachments && !from(m).endsWith("@career141.com")).sort(oldestFirst);
-    if (args.clients) {
-      for (const m of clientMail) {
-        rows.push({ kind: "client", ...(await reconcileOne(ctx, token, {
-          mailbox: SHORTLIST_MAILBOX,
-          graphMessageId: m.id,
-          receivedAt: Date.parse(m.receivedDateTime ?? new Date().toISOString()),
-          fromAddress: from(m),
-          subject: m.subject ?? "",
-          sourceMessageId: null,
-          dryRun: args.dryRun,
-          applyClear: args.applyClear,
-          taught,
-        })) });
-      }
-    }
     const clientReplies = clientMail.map((m) => ({ receivedAt: m.receivedDateTime ?? "", from: from(m), subject: m.subject ?? "" }));
 
     const summary: Record<string, number> = {};
