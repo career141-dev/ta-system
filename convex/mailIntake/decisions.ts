@@ -721,7 +721,10 @@ export const reconcileFromMailbox = internalAction({
     // 2. The Director's replies, oldest first within each thread. One at a
     //    time, 115 replies with the AI reader ran past the pipeline's limit
     //    and the run failed with nothing to show (23 October); threads are
-    //    read six at a time, and one reply that throws is reported, not fatal.
+    //    read two at a time, and one reply that throws is reported, not fatal.
+    //    The backend runs six actions at once, the crons' included: six
+    //    threads failed 45 replies with "Too many concurrent requests" (24
+    //    October), so two, and a busy backend or Graph 429 is tried again.
     const replies = listed.filter((m) => !m.hasAttachments && directors.has(from(m))).sort(oldestFirst);
     const threads = new Map<string, typeof replies>();
     for (const m of replies) threads.set(m.conversationId ?? m.id, [...(threads.get(m.conversationId ?? m.id) ?? []), m]);
@@ -731,25 +734,31 @@ export const reconcileFromMailbox = internalAction({
       for (let thread = queue.shift(); thread; thread = queue.shift()) {
         for (const m of thread) {
           const receivedAt = Date.parse(m.receivedDateTime ?? new Date().toISOString());
-          try {
-            rows.push({ receivedAt, ...(await reconcileOne(ctx, token, {
-              mailbox: SHORTLIST_MAILBOX,
-              graphMessageId: m.id,
-              receivedAt,
-              fromAddress: from(m),
-              subject: m.subject ?? "",
-              sourceMessageId: null,
-              dryRun: args.dryRun,
-              applyClear: args.applyClear,
-              taught,
-            })) });
-          } catch (e) {
-            rows.push({ receivedAt, messageId: m.id, subject: m.subject ?? "", result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) });
+          for (let attempt = 1; ; attempt++) {
+            let row: Record<string, unknown>;
+            try {
+              row = await reconcileOne(ctx, token, {
+                mailbox: SHORTLIST_MAILBOX,
+                graphMessageId: m.id,
+                receivedAt,
+                fromAddress: from(m),
+                subject: m.subject ?? "",
+                sourceMessageId: null,
+                dryRun: args.dryRun,
+                applyClear: args.applyClear,
+                taught,
+              });
+            } catch (e) {
+              row = { messageId: m.id, subject: m.subject ?? "", result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) };
+            }
+            const busy = row.result === "graph_429" || /too many concurrent/i.test(String(row.error ?? ""));
+            if (!busy || attempt === 5) { rows.push({ receivedAt, ...row }); break; }
+            await new Promise((resolve) => setTimeout(resolve, attempt * 3_000));
           }
         }
       }
     };
-    await Promise.all(Array.from({ length: 6 }, readThreads));
+    await Promise.all(Array.from({ length: 2 }, readThreads));
     rows.sort((a, b) => (a.receivedAt as number) - (b.receivedAt as number));
     for (const row of rows) row.receivedAt = new Date(row.receivedAt as number).toISOString();
 
