@@ -21,12 +21,13 @@ export interface RosterRow {
   name: string;
 }
 
-export function directorReplyPrompt(roster: RosterRow[], replyText: string): string {
+export function directorReplyPrompt(roster: RosterRow[], replyText: string, reviewer: "director" | "client" = "director"): string {
   const list = roster.map((r, i) => `${i + 1}. ${r.name}`).join("\n");
-  return `A recruitment Director replied to a TA's email that submitted these candidates:
+  const who = reviewer === "client" ? "The client company" : "A recruitment Director";
+  return `${who} replied to a recruitment agency's email that submitted these candidates:
 ${list}
 
-Director's reply:
+The reply:
 """
 ${replyText.slice(0, 6000)}
 """
