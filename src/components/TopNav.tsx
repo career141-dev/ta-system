@@ -18,6 +18,7 @@ import { allows, isTa } from "@/lib/auth";
 const NAV = [
   { href: "/clients", label: "Clients" },
   { href: "/openings", label: "Openings" },
+  { href: "/support-tables", label: "Excel Tables" },
   // TA Leads give the TAs strategies per job (8 Oct); shown only to those who may.
   { href: "/strategy", label: "Strategy Planner" },
   { href: "/database", label: "Database" },
@@ -73,6 +74,7 @@ export function TopNav({
       (n.href !== "/workday" || ["ta", "ta_support", "ta_lead", "admin"].includes(user.role)) &&
       (n.href !== "/voice" || allows(user, "voice.practice")) &&
       (n.href !== "/strategy" || allows(user, "strategy.assign")) &&
+      (n.href !== "/support-tables" || allows(user, "tables.readAll")) &&
       (n.href !== "/feedback" || !isTa(user)),
   );
   const badge = alertCount > 0 && (
