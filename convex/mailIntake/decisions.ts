@@ -691,6 +691,10 @@ export const reconcileFromMailbox = internalAction({
     summary: Record<string, number>; clientReplies: { receivedAt: string; from: string; subject: string }[];
     rows: Record<string, unknown>[];
   }> => {
+    // A run is stopped at five minutes: the real run on 24 October was cut
+    // off mid-way with a bare "Error". No reply is started after four; a real
+    // run hands the rest to a fresh run, which skips what this one recorded.
+    const deadline = Date.now() + 4 * 60_000;
     const days = Math.min(Math.max(Math.floor(args.days ?? 21), 1), 60);
     const box = await ctx.runQuery(internal.mailIntake.model.mailbox, { mailbox: SHORTLIST_MAILBOX });
     const since = new Date(Date.now() - days * 86_400_000).toISOString();
@@ -729,22 +733,51 @@ export const reconcileFromMailbox = internalAction({
       }
     }
 
-    // 2. The Director's replies, oldest first.
+    // 2. The Director's replies, oldest first within each thread. One at a
+    //    time, 115 replies with the AI reader ran past the pipeline's limit
+    //    and the run failed with nothing to show (23 October); threads are
+    //    read two at a time, and one reply that throws is reported, not fatal.
+    //    The backend runs six actions at once, the crons' included: six
+    //    threads failed 45 replies with "Too many concurrent requests" (24
+    //    October), so two, and a busy backend or Graph 429 is tried again.
     const replies = listed.filter((m) => !m.hasAttachments && directors.has(from(m))).sort(oldestFirst);
+    const threads = new Map<string, typeof replies>();
+    for (const m of replies) threads.set(m.conversationId ?? m.id, [...(threads.get(m.conversationId ?? m.id) ?? []), m]);
+    const queue = [...threads.values()];
     const rows: Record<string, unknown>[] = [];
-    for (const m of replies) {
-      rows.push(await reconcileOne(ctx, token, {
-        mailbox: SHORTLIST_MAILBOX,
-        graphMessageId: m.id,
-        receivedAt: Date.parse(m.receivedDateTime ?? new Date().toISOString()),
-        fromAddress: from(m),
-        subject: m.subject ?? "",
-        sourceMessageId: null,
-        dryRun: args.dryRun,
-        applyClear: args.applyClear,
-        taught,
-      }));
-    }
+    const readThreads = async () => {
+      for (let thread = Date.now() < deadline ? queue.shift() : undefined; thread; thread = Date.now() < deadline ? queue.shift() : undefined) {
+        for (const m of thread) {
+          const receivedAt = Date.parse(m.receivedDateTime ?? new Date().toISOString());
+          for (let attempt = 1; ; attempt++) {
+            let row: Record<string, unknown>;
+            try {
+              row = await reconcileOne(ctx, token, {
+                mailbox: SHORTLIST_MAILBOX,
+                graphMessageId: m.id,
+                receivedAt,
+                fromAddress: from(m),
+                subject: m.subject ?? "",
+                sourceMessageId: null,
+                dryRun: args.dryRun,
+                applyClear: args.applyClear,
+                taught,
+              });
+            } catch (e) {
+              row = { messageId: m.id, subject: m.subject ?? "", result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) };
+            }
+            const busy = row.result === "graph_429" || /too many concurrent/i.test(String(row.error ?? ""));
+            if (!busy || attempt === 5) { rows.push({ receivedAt, ...row }); break; }
+            await new Promise((resolve) => setTimeout(resolve, attempt * 3_000));
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: 2 }, readThreads));
+    const notReached = queue.reduce((n, thread) => n + thread.length, 0);
+    if (notReached && !args.dryRun) await ctx.scheduler.runAfter(0, internal.mailIntake.decisions.reconcileFromMailbox, args);
+    rows.sort((a, b) => (a.receivedAt as number) - (b.receivedAt as number));
+    for (const row of rows) row.receivedAt = new Date(row.receivedAt as number).toISOString();
 
     // 3. Client replies, after the Director's (they act on the Director's
     //    shortlist). With `clients`, each is read like the Director's: the set
@@ -771,6 +804,8 @@ export const reconcileFromMailbox = internalAction({
     const summary: Record<string, number> = {};
     for (const row of rows) summary[String(row.result)] = (summary[String(row.result)] ?? 0) + 1;
     for (const row of rows) for (const move of (row.moves as { to: string }[] | undefined) ?? []) summary[`move to ${move.to}`] = (summary[`move to ${move.to}`] ?? 0) + 1;
+    if (notReached) summary[args.dryRun ? "not reached (time)" : "continued in a new run"] = notReached;
+    console.log(`reconcileFromMailbox ${args.dryRun ? "dry run" : "run"}: ${JSON.stringify(summary)}`);
     return { dryRun: args.dryRun, days, listed: listed.length, copiesTaught: taught.size, fromDirectors: replies.length, summary, clientReplies, rows };
   },
 });
