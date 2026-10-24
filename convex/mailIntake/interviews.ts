@@ -20,6 +20,15 @@ import { INTERVIEW_MAILBOX } from "./model";
 /** Past the TA's own work and before Interview: an invitation moves them on. */
 const MOVES_TO_INTERVIEW = new Set(["second_shortlist", "director_shortlist", "client_review"]);
 const AT_OR_PAST_INTERVIEW = new Set(["interview", "offer", "placed"]);
+/**
+ * Found by their own address at that client, they move from any open stage
+ * before it too (owner, 24 October): the TAs often put people forward by
+ * email only, so the client was interviewing someone the system still had in
+ * New CVs. Found by name, never — a namesake further back could be anyone.
+ */
+const EARLIER_OPEN = new Set(["new_cvs", "matched_candidates", "ta_shortlist", "follow_up"]);
+const movesToInterview = (stage: string, byAddress: boolean) =>
+  MOVES_TO_INTERVIEW.has(stage) || (byAddress && EARLIER_OPEN.has(stage));
 
 /** Further along the pipeline is later in this list; a tie goes to the role's words. */
 const STAGE_ORDER = ["new_cvs", "matched_candidates", "ta_shortlist", "follow_up", "second_shortlist", "director_shortlist", "client_review", "interview", "offer", "placed"];
@@ -84,6 +93,7 @@ export const applyInterviewMail = internalMutation({
     kind: v.union(v.literal("invite"), v.literal("cancel"), v.literal("reply")),
     answer: v.optional(v.string()),
     subject: v.string(), fromAddress: v.string(), messageId: v.string(), receivedAt: v.number(),
+    byAddress: v.optional(v.boolean()),
   },
   handler: async (ctx, a): Promise<{ result: "moved" | "noted" | "already_recorded" | "left"; stage: string }> => {
     const app = await ctx.db.get(a.applicationId);
@@ -93,7 +103,7 @@ export const applyInterviewMail = internalMutation({
     const events = await ctx.db.query("pipelineEvents").withIndex("by_application", (q) => q.eq("applicationId", a.applicationId)).collect();
     if (events.some((e) => e.metadata?.includes(marker))) return { result: "already_recorded", stage };
 
-    if (a.kind === "invite" && MOVES_TO_INTERVIEW.has(stage)) {
+    if (a.kind === "invite" && movesToInterview(stage, a.byAddress === true)) {
       await executeStageTransition(ctx, {
         applicationId: a.applicationId, targetStage: "interview", actorId: "interview-mail",
         reason: `Invited to the client's interview (${a.fromAddress}): ${a.subject.slice(0, 160)}`,
@@ -138,13 +148,14 @@ export async function handleInterviewMail(
   const who = { candidate: found.candidateName, job: found.job, stage: found.stage, matched: found.how };
   if (dryRun) {
     const result = mail.kind !== "invite" ? "would_note"
-      : MOVES_TO_INTERVIEW.has(found.stage) ? "would_move"
+      : movesToInterview(found.stage, found.how === "by address") ? "would_move"
       : AT_OR_PAST_INTERVIEW.has(found.stage) ? "would_note" : "would_leave";
     return { ...base, ...who, result };
   }
   const r = await ctx.runMutation(internal.mailIntake.interviews.applyInterviewMail, {
     applicationId: found.applicationId, kind: mail.kind, answer: mail.answer,
     subject: m.subject, fromAddress: m.fromAddress, messageId: m.messageId, receivedAt: m.receivedAt,
+    byAddress: found.how === "by address",
   });
   return { ...base, ...who, result: r.result };
 }
