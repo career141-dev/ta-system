@@ -93,3 +93,12 @@ test("a failed AI reading tells the TA why, not a guess", () => {
   const llm = readFileSync("convex/lib/llm.ts", "utf8");
   assert.match(llm, /primaryError/);
 });
+
+test("the same file again is read when the profile holding it was never read", () => {
+  const src = readFileSync("convex/cvs/cvExtraction.ts", "utf8");
+  // Only a profile that was read takes the duplicate-file shortcut.
+  assert.match(src, /const unreadHolder = heldByHash && heldByHash\.isParsed === false && !heldByHash\.mergedInto && !skipLLM \? heldByHash : null;/);
+  assert.match(src, /const existingCandidate = unreadHolder \? null : heldByHash;/);
+  // And the reading fills that profile rather than making a second one.
+  assert.match(src, /const readInto = cvUpload\.candidateId \?\? unreadHolder\?\._id;/);
+});
