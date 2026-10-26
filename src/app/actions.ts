@@ -71,6 +71,7 @@ import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type 
 import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
 import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
 import { linkKey, profileLink } from "@/lib/url";
+import { parseLinkPaste } from "@/lib/linkPaste";
 import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
 import { draftsFor } from "@/lib/followup";
@@ -545,6 +546,45 @@ export async function addLink(formData: FormData) {
       : "Saved to Excel Tables as Shortlisted. Add their name from the row, so it can go to the pipeline.") +
       (leadNote ? " Your note is on the row." : "") +
       alsoHeldLine(otherHolders(repo.linksByUrl(openingId, key), user, deskWide)),
+  );
+}
+
+/** Most rows one paste adds: the lot is saved as one transaction. */
+const PASTE_MAX = 100;
+
+/**
+ * Many rows at once, copied out of the TA's own Excel sheet (26 Oct): each
+ * row with a LinkedIn profile is added to the chosen L as Shortlisted, its
+ * contact number kept as the phone and the rest of the row as the TA's note
+ * (lib/linkPaste). Someone already in the table is left as they are.
+ */
+export async function addLinksBulk(formData: FormData) {
+  const openingId = String(formData.get("openingId"));
+  await primeStore({ openingId });
+  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const { rows, skipped } = parseLinkPaste(String(formData.get("rows") ?? ""));
+  if (!rows.length) await fail("No LinkedIn profile links in what was pasted. Copy the rows from the sheet, link column included.");
+  if (rows.length > PASTE_MAX) await fail(`That is ${rows.length} rows. Paste up to ${PASTE_MAX} at a time.`);
+  const location = requireWorkLocation(repo.opening(openingId)!, String(formData.get("workLocationId") ?? ""));
+  const level = Number(formData.get("level")) || undefined;
+  const deskWide = deskWideCheck();
+  let added = 0, there = 0, bad = 0;
+  for (const row of rows) {
+    const profile = profileLink(row.url);
+    if (!profile) { bad++; continue; }
+    if (repo.findLinkByUrl(openingId, profile.key, rowCountsFor(user, deskWide))) { there++; continue; }
+    const id = repo.addLink(openingId, profile.url, user.id, profile.guessedName, "shortlisted", location?.id, level);
+    if (row.phone) repo.updateLink(id, { phoneNumber: row.phone, phoneSource: "other" });
+    if (row.note) repo.addLinkTaNote(id, user.id, row.note.slice(0, 1000));
+    added++;
+  }
+  revalidateLinks(openingId);
+  await done(
+    `Added ${added} to Excel Tables as Shortlisted.` +
+      (there ? ` ${there} ${there === 1 ? "was" : "were"} already in the table.` : "") +
+      (bad ? ` ${bad} link${bad === 1 ? " was not a profile" : "s were not profiles"}.` : "") +
+      (skipped ? ` ${skipped} line${skipped === 1 ? "" : "s"} had no LinkedIn link.` : "") +
+      " Names are read from the links, so check them.",
   );
 }
 
@@ -5534,6 +5574,10 @@ export async function createOpeningStep1Inline(_: ActionResult | null, formData:
 
 export async function addLinkInline(_: ActionResult | null, formData: FormData) {
   return inline(() => addLink(formData));
+}
+
+export async function addLinksBulkInline(_: ActionResult | null, formData: FormData) {
+  return inline(() => addLinksBulk(formData));
 }
 
 export async function generateJdInline(_: ActionResult | null, formData: FormData) {
