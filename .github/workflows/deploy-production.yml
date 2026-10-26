@@ -94,14 +94,20 @@ jobs:
       # manual run asks for it (`backup: always`). A schema change alone no
       # longer does: the schema only ever gains optional fields, which change
       # no stored row. (Owner's decision, 21 September — twice.)
+      # A function run with "dryRun": true only reads, so it takes none either:
+      # the dump was most of every dry run's 25 minutes (owner, 26 October).
+      # `backup: always` still forces one.
       - name: Does this release need a database backup?
         id: backup
         env:
           FORCE: ${{ inputs.backup }}
           RUN_FUNCTION: ${{ inputs.run_function }}
+          RUN_ARGS: ${{ inputs.run_args }}
         run: |
           need=false
-          if [ "$FORCE" = "always" ] || [ -n "$RUN_FUNCTION" ]; then
+          if [ "$FORCE" = "always" ]; then
+            need=true
+          elif [ -n "$RUN_FUNCTION" ] && ! printf '%s' "$RUN_ARGS" | grep -Eq '"dryRun"[[:space:]]*:[[:space:]]*true'; then
             need=true
           fi
           echo "need=$need" >> "$GITHUB_OUTPUT"
