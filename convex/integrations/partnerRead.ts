@@ -10,7 +10,7 @@ export const PARTNER_READ_TABLES = [
   "users", "teams", "teamMembers", "jobAssignments", "openingAccessRequests", "roleAuditLog",
   "candidateLocks", "candidateInquiries", "jobs", "jobChannels", "job_assets",
   "custom_filters", "saved_filters", "match_scores", "pipeline_health_reports",
-  "cvUploads", "partnerCvFiles", "folderImportProgress", "candidateResumes", "referees", "candidates",
+  "cvUploads", "cvExtractionQueue", "partnerCvFiles", "folderImportProgress", "candidateResumes", "referees", "candidates",
   "applications", "pipelineEvents", "aiCalls", "voiceCallSessions", "voiceAnswers",
   "voiceAgentNonces", "voiceSimulationReservations", "communications", "directorReviews",
   "clientReviews", "interviews", "offers", "placements", "rejectionLoopEvents",

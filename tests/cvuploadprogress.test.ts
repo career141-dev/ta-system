@@ -39,9 +39,12 @@ test("the extraction does not run OCR again after a full-text AI failure", () =>
   assert.match(source, /trimmed\.length < 50 && !ocrAttempted/);
 });
 
-test("a missed worker is handed back quickly instead of waiting a minute", () => {
+test("a missed worker waits in the queue and is started when a slot frees", () => {
+  // 26 Oct: the 4–6s reschedule became a busy-wait with 800 CVs queued; the
+  // queue itself is covered in extractionqueue.test.ts.
   const source = readFileSync(new URL("../convex/cvs/cvExtraction.ts", import.meta.url), "utf8");
-  assert.match(source, /const later = 4_000 \+ Math\.floor\(Math\.random\(\) \* 2_000\)/);
+  assert.doesNotMatch(source, /const later = 4_000 \+ Math\.floor\(Math\.random\(\) \* 2_000\)/);
   assert.doesNotMatch(source, /const later = 30_000 \+ Math\.floor\(Math\.random\(\) \* 30_000\)/);
+  assert.match(source, /enterExtractionQueue/);
 });
 

@@ -1,6 +1,8 @@
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
 import { internalQuery, internalMutation } from "../_generated/server";
+import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { planTurns } from "../lib/extractionQueue";
 import { internal } from "../_generated/api";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { readCursor, writeCursor, nextCreationCursor } from "../lib/cronCursor";
@@ -285,12 +287,13 @@ export const recoverStuckUploads = internalMutation({
       // Use processingStartedAt (stamped when extraction actually began) if available;
       // fall back to _creationTime only for legacy records that predate the new field.
       const processingStartMs = (upload as any).processingStartedAt ?? upload._creationTime;
-      if (processingStartMs < tenMinutesAgo) {
+      // Behind a long upload a CV can wait its turn for over ten minutes (26 Oct).
+      if (processingStartMs < tenMinutesAgo && !(await inExtractionQueue(ctx, upload._id))) {
         await ctx.db.patch(upload._id, {
           status: "failed",
           errorMessage: "Process interrupted or timed out (>10m)",
         });
-        
+
         // Also check if this upload is part of a batch
         if (upload.batchId) {
           // Trigger next batch evaluation
@@ -580,13 +583,18 @@ export const claimUploadedBatch = internalMutation({
   },
   handler: async (ctx, args) => {
     const limit = args.limit ?? 10;
+    // A just-uploaded CV stays "uploaded" while it waits for a reading slot.
+    // It is already queued: claiming it again started a second chain of runs
+    // for the same file (26 Oct). Read past those to the ones nobody queued.
     const uploadedRecords = await ctx.db
       .query("cvUploads")
       .withIndex("by_status", (q) => q.eq("status", "uploaded"))
-      .take(limit);
+      .take(limit * 5);
 
     const claimed = [];
     for (const record of uploadedRecords) {
+      if (claimed.length >= limit) break;
+      if (await inExtractionQueue(ctx, record._id)) continue;
       if (!record.s3Key && !record.storageId) {
         await ctx.db.patch(record._id, {
           status: "failed",
@@ -670,7 +678,10 @@ export const requeueAllStuckUploads = internalMutation({
         .withIndex("by_status", (q) => q.eq("status", status).gt("_creationTime", after))
         .take(want);
       await writeCursor(ctx, name, nextCreationCursor(rows, want));
-      allStuck.push(...rows.filter(eligible));
+      for (const row of rows.filter(eligible)) {
+        // Waiting for a slot, or being read now: not stuck.
+        if (!(await inExtractionQueue(ctx, row._id))) allStuck.push(row);
+      }
     }
 
     let requeuedCount = 0;
@@ -852,17 +863,73 @@ export const unlockExtraction = internalMutation({
   },
 });
 
+/** Hand free reading slots to the CVs that have waited longest (lib/extractionQueue.ts). */
+async function startNextTurns(ctx: MutationCtx) {
+  const now = Date.now();
+  // Held slots: startedAt is set. Missing values sort first, so gt(0) skips the waiting.
+  const held = await ctx.db.query("cvExtractionQueue").withIndex("by_startedAt", (q) => q.gt("startedAt", 0)).take(100);
+  const { lapsed, free } = planTurns(held, now);
+  for (const row of lapsed) {
+    // Its reading died holding the slot. The upload is left as that reading
+    // left it; the stuck-upload recovery and the two-minute queue pick it up.
+    console.warn(`[extractionQueue] Slot for upload ${row.cvUploadId} lapsed after ${Math.round((now - row.startedAt!) / 1000)}s — taken back.`);
+    await ctx.db.delete(row._id);
+  }
+  if (free === 0) return 0;
+  const next = await ctx.db.query("cvExtractionQueue").withIndex("by_startedAt", (q) => q.eq("startedAt", undefined)).take(free);
+  for (const row of next) {
+    await ctx.db.patch(row._id, { startedAt: now });
+    await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, { ...row.args, leaseId: row._id });
+  }
+  return next.length;
+}
+
+/** Is this upload already waiting for, or holding, a reading slot? */
+export async function inExtractionQueue(ctx: QueryCtx, cvUploadId: Id<"cvUploads">) {
+  return !!(await ctx.db.query("cvExtractionQueue").withIndex("by_cvUploadId", (q) => q.eq("cvUploadId", cvUploadId)).first());
+}
+
 /**
- * How many CV readings are running right now (6 Oct). Read from the
- * scheduler's own table, so it counts every way a reading is started.
+ * Every CV reading starts here (26 Oct). The CV joins the back of the queue —
+ * once: a second request for the same upload while it waits or is being read
+ * is dropped — and free slots go to whoever has waited longest.
  */
-export const runningExtractions = internalQuery({
-  args: {},
-  handler: async (ctx) => {
-    let running = 0;
-    for (const f of await ctx.db.system.query("_scheduled_functions").order("desc").take(500)) {
-      if (f.name.endsWith("processCvExtraction") && f.state.kind === "inProgress") running++;
+export const enterExtractionQueue = internalMutation({
+  args: { cvUploadId: v.id("cvUploads"), args: v.any() },
+  handler: async (ctx, a) => {
+    const added = !(await inExtractionQueue(ctx, a.cvUploadId));
+    if (added) {
+      await ctx.db.insert("cvExtractionQueue", { cvUploadId: a.cvUploadId, args: a.args });
+      const upload = await ctx.db.get(a.cvUploadId);
+      if (upload && upload.processingStage !== "queued") {
+        await ctx.db.patch(a.cvUploadId, { processingStage: "queued", stageChangedAt: Date.now() });
+      }
     }
-    return running;
+    await startNextTurns(ctx);
+    return { added };
   },
+});
+
+/** A reading has ended, however it ended: free its slot for the next CV. */
+export const leaveExtractionQueue = internalMutation({
+  args: { leaseId: v.id("cvExtractionQueue") },
+  handler: async (ctx, a) => {
+    if (await ctx.db.get(a.leaseId)) await ctx.db.delete(a.leaseId);
+    await startNextTurns(ctx);
+  },
+});
+
+/** Is this slot still held for this upload? A lapsed one was taken back and may be someone else's now. */
+export const holdsExtractionSlot = internalQuery({
+  args: { leaseId: v.id("cvExtractionQueue"), cvUploadId: v.id("cvUploads") },
+  handler: async (ctx, a) => {
+    const row = await ctx.db.get(a.leaseId);
+    return !!row && row.cvUploadId === a.cvUploadId && row.startedAt !== undefined;
+  },
+});
+
+/** For the two-minute queue: take back lapsed slots and start whoever can start. */
+export const startWaitingExtractions = internalMutation({
+  args: {},
+  handler: async (ctx) => startNextTurns(ctx),
 });

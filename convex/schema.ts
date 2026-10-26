@@ -864,6 +864,19 @@ export default defineSchema({
     .index("by_fileName", ["fileName"])
     .index("by_isHealAttempted", ["isHealAttempted"]),
 
+  // CVs waiting for, or holding, one of the few CV-reading slots (26 Oct). A
+  // row without startedAt waits its turn, oldest first; a row with it is a
+  // reading in progress and is removed when that reading ends. See
+  // lib/extractionQueue.ts.
+  cvExtractionQueue: defineTable({
+    cvUploadId: v.id("cvUploads"),
+    // The processCvExtraction arguments, replayed when the turn comes.
+    args: v.any(),
+    startedAt: v.optional(v.number()),
+  })
+    .index("by_cvUploadId", ["cvUploadId"])
+    .index("by_startedAt", ["startedAt"]),
+
   // CV files uploaded by the Capacity Planner for storage/retrieval only.
   // Kept outside cvUploads so TA extraction/recovery never treats them as intake.
   partnerCvFiles: defineTable({
