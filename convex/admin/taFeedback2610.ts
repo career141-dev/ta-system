@@ -49,6 +49,9 @@ const MOVES: { applicationId: string; from: string; to: PipelineStage; ta: strin
   { applicationId: "js7axxt7dtfyy5bt93ah1w1rh98fx24z", from: "new_cvs", to: "director_shortlist", ta: "Thushini", who: "DELMO - HOLDING · IT MANAGER" },
   { applicationId: "js77g8b52xbrrkydhjkge5m7sx8fvtzc", from: "matched_candidates", to: "director_shortlist", ta: "Thushini", who: "DELMO - HOLDING · IT MANAGER" },
   { applicationId: "js7faw8cf8c1hcdj1rd6hjvnnd8frapn", from: "new_cvs", to: "unresponsive", ta: "Thushini", who: "DELMO - HOLDING · IT MANAGER" },
+  // Added after the first run: on Melwa Head of HR too, not only Group Head
+  // of HR (two positions, owner 26 Oct). His second record there is left.
+  { applicationId: "js7a3zk2hf6mjhmhnjsw32kx2x8g9w07", from: "matched_candidates", to: "director_shortlist", ta: "Thushini", who: "MELWA · Head OF HR" },
   // Moved to Interview by the interviews@ catch-up that morning because the
   // invitation went to his address; Thushini's table names a different
   // candidate of the same first name as the one interviewed (moved above).

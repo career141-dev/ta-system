@@ -511,7 +511,7 @@ async function fileShortlist(
  * pipeline, the way handleMessage does. A CV already held is not read again:
  * its person is given to `known`, or the upload waited on if still being read.
  */
-async function ingestCvs(
+export async function ingestCvs(
   ctx: ActionCtx,
   token: string,
   mailboxPath: string,
