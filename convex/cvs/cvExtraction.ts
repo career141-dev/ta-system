@@ -1147,7 +1147,13 @@ async function runCvExtractionLocked(
     const fileHash = computeSha256(buffer);
 
     // Skip extraction if file is duplicate of an already extracted candidate (Agent 6 factor)
-    const existingCandidate = await ctx.runQuery(internal.candidates.candidates.findCandidateByHash, { fileHash });
+    const heldByHash = await ctx.runQuery(internal.candidates.candidates.findCandidateByHash, { fileHash });
+    // A profile left empty by a failed reading holds this file's hash too (26
+    // Oct): the same file uploaded again, or put back with Replace CV, was
+    // filed onto that empty profile unread, so it could never be read. Read it
+    // this time, into that profile.
+    const unreadHolder = heldByHash && heldByHash.isParsed === false && !heldByHash.mergedInto && !skipLLM ? heldByHash : null;
+    const existingCandidate = unreadHolder ? null : heldByHash;
     if (existingCandidate) {
       console.log(`[CvExtraction] Duplicate CV detected (hash: ${fileHash}). Candidate ID: ${existingCandidate._id}. Skipping extraction.`);
 
@@ -1287,8 +1293,9 @@ async function runCvExtractionLocked(
       console.warn(`[CvExtraction] R2 raw text upload error for upload ${cvUploadId}:`, r2Err?.message || r2Err);
     }
 
-    if (cvUpload.candidateId) {
-      candidateId = cvUpload.candidateId;
+    const readInto = cvUpload.candidateId ?? unreadHolder?._id;
+    if (readInto) {
+      candidateId = readInto;
       await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
         candidateId,
         rawTextKey,
