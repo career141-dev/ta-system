@@ -17,7 +17,7 @@ import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
 import { DIRECTOR_MAILBOXES, matchHouseSubject, parseHouseSubject, type OpeningLite } from "../lib/shortlistMail";
-import { isCvFile, matchCvFiles, nameFromCvFile } from "../lib/directorReplyAi";
+import { isCvFile, nameFromCvFile, someoneNamed } from "../lib/directorReplyAi";
 import { isCvAttachment, type MailAttachmentMeta } from "../lib/mailParse";
 import { setOpenings } from "../lib/setOpening";
 import { ingestCvs } from "./process";
@@ -104,7 +104,7 @@ export const reconcileSetCvs = internalAction({
         // The same opening entered twice: the copy most of the set is already on.
         const onEach = await Promise.all(fits.map(async (o) => {
           const people = await ctx.runQuery(internal.mailIntake.setCvs.openingPeople, { jobId: o.id as Id<"jobs"> });
-          return { o, people, on: cvs.filter((cv) => matchCvFiles([cv.name ?? ""], people).roster.length).length };
+          return { o, people, on: cvs.filter((cv) => someoneNamed(cv.name ?? "", people)).length };
         }));
         onEach.sort((a, b) => b.on - a.on);
         if (onEach.length > 1 && onEach[0].on === onEach[1].on) {
@@ -117,7 +117,7 @@ export const reconcileSetCvs = internalAction({
         const onJob: string[] = [];
         const missing: MailAttachmentMeta[] = [];
         for (const cv of cvs) {
-          if (matchCvFiles([cv.name ?? ""], people).roster.length) onJob.push(nameFromCvFile(cv.name ?? ""));
+          if (someoneNamed(cv.name ?? "", people)) onJob.push(nameFromCvFile(cv.name ?? ""));
           else missing.push(cv);
         }
         const row = { ...base, job, cvs: cvs.length, onJob: onJob.length, missing: missing.map((c) => nameFromCvFile(c.name ?? "")) };

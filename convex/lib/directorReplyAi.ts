@@ -113,6 +113,19 @@ const NOT_NAME = new Set(["mba", "cv", "cvs", "resume", "career", "mrs", "miss",
 const nameWords = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z ]/g, " ").split(/\s+/).filter((w) => w.length >= 3 && !NOT_NAME.has(w));
 
 /**
+ * Whether anyone on the opening has the CV's name — two shared words, or one
+ * when the file has one. Unlike matchCvFiles there is no tie to break: the
+ * same person on file twice is still someone already there (26 October, when
+ * a person's two records tied and their CV was counted as missing).
+ */
+export function someoneNamed(file: string, candidates: { name: string }[]): boolean {
+  const want = nameWords(nameFromCvFile(file));
+  if (want.length === 0) return false;
+  const need = Math.min(2, want.length);
+  return candidates.some((c) => want.filter((w) => new Set(nameWords(c.name)).has(w)).length >= need);
+}
+
+/**
  * The set an email submitted, from its CV file names: each file matched to the
  * candidate on the opening who shares its words — two when the file has two or
  * more, one when it has one (a file named only "ILYAS"). A file that matches
