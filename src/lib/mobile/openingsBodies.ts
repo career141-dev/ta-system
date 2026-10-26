@@ -90,3 +90,12 @@ export const jdWriteBody = z.discriminatedUnion("action", [
   }).strict(),
   z.object({ action: z.literal("reextract_details") }).strict(),
 ]);
+
+export const strategyWriteBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("accept") }).strict(),
+  z.object({
+    action: z.literal("submit"),
+    rows: z.array(z.object({ rowId: z.string().min(1).max(200), used: z.boolean(), date: text(20), note: text(500) }).strict()).max(100),
+  }).strict(),
+  z.object({ action: z.literal("remove_proof"), rowId: z.string().min(1).max(200), proofId: z.string().min(1).max(300) }).strict(),
+]);

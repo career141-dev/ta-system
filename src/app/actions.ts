@@ -28,6 +28,7 @@ import {
   writeJdNotes,
 } from "@/lib/openings/jdWrites";
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
+import { acceptStrategies, removeStrategyPicture, strategyBellDue, submitStrategies } from "@/lib/openings/strategyWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
@@ -94,6 +95,11 @@ import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexAction, convexActorForEmail, convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
 import * as backend from "@/data/convex/backend";
+
+/** Keep the website's responsive 30-second assignment-bell debounce. */
+function bellDue(key: string, ms = 30_000): boolean {
+  return strategyBellDue(key, ms);
+}
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -5468,14 +5474,6 @@ function strategyRowOf(formData: FormData, field = "rowId") {
  * Debounces bells per key within 30 seconds. A lead clicking multiple strategies
  * rapidly generates one chime, while assignments made moments later are not silenced.
  */
-const lastBell = new Map<string, number>();
-function bellDue(key: string, ms = 30_000): boolean {
-  const now = Date.now();
-  if (now - (lastBell.get(key) ?? 0) < ms) return false;
-  lastBell.set(key, now);
-  return true;
-}
-
 /** Put a TA on a strategy for a job ("Done by"). The TA Lead's side of the table. */
 export async function addStrategyDoneBy(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
@@ -5538,11 +5536,12 @@ export async function removeStrategyDoneBy(formData: FormData) {
 export async function acceptStrategyAssignments(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
   await primeStore({ openingId });
-  const user = await authorizeOn(openingId, "strategy.work");
-  const accepted = repo.acceptStrategyAssignments({ openingId, taId: user.id });
+  const user = await getCurrentUser();
+  const result = acceptStrategies(user, openingId, { convexMutation, markTablesStale, notify: revalidatePath });
+  if (!result.ok) await fail(result.message);
   revalidateStrategies(openingId);
-  if (accepted === 0) await note("There are no new strategy assignments to accept.");
-  await done(`Accepted ${accepted} ${accepted === 1 ? "strategy" : "strategies"}. You can start working on ${accepted === 1 ? "it" : "them"} now.`);
+  if (result.ok && result.tone === "note") await note(result.message);
+  await done(result.message);
 }
 
 /** The day the lead assigned a strategy; empty clears it. */
@@ -5584,47 +5583,17 @@ export async function setStrategyNotApplicable(formData: FormData) {
 export async function submitStrategyUpdate(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
   await primeStore({ openingId });
-  const user = await authorizeOn(openingId, "strategy.work");
+  const user = await getCurrentUser();
   const ids = formData.getAll("rowId").map(String).filter(Boolean);
-  if (ids.length === 0) await fail("There is nothing to submit.");
-
-  const today = colomboDayStart(Date.now());
-  const rows: { rowId: string; doneAt: number | null; note: string | null }[] = [];
-  for (const id of ids) {
-    const row = repo.strategyAssignment(id);
-    if (!row || row.openingId !== openingId || row.notApplicable) continue;
-    const onIt = row.doneBy.includes(user.id);
-    if (!onIt && !isTicked(row)) continue;
-    const used = formData.get(`used_${id}`) === "on";
-    const typed = String(formData.get(`date_${id}`) ?? "").trim();
-    const day = colomboDayFromValue(typed);
-    if (used && typed && day === null) await fail(`That is not a date (${row.strategyName}).`);
-    const text = String(formData.get(`note_${id}`) ?? "").trim();
-    if (text.length > 500) await fail(`Keep the note under 500 characters (${row.strategyName}).`);
-    if (!onIt && !used && !text) continue;
-    // Ticked "used" with no date means today; not ticked means not used yet.
-    rows.push({ rowId: id, doneAt: used ? day ?? today : null, note: text || null });
-  }
-  if (rows.length === 0) await fail("None of those strategies are yours to update.");
-
-  const taken = repo.submitStrategyRows({ openingId, taId: user.id, rows });
-  if (taken === 0) await fail("Accept your new strategy assignments before submitting an update.");
+  const result = await submitStrategies(user, openingId, ids.map((id) => ({
+    rowId: id,
+    used: formData.get(`used_${id}`) === "on",
+    date: String(formData.get(`date_${id}`) ?? ""),
+    note: String(formData.get(`note_${id}`) ?? ""),
+  })), { convexMutation, markTablesStale, notify: revalidatePath });
+  if (!result.ok) await fail(result.message);
   revalidateStrategies(openingId);
-
-  // The TA Lead is told a submission arrived, not what is in it.
-  const opening = repo.opening(openingId)!;
-  const leadId = opening.taLeadId;
-  if (isConvex() && leadId && leadId !== user.id && bellDue(`submit:${user.id}:${openingId}`, 5 * 60_000)) {
-    await convexMutation("ta/notifications:create", {
-      userId: leadId,
-      type: "strategy_assigned",
-      title: "A TA submitted strategies",
-      body: `${user.name} submitted their strategies on ${opening.title}.`,
-      jobId: openingId,
-    }).catch((e) => console.error("[notifications] strategy submit failed:", e));
-    revalidatePath("/api/notifications");
-  }
-  await done(`Submitted ${taken} ${taken === 1 ? "strategy" : "strategies"}. Your TA Lead can now see ${taken === 1 ? "it" : "them"}.`);
+  await done(result.message);
 }
 
 /**
@@ -5671,15 +5640,12 @@ export async function removeStrategyProof(formData: FormData) {
   await primeStore();
   const row = strategyRowOf(formData);
   if (!row) await fail("That strategy is no longer on this job's table.");
-  const user = await authorizeOn(row!.openingId, "strategy.work");
+  const user = await getCurrentUser();
   const proofId = String(formData.get("proofId") ?? "");
-  const proof = row!.proofs.find((p) => p.id === proofId);
-  if (!proof) await fail("That picture is already gone.");
-  if (proof!.addedBy !== user.id) await fail("Only the person who attached a picture can remove it.");
-  const gone = repo.removeStrategyProof(row!.id, proofId);
-  if (gone && isConvex()) await convexMutation("ta/strategies:proofDelete", { storageId: gone }).catch(() => {});
+  const result = await removeStrategyPicture(user, row!.id, proofId, { convexMutation, markTablesStale, notify: revalidatePath });
+  if (!result.ok) await fail(result.message);
   revalidateStrategies(row!.openingId);
-  await done("Picture removed.");
+  await done(result.message);
 }
 
 /** Add a strategy to the list, or change one. */
