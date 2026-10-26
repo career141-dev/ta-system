@@ -19,16 +19,28 @@ import { getGraphToken } from "../lib/graphClient";
 import { DIRECTOR_MAILBOXES, matchHouseSubject, parseHouseSubject, type OpeningLite } from "../lib/shortlistMail";
 import { isCvFile, matchCvFiles, nameFromCvFile } from "../lib/directorReplyAi";
 import { isCvAttachment, type MailAttachmentMeta } from "../lib/mailParse";
+import { setOpenings } from "../lib/setOpening";
 import { ingestCvs } from "./process";
 
 const MAILBOXES = ["joborders@career141.com", "shortlists@career141.com"];
 
-/** Everyone on the opening, by the name on their application. */
+/**
+ * Everyone on the opening, by every name we hold for them: many applications
+ * carry no name of their own (the first dry run counted 188 CVs "missing",
+ * most of them people already there — 26 October), so the profile's is read too.
+ */
 export const openingPeople = internalQuery({
   args: { jobId: v.id("jobs") },
-  handler: async (ctx, { jobId }) =>
-    (await ctx.db.query("applications").withIndex("by_jobId", (q) => q.eq("jobId", jobId)).collect())
-      .map((a) => ({ applicationId: a._id as string, name: a.candidateName ?? "", stage: a.currentStage ?? "new_cvs" })),
+  handler: async (ctx, { jobId }) => {
+    const out: { applicationId: string; name: string; stage: string }[] = [];
+    for (const a of await ctx.db.query("applications").withIndex("by_jobId", (q) => q.eq("jobId", jobId)).collect()) {
+      const candidate = await ctx.db.get(a.candidateId);
+      // One row per person, both names together: two rows would tie each other and match nobody.
+      const name = [...new Set([a.candidateName, candidate?.fullName].filter((n): n is string => Boolean(n?.trim())))].join(" ");
+      out.push({ applicationId: a._id as string, name, stage: a.currentStage ?? "new_cvs" });
+    }
+    return out;
+  },
 });
 
 export const reconcileSetCvs = internalAction({
@@ -79,16 +91,29 @@ export const reconcileSetCvs = internalAction({
       const subject = m.subject ?? "";
       const from = (m.from?.emailAddress?.address ?? "").toLowerCase();
       const base = { receivedAt: m.receivedDateTime ?? "", from, subject };
-      const match = matchHouseSubject(parseHouseSubject(subject)!, openings as OpeningLite[]);
-      if (!match.opening) { rows.push({ ...base, result: "no_opening", note: match.note }); continue; }
-      const jobId = match.opening.id as Id<"jobs">;
-      const job = `${match.opening.clientName} · ${match.opening.title}`;
+      const house = parseHouseSubject(subject)!;
+      const strict = matchHouseSubject(house, openings as OpeningLite[]);
+      // The strict reader first; then the desk's own names for the opening (lib/setOpening).
+      const fits = strict.opening ? [strict.opening] : setOpenings(house, openings as OpeningLite[]);
+      if (!fits.length) { rows.push({ ...base, result: "no_opening", note: strict.note }); continue; }
       try {
         const mailboxPath = `/users/${encodeURIComponent(m.box)}/messages/${encodeURIComponent(m.id)}`;
         const att = await fetch(`https://graph.microsoft.com/v1.0${mailboxPath}/attachments?$select=id,name,contentType,size,isInline`, { headers: H });
         const attachments = att.ok ? (((await att.json()).value ?? []) as MailAttachmentMeta[]) : [];
         const cvs = attachments.filter((a) => isCvAttachment(a) && isCvFile(a.name ?? ""));
-        const people = await ctx.runQuery(internal.mailIntake.setCvs.openingPeople, { jobId });
+        // The same opening entered twice: the copy most of the set is already on.
+        const onEach = await Promise.all(fits.map(async (o) => {
+          const people = await ctx.runQuery(internal.mailIntake.setCvs.openingPeople, { jobId: o.id as Id<"jobs"> });
+          return { o, people, on: cvs.filter((cv) => matchCvFiles([cv.name ?? ""], people).roster.length).length };
+        }));
+        onEach.sort((a, b) => b.on - a.on);
+        if (onEach.length > 1 && onEach[0].on === onEach[1].on) {
+          rows.push({ ...base, result: "no_opening", note: `Fits ${fits.length} openings equally (${fits.map((o) => o.title).join(" / ")}) and the set's people are on neither more than the other.` });
+          continue;
+        }
+        const { o: opening, people } = onEach[0];
+        const jobId = opening.id as Id<"jobs">;
+        const job = `${opening.clientName} · ${opening.title}`;
         const onJob: string[] = [];
         const missing: MailAttachmentMeta[] = [];
         for (const cv of cvs) {
@@ -114,7 +139,7 @@ export const reconcileSetCvs = internalAction({
         );
         rows.push({ ...row, result: "filed", reading: ingest.cvUploadIds.length, knownPlaced: placed.length, notes: ingest.notes });
       } catch (e) {
-        rows.push({ ...base, job, result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) });
+        rows.push({ ...base, result: "error", error: String((e as Error)?.message ?? e).slice(0, 200) });
       }
     }
     if (notReached && !args.dryRun) await ctx.scheduler.runAfter(0, internal.mailIntake.setCvs.reconcileSetCvs, args);
