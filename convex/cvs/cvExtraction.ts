@@ -136,6 +136,16 @@ const makeArray = (val: any) => {
   return [];
 };
 
+// The lists of entries (education, jobs, referees) as an array of objects
+// (26 Oct). The model sometimes answers one entry as a bare object, puts a
+// null or a line of text in the list, or gives a sentence instead: every other
+// field was already loose about this, these three rejected the whole CV.
+const makeObjectArray = (val: any) => {
+  if (val === null || val === undefined) return null;
+  const list = Array.isArray(val) ? val : [val];
+  return list.filter((v) => v !== null && typeof v === "object" && !Array.isArray(v));
+};
+
 const makeNumber = (val: any) => {
   if (val === null || val === undefined) return null;
   const num = Number(val);
@@ -203,13 +213,13 @@ export const cvExtractionSchema = z.object({
     value: z.string(),
     confidence: z.number().nullable().optional()
   })).nullable().optional()),
-  education: z.array(educationSchema).nullable().optional(),
+  education: z.preprocess(makeObjectArray, z.array(educationSchema).nullable().optional()),
   certifications: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   languages: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   summary: z.preprocess(makeString, z.string().nullable().optional()),
   gender: z.preprocess(makeString, z.string().nullable().optional()),
-  jobHistory: z.array(jobHistorySchema).nullable().optional(),
-  referees: z.array(refereeSchema).nullable().optional(),
+  jobHistory: z.preprocess(makeObjectArray, z.array(jobHistorySchema).nullable().optional()),
+  referees: z.preprocess(makeObjectArray, z.array(refereeSchema).nullable().optional()),
 });
 
 export type CvExtractionResult = z.infer<typeof cvExtractionSchema>;
@@ -883,8 +893,18 @@ export async function callOpenRouterLLM(
   ctx: ActionCtx,
   rawText: string,
   cvUploadId?: Id<"cvUploads">,
-  sourceChannel?: string
+  sourceChannel?: string,
+  /**
+   * Filled with why no details came back (26 Oct). Every failure used to come
+   * back as the same null, and the TA saw "API timeout or invalid response"
+   * for an out-of-credits answer, a cut-off reply and a wrong field alike.
+   */
+  failure?: { reason?: string },
 ): Promise<CvExtractionResult | null> {
+  const fail = (reason: string) => {
+    if (failure) failure.reason = reason;
+    return null;
+  };
   // 16 000 chars (~4 000 tokens) covers full multi-page CVs including end-of-CV references
   // without exceeding LLM context or budget.
   const MAX_CHARS = 16000;
@@ -935,7 +955,7 @@ JSON Target Schema:
   ];
 
   try {
-    const { content, provider } = await executeLLMWithNvidiaFallback(ctx, "cv_structuring", {
+    const { content, provider, model, primaryError } = await executeLLMWithNvidiaFallback(ctx, "cv_structuring", {
       messages,
       temperature: 0,
       // A long work history runs past 4,000 tokens of JSON; cut off, it does not parse.
@@ -945,29 +965,34 @@ JSON Target Schema:
       sourceChannel,
     });
 
-    if (!content) return null;
+    const after = primaryError ? `DeepSeek failed (${primaryError.slice(0, 160)}), then ${model} ` : `${model} `;
+    if (!content) return fail(`${after}gave an empty answer`);
     const parsed = parseJsonRobustly(content);
-    if (!parsed) return null;
+    if (!parsed) return fail(`${after}gave an answer that is not readable JSON (${content.length} characters — likely cut off)`);
 
     if (Object.keys(parsed).length === 0 || (!parsed.fullName && !parsed.email && !parsed.phone && !parsed.skills && !parsed.jobHistory)) {
       // Only the primary model's "not a CV" is trusted. The fallback is reached
       // when the primary failed, and it answers an empty object for real CVs;
       // treating that as a verdict deleted real applicants (17 September).
-      if (provider === "nvidia") return null;
+      if (provider === "nvidia") return fail(`${after}found no candidate details`);
       throw new Error("NOT_A_CV");
     }
 
-    try {
-      return cvExtractionSchema.parse(parsed);
-    } catch (e) {
-      console.error("Zod parse error:", e);
-      return null;
-    }
+    const checked = cvExtractionSchema.safeParse(parsed);
+    if (checked.success) return checked.data;
+    // One malformed field must not cost the whole CV — name, contact and the
+    // rest are kept, and only the fields that do not fit are left empty.
+    const bad = [...new Set(checked.error.issues.map((i) => String(i.path[0])))];
+    console.warn(`[callOpenRouterLLM] Dropped malformed field(s) ${bad.join(", ")}:`, checked.error.issues.slice(0, 3));
+    const kept = cvExtractionSchema.safeParse(Object.fromEntries(Object.entries(parsed).filter(([k]) => !bad.includes(k))));
+    if (kept.success) return kept.data;
+    const issue = kept.error.issues[0];
+    return fail(`${after}gave details in the wrong shape (${issue.path.join(".")}: ${issue.message})`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "NOT_A_CV") throw error;
     console.error("[callOpenRouterLLM] CV extraction failed on primary and fallback LLM:", message);
-    return null;
+    return fail(`no AI model answered: ${message.slice(0, 200)}`);
   }
 }
 
@@ -1340,7 +1365,8 @@ async function runCvExtractionLocked(
       // LLM structuring only — embedding is deferred to background scheduler below
       checkDeadline("pre_llm");
       const tLlmStart = Date.now();
-      let extractedData = await callOpenRouterLLM(ctx, cappedRawText, cvUploadId, sourceChannel).catch((err) => {
+      const failure: { reason?: string } = {};
+      let extractedData = await callOpenRouterLLM(ctx, cappedRawText, cvUploadId, sourceChannel, failure).catch((err) => {
         // The model read the text and said it is not a CV (an invoice, a deck).
         // That is an answer, not a failure: OCR will not change it, and falling
         // through to OCR used to leave the document as "needs review" with an
@@ -1362,7 +1388,8 @@ async function runCvExtractionLocked(
       }
 
       if (!extracted) {
-        throw new Error("LLM failed to extract candidate data (API timeout or invalid response)");
+        // The reason, so the upload card says what went wrong, not a guess.
+        throw new Error(`LLM failed to extract candidate data: ${failure.reason ?? "no answer from the AI model"}`);
       }
       await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "validating" });
       // Embedding is always deferred — scheduled after candidate save below

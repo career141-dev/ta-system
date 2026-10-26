@@ -80,3 +80,16 @@ test("HH and Scoop uploads join the line in their own mutation, ahead of backgro
   const start = queue.slice(queue.indexOf("async function startNextTurns"), queue.indexOf("export async function inExtractionQueue"));
   assert.ok(start.indexOf('eq("urgent", true)') < start.indexOf('eq("urgent", undefined)'), "urgent CVs are started first");
 });
+
+test("a failed AI reading tells the TA why, not a guess", () => {
+  const src = readFileSync("convex/cvs/cvExtraction.ts", "utf8");
+  assert.doesNotMatch(src, /throw new Error\("LLM failed to extract candidate data \(API timeout or invalid response\)"\)/);
+  assert.match(src, /callOpenRouterLLM\(ctx, cappedRawText, cvUploadId, sourceChannel, failure\)/);
+  assert.match(src, /LLM failed to extract candidate data: \$\{failure\.reason/);
+  // Every way the call comes back empty names its reason.
+  const call = src.slice(src.indexOf("export async function callOpenRouterLLM"), src.indexOf("// null → undefined helper"));
+  // The one bare `return null` is the reason-recording helper itself.
+  assert.equal(call.match(/return null;/g)?.length, 1);
+  const llm = readFileSync("convex/lib/llm.ts", "utf8");
+  assert.match(llm, /primaryError/);
+});
