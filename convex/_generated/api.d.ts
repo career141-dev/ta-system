@@ -36,6 +36,7 @@ import type * as admin_runBackfill from "../admin/runBackfill.js";
 import type * as admin_setActiveJobs from "../admin/setActiveJobs.js";
 import type * as admin_settings from "../admin/settings.js";
 import type * as admin_taFeedback2610 from "../admin/taFeedback2610.js";
+import type * as admin_taTables2610b from "../admin/taTables2610b.js";
 import type * as admin_unshortlist from "../admin/unshortlist.js";
 import type * as admin_updateJDs from "../admin/updateJDs.js";
 import type * as aiCalls_voiceCallGuards from "../aiCalls/voiceCallGuards.js";
@@ -285,6 +286,7 @@ declare const fullApi: ApiFromModules<{
   "admin/setActiveJobs": typeof admin_setActiveJobs;
   "admin/settings": typeof admin_settings;
   "admin/taFeedback2610": typeof admin_taFeedback2610;
+  "admin/taTables2610b": typeof admin_taTables2610b;
   "admin/unshortlist": typeof admin_unshortlist;
   "admin/updateJDs": typeof admin_updateJDs;
   "aiCalls/voiceCallGuards": typeof aiCalls_voiceCallGuards;
