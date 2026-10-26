@@ -873,9 +873,13 @@ export default defineSchema({
     // The processCvExtraction arguments, replayed when the turn comes.
     args: v.any(),
     startedAt: v.optional(v.number()),
+    // A CV a TA uploaded and is watching (HH, Scoop): read before background
+    // work, with a slot kept for it (26 Oct).
+    urgent: v.optional(v.boolean()),
   })
     .index("by_cvUploadId", ["cvUploadId"])
-    .index("by_startedAt", ["startedAt"]),
+    .index("by_startedAt", ["startedAt"])
+    .index("by_startedAt_urgent", ["startedAt", "urgent"]),
 
   // CV files uploaded by the Capacity Planner for storage/retrieval only.
   // Kept outside cvUploads so TA extraction/recovery never treats them as intake.

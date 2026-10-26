@@ -2,7 +2,7 @@ import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
 import { internalQuery, internalMutation } from "../_generated/server";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
-import { planTurns } from "../lib/extractionQueue";
+import { planTurns, isUrgentUpload } from "../lib/extractionQueue";
 import { internal } from "../_generated/api";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { readCursor, writeCursor, nextCreationCursor } from "../lib/cronCursor";
@@ -863,12 +863,15 @@ export const unlockExtraction = internalMutation({
   },
 });
 
-/** Hand free reading slots to the CVs that have waited longest (lib/extractionQueue.ts). */
+/**
+ * Hand free reading slots out: CVs a TA is watching first, then background
+ * work up to its share, each oldest first (lib/extractionQueue.ts).
+ */
 async function startNextTurns(ctx: MutationCtx) {
   const now = Date.now();
   // Held slots: startedAt is set. Missing values sort first, so gt(0) skips the waiting.
   const held = await ctx.db.query("cvExtractionQueue").withIndex("by_startedAt", (q) => q.gt("startedAt", 0)).take(100);
-  const { lapsed, free } = planTurns(held, now);
+  const { lapsed, free, backgroundFree } = planTurns(held, now);
   for (const row of lapsed) {
     // Its reading died holding the slot. The upload is left as that reading
     // left it; the stuck-upload recovery and the two-minute queue pick it up.
@@ -876,12 +879,20 @@ async function startNextTurns(ctx: MutationCtx) {
     await ctx.db.delete(row._id);
   }
   if (free === 0) return 0;
-  const next = await ctx.db.query("cvExtractionQueue").withIndex("by_startedAt", (q) => q.eq("startedAt", undefined)).take(free);
-  for (const row of next) {
+  const urgent = await ctx.db.query("cvExtractionQueue")
+    .withIndex("by_startedAt_urgent", (q) => q.eq("startedAt", undefined).eq("urgent", true))
+    .take(free);
+  const left = Math.min(backgroundFree, free - urgent.length);
+  const background = left > 0
+    ? await ctx.db.query("cvExtractionQueue")
+        .withIndex("by_startedAt_urgent", (q) => q.eq("startedAt", undefined).eq("urgent", undefined))
+        .take(left)
+    : [];
+  for (const row of [...urgent, ...background]) {
     await ctx.db.patch(row._id, { startedAt: now });
     await ctx.scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, { ...row.args, leaseId: row._id });
   }
-  return next.length;
+  return urgent.length + background.length;
 }
 
 /** Is this upload already waiting for, or holding, a reading slot? */
@@ -890,24 +901,28 @@ export async function inExtractionQueue(ctx: QueryCtx, cvUploadId: Id<"cvUploads
 }
 
 /**
- * Every CV reading starts here (26 Oct). The CV joins the back of the queue —
- * once: a second request for the same upload while it waits or is being read
- * is dropped — and free slots go to whoever has waited longest.
+ * Put a CV in line for reading — once: a second request for the same upload
+ * while it waits or is being read is dropped — and start whoever can start.
+ * The HH and Scoop uploads call this straight from their own mutation, so the
+ * TA's CV is in line the moment it is stored.
  */
+export async function enqueueExtraction(ctx: MutationCtx, cvUploadId: Id<"cvUploads">, args: Record<string, unknown>) {
+  const added = !(await inExtractionQueue(ctx, cvUploadId));
+  if (added) {
+    const upload = await ctx.db.get(cvUploadId);
+    await ctx.db.insert("cvExtractionQueue", { cvUploadId, args, ...(isUrgentUpload(upload) ? { urgent: true } : {}) });
+    if (upload && upload.processingStage !== "queued") {
+      await ctx.db.patch(cvUploadId, { processingStage: "queued", stageChangedAt: Date.now() });
+    }
+  }
+  await startNextTurns(ctx);
+  return { added };
+}
+
+/** Every CV reading started by scheduling processCvExtraction comes in here (26 Oct). */
 export const enterExtractionQueue = internalMutation({
   args: { cvUploadId: v.id("cvUploads"), args: v.any() },
-  handler: async (ctx, a) => {
-    const added = !(await inExtractionQueue(ctx, a.cvUploadId));
-    if (added) {
-      await ctx.db.insert("cvExtractionQueue", { cvUploadId: a.cvUploadId, args: a.args });
-      const upload = await ctx.db.get(a.cvUploadId);
-      if (upload && upload.processingStage !== "queued") {
-        await ctx.db.patch(a.cvUploadId, { processingStage: "queued", stageChangedAt: Date.now() });
-      }
-    }
-    await startNextTurns(ctx);
-    return { added };
-  },
+  handler: async (ctx, a) => enqueueExtraction(ctx, a.cvUploadId, a.args),
 });
 
 /** A reading has ended, however it ended: free its slot for the next CV. */

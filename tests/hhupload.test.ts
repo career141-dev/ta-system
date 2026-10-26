@@ -26,7 +26,8 @@ eq("which the TA System reads as HH", channelOf(channel), "HH");
 eq("an ordinary manual upload is not HH", channelOf("manual_upload"), "E");
 
 console.log("\nthe upload uses the existing extraction, not a new one");
-eq("queued on processCvExtraction", hh.includes("internal.cvs.cvExtraction.processCvExtraction"), true);
+// In line for processCvExtraction through the shared reading queue (26 Oct).
+eq("queued on processCvExtraction", hh.includes("await enqueueExtraction(ctx, cvUploadId,"), true);
 eq("filed on this opening through assignToJob", /assignToJob: job\._id/.test(hh), true);
 eq("no text extraction of its own", /extractText|callOpenRouterLLM/.test(hh), false);
 eq("claimed by the same rule as Shortlist", hh.includes("claimForTa(ctx, user, app)"), true);
