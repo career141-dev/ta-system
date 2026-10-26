@@ -3274,7 +3274,7 @@ export default defineSchema({
     enabled: v.boolean(),
     /** shared (absent): linkedin@, cv@, job@. ta: a TA's own mailbox, read only
      *  for scoops the Director, a TA Lead or Ops send them (27 Sep). */
-    kind: v.optional(v.union(v.literal("shared"), v.literal("ta"), v.literal("shortlist"))),
+    kind: v.optional(v.union(v.literal("shared"), v.literal("ta"), v.literal("shortlist"), v.literal("interview"))),
     taUserId: v.optional(v.id("users")),
     /** Graph's delta token URL; absent until the first full sync completes. */
     deltaLink: v.optional(v.string()),
