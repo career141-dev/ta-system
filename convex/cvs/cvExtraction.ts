@@ -136,6 +136,16 @@ const makeArray = (val: any) => {
   return [];
 };
 
+// The lists of entries (education, jobs, referees) as an array of objects
+// (26 Oct). The model sometimes answers one entry as a bare object, puts a
+// null or a line of text in the list, or gives a sentence instead: every other
+// field was already loose about this, these three rejected the whole CV.
+const makeObjectArray = (val: any) => {
+  if (val === null || val === undefined) return null;
+  const list = Array.isArray(val) ? val : [val];
+  return list.filter((v) => v !== null && typeof v === "object" && !Array.isArray(v));
+};
+
 const makeNumber = (val: any) => {
   if (val === null || val === undefined) return null;
   const num = Number(val);
@@ -203,13 +213,13 @@ export const cvExtractionSchema = z.object({
     value: z.string(),
     confidence: z.number().nullable().optional()
   })).nullable().optional()),
-  education: z.array(educationSchema).nullable().optional(),
+  education: z.preprocess(makeObjectArray, z.array(educationSchema).nullable().optional()),
   certifications: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   languages: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   summary: z.preprocess(makeString, z.string().nullable().optional()),
   gender: z.preprocess(makeString, z.string().nullable().optional()),
-  jobHistory: z.array(jobHistorySchema).nullable().optional(),
-  referees: z.array(refereeSchema).nullable().optional(),
+  jobHistory: z.preprocess(makeObjectArray, z.array(jobHistorySchema).nullable().optional()),
+  referees: z.preprocess(makeObjectArray, z.array(refereeSchema).nullable().optional()),
 });
 
 export type CvExtractionResult = z.infer<typeof cvExtractionSchema>;
@@ -968,13 +978,16 @@ JSON Target Schema:
       throw new Error("NOT_A_CV");
     }
 
-    try {
-      return cvExtractionSchema.parse(parsed);
-    } catch (e) {
-      console.error("Zod parse error:", e);
-      const issue = e instanceof z.ZodError ? e.issues[0] : undefined;
-      return fail(`${after}gave details in the wrong shape${issue ? ` (${issue.path.join(".")}: ${issue.message})` : ""}`);
-    }
+    const checked = cvExtractionSchema.safeParse(parsed);
+    if (checked.success) return checked.data;
+    // One malformed field must not cost the whole CV — name, contact and the
+    // rest are kept, and only the fields that do not fit are left empty.
+    const bad = [...new Set(checked.error.issues.map((i) => String(i.path[0])))];
+    console.warn(`[callOpenRouterLLM] Dropped malformed field(s) ${bad.join(", ")}:`, checked.error.issues.slice(0, 3));
+    const kept = cvExtractionSchema.safeParse(Object.fromEntries(Object.entries(parsed).filter(([k]) => !bad.includes(k))));
+    if (kept.success) return kept.data;
+    const issue = kept.error.issues[0];
+    return fail(`${after}gave details in the wrong shape (${issue.path.join(".")}: ${issue.message})`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     if (message === "NOT_A_CV") throw error;
