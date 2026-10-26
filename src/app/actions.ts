@@ -17,6 +17,16 @@ import {
   type OpeningWriteDeps,
 } from "@/lib/openings/writes";
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
+import {
+  amendJdText as amendJdShared,
+  approveJdText as approveJdShared,
+  generateJd as generateJdShared,
+  reextractJdDetails as reextractJdDetailsShared,
+  restoreJd as restoreJdShared,
+  reviseJd as reviseJdShared,
+  saveJdDetails as saveJdDetailsShared,
+  writeJdNotes,
+} from "@/lib/openings/jdWrites";
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
@@ -35,10 +45,9 @@ import { BACK_TO_TABLES_REASON, movedBackToTables, awaitingShortlist } from "@/l
 import { BULK_STAGES } from "@/lib/bulkStages";
 import { linkedinPostUrl } from "@/lib/workdayRequirements";
 import { extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
-import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
 import { invalidateCandidate, markTablesStale, resetStore, withRealIds } from "@/data/primeState";
-import { contextFor, draftJd, extractJobDetails, jdBriefsFor } from "@/lib/openings/jdDraft";
+import { contextFor } from "@/lib/openings/jdDraft";
 import { saveNewClient as sharedSaveNewClient, saveNewOpening as sharedSaveNewOpening } from "@/lib/openings/create";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
@@ -67,7 +76,6 @@ function redirect(url: string): never {
   return nextRedirect(withRealIds(url)) as never;
 }
 import { after } from "next/server";
-import { reviseJdText } from "@/lib/headhunt";
 import { FAILURE_MESSAGE, gemini, modelFor } from "@/lib/ai";
 import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
@@ -316,6 +324,8 @@ const OPENING_DEPS: OpeningWriteDeps = {
   // The same function @/data/prime re-exports; taken from primeState so it runs synchronously.
   resetStore,
 };
+
+const JD_DEPS = { convexQuery, markTablesStale, resetStore };
 
 /** The primed copy is behind a backend write; drop it so the next read is fresh. */
 async function afterBackendWrite(openingId: string) {
@@ -860,52 +870,11 @@ function saveNewOpening(formData: FormData, user: User): Promise<string | null> 
 export async function saveBriefNotes(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  await authorize(formData, "opening.manage", { opening: "openingId" });
   const user = await getCurrentUser();
-  // It used to return nothing either way, so a save that found no opening
-  // lost the notes without a word (testing, 21 Sep).
-  if (!saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""))) {
-    await fail("The opening could not be found, so the notes were not saved. Reload the page and try again.");
-  }
+  const result = await writeJdNotes(user, openingId, String(formData.get("notes") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Notes saved.");
-}
-
-/**
- * A person's own notes on an opening, kept as their own brief.
- *
- * The TA's notes box used to write into the lead's brief, so saving it replaced
- * what the lead had left. Each person now has a brief of their own, and the JD
- * is written from all of them (see `jdBriefsFor`).
- */
-function saveOwnNotes(openingId: string, userId: string, notes: string): boolean {
-  const opening = repo.opening(openingId);
-  if (!opening) return false;
-  const extracted = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
-  const mine = repo.briefsForOpening(openingId).filter((b) => b.capturedBy === userId).pop();
-  if (mine) {
-    if (mine.notesMarkdown !== notes) repo.updateBrief(mine.id, { notesMarkdown: notes, extracted });
-    return true;
-  }
-  if (!notes.trim()) return true;
-  repo.createBrief({
-    clientId: opening.clientId,
-    openingId,
-    kind: "lead_to_ta",
-    capturedBy: userId,
-    capturedAt: Date.now(),
-    method: "notes",
-    notesMarkdown: notes,
-    transcriptStatus: "none",
-    transcript: null,
-    recordingKey: null,
-    recordingDurationMs: null,
-    consentAcknowledgedBy: null,
-    consentAcknowledgedAt: null,
-    consentText: null,
-    extracted,
-  });
-  return true;
+  await done(result.message);
 }
 
 /**
@@ -917,24 +886,18 @@ function saveOwnNotes(openingId: string, userId: string, notes: string): boolean
 export async function approveJd(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const user = await getCurrentUser();
   const jd = String(formData.get("jdMarkdown") ?? "");
-  if (jd.trim()) repo.updateJd(openingId, jd);
-  repo.approveJd(openingId, user.id);
+  const suggestionsBefore = repo.suggestions(openingId).length;
+  const owner = repo.opening(openingId)?.assignedTaIds[0];
+  const researched = !!repo.research(openingId);
+  const result = await approveJdShared(user, openingId, jd, JD_DEPS);
+  if (!result.ok) await fail(result.message);
 
   if (isConvex()) {
     // Approval in the backend also starts reading the JD's requirements
     // (skills, seniority, years, location, salary …) into the Job details.
     // Matching waits for that, so it scores against the real requirements.
-    const suggestionsBefore = repo.suggestions(openingId).length;
-    const owner = repo.opening(openingId)?.assignedTaIds[0];
-    const researched = !!repo.research(openingId);
-    const fromChat = !detailsFollowNotes(repo.jdChat(openingId));
-    try {
-      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined, fromChat);
-    } catch (e) {
-      await fail(backendMessage(e, "The JD could not be approved."));
-    }
     markMatching(openingId);
     // Research and the first Suggestions round wait for the approved JD, so
     // they search with the words the TA agreed (25 Sep). Before that they ran
@@ -951,11 +914,9 @@ export async function approveJd(formData: FormData) {
     if (String(formData.get("thenGo") ?? "") === "opening") {
       redirect(`/openings/${openingId}?msg=${encodeURIComponent("The job description is approved. The job is live.")}&tone=ok`);
     }
-    await done("The job description is approved. The job is live.");
+    await done(result.message);
     return;
   }
-  if (jd.trim()) repo.updateJd(openingId, jd);
-  repo.approveJd(openingId, user.id);
 
   // Spec §8A.2 — the first sourcing round starts here, without being asked. The
   // JD is the search vocabulary, so this is the first moment a good search is
@@ -966,17 +927,16 @@ export async function approveJd(formData: FormData) {
     await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
-  if (!repo.research(openingId)) {
+  if (!researched) {
     after(async () => {
       await researchOpening(openingId, user.id).catch(() => undefined);
       revalidatePath(`/openings/${openingId}`, "layout");
     });
   }
 
-  if (repo.suggestions(openingId).length === 0) {
+  if (suggestionsBefore === 0) {
     // The auto-run belongs to the TA the opening is on, not to whoever
     // approved the JD — a lead approving it must not end up owning the list.
-    const owner = repo.opening(openingId)?.assignedTaIds[0];
     // After the response: a round takes minutes, and approving a JD must not.
     after(async () => {
       await sourceFor(openingId, owner).catch(() => undefined);
@@ -1000,62 +960,22 @@ export async function approveJd(formData: FormData) {
  */
 export async function amendJd(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
-  const o = repo.opening(openingId);
-  if (!o) return;
-  if (!o.assignedTaIds.includes(user.id) && isTa(user)) return;
   const jd = String(formData.get("jdMarkdown") ?? "");
-  if (isConvex()) {
-    let r: { reextracting: boolean } | null = null;
-    if (jd.trim()) {
-      try {
-        r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
-      } catch (e) {
-        await fail(backendMessage(e, "The JD could not be saved."));
-      }
-      if (r?.reextracting) {
-        markMatching(openingId);
-        after(() => rematchWhenRequirementsSettle(openingId, user.id));
-      }
-    }
-    await afterBackendWrite(openingId);
-    // It used to come back with no word at all, so a save looked like nothing
-    // had happened (25 Sep).
-    redirect(amendedJd(openingId, r?.reextracting ? "JD saved. The job details are read again, then matching re-runs." : "JD saved."));
+  const result = await amendJdShared(user, openingId, jd, JD_DEPS);
+  if (!result.ok) await fail(result.message);
+  if (result.ok && result.reextracting) {
+    markMatching(openingId);
+    after(() => rematchWhenRequirementsSettle(openingId, user.id));
   }
-  if (jd.trim()) repo.updateJd(openingId, jd);
+  if (isConvex()) await afterBackendWrite(openingId);
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(amendedJd(openingId, "JD saved."));
+  redirect(amendedJd(openingId, result.message));
 }
 
 function amendedJd(openingId: string, message: string) {
   return `/openings/${openingId}/jd?msg=${encodeURIComponent(message)}&tone=ok`;
-}
-
-// ─── The JD chat (25 Sep) ────────────────────────────────────────────────────
-
-/**
- * Save a JD the chat produced. Before approval it is a draft like any other;
- * after approval it stays approved and the Job details follow it at once
- * (keeping what a person corrected), because the TA's request is the change.
- */
-async function saveChatJd(openingId: string, userId: string, jd: string): Promise<void> {
-  const o = repo.opening(openingId);
-  if (isConvex()) {
-    const r = await convexMutation<{ reextracting: boolean }>("ta/openings:saveJd", {
-      actorId: userId,
-      openingId,
-      jdMarkdown: jd,
-      ...(o?.jdStatus === "approved" ? { detailsFromJd: true } : {}),
-    });
-    if (r?.reextracting) {
-      markMatching(openingId);
-      after(() => rematchWhenRequirementsSettle(openingId, userId));
-    }
-    return;
-  }
-  repo.updateJd(openingId, jd);
 }
 
 /**
@@ -1066,63 +986,32 @@ async function saveChatJd(openingId: string, userId: string, jd: string): Promis
 export async function reviseJd(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  const request = String(formData.get("request") ?? "").trim();
-  if (!request) await fail("Write what should change in the JD first.");
-  if (request.length > JD_REQUEST_MAX) await fail(`That is too long — keep it under ${JD_REQUEST_MAX} characters.`);
-  const opening = repo.opening(openingId);
-  const c = contextFor(openingId);
-  if (!opening || !c) await fail("The opening could not be found. Reload the page and try again.");
-  // The editor as it stands, so hand edits not yet saved are revised, not lost.
-  const currentJd = String(formData.get("currentJd") ?? "").trim() || opening!.jdMarkdown || "";
-  if (!currentJd.trim()) await fail("There is no JD to revise yet. Generate one first.");
-
-  const history = chatHistory(repo.jdChat(openingId));
-  repo.addJdChat({ openingId, role: "user", body: request, jdMarkdown: null, byUserId: user.id, at: Date.now() });
-
-  const res = await reviseJdText(c!, jdBriefsFor(openingId), currentJd, request, history);
-  if (!res.ok || !res.text.trim()) {
-    repo.addJdChat({
-      openingId, role: "assistant", jdMarkdown: null, byUserId: null, at: Date.now(), failed: true,
-      body: `Could not revise the JD — ${res.ok ? "the AI sent back nothing." : reasonInWords(res.reason)} The JD is as it was. Try again.`,
-    });
-    revalidatePath(`/openings/${openingId}/jd`);
-    await fail("Could not revise the JD. The JD is as it was — try again.");
-  }
-  const jd = res.ok ? res.text : currentJd;
-  const changes = (res.ok && res.changes) || "Revised the JD.";
-
-  repo.addJdChat({ openingId, role: "assistant", body: changes, jdMarkdown: jd, byUserId: null, at: Date.now() });
-  try {
-    await saveChatJd(openingId, user.id, jd);
-  } catch (e) {
-    await fail(backendMessage(e, "The revised JD could not be saved. Try again."));
+  const user = await getCurrentUser();
+  const result = await reviseJdShared(user, openingId, String(formData.get("request") ?? ""), String(formData.get("currentJd") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
+  if (result.ok && result.reextracting) {
+    markMatching(openingId);
+    after(() => rematchWhenRequirementsSettle(openingId, user.id));
   }
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Revised: ${changes}`);
+  await done(result.message);
 }
 
 /** Put back the JD an earlier answer in the JD chat produced. */
 export async function restoreJdVersion(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  const turn = repo.jdChat(openingId).find((m) => m.id === String(formData.get("messageId") ?? ""));
-  if (!turn?.jdMarkdown) await fail("That version could not be found. Reload the page and try again.");
-  const when = new Date(turn!.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Colombo" });
-  repo.addJdChat({
-    openingId, role: "assistant", body: `Put back the version from ${when}.`,
-    jdMarkdown: turn!.jdMarkdown, byUserId: user.id, at: Date.now(),
-  });
-  try {
-    await saveChatJd(openingId, user.id, turn!.jdMarkdown!);
-  } catch (e) {
-    await fail(backendMessage(e, "That version could not be put back. Try again."));
+  const user = await getCurrentUser();
+  const result = await restoreJdShared(user, openingId, String(formData.get("messageId") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
+  if (result.ok && result.reextracting) {
+    markMatching(openingId);
+    after(() => rematchWhenRequirementsSettle(openingId, user.id));
   }
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Put back the version from ${when}.`);
+  await done(result.message);
 }
 
 // ─── Job details: requirements extracted from the approved JD ────────────────
@@ -1184,8 +1073,6 @@ export async function saveJobDetails(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  if (!isConvex()) await fail("Job details need the Convex store.");
-
   const minYears = optionalNumber(formData, "experienceMinYears");
   const maxYears = optionalNumber(formData, "experienceMaxYears");
   const salaryMin = optionalNumber(formData, "salaryMin");
@@ -1193,34 +1080,29 @@ export async function saveJobDetails(formData: FormData) {
   if ([minYears, maxYears, salaryMin, salaryMax].some((n) => Number.isNaN(n))) {
     await fail("Years and salary must be numbers.");
   }
-  try {
-    await convexMutation("ta/requirements:save", {
-      actorId: user.id,
-      openingId,
-      title: String(formData.get("title") ?? ""),
-      clientIndustry: String(formData.get("clientIndustry") ?? "Other"),
-      recruitmentType: String(formData.get("recruitmentType") ?? "both"),
-      isConfidential: formData.get("isConfidential") === "on",
-      status: String(formData.get("status") ?? "active"),
-      location: String(formData.get("location") ?? ""),
-      seniorityLevel: String(formData.get("seniorityLevel") ?? "other"),
-      experienceMinYears: minYears ?? 0,
-      experienceMaxYears: maxYears,
-      educationLevel: String(formData.get("educationLevel") ?? ""),
-      salaryMin,
-      salaryMax,
-      salaryCurrency: String(formData.get("salaryCurrency") ?? ""),
-      requiredSkills: listField(formData, "requiredSkills"),
-      niceToHaveSkills: listField(formData, "niceToHaveSkills"),
-      languagesRequired: listField(formData, "languagesRequired"),
-    });
-  } catch (e) {
-    await fail(backendMessage(e, "The job details could not be saved."));
-  }
+  const result = await saveJdDetailsShared(user, openingId, {
+    title: String(formData.get("title") ?? ""),
+    clientIndustry: String(formData.get("clientIndustry") ?? "Other"),
+    recruitmentType: (String(formData.get("recruitmentType") ?? "both") as "both" | "headhunting" | "job_posting"),
+    isConfidential: formData.get("isConfidential") === "on",
+    jobStatus: (String(formData.get("status") ?? "active") as "active" | "draft" | "on_hold"),
+    location: String(formData.get("location") ?? ""),
+    seniorityLevel: String(formData.get("seniorityLevel") ?? "other"),
+    experienceMinYears: minYears ?? 0,
+    experienceMaxYears: maxYears,
+    educationLevel: String(formData.get("educationLevel") ?? ""),
+    salaryMin,
+    salaryMax,
+    salaryCurrency: String(formData.get("salaryCurrency") ?? ""),
+    requiredSkills: listField(formData, "requiredSkills"),
+    niceToHaveSkills: listField(formData, "niceToHaveSkills"),
+    languagesRequired: listField(formData, "languagesRequired"),
+  }, JD_DEPS);
+  if (!result.ok) await fail(result.message);
   markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await done("Job details saved. Matching is re-running against them.");
+  await done(result.message);
 }
 
 /** Read the approved JD again and replace the details — including hand corrections. */
@@ -1228,15 +1110,12 @@ export async function reextractJobDetails(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  try {
-    await convexMutation("ta/requirements:reextract", { actorId: user.id, openingId });
-  } catch (e) {
-    await fail(backendMessage(e, "Could not start the extraction."));
-  }
+  const result = await reextractJdDetailsShared(user, openingId, JD_DEPS);
+  if (!result.ok) await fail(result.message);
   markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await done("Reading the JD again — the details update in a few seconds.");
+  await done(result.message);
 }
 
 export async function addJobPost(formData: FormData) {
@@ -3563,19 +3442,13 @@ function saveBenchmarks(openingId: string, rows: IncumbentRow[]) {
 export async function generateJdWithModel(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  // The notes box as it stands when Generate is pressed — typed but not yet
-  // saved notes are still the TA's notes, and the draft must include them.
-  if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
-  const res = await draftJd(openingId, user.id);
-  if (!res) await fail("The opening could not be found. Reload the page and try again.");
+  const user = await getCurrentUser();
+  const result = await generateJdShared(user, openingId, String(formData.get("notes") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
-  if (res!.ok) await done("Written by the AI. Read it through before approving.");
-  // Said plainly and beside the button: the fallback reads like a finished JD.
-  await note(
-    `The AI could not write it — ${reasonInWords(res!.reason)} A basic version built from your notes is in place: try again, or edit it by hand.`,
-  );
+  if (result.ok && result.tone === "note") await note(result.message);
+  await done(result.message);
 }
 
 /** A TA correcting a generated field. Marked, so regeneration leaves it alone. */

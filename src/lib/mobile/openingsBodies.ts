@@ -70,3 +70,23 @@ export const newClientBody = z
     contactEmail: text(320),
   })
   .strict();
+
+export const jdWriteBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("save_notes"), notes: text(20_000) }).strict(),
+  z.object({ action: z.literal("generate"), notes: text(20_000) }).strict(),
+  z.object({ action: z.literal("approve"), markdown: text(100_000) }).strict(),
+  z.object({ action: z.literal("amend"), markdown: text(100_000) }).strict(),
+  z.object({ action: z.literal("revise"), request: text(2_000), currentMarkdown: text(100_000) }).strict(),
+  z.object({ action: z.literal("restore"), messageId: z.string().min(1).max(100) }).strict(),
+  z.object({
+    action: z.literal("save_details"),
+    details: z.object({
+      title: text(200), clientIndustry: text(100), recruitmentType: z.enum(["both", "headhunting", "job_posting"]),
+      isConfidential: z.boolean(), jobStatus: z.enum(["active", "draft", "on_hold"]), location: text(300), seniorityLevel: text(80),
+      experienceMinYears: z.number().min(0).max(50), experienceMaxYears: z.number().min(0).max(50).nullable(), educationLevel: text(100),
+      salaryMin: z.number().min(0).max(1_000_000_000).nullable(), salaryMax: z.number().min(0).max(1_000_000_000).nullable(), salaryCurrency: text(10),
+      requiredSkills: z.array(text(200)).max(100), niceToHaveSkills: z.array(text(200)).max(100), languagesRequired: z.array(text(100)).max(50),
+    }).strict(),
+  }).strict(),
+  z.object({ action: z.literal("reextract_details") }).strict(),
+]);
