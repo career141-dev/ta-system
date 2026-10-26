@@ -154,6 +154,10 @@ export interface CandidatePayload {
     canLog: boolean;
     defaultKind: "pre_interview" | "post_offer" | "ad_hoc";
   };
+  referenceAccess: {
+    canView: boolean;
+    canVerify: boolean;
+  };
   aiCallResults: {
     id: string;
     status: string;
@@ -199,7 +203,7 @@ export interface CandidatePayload {
     sentAt: number;
   }[];
   referees: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; relationship: string | null }[];
-  companyReferences: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; kind: "candidate" | "referee" }[];
+  companyReferences: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; kind: "candidate" | "referee"; latestApplication: { applicationId: string; openingId: string; stage: CandidateStage } | null }[];
 }
 
 export interface CandidateCvUploadResult {
@@ -235,6 +239,16 @@ export type CandidateFollowUpBody =
 export interface CandidateFollowUpResult {
   ok: boolean;
   message: string;
+}
+
+export interface CandidateRefereeCheckBody {
+  refereeId: string;
+}
+
+export interface CandidateRefereeCheckResult {
+  ok: boolean;
+  message: string;
+  profileUrl?: string;
 }
 
 export type CandidateInterviewBody =

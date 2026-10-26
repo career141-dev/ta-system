@@ -23,6 +23,7 @@ import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
 import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
 import { writeCandidateCall } from "@/lib/candidates/callWrites";
+import { checkCandidateReferee } from "@/lib/candidates/referenceChecks";
 import { sendCandidateFollowUp, stopCandidateFollowUp } from "@/lib/candidates/followUpWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
@@ -5466,40 +5467,19 @@ export async function stopFollowUpNowInline(_: ActionResult | null, formData: Fo
  */
 export async function verifyReferee(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await getCurrentUser();
   const refereeId = String(formData.get("refereeId") ?? "");
   const openingId = String(formData.get("openingId") ?? "");
-  const r = repo.refereesForPipeline(openingId).flatMap((g) => g.referees).find((x) => x.id === refereeId);
-  if (!r) await fail("That referee is not on this opening's list any more. Reload the page.");
-  const { search, serperConfigured } = await import("@/lib/serper");
-  if (!serperConfigured()) await fail("Web search is not set up on this system, so LinkedIn cannot be checked.");
-  const first = r!.name.split(/\s+/).filter((w) => w.length > 1 && !/^(dr|mr|mrs|ms|prof)\.?$/i.test(w))[0]?.toLowerCase() ?? "";
-  // A name that is only titles or initials leaves nothing to match on, and
-  // "".includes matched the first result — a stranger (review of PR #2).
-  if (!first) await note(`${r!.name} is too short a name to match on LinkedIn. Check by hand, or call them.`);
-  const query = `"${r!.name}"${r!.company ? ` "${r!.company}"` : ""} site:linkedin.com/in`;
-  const res = await search(query, 5);
-  if (res.error) await fail(`The search did not run (${res.error}). Try again.`);
-  const hit = res.hits.find((h) => canonicalProfile(h.url) && h.title.toLowerCase().includes(first));
-  if (!hit) await note(`No LinkedIn profile found for ${r!.name}${r!.company ? ` at ${r!.company}` : ""}. Check by hand, or call them.`);
-  const { profileFacts } = await import("@/lib/sourcing");
-  const parts = hit!.title.replace(/\s*\|\s*LinkedIn.*$/i, "").split(/\s+[-–—]\s+/);
-  const title = (parts[1] ?? "").replace(/\s+(?:at|@)\s+.+$/i, "").trim() || null;
-  const company = profileFacts({ title: hit!.title, snippets: [hit!.snippet] }).company;
-  const now = [title, company && `at ${company}`].filter(Boolean).join(" ") || "role not shown in the search result";
-  const cv = [r!.title, r!.company && `at ${r!.company}`].filter(Boolean).join(" ");
-  const same = !!company && !!r!.company && employerMatches(company, r!.company);
-  await done(
-    `LinkedIn today: ${now}.${cv ? ` The CV says ${cv}${same ? " — same company." : " — this may be out of date."}` : ""} Profile: ${displayUrl(canonicalProfile(hit!.url)!)}`,
-  );
-}
-
-/** "Hayleys PLC" and "hayleys" are the same employer for this check. */
-function employerMatches(a: string, b: string): boolean {
-  const k = (x: string) => x.toLowerCase().replace(/(plc|pvt|ltd|limited|inc|llc|group|\(pvt\))/g, "").replace(/[^a-z0-9]+/g, " ").trim();
-  const x = k(a);
-  const y = k(b);
-  return !!x && !!y && (x.includes(y) || y.includes(x));
+  const result = await checkCandidateReferee(user, openingId, refereeId, null, {
+    convexQuery,
+    searchConfigured: serperConfigured,
+    search: (query, limit) => import("@/lib/serper").then(({ search }) => search(query, limit)),
+  });
+  if (!result.ok) {
+    if (result.notice) await note(result.message);
+    await fail(result.message);
+  }
+  await done(result.message);
 }
 
 export async function verifyRefereeInline(_: ActionResult | null, formData: FormData) {

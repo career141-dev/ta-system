@@ -18,6 +18,8 @@ export const candidateFollowUpBody = z.discriminatedUnion("action", [
   z.object({ action: z.literal("stop") }).strict(),
 ]);
 
+export const candidateRefereeCheckBody = z.object({ refereeId: z.string().min(1).max(100) }).strict();
+
 const mode = z.enum(["in_person", "video", "phone"]);
 const rating = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.null()]);
 const interviewId = z.string().min(1).max(100);

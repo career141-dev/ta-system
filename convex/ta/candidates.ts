@@ -219,6 +219,7 @@ export const peopleAtCompany = internalQuery({
       currentEmployer: string;
       phone: string | null;
       email: string | null;
+      latestApplication: { applicationId: string; openingId: string; stage: string } | null;
     }[] = [];
 
     // By the employer search index, across the whole database.
@@ -239,6 +240,7 @@ export const peopleAtCompany = internalQuery({
           currentEmployer: cand.currentEmployer ?? (cand.jobHistory?.find((h) => matchCompany(h.company ?? ""))?.company ?? ""),
           phone: cand.phone ?? null,
           email: cand.email ?? null,
+          latestApplication: null,
         });
         if (candidates.length >= limit) break;
       }
@@ -286,11 +288,27 @@ export const peopleAtCompany = internalQuery({
       }
     }
 
+    const candidatesWithApplications = await Promise.all(candidates.map(async (candidate) => {
+      const latest = await ctx.db
+        .query("applications")
+        .withIndex("by_candidateId", (q) => q.eq("candidateId", candidate.id as Id<"candidates">))
+        .order("desc")
+        .first();
+      return {
+        ...candidate,
+        latestApplication: latest ? {
+          applicationId: latest._id as string,
+          openingId: latest.jobId as string,
+          stage: latest.currentStage,
+        } : null,
+      };
+    }));
+
     // Sort contacts with phone numbers at the top
-    candidates.sort((a, b) => (b.phone ? 1 : 0) - (a.phone ? 1 : 0));
+    candidatesWithApplications.sort((a, b) => (b.phone ? 1 : 0) - (a.phone ? 1 : 0));
     referees.sort((a, b) => (b.phone ? 1 : 0) - (a.phone ? 1 : 0));
 
-    return { candidates, referees };
+    return { candidates: candidatesWithApplications, referees };
   },
 });
 

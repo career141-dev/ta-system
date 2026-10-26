@@ -5,6 +5,7 @@ import { interviewStatus, mayChangeFeedback } from "@/lib/interviews";
 import type { CandidatePayload } from "@/lib/mobile/candidateTypes";
 import { isSystemNote } from "@/lib/pdf";
 import { seatFor, visibleToSeat } from "@/lib/visibility";
+import { isPlausibleReferee } from "../../../convex/lib/refereeCheck";
 
 export type MobileCandidateResult =
   | { kind: "ok"; payload: CandidatePayload }
@@ -65,18 +66,29 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
   const siblings = visibleToSeat(repo.applications(openingId), seat).filter((row) => row.stage === app.stage);
   const index = siblings.findIndex((row) => row.id === app.id);
   const outreach = repo.outreach(app.id);
-  const refs = repo.referees().filter((row) => row.fromCandidateId === candidate.id);
+  const refs = repo.referees().filter((row) => row.fromCandidateId === candidate.id && isPlausibleReferee({
+    name: row.name,
+    contactNo: row.phone,
+    email: row.email,
+    company: row.company,
+    designation: row.title,
+  }));
   const company = (candidate.currentEmployer ?? candidate.workHistory?.[0]?.employer ?? "").trim();
   const companyReferences = company
-    ? repo.peopleAtCompany(company, candidate.id).map((row) => ({
-        id: row.id,
-        name: row.fullName,
-        title: row.currentTitle ?? null,
-        company: row.currentEmployer ?? company,
-        phone: row.phone ?? null,
-        email: row.email ?? null,
-        kind: ((row as typeof row & { kind?: "candidate" | "referee" }).kind ?? "candidate") as "candidate" | "referee",
-      }))
+    ? repo.peopleAtCompany(company, candidate.id).map((row) => {
+        const kind = ((row as typeof row & { kind?: "candidate" | "referee" }).kind ?? "candidate") as "candidate" | "referee";
+        const latest = kind === "candidate" ? repo.applicationsForCandidate(row.id)[0] ?? null : null;
+        return {
+          id: row.id,
+          name: row.fullName,
+          title: row.currentTitle ?? null,
+          company: row.currentEmployer ?? company,
+          phone: row.phone ?? null,
+          email: row.email ?? null,
+          kind,
+          latestApplication: latest ? { applicationId: latest.id, openingId: latest.openingId, stage: latest.stage } : null,
+        };
+      })
     : [];
   const events = repo.events(app.id);
   const calls = repo.callFeedback(app.id).map((row) => ({
@@ -118,6 +130,7 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
   ].filter((value): value is string => Boolean(value));
   const canManageInterviews = allows(user, "opening.act", { openingId, assignment, ownerTaId: app.ownerTaId });
   const canGiveInterviewFeedback = allows(user, "interview.feedback", { openingId, assignment });
+  const canViewReferences = allows(user, "opening.sourcing", { openingId, assignment, onStrategy });
   const reviewStages = ["new_cv", "matched", "ai_follow_up", "ta_follow_up"];
   const showReviewDetails = reviewStages.includes(app.stage);
   const canAddReviewNote = app.stage === "director_review" && allows(user, "review.note", { openingId, assignment });
@@ -277,6 +290,10 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       canLog: canManageInterviews,
       defaultKind: repo.interviews(app.id).length > 0 ? "pre_interview" : app.stage === "offer" ? "post_offer" : "ad_hoc",
     },
+    referenceAccess: {
+      canView: canViewReferences,
+      canVerify: canViewReferences,
+    },
     // The route fills this from ta/voice:callsFor on the connected Convex store.
     aiCallResults: [],
     tabs: [
@@ -285,8 +302,10 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       { key: "history", label: TAB_LABEL.history, count: events.length + 1 },
       { key: "call", label: TAB_LABEL.call, count: calls.length + aiCalls.length },
       { key: "chat", label: TAB_LABEL.chat, count: messages.length },
-      { key: "reference", label: TAB_LABEL.reference, count: refs.length },
-      { key: "company_refs", label: TAB_LABEL.company_refs, count: companyReferences.length },
+      ...(canViewReferences ? [
+        { key: "reference" as const, label: TAB_LABEL.reference, count: refs.length },
+        { key: "company_refs" as const, label: TAB_LABEL.company_refs, count: companyReferences.length },
+      ] : []),
     ],
     cv: { available: Boolean(candidate.cvFileName || app.cvFileName), fileName: candidate.cvFileName ?? app.cvFileName ?? null },
     history: [
@@ -314,7 +333,7 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       errorMessage: null,
       sentAt: row.sentAt ?? row.createdAt,
     })),
-    referees: refs.map((row) => ({
+    referees: canViewReferences ? refs.map((row) => ({
       id: row.id,
       name: row.name,
       title: row.title,
@@ -322,8 +341,8 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       phone: row.phone,
       email: row.email,
       relationship: row.relationship,
-    })),
-    companyReferences,
+    })) : [],
+    companyReferences: canViewReferences ? companyReferences : [],
   };
   return { kind: "ok", payload };
 }
