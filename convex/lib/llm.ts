@@ -319,7 +319,7 @@ export async function executeLLMWithNvidiaFallback(
   ctx: ActionCtx,
   taskType: TaskType | string,
   options: LLMCompletionOptions
-): Promise<{ content: string; provider: "openrouter" | "nvidia"; model: string }> {
+): Promise<{ content: string; provider: "openrouter" | "nvidia"; model: string; primaryError?: string }> {
   if (IS_CV_EXTRACTION_TASK(taskType)) {
     const candidateModels = [
       OPENROUTER_CV_EXTRACTION_MODEL,
@@ -327,9 +327,12 @@ export async function executeLLMWithNvidiaFallback(
     ];
 
     let lastError: any = null;
+    // Why DeepSeek gave no answer, when the fallback is the one that answers.
+    let primaryError: string | undefined;
 
     for (const model of candidateModels) {
       const isNvidiaModel = model.startsWith("meta/");
+      if (isNvidiaModel && lastError) primaryError = lastError?.message || String(lastError);
       const maxRetries = isNvidiaModel ? 1 : 2;
 
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -365,7 +368,7 @@ export async function executeLLMWithNvidiaFallback(
 
           const content = response.choices[0]?.message?.content?.trim() || "";
           if (content) {
-            return { content, provider: isNvidiaModel ? "nvidia" : "openrouter", model };
+            return { content, provider: isNvidiaModel ? "nvidia" : "openrouter", model, ...(isNvidiaModel ? { primaryError } : {}) };
           }
           throw new Error(`${model} returned empty response`);
         } catch (err: any) {
