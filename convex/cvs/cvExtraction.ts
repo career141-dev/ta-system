@@ -1069,11 +1069,15 @@ async function runCvExtractionLocked(
     return null;
   }
 
+  // Counted, so the stuck-upload recovery stops after its retry budget. Nothing
+  // counted readings of an uploaded CV: one that failed every time went from
+  // failed back to uploaded every two minutes, for ever (26 Oct).
   await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
     cvUploadId,
     status: "processing",
     processingStartedAt: Date.now(),
     processingStage: "downloading",
+    countAttempt: true,
   });
 
   if (args.logId) {
@@ -1716,31 +1720,26 @@ async function runCvExtractionLocked(
 // ──────────────────────────────────────────────────
 
 /*
- * CV reading may use at most this many of the backend's six action slots
- * (6 Oct). A backlog of CVs took all six, and the end-of-day send, reply
- * reading and even a deploy were refused with "Too many concurrent requests".
- * A reading over the limit steps aside and is scheduled again shortly.
+ * CV reading may use at most MAX_CONCURRENT_EXTRACTIONS of the backend's six
+ * action slots (6 Oct). A backlog of CVs took all six, and the end-of-day
+ * send, reply reading and even a deploy were refused with "Too many concurrent
+ * requests". A request over the limit waits its turn in cvExtractionQueue
+ * (lib/extractionQueue.ts) and is started again, with a slot, when one frees.
  */
-const MAX_CONCURRENT_EXTRACTIONS = 3;
-
 export const processCvExtraction = internalAction({
-  args: ExtractionActionArgs,
-  handler: async (ctx, args): Promise<string | null> => {
-    const running = await ctx.runQuery(internal.cvs.cvUploads.runningExtractions, {}).catch(() => 0);
-    // `running` includes this one.
-    if (running > MAX_CONCURRENT_EXTRACTIONS) {
-      // A file that missed a worker used to disappear into a random 30–60s
-      // wait. A short stagger keeps the three-slot safety ceiling without
-      // making a five-CV upload wait another minute between waves (21 Oct).
-      const later = 4_000 + Math.floor(Math.random() * 2_000);
-      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
-        cvUploadId: args.cvUploadId,
-        processingStage: "queued",
-      });
-      await ctx.scheduler.runAfter(later, internal.cvs.cvExtraction.processCvExtraction, args);
+  args: { ...ExtractionActionArgs, leaseId: v.optional(v.id("cvExtractionQueue")) },
+  handler: async (ctx, { leaseId, ...args }): Promise<string | null> => {
+    if (!leaseId) {
+      await ctx.runMutation(internal.cvs.cvUploads.enterExtractionQueue, { cvUploadId: args.cvUploadId, args });
       return null;
     }
     try {
+      // The slot lapsed and was taken back before this run got going: whoever
+      // has it now reads. Nothing to free.
+      if (!(await ctx.runQuery(internal.cvs.cvUploads.holdsExtractionSlot, { leaseId, cvUploadId: args.cvUploadId }))) {
+        console.warn(`[processCvExtraction] Slot for upload ${args.cvUploadId} is no longer held — standing aside.`);
+        return null;
+      }
       return await runCvExtraction(ctx, args);
     } catch (err: any) {
       console.error(`[processCvExtraction] Top-level uncaught action error for upload ${args.cvUploadId}:`, err?.message || err);
@@ -1756,6 +1755,11 @@ export const processCvExtraction = internalAction({
         console.error(`[processCvExtraction] Failed to mark upload as failed:`, updateErr);
       }
       return null;
+    } finally {
+      await ctx.runMutation(internal.cvs.cvUploads.leaveExtractionQueue, { leaseId }).catch((err) => {
+        // The two-minute queue takes the slot back when it lapses.
+        console.error(`[processCvExtraction] Could not free the slot for upload ${args.cvUploadId}:`, err?.message || err);
+      });
     }
   },
 });
@@ -1976,6 +1980,10 @@ Respond ONLY with a valid JSON object in this exact format:
 export const processUnextractedQueueCron = internalAction({
   args: {},
   handler: async (ctx): Promise<{ processed: number }> => {
+    // 0. Start any CV waiting for a reading slot whose turn was missed, and
+    //    take back slots whose reading died without letting go.
+    await ctx.runMutation(internal.cvs.cvUploads.startWaitingExtractions, {});
+
     // 1. Claim up to 10 'uploaded' records per run
     let claimed: any[] = await ctx.runMutation(internal.cvs.cvUploads.claimUploadedBatch, {
       limit: 10,

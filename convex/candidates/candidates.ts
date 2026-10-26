@@ -917,6 +917,8 @@ export const updateCvUpload = internalMutation({
     completedAt: v.optional(v.number()),
     textExtractionMethod: v.optional(v.string()),
     isHealAttempted: v.optional(v.boolean()),
+    /** One more reading of this file has begun (cvs/cvExtraction.ts). */
+    countAttempt: v.optional(v.boolean()),
     /** Unlink the candidate — for a document found not to be a CV after its row was made. */
     clearCandidate: v.optional(v.boolean()),
   },
@@ -936,6 +938,11 @@ export const updateCvUpload = internalMutation({
     if (args.completedAt !== undefined) updates.completedAt = args.completedAt;
     if (args.textExtractionMethod !== undefined) updates.textExtractionMethod = args.textExtractionMethod;
     if (args.isHealAttempted !== undefined) updates.isHealAttempted = args.isHealAttempted;
+    if (args.countAttempt) {
+      const current = await ctx.db.get(args.cvUploadId);
+      updates.extractionAttempts = (current?.extractionAttempts ?? 0) + 1;
+      updates.lastAttemptAt = Date.now();
+    }
     await ctx.db.patch(args.cvUploadId, updates);
     const upload = await ctx.db.get(args.cvUploadId);
     return upload?.assignToJob;
