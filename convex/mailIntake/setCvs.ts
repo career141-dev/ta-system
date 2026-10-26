@@ -44,7 +44,12 @@ export const openingPeople = internalQuery({
 });
 
 export const reconcileSetCvs = internalAction({
-  args: { dryRun: v.boolean(), days: v.optional(v.number()) },
+  args: {
+    dryRun: v.boolean(),
+    days: v.optional(v.number()),
+    /** Openings the owner says are one position entered twice: sets for \`from\` are filed on \`to\`. */
+    sameAs: v.optional(v.array(v.object({ from: v.string(), to: v.string() }))),
+  },
   handler: async (ctx, args) => {
     // Like the other catch-ups: nothing started after four minutes; a real run continues itself.
     const deadline = Date.now() + 4 * 60_000;
@@ -111,16 +116,26 @@ export const reconcileSetCvs = internalAction({
           rows.push({ ...base, result: "no_opening", note: `Fits ${fits.length} openings equally (${fits.map((o) => o.title).join(" / ")}) and the set's people are on neither more than the other.` });
           continue;
         }
-        const { o: opening, people } = onEach[0];
+        const chosen = onEach[0];
+        const redirect = args.sameAs?.find((x) => x.from === (chosen.o.id as string));
+        const opening = redirect ? (openings as OpeningLite[]).find((o) => o.id === redirect.to) ?? chosen.o : chosen.o;
+        const people = opening === chosen.o ? chosen.people : await ctx.runQuery(internal.mailIntake.setCvs.openingPeople, { jobId: opening.id as Id<"jobs"> });
+        // Someone on another opening at the same client is not filed here as
+        // well: a CV in the wrong set (two Garment Technology people in an
+        // Electrical set, 26 October) is reported, not copied across.
+        const sameClient = (openings as OpeningLite[]).filter((o) => o.id !== opening.id && o.clientName === opening.clientName);
+        const elsewhere = (await Promise.all(sameClient.map((o) => ctx.runQuery(internal.mailIntake.setCvs.openingPeople, { jobId: o.id as Id<"jobs"> })))).flat();
         const jobId = opening.id as Id<"jobs">;
         const job = `${opening.clientName} · ${opening.title}`;
         const onJob: string[] = [];
+        const onOther: string[] = [];
         const missing: MailAttachmentMeta[] = [];
         for (const cv of cvs) {
           if (someoneNamed(cv.name ?? "", people)) onJob.push(nameFromCvFile(cv.name ?? ""));
+          else if (someoneNamed(cv.name ?? "", elsewhere)) onOther.push(nameFromCvFile(cv.name ?? ""));
           else missing.push(cv);
         }
-        const row = { ...base, job, cvs: cvs.length, onJob: onJob.length, missing: missing.map((c) => nameFromCvFile(c.name ?? "")) };
+        const row = { ...base, job, cvs: cvs.length, onJob: onJob.length, onOtherOpening: onOther, missing: missing.map((c) => nameFromCvFile(c.name ?? "")) };
         if (args.dryRun || missing.length === 0) { rows.push({ ...row, result: missing.length ? "would_file" : "all_on_job" }); continue; }
         const placed: string[] = [];
         const ingest = await ingestCvs(
