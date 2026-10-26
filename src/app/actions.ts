@@ -23,6 +23,7 @@ import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
 import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
 import { writeCandidateCall } from "@/lib/candidates/callWrites";
+import { sendCandidateFollowUp, stopCandidateFollowUp } from "@/lib/candidates/followUpWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, User, WorkingStage } from "@/data/types";
@@ -357,46 +358,25 @@ export async function claimCandidate(formData: FormData) {
  */
 export async function sendFollowUpNow(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
   const raw = String(formData.get("channel") ?? "");
   // The WhatsApp and Email buttons send one channel; the older button sends both.
   const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
-  if (!isConvex()) await fail("Sending needs the Convex store.");
-  let r: { sent: boolean; blocked?: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
-  try {
-    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
-  } catch (e) {
-    await fail(backendMessage(e, "The follow-up could not be sent."));
-  }
-  await afterBackendWrite(openingId);
-  const what =
-    channel === "whatsapp"
-      ? r?.kind === "initial" ? "WhatsApp follow-up sent (approved template)" : "WhatsApp reminder sent"
-      : channel === "email"
-        ? r?.kind === "initial" ? "Follow-up email sent" : "Reminder email sent"
-        : r?.kind === "initial" ? "Follow-up sent — WhatsApp template and email" : "Reminder sent";
-  if (!r?.sent) await (r?.blocked ? note : fail)(r?.reason ?? "Nothing was sent.");
-  await done(
-    r!.kind === "initial" || r!.sameRound
-      ? `${what}. Delivery shows in the conversation in a few seconds.`
-      : `${what} — follow-up ${r!.attempt} of ${r!.maxAttempts}.`,
-  );
+  const result = await sendCandidateFollowUp(user, openingId, appId, channel, OPENING_DEPS);
+  if (!result.ok) await (result.notice ? note : fail)(result.message);
+  await done(result.message);
 }
 
 export async function stopFollowUpNow(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
-  try {
-    await convexMutation("ta/followUp:stop", { actorId: user.id, applicationId: appId });
-  } catch (e) {
-    await fail(backendMessage(e, "Could not stop the follow-up."));
-  }
-  await afterBackendWrite(openingId);
-  await done("Follow-up stopped. Nothing further will be sent.");
+  const result = await stopCandidateFollowUp(user, openingId, appId, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /**

@@ -300,14 +300,19 @@ export function mobileCandidate(user: User, openingId: string, applicationId: st
       { id: `created_${app.id}`, label: "Added to opening", detail: null, at: app.createdAt, actorName: null },
     ].sort((a, b) => b.at - a.at),
     calls: [...calls, ...aiCalls].sort((a, b) => b.at - a.at),
+    // The connected route replaces this with the live Convex sequence state.
+    followUp: null,
     messages: messages.map((row) => ({
       id: row.id,
       channel: row.channel,
       direction: row.direction,
       body: row.body,
       subject: row.subject,
-      sentAt: row.sentAt,
-      createdAt: row.createdAt,
+      deliveryStatus: "recorded",
+      legacyStatus: null,
+      stoppedSequence: false,
+      errorMessage: null,
+      sentAt: row.sentAt ?? row.createdAt,
     })),
     referees: refs.map((row) => ({
       id: row.id,

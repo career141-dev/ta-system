@@ -172,7 +172,32 @@ export interface CandidatePayload {
   cv: { available: boolean; fileName: string | null };
   history: { id: string; label: string; detail: string | null; at: number; actorName: string | null }[];
   calls: { id: string; kind: string; outcome: string; body: string; source: string; at: number; byName: string | null }[];
-  messages: { id: string; channel: "whatsapp" | "email"; direction: "out" | "in"; body: string; subject: string | null; sentAt: number | null; createdAt: number }[];
+  followUp: {
+    delivery: { whatsapp: "live" | "test" | "off"; email: "live" | "test" | "off" };
+    attemptCount: number;
+    maxAttempts: number;
+    nextScheduledAt: number | null;
+    lastCandidateReplyAt: number | null;
+    autoFollowUp: boolean;
+    flaggedForTaReview: boolean;
+    taReviewReason: string | null;
+    collected: { cv: boolean | null; currentSalary: boolean | null; expectedSalary: boolean | null; noticePeriod: boolean | null };
+    customQuestions: string[];
+    customAnswers: Record<string, string>;
+    canAct: boolean;
+  } | null;
+  messages: {
+    id: string;
+    channel: "whatsapp" | "email";
+    direction: "out" | "in";
+    body: string;
+    subject: string | null;
+    deliveryStatus: string;
+    legacyStatus: string | null;
+    stoppedSequence: boolean;
+    errorMessage: string | null;
+    sentAt: number;
+  }[];
   referees: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; relationship: string | null }[];
   companyReferences: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; kind: "candidate" | "referee" }[];
 }
@@ -199,6 +224,15 @@ export interface CandidateCallBody {
 }
 
 export interface CandidateCallResult {
+  ok: boolean;
+  message: string;
+}
+
+export type CandidateFollowUpBody =
+  | { action: "send"; channel: "whatsapp" | "email" }
+  | { action: "stop" };
+
+export interface CandidateFollowUpResult {
   ok: boolean;
   message: string;
 }

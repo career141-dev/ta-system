@@ -35,6 +35,8 @@ test("an authorised sheet contains the full profile and stage siblings", () => {
   assert.equal(result.payload.context.applicationId, app.id);
   assert.equal(result.payload.profile.candidateId, app.candidateId);
   assert(result.payload.tabs.some((tab) => tab.key === "history"));
+  assert.equal(result.payload.followUp, null);
+  assert(result.payload.messages.every((message) => typeof message.deliveryStatus === "string"));
   assert(result.payload.context.position >= 1);
   assert(result.payload.context.total >= 1);
 });
