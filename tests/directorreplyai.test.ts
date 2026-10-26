@@ -2,7 +2,7 @@
  * The AI reader's safety check and the set rebuilt from CV file names
  * (convex/lib/directorReplyAi.ts, 23 Oct). Pure — no model is called.
  */
-import { matchCvFiles, nameFromCvFile, readAiAnswer } from "../convex/lib/directorReplyAi";
+import { matchCvFiles, nameFromCvFile, readAiAnswer, someoneNamed } from "../convex/lib/directorReplyAi";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -57,6 +57,12 @@ const m = matchCvFiles(["Rizny Ahamed - Career141.pdf", "KANISHKA PERERA - CAREE
 eq("each CV matched to its candidate; the table and images ignored", m.roster.map((x) => x.applicationId), ["x1", "x2", "x3"]);
 eq("a surname two people share does not pick one", matchCvFiles(["Perera - Career141.pdf"], people).unmatched, ["Perera"]);
 eq("a CV that matches nobody is reported", matchCvFiles(["Nimal Silva - Career141.pdf"], people).unmatched, ["Nimal Silva"]);
+
+console.log("\nsomeone already on the opening");
+const twice = [{ name: "Akalanka Samarawickrama" }, { name: "Akalanka Samarawickrama" }, { name: "Sameera Lokuwithana" }];
+eq("the same person twice is still there", someoneNamed("Akalanka Samarawickrama - Career141.pdf", twice), true);
+eq("one shared word is not enough for two", someoneNamed("Akalanka Perera.pdf", twice), false);
+eq("nobody by that name", someoneNamed("Nimal Silva.pdf", twice), false);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exitCode = fail ? 1 : 0;
