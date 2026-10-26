@@ -13,7 +13,8 @@
  *   run_args:     {"dryRun":true}
  */
 import { v } from "convex/values";
-import { internalMutation } from "../_generated/server";
+import { internalAction, internalMutation } from "../_generated/server";
+import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { executeStageTransition, type PipelineStage } from "../pipeline/pipelineStateMachine";
 
@@ -63,31 +64,45 @@ const LABEL: Record<string, string> = {
   ta_shortlist: "TA shortlist", director_shortlist: "Director shortlist", client_review: "Client shortlist", interview: "Interview", unresponsive: "Dropped out",
 };
 
-export const run = internalMutation({
+/**
+ * One move, in its own transaction. The first real run did all of them in one
+ * mutation and the backend stopped it at its one-second limit — nothing was
+ * changed (26 October) — so each is its own, and the action walks the list.
+ */
+export const moveOne = internalMutation({
+  args: { applicationId: v.string(), from: v.string(), to: v.string(), ta: v.string(), dryRun: v.boolean() },
+  handler: async (ctx, m): Promise<string> => {
+    const app = await ctx.db.get(m.applicationId as Id<"applications">);
+    const now = app?.currentStage ?? "missing";
+    if (!app || now !== m.from) return `skipped — now at ${now}`;
+    if (m.dryRun) return "would move";
+    await executeStageTransition(ctx, {
+      applicationId: app._id,
+      targetStage: m.to as PipelineStage,
+      actorId: "ta-feedback",
+      reason: m.to === "unresponsive"
+        ? `Dropped out — ${m.ta}'s pipeline table, 26 Oct`
+        : `${LABEL[m.to]} per ${m.ta}'s pipeline table, 26 Oct`,
+      bypassRoleCheck: true,
+      skipAutoOutreach: true,
+      decidedByReviewer: true,
+    });
+    return "moved";
+  },
+});
+
+export const run = internalAction({
   args: { dryRun: v.boolean() },
   handler: async (ctx, args) => {
     const rows: { who: string; from: string; to: string; result: string }[] = [];
     for (const m of MOVES) {
-      const app = await ctx.db.get(m.applicationId as Id<"applications">);
-      const now = app?.currentStage ?? "missing";
-      if (!app || now !== m.from) {
-        rows.push({ who: m.who, from: m.from, to: m.to, result: `skipped — now at ${now}` });
-        continue;
+      let result: string;
+      try {
+        result = await ctx.runMutation(internal.admin.taFeedback2610.moveOne, { applicationId: m.applicationId, from: m.from, to: m.to, ta: m.ta, dryRun: args.dryRun });
+      } catch (e) {
+        result = `error — ${String((e as Error)?.message ?? e).slice(0, 160)}`;
       }
-      if (!args.dryRun) {
-        await executeStageTransition(ctx, {
-          applicationId: app._id,
-          targetStage: m.to,
-          actorId: "ta-feedback",
-          reason: m.to === "unresponsive"
-            ? `Dropped out — ${m.ta}'s pipeline table, 26 Oct`
-            : `${LABEL[m.to]} per ${m.ta}'s pipeline table, 26 Oct`,
-          bypassRoleCheck: true,
-          skipAutoOutreach: true,
-          decidedByReviewer: true,
-        });
-      }
-      rows.push({ who: m.who, from: m.from, to: m.to, result: args.dryRun ? "would move" : "moved" });
+      rows.push({ who: m.who, from: m.from, to: m.to, result });
     }
     const summary: Record<string, number> = {};
     for (const r of rows) summary[r.result.replace(/ —.*/, "")] = (summary[r.result.replace(/ —.*/, "")] ?? 0) + 1;
