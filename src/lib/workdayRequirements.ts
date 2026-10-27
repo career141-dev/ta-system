@@ -86,3 +86,8 @@ export function setupChecks(e: SetupEvidence, includeSuggestions = SUGGESTIONS_W
   return (includeSuggestions ? rows : rows.filter(c => !c.key.startsWith("suggestions:")))
     .map(c => ({ ...c, blocksEmail: isEodSendCheck(c) }));
 }
+
+/** 27 Oct: a TA may work up to five 100% positions a day; none is compulsory. */
+export const MAX_100_PER_DAY = 5;
+export const MAX_100_MESSAGE = `A workday supports at most ${MAX_100_PER_DAY} 100% positions. Choose Follow-up or Add-on for returning work, or add the position on your next workday.`;
+export const count100 = (jobs: { workType: string }[]) => jobs.filter(j => j.workType === "100%").length;
