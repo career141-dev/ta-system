@@ -1,4 +1,4 @@
-import { cronJobs } from "convex/server";
+import { cronJobs, makeFunctionReference } from "convex/server";
 import { internalMutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { buildStructuredEmailHtml } from "./communications/emailHtml";
@@ -950,6 +950,7 @@ function addBin(registry: ReturnType<typeof cronJobs>) {
 /** A sent end-of-day email's copies are deleted once their month is over (8 Oct). On both registries, like the Bin. */
 function addEodCopies(registry: ReturnType<typeof cronJobs>) {
   registry.interval("ta-purge-eod-copies", { minutes: 41 }, internal.ta.eodCopies.purgeExpired, {});
+  registry.interval("ta-purge-tracking", { minutes: 30 }, makeFunctionReference<"mutation">("ta/tracking:purgeExpired"), {});
 }
 
 addMailIntake(crons);

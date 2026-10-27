@@ -1,0 +1,35 @@
+:root { color-scheme: light; font: 14px/1.5 system-ui, sans-serif; color: #172b3a; background: #f3f6fa; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1180px; margin: 32px auto; padding: 0 24px; }
+body.popup { width: 380px; }
+.popup main { margin: 0; padding: 22px; }
+h1 { font-size: 26px; margin: 4px 0 8px; letter-spacing: -.6px; }
+.popup h1 { font-size: 21px; }
+h2 { font-size: 17px; }
+.eyebrow { color: #227362; font-size: 11px; font-weight: 800; letter-spacing: 1.6px; }
+.muted { color: #536678; }
+.notice { padding: 12px; border-radius: 8px; background: #e8f1fa; }
+label { display: block; margin: 14px 0 6px; }
+input[type=text], input[type=date], input[type=email], input[type=url], select { width: 100%; padding: 9px; border: 1px solid #b5c3cf; border-radius: 6px; font: inherit; background: white; }
+.check { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; }
+.check input { margin-top: 4px; }
+button { border: 0; border-radius: 6px; background: #116c58; color: white; padding: 10px 16px; cursor: pointer; font: inherit; font-weight: 600; }
+button.secondary { color: #17394c; background: #e2e9ef; }
+button.danger { background: #a63131; }
+button:disabled { opacity: .5; cursor: default; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.status { font-weight: 700; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 22px 0; }
+.card { background: white; border: 1px solid #dee6ee; border-radius: 10px; padding: 18px; }
+.value { display: block; font-size: 25px; font-weight: 700; }
+.filters { display: flex; gap: 16px; align-items: end; }
+.filters label { min-width: 180px; margin: 0; }
+table { border-collapse: collapse; width: 100%; background: white; }
+th, td { text-align: left; padding: 12px; border-bottom: 1px solid #e1e8ef; white-space: nowrap; }
+th { font-size: 12px; color: #536678; background: #edf2f7; }
+.table-wrap { overflow-x: auto; border: 1px solid #dee6ee; border-radius: 8px; }
+#error { color: #a32626; }
+#empty { padding: 24px; background: white; }
+footer { margin-top: 28px; font-size: 12px; color: #536678; }
+@media(max-width: 700px) { .cards { grid-template-columns: 1fr; } .filters { flex-wrap: wrap; } }
