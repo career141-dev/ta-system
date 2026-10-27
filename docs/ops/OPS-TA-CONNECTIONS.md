@@ -11,7 +11,7 @@ This replaces the earlier "separate backend, HTTP endpoints only" version. The c
 
 Built from:
 - the final Ops flow: c5237, the 250-step two-system flow with its OPS/REC/LINK steps; c3626, the locked business flow; and the dated decisions of 20/22/23/26 Oct, all in `/ops`;
-- the stage-by-stage comparison (`COMPARISON.md`);
+- the stage-by-stage comparison of the Ops flow with the TA System (kept in the `/ops` planning notes, not in this repo; its findings are folded into sections 2 and 3);
 - the TA System code on `main` (`4c355c4`): schema, server actions, the partner API, the mobile API and the alerts.
 
 Field names in `code` are real TA field names unless marked **(new)**.
@@ -48,7 +48,7 @@ Field names in `code` are real TA field names unless marked **(new)**.
 ### 1.1 Why one backend still has to be "two systems"
 - **One deploy folder.** `convex deploy` replaces every function with what is in the folder deployed. So all Ops backend code must live **in this repo**, under `convex/ops/`. A separate repo deploying to the same backend would wipe the TA functions (the reason for AGENTS.md hard rule 6).
 - **One schema.** `convex/schema.ts` defines all tables. Split it by owner: `convex/schema/ta.ts` and `convex/schema/ops.ts`, both spread into `schema.ts`. All Ops tables are prefixed `ops`.
-- **Shared capacity.** It is one self-hosted backend: Ops crons and timers share action slots and CPU with TA (the CV reader already ran out of slots on 26 Oct). Ops work must be batched and cursor-based like TA's follow-up sweep.
+- **Shared capacity.** It is one self-hosted backend: Ops crons and timers share action slots and CPU with TA (the CV reader already ran out of slots on 26 Oct). Ops work must be batched and cursor-based like TA's follow-up sweep, and Ops crons need their **own kill switch and opt-in flags** (like TA's `appSettings.autopilotEnabled` and `C141_DISABLE_CRONS`), so Ops can be paused without touching TA.
 - **Coupled releases.** Both ship through the same pipeline, so an Ops change goes through the same review, tests and owner approval as a TA change.
 
 ### 1.2 The contract (the only door between the two)
@@ -92,24 +92,24 @@ A common point only works if each record has one owner. The other side reads it,
 
 ## 3. The common points, step by step (client onboarding -> close)
 
-> With one backend, read every **TA endpoint** below as the matching **contract function** in section 4 (same data, same rules): `GET /integrations/v1/...` reads become contract queries, `POST /api/ops/v1/...` commands become contract mutations, and events go through the `contractEvents` table. Where a block says "mirror", read "the shared table".
-Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint** -> **rules** -> **notes**.
+> Each block names the **contract function** that carries it (full catalogue in section 4); TA -> Ops events go through the `contractEvents` table (section 5). "Exists / adapt / new" says how much of the TA side is already built. Where a block says "mirror", read "the shared table".
+Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA contract** -> **rules** -> **notes**.
 
 ### CP-01 People directory and roles
 - **Steps**: every step with an owner: "Owner alerted", "Primary TA picked", "TA alerted of booking", "Asma and ops told".
 - **Direction / kind**: TA -> Ops, read (plus changes via events).
 - **Data** (`users`): `_id`, `email`, `fullName`, `initials`, `taRole` (admin, director, ta_lead, ta, ta_support, ops, client, viewer), `isActive`, `routingEmail` (a TA's own jobs mailbox), `workCountry`, `phone`. Plus `teams`/`teamMembers` if used.
-- **TA endpoint**: **exists** as `GET /integrations/v1/tables/users` (whole table, paged). **Adapt**: `GET /integrations/v1/people?role=&active=` returning only these fields, never `tokenIdentifier`.
+- **TA contract**: **exists** as table `users` (whole table, paged). **Adapt**: `people.list` returning only these fields, never `tokenIdentifier`.
 - **Rules**: match a person across systems by **email** (TA's sign-in joins Clerk to `users` by verified email). Ops-only roles (ops owner, ops lead, accounts, Director of Operations, marketing) are kept in Ops.
 - **Notes**: Ops needs TA user ids to assign the primary TA and to notify people.
 
 ### CP-02 Client master: create, link, update
 - **Steps**: "OPS Duplicate client match", "OPS Existing client linked", "LINK Client, ops owner recorded".
 - **Direction / kind**: Ops -> TA, command; TA -> Ops, read for matching.
-- **Data**: `clients`: `name`, `nameKey` (TA's dedup key: lower case, punctuation stripped), `industry`, `contacts[] {name,title,email,isPrimary}`, `status` (active/dormant/archived), `esaSignedAt`, `researchNotes`. **New** on the TA mirror: `opsClientRef` (Ops id), `opsOwnerEmail` (display only), `bankingFinanceFlag`.
-- **TA endpoints**:
-  - read: **exists** (`/tables/clients`). **Adapt**: `GET /integrations/v1/clients?nameKey=` and `?updatedSince=` (the table has no `updatedAt` today: **new field**).
-  - command: **new** `POST /api/ops/v1/clients/upsert`, reusing `convex/ta/clients.ts add/update/saveContacts`. `add` already returns the existing id when the `nameKey` matches, and restores a binned client.
+- **Data**: `clients`: `name`, `nameKey` (TA's dedup key: lower case, punctuation stripped), `industry`, `contacts[] {name,title,email,isPrimary}`, `status` (active/dormant/archived), `esaSignedAt`, `researchNotes`. **New** on the shared table: `opsClientRef` (Ops id), `opsOwnerEmail` (display only), `bankingFinanceFlag`.
+- **TA contract**:
+  - read: **exists** (table `clients`). **Adapt**: `clients.find` and `?updatedSince=` (the table has no `updatedAt` today: **new field**).
+  - command: **new** `clients.upsert`, reusing `convex/ta/clients.ts add/update/saveContacts`. `add` already returns the existing id when the `nameKey` matches, and restores a binned client.
 - **Rules**:
   - one client per `nameKey`;
   - adding a client that is in the Bin restores it;
@@ -124,18 +124,18 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - "LINK Director countersigns";
   - "OPS ESA declined" -> "Search blocked, team told";
   - "LINK Client, ops owner recorded".
-- **Direction / kind**: Ops -> TA, command (mirror the outcome); TA -> Ops, read (existing ESAs at go-live).
+- **Direction / kind**: Ops -> TA, command (write the outcome); TA -> Ops, read (existing ESAs at go-live).
 - **Data**:
   - `esaRecords`: `clientId`, `openingId` (null = client-wide), `status` (pending/sent/signed/expired/not_required; **add `declined`**), `sentAt`, `signedAt`, `signedBy`, `documentName`/`esaDocumentUrl`, `dueAt`, `feePercent`, `guaranteeDays`.
   - **New**: fee rule (months of gross 1 or 2 by nationality, gross/basic, flat fee), `countersignedAt`, `opsEsaRef`.
-- **TA endpoints**:
-  - read: **exists** (`/tables/esaRecords`). **Adapt**: by `clientId`.
-  - command: **new** `POST /api/ops/v1/esa/upsert`, built on the dormant `repo.saveEsa`. It already keeps `clients.esaSignedAt` in step with the newest signed record.
+- **TA contract**:
+  - read: **exists** (table `esaRecords`). **Adapt**: by `clientId`.
+  - command: **new** `esa.upsert`, built on the dormant `repo.saveEsa`. It already keeps `clients.esaSignedAt` in step with the newest signed record.
 - **Rules**:
   - only the ESA outcome crosses; drafts, chase messages and negotiation notes stay in Ops;
   - **ESA declined blocks search**: TA must refuse `opening.create` for that client (**new** guard);
   - `esaFor(clientId, openingId)` picks the ESA for a placement in this order: signed for this opening, then signed client-wide, then not_required, then the latest unsigned.
-- **Notes**: fee and guarantee terms are snapshotted at Place (CP-17), so a wrong mirror means a wrong invoice basis.
+- **Notes**: fee and guarantee terms are snapshotted at Place (CP-19), so a wrong ESA record means a wrong invoice basis.
 
 ### CP-04 Requirement -> opening created in TA (the main hand-over)
 - **Steps**: "LINK Requirement meeting held" -> "LINK Requirement saved" -> "LINK Opening built" -> "LINK Primary TA picked" -> "LINK 100% day set" -> "LINK Bell to TA".
@@ -149,13 +149,13 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - the primary TA's 100% day (`jobAssignments.workingStage = "100%"`);
   - **new** `opsRequirementRef`, `handoverAt`.
 - **Data returned**: `openingId` (`jobs._id`), `keyword`, `status`, `jdStatus`, the first LinkedIn job post id.
-- **TA endpoint**: **new** `POST /api/ops/v1/openings`, reusing the opening create path: `createOpening` in `src/app/actions.ts`, `ta/openings:create`, `setAssignments`, `setWorkingStage`. The mobile API has `openings/new`, `team` and `working-stage` routes to copy.
+- **TA contract**: **new** `openings.createFromRequirement`, reusing the opening create path: `createOpening` in `src/app/actions.ts`, `ta/openings:create`, `setAssignments`, `setWorkingStage`. The mobile API has `openings/new`, `team` and `working-stage` routes to copy.
 - **Rules**:
   - TA creates the first LinkedIn advert automatically;
   - new openings start with the JD "waiting for approval";
   - `taLeadId` is set once at creation;
   - saving the team resets every TA's working stage to 100% (a known TA quirk);
-  - the 100% rule in TA's workday (`/workday`) may refuse 100% on a returning job (later TA change);
+  - **conflict to settle:** commit `9bfb190` (27 Oct, on main) lets a TA work **up to five 100% positions a day** (Follow-up and Add-on do not count), while the Ops board's rule is **one 100% position per TA per day**, set by the TA lead. Decide which rule governs before CP-04 and CP-14 set modes;
   - **idempotent** on `opsRequirementRef`, so a retry never makes two openings.
 - **Notes**: the "bell to TA" is a TA notification (`notifications`, type opening_assigned) raised by TA itself.
 
@@ -171,7 +171,7 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - `opening.jd_approved`;
   - `jobpost.live` / `jobpost.closed` (with `externalUrl`);
   - `opening.working_stage_changed`.
-- **TA endpoint**: read **exists** (`/tables/jobs`, `/tables/jobPosts`, `/tables/jobAssignments`). **Adapt**: `GET /integrations/v1/openings/{id}` returning one opening with posts, team and stage counts (`jobs.stageCounts`).
+- **TA contract**: read **exists** (table `jobs`, table `jobPosts`, table `jobAssignments`). **Adapt**: `openings.get` returning one opening with posts, team and stage counts (`jobs.stageCounts`).
 - **Rules**: Live needs an approved JD (TA rule today); Ops needs the LinkedIn URL for Talent Pulse and closing.
 
 ### CP-06 Ad channels: TopJobs and Talent Pulse -> source-tagged CVs
@@ -181,10 +181,10 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - TopJobs: request (`openingId`, requester), live date, close date, cost (5,400 / 12,700).
   - Talent Pulse: edition date, list of `openingId` + title + short brief + tracked apply link **(new)**.
   - CV source: `cvUploads.source` / `applications.sourceChannel` / `taSourcingChannel` with **new** values `topjobs`, `talent_pulse`.
-- **TA endpoints**:
-  - read: open openings for the list (**adapt**: `GET /integrations/v1/openings?status=active` with title and brief);
-  - command: **new** `POST /api/ops/v1/openings/{id}/ad-channel` (record TopJobs live/closed and cost for display and the TA alert);
-  - CVs: TopJobs/Talent Pulse applicants reach TA through its mailboxes (mail intake routes by advert: `convex/ta/intakeRouting.ts`, `src/lib/routing.ts`) **or** through a **new** command `POST /api/ops/v1/cvs` that files a CV to an opening with a source (built on the existing upload path `/api/cv/upload` -> `ta/cv:attach` / extraction queue). The existing partner CV upload stores files only and does **not** create candidates, so it is not enough.
+- **TA contract**:
+  - read: open openings for the list (**adapt**: `openings.list({status:"active"})` with title and brief);
+  - command: **new** `openings.recordAdChannel` (record TopJobs live/closed and cost for display and the TA alert);
+  - CVs: TopJobs/Talent Pulse applicants reach TA through its mailboxes (mail intake routes by advert: `convex/ta/intakeRouting.ts`, `src/lib/routing.ts`) **or** through a **new** command `cvs.fileToOpening` that files a CV to an opening with a source (built on the existing upload path `/api/cv/upload` -> `ta/cv:attach` / extraction queue). The existing partner CV upload stores files only and does **not** create candidates, so it is not enough.
 - **Rules**: TopJobs closes 2 weeks after posting; LinkedIn reposted under 20 CVs/day; CVs must be source-tagged (brief: Talent Pulse CVs don't land in the TA's job today).
 
 ### CP-07 Candidate pipeline feed (counts and stage moves)
@@ -194,7 +194,7 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - `pipelineEvents`: `jobId`, `applicationId`, `candidateId`, `eventType` (stage_change_<stage>), `fromStage`, `toStage`, `actorType`, `actorId`, `isBackwardMove`, `createdAt`.
   - `applications`: `currentStage` (backend: new_cvs, matched_candidates, ta_shortlist, follow_up, second_shortlist, director_shortlist, client_review, interview, offer, placed, rejected, unresponsive), `ownerTaId`, `setNumber`, `isAddOn`, `backupForApplicationId`, `lastStageChangedAt`.
   - `jobs.stageCounts`.
-- **TA endpoint**: read **exists** (`/tables/pipelineEvents`, `/tables/applications`). **Adapt**: `GET /integrations/v1/openings/{id}/pipeline` (counts by stage + list of client-stage candidates), and the events feed (**new** `GET /integrations/v1/events`, with `pipelineEvents` as its first source; needs a time-ordered index, today only `by_job_time` etc.).
+- **TA contract**: read **exists** (table `pipelineEvents`, table `applications`). **Adapt**: `pipeline.forOpening` (counts by stage + list of client-stage candidates), and the events feed (**new** the `contractEvents` table, with `pipelineEvents` as its first source; needs a time-ordered index, today only `by_job_time` etc.).
 - **Rules**:
   - only TA's stage names and translator (`convex/ta/stages.ts`) are authoritative; TA's UI names differ (director_review = second_shortlist, client_shortlist = client_review, dropped_out = unresponsive);
   - depth rule: <=3 pending interviews -> add-on; 5 shortlisted in total -> hold; below five -> lift.
@@ -206,7 +206,7 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
 - **Data**:
   - `reviewRounds` (kind director): `openingId`, `setNumber`, `applicationIds`, `sentAt`, `sentBy`, `status` (awaiting/partial/returned), `decisions[]`.
   - `dailyEmails` (EOD records) for the weekly report.
-- **TA endpoint**: read **exists** (`/tables/reviewRounds`, `/tables/dailyEmails`). **New** events: `director_round.sent`, `director_round.decided`.
+- **TA contract**: read **exists** (table `reviewRounds`, table `dailyEmails`). **New** events: `director_round.sent`, `director_round.decided`.
 - **Rules**: min 5 CVs (planned; TA today closes a set at 5+ in a Colombo day); no reason needed from the Director.
 
 ### CP-09 Client set: built by TA, sent by Ops (core hand-over)
@@ -215,19 +215,19 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
 - **Data TA -> Ops**:
   - the round: `reviewRounds` kind client, `setNumber`, `applicationIds`, subject "CLIENT > ROLE > SET n";
   - per candidate: name, current company and designation, notice, current/expected salary, notes. These are the EOD table fields: `shortlistRows` in `src/lib/eod.ts`, from `applications` + `candidates`;
-  - **files**: the prepared CV PDF per candidate (`src/lib/preparedCvFile.ts`, `/api/prepared-cv/[appId]`) and the original CV (`GET /integrations/v1/cv/{cvUploadId}`, exists).
+  - **files**: the prepared CV PDF per candidate (`src/lib/preparedCvFile.ts`, `/api/prepared-cv/[appId]`) and the original CV (`files.cv`, exists).
 - **Data Ops -> TA**: `sentAt`, `sentTo`, `receivedAt` (starts the 7-working-day ownership clock and the feedback timer), the Ops message id.
-- **TA endpoints**:
-  - read **adapt**: `GET /integrations/v1/openings/{id}/client-set/{setNumber}` (candidates + fields above);
-  - files: **exists** for the original CV; **new** `GET /api/ops/v1/applications/{appId}/prepared-cv` (service-token version of `/api/prepared-cv/[appId]`);
-  - command: **new** `POST /api/ops/v1/client-sets/{roundId}/sent`. Today the client round is saved with `dispatch: "held"` and never sent (`src/data/store.ts`), so Ops becomes the sender and TA records it as sent.
+- **TA contract**:
+  - read **adapt**: `clientSets.get` (candidates + fields above);
+  - files: **exists** for the original CV; **new** `files.preparedCv` (service-token version of `/api/prepared-cv/[appId]`);
+  - command: **new** `clientSets.markSent`. Today the client round is saved with `dispatch: "held"` and never sent (`src/data/store.ts`), so Ops becomes the sender and TA records it as sent.
 - **Rules**: ops owner approves before sending; WhatsApp group posts stay manual (Ops logs them); sending to a client goes through Ops's own outbound safety (same principle as TA's `outreachSafety`).
 
 ### CP-10 Client decisions on the set -> candidate stage in TA
 - **Steps**: "LINK Client replies" -> "LINK Reply read into system" -> "LINK TA informed" -> "LINK Reason saved" -> "LINK Client decision" -> "REC Rejected by client" -> "REC Client rejection notice" / "LINK Candidate marked shortlisted".
 - **Direction / kind**: Ops -> TA, command; TA -> Ops, event (the stage change).
 - **Data**: `applicationId`, decision (shortlisted / rejected / hold), reason (if given), source (email/WhatsApp/call), who recorded it, the reply text or reference.
-- **TA endpoint**: **new** `POST /api/ops/v1/applications/{appId}/client-decision`, reusing the stage move path (`src/lib/openings/pipelineWrites.ts` -> `ta/applications:moveStage`, `recordShortlistDecision` in `convex/lib/shortlistDecision.ts`). It sets director_shortlist -> client_review (client shortlist), or rejected with a reason, as a **recorded client reply** (TA's `decide.client` / `decidedByReviewer` path, so no TA user is impersonated).
+- **TA contract**: **new** `applications.recordClientDecision`, reusing the stage move path (`src/lib/openings/pipelineWrites.ts` -> `ta/applications:moveStage`, `recordShortlistDecision` in `convex/lib/shortlistDecision.ts`). It sets director_shortlist -> client_review (client shortlist), or rejected with a reason, as a **recorded client reply** (TA's `decide.client` / `decidedByReviewer` path, so no TA user is impersonated).
 - **Rules**:
   - TA must inform the TA either way (bell);
   - rejected -> candidate rejection notice (sent by TA, CP-21);
@@ -239,31 +239,31 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
 - **Steps**: "OPS Ownership clock starts" -> "OPS Countdown shown" -> "OPS Claim checked" -> "OPS CV dropped, not pursued" -> "OPS Candidate marked client-owned" -> "OPS Rest of set continues" / "OPS Claim refused".
 - **Direction / kind**: Ops -> TA, command.
 - **Data**: `applicationId`, `claimedAt`, decision (dropped/refused), reason "client already had CV".
-- **TA endpoint**: **new** `POST /api/ops/v1/applications/{appId}/client-owned` (moves the candidate out of the client round with reason; **new** flag `clientOwnedAt` so TA never offers that person to that client again).
+- **TA contract**: **new** `applications.markClientOwned` (moves the candidate out of the client round with reason; **new** flag `clientOwnedAt` so TA never offers that person to that client again).
 - **Rules**: 7 working days from receipt (CP-09 `receivedAt`); working days use one shared holiday calendar (see section 6).
 
 ### CP-12 Client silence -> position on hold / lift / close
 - **Steps**: "OPS Feedback timer starts" -> "OPS Chase drafted/approved/sent" -> "OPS Owner calls client" -> "OPS Client silent after call" -> "OPS Inactive notice drafted/approved/sent" -> "OPS Position on hold" -> "OPEN Silent-hold limit" -> "LINK Lead or position closed".
 - **Direction / kind**: Ops -> TA, command; TA -> Ops, event.
 - **Data**: `openingId`, new status (`on_hold` with reason "client inactive (ESA)"), later back to `active`, or closed.
-- **TA endpoint**: **new** `POST /api/ops/v1/openings/{id}/status` (reuses `setOpeningStatus` / `repo.setOpeningStatus`; the mobile API has `openings/[id]/status`).
+- **TA contract**: **new** `openings.setStatus` (reuses `setOpeningStatus` / `repo.setOpeningStatus`; the mobile API has `openings/[id]/status`).
 - **Rules**:
   - TA On hold already stops TA's automatic follow-up sweep and SLA alerts and keeps intake only through the post's own link;
   - hold needs a reason (**new** field);
-  - the silence clock is 14 calendar days after profiles shared (resolved rule).
+  - the silence clock is 14 calendar days after profiles shared. This was decided by the owner on 27 Oct, when the recommended resolutions were accepted. The planning board still lists the exact hold days as open; its 26 Oct note (stop chasing after 3-4 silent days) is the chase cadence inside this clock. Confirm on the board.
 
 ### CP-13 Unreported hire (3 months)
 - **Steps**: "LINK Set sent to client" -> "OPS Unreported hire flagged" -> "OPS Surcharge invoice drafted/approved/sent".
 - **Direction / kind**: TA -> Ops, read.
 - **Data**: candidates sent in each client set and their later status (placed with this client? reported?).
-- **TA endpoint**: read **adapt** (client rounds + applications by `clientId`).
+- **TA contract**: read **adapt** (client rounds + applications by `clientId`).
 - **Notes**: the surcharge invoice itself is Ops-only.
 
 ### CP-14 Pipeline depth -> TA mode (add-on / monitor / resume)
 - **Steps**: "LINK Add-on alert to TA" -> "REC Add-on search" (30-60 min a day); "LINK Hold at five CVs" -> "REC Monitor position" (LinkedIn closes); "LINK Five-CV hold lifts".
 - **Direction / kind**: Ops -> TA, command (if Ops computes; see CP-07).
 - **Data**: `openingId`, TA user, mode (`Add-on`, monitor), reason (counts).
-- **TA endpoint**: **new** `POST /api/ops/v1/openings/{id}/working-stage` (reuses `setWorkingStage`; the mobile route exists) + `notify` (CP-22).
+- **TA contract**: **new** `openings.setWorkingStage` (reuses `setWorkingStage`; the mobile route exists) + `notify` (CP-25).
 - **Rules**:
   - TA working stages are 100% / Follow-up / Add-on; "monitor" does not exist as a mode (**new** value or a flag);
   - mode changes are refused after the day's EOD is sent (TA `recordActiveMode`).
@@ -283,34 +283,35 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - `taHistory[]` (rescheduled/status/edited with reason);
   - `taFeedback[]`, `clientFeedback`, `clientRating`;
   - **new**: `scheduledBy` (client/us), Teams link, slot proposals, `opsInterviewRef`.
-- **TA endpoints**:
-  - read **exists** (`/tables/interviews`);
-  - commands **new** `POST /api/ops/v1/interviews` (book), `.../{id}/reschedule`, `.../{id}/outcome`, reusing `writeCandidateInterview` (`src/lib/candidates/interviewWrites.ts`), which already handles schedule, confirm, reschedule (old time kept with reason), outcome, result, edit and feedback;
+- **TA contract**:
+  - read **exists** (table `interviews`);
+  - commands **new** `interviews.book` (book), `interviews.reschedule`, `interviews.setOutcome`, reusing `writeCandidateInterview` (`src/lib/candidates/interviewWrites.ts`), which already handles schedule, confirm, reschedule (old time kept with reason), outcome, result, edit and feedback;
   - events **new**: `interview.confirmed`, `interview.candidate_out`, `interview.outcome`, `interview.feedback`.
 - **Rules**:
   - client notified at least 1 day (or 3 hours) before a candidate drops out (Ops sends; TA tells Ops);
   - TA already raises `interview_confirmation` (day of), `interview_confirmation_escalation` (<4 h, nobody called) and `interview_followup` (after attended) alerts (`src/lib/sla.ts`);
   - candidate messages (reconfirm, notices) stay TA's (TA owns the candidate WhatsApp/email and safety gates);
   - Teams/Outlook invites to the client and interviewers are Ops's.
+  - **Invites, both sides.** One meeting, two senders. Ops creates the Teams meeting and sends the calendar invite to the client's interviewers. The meeting time, place and link are stored on the TA interview record (**new** `teamsLink`). TA sends the candidate their own invite and the day-before reconfirm through its candidate channels and safety gates. The candidate never receives an Ops message.
 
 ### CP-16 Interview feedback and round decision
 - **Steps**: "REC TA logs feedback after 5 PM" -> "REC Candidate told" -> "OPS Client message drafted/approved" -> "OPS Feedback posted to client" -> "LINK Client round decision" -> "LINK TA informed of decision" -> round 2 / reference / rejected after round -> "REC Candidate told not moving".
 - **Direction / kind**: TA -> Ops, event (TA feedback); Ops -> TA, command (client round decision).
 - **Data**: interview feedback (`taFeedback`), client decision (round 2 / selected / not moving) + reason.
-- **TA endpoint**: **new** `POST /api/ops/v1/interviews/{id}/client-decision` (round 2 -> new interview round; not moving -> rejected with reason, same stage-move path as CP-10).
+- **TA contract**: **new** `interviews.recordClientDecision` (round 2 -> new interview round; not moving -> rejected with reason, same stage-move path as CP-10).
 - **Rules**: TA informed either way; back-up kept at the final stage (TA's back-up tag `backupForApplicationId`).
 
 ### CP-17 Reference check (only if the client asks)
 - **Steps**: "REC Client asks for reference?" -> "REC TA calls referee" -> "REC Reference reported to client" / "REC Referee not reached" -> "Client clears reference".
 - **Direction / kind**: Ops -> TA, command (request); TA -> Ops, event (result).
 - **Data**: request (`applicationId`, who asked); result (referee name, company, notes as is, not reached).
-- **TA endpoint**: **new** `POST /api/ops/v1/applications/{appId}/reference-request` + event `reference.reported`. TA has `referees` from CVs and the Referee Calls grid (sourcing); a client-requested reference record is **new**.
+- **TA contract**: **new** `applications.requestReference` + event `reference.reported`. TA has `referees` from CVs and the Referee Calls grid (sourcing); a client-requested reference record is **new**.
 
 ### CP-18 Offer: made, accepted, declined (search stops)
 - **Steps**: "LINK Offer made" -> "LINK Search stops" -> "LINK Offer accepted" / "REC Offer declined" -> "REC Back-up promoted" / "REC Search reopened"; "OPEN Offer silent".
 - **Direction / kind**: TA -> Ops, events + read.
 - **Data** (`offers`): `applicationId`, `jobId`, `candidateId`, `offeredSalary`, `offeredSalaryCurrency`, `salaryBasis` (monthly/annual), `startDateMs`, `status` (pending/accepted/declined/withdrawn), `declineReason`, `madeBy`, `createdAt`.
-- **TA endpoint**: read **exists** (`/tables/offers`). Events **new**: `offer.made`, `offer.accepted`, `offer.declined`.
+- **TA contract**: read **exists** (table `offers`). Events **new**: `offer.made`, `offer.accepted`, `offer.declined`.
 - **Rules**: search stops at the offer (Ops closes TopJobs; TA closes LinkedIn); TA's offer panel only allows offers from Client Shortlist/Interview/Offer/Placed (`src/components/ClosingPanel.tsx`).
 
 ### CP-19 Placement: Place, package, DOJ, offer letter, Asma told the same day
@@ -320,7 +321,7 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
   - `applicationId`, `jobId`, `candidateId`, `offerId`, `clientId`, `placedBy`, `joinDateMs`/`joinDate`, `placedSalary`/`placedSalaryCurrency`, `salaryBasis`;
   - **snapshot** `feePercent`/`flatFee`, `guaranteeDays` (taken from the ESA via `esaFor`, CP-03), `taSourcingChannel`, `sourceChannel`;
   - **new**: package details, offer-letter file, DOJ history `[{from,to,at,by,reason}]`, invoice address.
-- **TA endpoints**: read **exists** (`/tables/placements`); event **new** `placement.created` (raised by `recordPlacement` -> `writeCandidateClosing`); commands **new** `POST /api/ops/v1/placements/{id}/details`, `.../doj`, `.../cancel`.
+- **TA contract**: read **exists** (table `placements`); event **new** `placement.created` (raised by `recordPlacement` -> `writeCandidateClosing`); commands **new** `placements.addDetails`, `placements.changeDoj`, `placements.cancel`.
 - **Rules**: "Asma and ops told" the same day = Ops reacts to the event; the placement **snapshots** terms (a later ESA change does not change it).
 - **Notes**: TA's Place currently redirects the TA to `/placements/{id}`, a page that does not exist. A TA fix, not a connection.
 
@@ -328,48 +329,48 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
 - **Steps**: "OPS Joining-day 9am alert" -> "LINK TA confirms joined" -> "LINK 90-day clock starts" / "OPS No-show flagged" -> "OPS Client options sent" (replace or stop, no refund).
 - **Direction / kind**: TA -> Ops, events; Ops -> TA, command (replacement search or close).
 - **Data**: `placements.joinConfirmedAt` (**exists**), no-show flag/reason (**new**; TA has `fellThroughAt`/`fellThroughReason`).
-- **TA endpoint**: events **new** `placement.joined`, `placement.no_show`. TA already raises the `joining_date` alerts ("starts today" 9 AM Colombo; "no start date agreed").
+- **TA contract**: events **new** `placement.joined`, `placement.no_show`. TA already raises the `joining_date` alerts ("starts today" 9 AM Colombo; "no start date agreed").
 - **Rules**: the guarantee starts on the join date; invoices for the first hire only.
 
 ### CP-21 Candidate rejection notices
 - **Steps**: "REC Director rejection notice", "REC Client rejection notice", "REC Candidate told not moving".
 - **Direction / kind**: inside TA, triggered by CP-08/10/16.
 - **Data**: `applicationId`, template id, channel.
-- **Rules**: one approved template, automatic (resolved rule); goes through TA's `outreachSafety`/`outboundGuard`; Ops only needs the "sent" event for its log.
+- **Rules**: one approved template, automatic (decided 27 Oct); goes through TA's `outreachSafety`/`outboundGuard`; Ops only needs the "sent" event for its log.
 
 ### CP-22 Guarantee events -> TA opening
 - **Steps**: "LINK Candidate leaves" -> "LINK Position reopened" (replace first) -> "OPS 60-working-day clock starts" -> "OPS Director of Operations told" -> "OPS Refund 25%" -> "OPS Refund logged"; "OPS No guarantee, clock stopped" (fee unpaid); "LINK 90-day clock starts" (replacement hire: new guarantee, no invoice); "OPS Guarantee ends clean" -> "OPS Commitment done".
 - **Direction / kind**: Ops -> TA, commands; TA -> Ops, event (a replacement placement links to the original).
 - **Data**: `placementId`, leaver date and reason, decision (replace / refund / void), `replacementOf` (**new** on placements).
-- **TA endpoints**:
-  - **new** `POST /api/ops/v1/placements/{id}/left` (TA marks fall-through: `fellThroughAt`/`Reason`; moves the candidate out of Placed; TA allows Placed -> Dropped Out/Rejected inside the guarantee);
-  - **new** `POST /api/ops/v1/openings/{id}/reopen` (same opening back to active, TA told).
+- **TA contract**:
+  - **new** `placements.markLeft` (TA marks fall-through: `fellThroughAt`/`Reason`; moves the candidate out of Placed; TA allows Placed -> Dropped Out/Rejected inside the guarantee);
+  - **new** `openings.reopen` (same opening back to active, TA told).
 - **Rules**: TA's checklist today raises "refund or free re-run owed" at once (`src/lib/closing.ts refund_due`); with Ops owning the guarantee this becomes display-only (later TA change).
 
 ### CP-23 Close: posts, position, lead
 - **Steps**: "LINK Lead or position closed" -> "LinkedIn closed" (TA closes; also when under 20 CVs/day or monitor-only), TopJobs closed (Ops).
 - **Direction / kind**: Ops -> TA, command; TA -> Ops, event.
 - **Data**: `openingId`, close reason (placed/guarantee ended; lost; refund; written off; client silent; ESA declined), posts to close.
-- **TA endpoint**: **new** `POST /api/ops/v1/openings/{id}/close` (reuses `setOpeningStatus` filled/closed + `setPostStatus` closed). Event `opening.closed`.
-- **Rules**: resolved rule: the position closes when the guarantee ends (clean, refund paid or fee written off); placing a candidate never marks the opening Placed in TA today.
+- **TA contract**: **new** `openings.close` (reuses `setOpeningStatus` filled/closed + `setPostStatus` closed). Event `opening.closed`.
+- **Rules**: decided 27 Oct: the position closes when the guarantee ends (clean, refund paid or fee written off); placing a candidate never marks the opening Placed in TA today.
 
 ### CP-24 Weekly report to Mr Azeem
 - **Steps**: "OPS Weekly report built" -> "OPS Report sent to Mr Azeem" (TA lead owns).
 - **Direction / kind**: TA -> Ops, read.
 - **Data**: per open opening: client, title, TA, days against target, stage counts, sets sent, interviews, offers, client feedback pending.
-- **TA endpoint**: **adapt** `GET /integrations/v1/reports/active-positions` (TA Reports page logic, `src/lib/reporting.ts`, `masterSheet.ts`).
+- **TA contract**: **adapt** `reports.activePositions` (TA Reports page logic, `src/lib/reporting.ts`, `masterSheet.ts`).
 
 ### CP-25 Notifications across the line
 - **Steps**: "LINK Owner alerted", "LINK Bell to TA", "LINK TA alerted of booking", "LINK TA told of cancel", "LINK TA informed", "REC Escalated to TA", "OPS Late-send alert".
 - **Direction / kind**: Ops -> TA, command; TA -> Ops, events.
 - **Data**: `notifications`: `userId`, `type`, `title`, `body`, `jobId`, `candidateId`, `read`, `createdAt`.
-- **TA endpoint**: **new** `POST /api/ops/v1/notify` (insert a TA notification; TA's bell plays the chime). TA -> Ops alerts arrive as events.
+- **TA contract**: **new** `notify` (insert a TA notification; TA's bell plays the chime). TA -> Ops alerts arrive as events.
 - **Rules**: a person is identified by email (CP-01); no duplicates (idempotency key).
 
 ### CP-26 Files
 - **What crosses**: CVs, prepared CVs (CP-09), offer letters (CP-19), signed/countersigned ESAs (CP-03), requirement recordings (CP-04).
-- **TA endpoints**:
-  - **exists**: `GET /integrations/v1/cv/{cvUploadId}`, `POST /integrations/v1/cv/uploads` + `/complete` (R2, 10 MB, PDF/DOC/DOCX, checksum, store-only);
+- **TA contract**:
+  - **exists**: `files.cv`, the R2 upload helper the partner API already uses (`convex/storage/r2`) + `/complete` (R2, 10 MB, PDF/DOC/DOCX, checksum, store-only);
   - **new**: prepared CV by application; attach an offer letter or ESA document to a placement/ESA record.
 - **Rules**: server to server only; `Cache-Control: no-store`; never put file links in browser code.
 
@@ -514,3 +515,16 @@ These are TA customisations to do after this contract is agreed.
 5. Ops UI: a second Next.js app in this repo with its own container (recommended for "two systems"), or an `/ops` area inside the TA app?
 6. Who reviews changes to `convex/contract/` (both team leads)?
 7. Shared holiday calendar: who maintains it?
+8. **100% positions:** one per TA per day (Ops board) or up to five (TA change `9bfb190`, 27 Oct)?
+9. **Silence clock:** confirm 14 calendar days after profiles shared, with chasing stopped after 3-4 silent days, on the board.
+
+## 11. Out of scope here (Ops internals, designed separately)
+This document is only the connection between the two systems. These belong to the Ops system's own design, and are listed so they are not lost:
+- the timers engine (one place for every clock: ESA 1-2 h, countersign 1 day, ownership 7 working days, 14-day silence, offer silent, 90-day guarantee, 60 working days, 3-month unreported hire, 30-day payment, 2-month chase);
+- the ops task inbox and escalations (Director chase, countersign and client-report reminders, which have no escalation on the board yet);
+- the client-message approval queue;
+- the finance and guarantee modules;
+- Ops kill switches;
+- the open board decisions: offer-silent timeout, day-75 warning, replace-or-stop deadline, simple or compounded late charge, invoice timing.
+
+The draft module plan (M1-M12) is in the `/ops` planning notes (`INTEGRATION-PLAN.md`).
