@@ -192,7 +192,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
       </label>
       {completedByEod ? (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          Your workday was completed when the 100% EOD email was sent. You cannot add another 100% position today. Choose Follow-up or Add-on only for returning work; otherwise, add the position on your next workday.
+          Your clock stopped at your first 100% EOD email. You can still add and send up to 5 100% positions a day; Follow-up and Add-on are for returning work.
         </p>
       ) : (
         <p className="text-xs text-ink-soft">

@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { workdayErrorMessage } from "../src/lib/workdayErrors";
-
-const stopped = new Error(
-  "Convex refused ta/workdays:addPosition: [Request ID: abc123] Server Error Uncaught Error: The workday clock has stopped. Add Follow-up or Add-on positions.\n    at handler (../../convex/ta/workdays.ts:1522:25)",
-);
+import { MAX_100_MESSAGE, count100 } from "../src/lib/workdayRequirements";
 
 assert.equal(
-  workdayErrorMessage(stopped, "addPosition"),
-  "Your workday was completed when the 100% EOD email was sent. You cannot add another 100% position today. Choose Follow-up or Add-on only for returning work; otherwise, add the position on your next workday.",
+  workdayErrorMessage(
+    new Error(`Convex refused ta/workdays:addPosition: [Request ID: abc123] Server Error Uncaught Error: ${MAX_100_MESSAGE}\n    at handler (../../convex/ta/workdays.ts:1522:25)`),
+    "addPosition",
+  ),
+  MAX_100_MESSAGE,
 );
+assert.equal(count100([{ workType: "100%" }, { workType: "Follow-up" }, { workType: "100%" }]), 2);
+assert.match(MAX_100_MESSAGE, /at most 5 100% positions/);
 assert.equal(
   workdayErrorMessage(
     new Error(

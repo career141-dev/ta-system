@@ -162,10 +162,6 @@ export const begin = internalMutation({
       if (!row || row.openingId !== args.jobId || !inWorkLocation(row, locationId ?? "")) throw new Error("A workbook row changed location. Reload and review the email before sending.");
     }
     const entry = day?.jobs.find(j => j.jobId === args.jobId);
-    if (day?.finishedAt !== undefined && entry?.workType === "100%") {
-      const already = emails.some(e => e.status === "accepted" && e.submissionType === "eod" && !e.parentId && !e.recoveryReopenedAt);
-      if (!already) throw new Error("The workday clock has stopped. Change this unfinished position to Follow-up or Add-on before sending.");
-    }
     const selectedMode = parent?.workType ?? parent?.snapshot?.workType ?? entry?.workType ?? "100%";
     if (snapshot.workType && snapshot.workType !== selectedMode) throw new Error("The work type changed. Reload and review the email before sending.");
     snapshot.workType = selectedMode;

@@ -772,10 +772,12 @@ try {
   for (let i = 0; i < 9; i++) {
     const jobId = `manual:${i}`;
     put("jobs", { _id: jobId, title: jobId, taLeadId: "lead", assignedTaIds: ["carryTa"] });
-    await run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId, workType: "100%" });
+    // 27 Oct: up to five 100% positions a day; the sixth must be Follow-up or Add-on.
+    if (i === 5) await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId, workType: "100%" }), /at most 5 100%/);
+    await run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId, workType: i < 5 ? "100%" : "Add-on" });
   }
   put("jobs", { _id: "manual:10", title: "One too many", taLeadId: "lead", assignedTaIds: ["carryTa"] });
-  await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId: "manual:10", workType: "100%" }), /at most ten/);
+  await assert.rejects(() => run("addPosition", { actorId: "carryTa", workdayId: carryDay.id, jobId: "manual:10", workType: "Add-on" }), /at most ten/);
   // Returning positions track only EOD candidates, ChatGPT and the EOD email.
   const mixedDay = (await run("dashboard", { actorId: "carryTa" })).active;
   assert.ok(mixedDay.jobs.filter((j: Row) => j.workType === "100%").every((j: Row) => j.checks.length > 0));

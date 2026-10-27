@@ -41,7 +41,7 @@ Trigger: TA picks a position and work type in the drawer (JobPicker, no active d
 Sign-in never starts the clock. The first Start is the opt-in (see `assertWorkdayScope`).
 
 ### Flow 2 - Add position (`addPosition`)
-`ownedActive`; no-op if the job is already on the day; cap: `day.jobs.filter(j => !j.carried).length >= 10` -> "A workday supports at most ten positions."; `assignedJob`; if the day is finished (`eod`) and mode is `100%` -> "The workday clock has stopped. A 100% EOD email completed it, so another 100% position must wait until the next workday. Follow-up and Add-on are only for returning work." (the form maps the "The workday clock has stopped" substring to the longer `CLOSED_WORKDAY_ADD_POSITION` copy only for op `addPosition`, `src/lib/workdayErrors.ts`). Appends the entry, `setMode`, `attachLead`, notification `workday_started` "Started work on another position", `refreshWorkdayChecks`. Always returns `{pending:false}`: the old request-to-lead flow is gone, see `decide` below.
+`ownedActive`; no-op if the job is already on the day; cap: `day.jobs.filter(j => !j.carried).length >= 10` -> "A workday supports at most ten positions."; `assignedJob`; if mode is `100%` and the day already has 5 100% entries (`count100` >= `MAX_100_PER_DAY`) -> "A workday supports at most 5 100% positions…". Appends the entry, `setMode`, `attachLead`, notification `workday_started` "Started work on another position", `refreshWorkdayChecks`. Always returns `{pending:false}`: the old request-to-lead flow is gone, see `decide` below.
 
 ### Flow 3 - Work mode (`setWorkType` and `recordActiveMode`)
 Two entry points write the same thing:
@@ -53,7 +53,7 @@ Two entry points write the same thing:
 |---|---|
 | any receipt for (day, job) is `sending`/`uncertain`/`accepted` without `finalizedAt` | "Wait for this position's email result or ask the lead to reconcile it before changing work type." |
 | a finalized original EOD (`!revised`, not `recoveryReopenedAt`, `submissionType` eod/undefined) exists | "This position's EOD has been sent. Its recorded work type cannot change today." |
-| day finished and target `100%` | "The workday clock has stopped. Choose Follow-up or Add-on." |
+| target `100%` and the day already has 5 100% entries | "A workday supports at most 5 100% positions…" (`MAX_100_PER_DAY`) |
 Then it patches the entry (`workType`, appends `modeHistory {at, workType}`) and calls `autoCompleteWorkday` (changing the last 100% job to returning can complete a returning-only day). `setWorkType` additionally: `suggestedMode` is an identity hook; a `carried` job switched to Add-on is un-carried (becomes a "selected" job, refused if there are already 10 non-carried: "A workday supports at most ten selected positions.").
 
 ### What each work mode requires
@@ -131,7 +131,7 @@ Two send paths create a `taWorkdayMail` receipt in status `sending` before any p
 4. `primary` = receipts of completed jobs whose recorded mode is `100%`.
 5. `finishedAt` = if `primary` non-empty: `Math.min` of `acceptedAt ?? finalizedAt` (the FIRST final 100% EOD), but `Math.max` if any job has locations; else if the day has no current 100% job and every job is complete: `Math.max` of all receipts (last EOD, returning-only day); else no close.
 6. `closeWorkday(ctx, day, at, "eod")`: builds an immutable `completion` snapshot via `view()` (pending requests -> denied "Workday closed before approval"), patches `finishedAt/closureReason/completion`, sets `taWorkdayLeads.finishedAt`, denies pending requests, and notifies each job's lead (`workday_finished`, "Workday completed by EOD email").
-Midday, revised (`revised`/`parentId`), failed, uncertain and reopened sends never complete or retime the day. After the clock stops, Follow-up/Add-on can still be sent and added; 100% cannot. Also called from `recordActiveMode` and `reconcileMail`.
+Midday, revised (`revised`/`parentId`), failed, uncertain and reopened sends never complete or retime the day. After the clock stops, Follow-up/Add-on and further 100% positions (up to 5 100% a day, `MAX_100_PER_DAY`) can still be added and sent; the clock stays at the first 100% EOD. Also called from `recordActiveMode` and `reconcileMail`.
 
 ### Flow 8 - Stale days and recovery
 - `recoverStaleDays(ctx, userId)` (called by `start`): every unfinished day with `date < today` is first passed to `autoCompleteWorkday`; if still open it is closed `expired` at `Date.parse(date + "T00:00:00+05:30") + 86400000` (next Colombo midnight), no notification. An expired day is "Incomplete (expired)" in the UI and never counts as success.
@@ -158,7 +158,7 @@ Applies only to `ta`/`ta_support`. Today's active day (open or `eod`-closed) mus
 | Redirect | `src/app/workday/page.tsx` | `redirect("/openings?checks=open")`; `?checks=open` opens either rail |
 | Data hook | `useWorkday(detail, enabled, query)` | `GET /api/workday?detail=0|1&date=&cursor=&ta=&checkDay=`; polls every 20 s only while `document.visibilityState === "visible"`, reloads on window `focus` and on the custom event `workday-changed` (every `WorkForm` dispatches it), aborts older requests |
 | `WorkdayDashboard` | same file | TA section: "Sent EOD emails - last 31 days" (`data.sentEmails` from `ta/dailyEmails:sent`, links `/openings/<id>/eod?mail=<id>` or `?resend=` for legacy, "Edit and resend"), active day or Start picker, "Add another position", "Previous workdays" (date filter client-side). Reviewer section: "Team checks" with Day / TA / Position / Task status filters (status values incomplete, complete, waiting, excused) and "Older records"/"Latest records" cursor buttons |
-| `JobPicker` | same | Start / Add position form (`op=start|addPosition`); shows the preview checks, the "Follow-up jobs carried forward" line, and the clock-stopped warning |
+| `JobPicker` | same | Start / Add position form (`op=start|addPosition`); shows the preview checks, the "Follow-up jobs carried forward" line, and the clock-stopped note |
 | `DailyReview` + `SavedDetails` | same | per-job collapsible; header `"<title> - <mode> - N completed - M remaining"` or "EOD sent"; `WorkingStageMenu`; activity counts (CV reviews, profiles added/worked, candidates submitted, JD/post/research/benchmark activity from `taWorkdayActivity`); "Review this job's end-of-day email" link |
 | `Check` | same | row with status (Completed / Reason submitted / Waiting / To do), "Open task page" (`check.href`), history, forms: `markReviewed`, `carry`, `taskException` (submit/update/withdraw), `saveCheck jd`, `saveCheck emptySuggestions`, `ChatgptConfirmation` |
 | `EodJobChecks` | same, used by `EodComposer.tsx:~1178` | non-detail poll; lists `emailBlockers` above the composer and reports `blocked`, `excused`, saved link upward |

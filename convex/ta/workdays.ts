@@ -21,7 +21,7 @@ import { assertWorkdayScope } from "../lib/workdayScope";
 import { finalizeDailyEmail, dailyEmailsFor, middayRequired } from "../lib/dailyEmail";
 import { dailySendProblem } from "../../src/lib/dailyEmail";
 import { requiredChecks, withTaskHistory } from "../lib/workdayChecks";
-import { researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
+import { MAX_100_MESSAGE, MAX_100_PER_DAY, count100, researchMissing, researchVersion, workSessionStart } from "../../src/lib/workdayRequirements";
 import { validateResearchLink } from "../../src/lib/eod-format";
 import { canReviewWorkdays } from "../../src/lib/workdayRoles";
 import {
@@ -129,7 +129,7 @@ export async function recordActiveMode(
     throw new Error("Wait for this position's email result or ask the lead to reconcile it before changing work type.");
   if (sent.some(r => r.status === "accepted" && r.finalizedAt && !r.revised && !r.recoveryReopenedAt && (r.submissionType ?? "eod") === "eod"))
     throw new Error("This position's EOD has been sent. Its recorded work type cannot change today.");
-  if (day.finishedAt !== undefined && stage === "100%") throw new Error("The workday clock has stopped. Choose Follow-up or Add-on.");
+  if (stage === "100%" && count100(day.jobs) >= MAX_100_PER_DAY) throw new Error(MAX_100_MESSAGE);
   await ctx.db.patch(day._id, {
     jobs: day.jobs.map((j) =>
       j.jobId === jobId
@@ -1332,7 +1332,6 @@ export const beginMail = internalMutation({
       return { id: null };
     await assignedJob(ctx, user, args.jobId);
     const entry = day.jobs.find(j => j.jobId === args.jobId)!;
-    if (day.finishedAt !== undefined && entry.workType === "100%") throw new Error("The workday clock has stopped. Change an unfinished position to Follow-up or Add-on, or edit and resend its saved EOD.");
     const current = await jobView(ctx, day, entry, Date.now());
     const blockers = emailBlockers([current]).filter(c => !c.key.startsWith("mail:"));
     if (blockers.length) throw new Error(`Complete Today's Checks before sending: ${blockers.map(c => c.label).join("; ")}.`);
@@ -1598,10 +1597,7 @@ export const addPosition = internalMutation({
       throw new Error("A workday supports at most ten positions.");
     const job = await assignedJob(ctx, user, args.jobId);
     const mode = await suggestedMode(ctx, user._id, args.jobId, args.workType);
-    if (day.finishedAt !== undefined && mode === "100%")
-      throw new Error(
-        "The workday clock has stopped. A 100% EOD email completed it, so another 100% position must wait until the next workday. Follow-up and Add-on are only for returning work.",
-      );
+    if (mode === "100%" && count100(day.jobs) >= MAX_100_PER_DAY) throw new Error(MAX_100_MESSAGE);
     const now = Date.now();
     await ctx.db.patch(day._id, {
       jobs: [
@@ -1681,6 +1677,7 @@ export const decide = internalMutation({
       const mode = await suggestedMode(ctx, user._id, job._id, request.workType);
       if (day.jobs.filter(j => !j.carried).length >= 10)
         throw new Error("The workday already has ten positions.");
+      if (mode === "100%" && !day.jobs.some(j => j.jobId === job._id) && count100(day.jobs) >= MAX_100_PER_DAY) throw new Error(MAX_100_MESSAGE);
       if (!day.jobs.some((j) => j.jobId === job._id))
         await ctx.db.patch(day._id, {
           jobs: [
