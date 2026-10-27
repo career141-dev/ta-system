@@ -50,6 +50,25 @@ fetch, merge onto the latest `main` in a separate branch, read every file,
 type-check, test, report, and only then merge — flagging anything that changes
 what users see or what is sent to candidates for the owner to decide.
 
+## Feature skills — read before you change a feature, update after
+
+`.claude/skills/` holds one skill per feature, each describing how the feature
+works **today** (flows, files, tables, guards, quirks, how to change it safely):
+`follow-up`, `scoop`, `sets-shortlist`, `strategy-planner`, `voice-agent`,
+`email-intake`, `cv-extraction`, `workday`, `eod-email`, `database-search`,
+`excel-tables`, `openings`. Claude Code: type `/follow-up` etc. Other tools: open
+`.claude/skills/<name>/SKILL.md`.
+
+If your change touches a file a skill lists under `sources:`, update that skill in
+the same pull request, then stamp it. A skill that disagrees with the code is a bug.
+
+```bash
+node .claude/skills/skill-sync/staleness.mjs check            # exit 1 if any skill is out of date
+node .claude/skills/skill-sync/staleness.mjs stamp <name>     # after updating a skill
+```
+
+Details and how to add a feature skill: `.claude/skills/skill-sync/SKILL.md`.
+
 ## Code style
 
 Match the surrounding code: its comment density (comments explain *why*, often
