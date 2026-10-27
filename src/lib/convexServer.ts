@@ -18,14 +18,18 @@ import "server-only";
  */
 
 import { backendHostAllowed } from "./convexHost";
+import { Breaker, Gate, ReadCache, backoffMs } from "./convexResilience";
 
 const TIMING = !!process.env.C141_TIMING;
 
 export class ConvexCallError extends Error {
   readonly status?: number;
-  constructor(message: string, status?: number) {
+  /** The connection itself failed — the only failure that says the backend is down. */
+  readonly unreachable: boolean;
+  constructor(message: string, status?: number, unreachable = false) {
     super(message);
     this.status = status;
+    this.unreachable = unreachable;
   }
 }
 
@@ -66,7 +70,42 @@ type Kind = "query" | "mutation" | "action";
  */
 const QUERY_TIMEOUT_MS = Number(process.env.C141_QUERY_TIMEOUT_MS ?? "") || 30_000;
 
+/*
+ * Shared by every call from this process (26 Oct): identical reads share one
+ * request, at most BACKEND_CONCURRENCY queries and mutations are out at once,
+ * and a backend that has stopped answering is left alone for a few seconds.
+ * Actions are not gated — a CV reading holds its place for minutes and would
+ * starve the reads the desk is waiting on.
+ */
+const BACKEND_CONCURRENCY = Number(process.env.C141_BACKEND_CONCURRENCY ?? "") || 16;
+const reads = new ReadCache();
+const gate = new Gate(BACKEND_CONCURRENCY);
+const breaker = new Breaker();
+
 async function call<T>(kind: Kind, path: string, args: Record<string, unknown>): Promise<T> {
+  const wait = breaker.blockedFor();
+  if (wait) throw new ConvexCallError(`The backend is not answering, so calls are paused for ${wait} more seconds.`, 503);
+  try {
+    const out = await (kind === "action" ? send<T>(kind, path, args) : gate.run(() => send<T>(kind, path, args)));
+    // The backend answered, even if with a refusal.
+    breaker.success();
+    return out;
+  } catch (e) {
+    // Only a connection that fails says the backend is down. A refusal, a
+    // missing key or one slow query timing out says nothing about the rest, and
+    // must not pause every other page.
+    if (e instanceof ConvexCallError) {
+      if (e.unreachable || e.status === 502 || e.status === 503 || e.status === 504) breaker.failure();
+      else if (e.status !== undefined) breaker.success();
+    }
+    throw e;
+  } finally {
+    // A write may have changed anything a held read says.
+    if (kind !== "query") reads.clear();
+  }
+}
+
+async function send<T>(kind: Kind, path: string, args: Record<string, unknown>): Promise<T> {
   const { url, adminKey } = config();
 
   // C141_TIMING=1 logs each backend call's path, duration and response size —
@@ -98,7 +137,7 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
     }
     const cause = (err as unknown as { cause?: Error | string })?.cause;
     const causeMsg = cause ? ` - ${typeof cause === "object" && "message" in cause ? cause.message : cause}` : "";
-    throw new ConvexCallError(`Could not reach the Convex backend (${err.message}${causeMsg}).`);
+    throw new ConvexCallError(`Could not reach the Convex backend (${err.message}${causeMsg}).`, undefined, true);
   }
 
   const raw = await res.text().catch(() => "");
@@ -126,17 +165,24 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
   return body.value as T;
 }
 
-const RETRYABLE = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network|invalid json response|http 502|http 503|http 504/i;
+const RETRYABLE = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network|invalid json response|http 429|http 502|http 503|http 504/i;
 
-export async function convexQuery<T>(path: string, args: Record<string, unknown> = {}): Promise<T> {
-  for (let attempt = 1; ; attempt++) {
-    try {
-      return await call<T>("query", path, args);
-    } catch (e) {
-      if (attempt >= 4 || !(e instanceof ConvexCallError) || !RETRYABLE.test(e.message)) throw e;
-      await new Promise((r) => setTimeout(r, Math.min(300 * Math.pow(2, attempt - 1), 2000)));
+/**
+ * `cacheMs`: how stale this answer may be. Left out, the read is fresh (though
+ * identical reads at the same moment still share one request). Any write this
+ * process makes drops what is held.
+ */
+export async function convexQuery<T>(path: string, args: Record<string, unknown> = {}, opts: { cacheMs?: number } = {}): Promise<T> {
+  return reads.get<T>(ReadCache.key(path, args), async () => {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await call<T>("query", path, args);
+      } catch (e) {
+        if (attempt >= 4 || !(e instanceof ConvexCallError) || !RETRYABLE.test(e.message)) throw e;
+        await new Promise((r) => setTimeout(r, backoffMs(attempt)));
+      }
     }
-  }
+  }, opts.cacheMs);
 }
 
 export const convexMutation = <T>(path: string, args: Record<string, unknown> = {}) =>
