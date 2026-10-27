@@ -8,7 +8,7 @@ async function signIn(message) {
   if (message.consent !== true) throw new Error('Accept the tracking notice before starting.');
   const email = String(message.email || '').trim().toLowerCase();
   if (!/^[^\s@]+@career141\.com$/.test(email)) throw new Error('Use your Career141 email address.');
-  const origin = systemOrigin(message.origin);
+  let origin = systemOrigin(message.origin);
   const { pairing: existing } = await chrome.storage.local.get('pairing');
   if (existing?.email === email && existing.origin === origin && !existing.needsSignIn) return serial(() => checkpoint({ type: 'start', consent: true }));
   if ((await read()).enabled) throw new Error('Pause tracking before signing in to a different account.');
@@ -21,8 +21,14 @@ async function signIn(message) {
     const token = btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
     const tokenHash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    const liveSites = ['https://aura.career141.com', 'https://ta-system.career141.com'];
     const tabs = await chrome.tabs.query({ url: `${origin}/*` });
-    const tab = tabs.find(tab => !tab.incognito && tab.id && tab.url && new URL(tab.url).origin === origin);
+    let tab = tabs.find(tab => !tab.incognito && tab.id && tab.url && new URL(tab.url).origin === origin);
+    if (!tab && liveSites.includes(origin)) {
+      const aliases = await chrome.tabs.query({ url: liveSites.map(site => `${site}/*`) });
+      tab = aliases.find(tab => !tab.incognito && tab.id && tab.url && liveSites.includes(new URL(tab.url).origin));
+      if (tab) origin = new URL(tab.url).origin;
+    }
     if (!tab) throw new Error(`Open ${origin} and sign in with ${email}, then choose Start tracking here.`);
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id },

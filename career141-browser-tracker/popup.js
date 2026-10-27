@@ -15,7 +15,9 @@ async function send(payload) {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab?.url) {
         const url = new URL(tab.url);
-        if (['localhost', '127.0.0.1'].includes(url.hostname) && (url.pathname === '/ta-track' || url.pathname.startsWith('/ta-track/'))) $('origin').value = url.origin;
+        const liveSite = ['https://aura.career141.com', 'https://ta-system.career141.com'].includes(url.origin);
+        const localTrack = ['localhost', '127.0.0.1'].includes(url.hostname) && (url.pathname === '/ta-track' || url.pathname.startsWith('/ta-track/'));
+        if (liveSite || localTrack) $('origin').value = url.origin;
       }
     }
     $('email').value = pairing?.email || $('email').value;

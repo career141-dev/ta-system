@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Career141 TA Browser Tracker",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Opt-in website activity shared with your TA system. Reports are available to admins and TA leads in TA Track.",
   "minimum_chrome_version": "120",
   "permissions": ["tabs", "storage", "idle", "alarms", "scripting"],

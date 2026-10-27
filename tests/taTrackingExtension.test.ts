@@ -12,15 +12,17 @@ const uploads: any[] = [];
 let authCount = 0;
 let invalidSession = false;
 let missingTaTab = false;
+let testTaOrigin = 'http://localhost:3100';
+const startupListeners: (() => void)[] = [];
 const event = () => ({ addListener() {} });
 const chrome = {
   storage: { local: { async get(key: string) { return structuredClone({ [key]: storage[key] }); }, async set(data: any) { Object.assign(storage, structuredClone(data)); } } },
-  tabs: { async query(query: any) { return query.url ? missingTaTab ? [] : [{ id: 20, url: "http://localhost:3100/ta-track", incognito: false }] : [{ id: 10, url: "https://web.whatsapp.com/", incognito: false }]; }, onActivated: event(), onUpdated: event(), onRemoved: event() },
+  tabs: { async query(query: any) { return query.url ? missingTaTab ? [] : [{ id: 20, url: `${testTaOrigin}/ta-track`, incognito: false }] : [{ id: 10, url: "https://web.whatsapp.com/", incognito: false }]; }, onActivated: event(), onUpdated: event(), onRemoved: event() },
   windows: { async getAll() { return [{ id: 1, focused: true, incognito: false }]; }, onFocusChanged: event() },
-  idle: { async queryState() { return "active"; }, onStateChanged: event() },
-  alarms: { onAlarm: event() },
+  idle: { async queryState() { return "active"; }, async setDetectionInterval() {}, onStateChanged: event() },
+  alarms: { onAlarm: event(), async create() {} },
   action: { async setBadgeText() {}, async setBadgeBackgroundColor() {}, async setTitle() {} },
-  runtime: { getURL: (path: string) => `chrome-extension://test/${path}`, onInstalled: event(), onStartup: event(), onMessage: { addListener(fn: any) { listener = fn; } } },
+  runtime: { getURL: (path: string) => `chrome-extension://test/${path}`, onInstalled: event(), onStartup: { addListener(fn: () => void) { startupListeners.push(fn); } }, onMessage: { addListener(fn: any) { listener = fn; } } },
   scripting: {
     async executeScript({ target, args, func }: any) {
       ++authCount;
@@ -103,21 +105,48 @@ assert.equal((await send(signIn)).ok, true);
 assert.equal(authCount, previousAuthCount, "resuming the same account does not require another sign-in");
 assert.equal((await send({ type: "clear" }, website)).rejected, true);
 assert.equal((await send({ type: "status" }, { url: "chrome-extension://test/report.html" })).rejected, true);
-const popupNodes: Record<string, any> = {};
-const popupNode = (id: string) => popupNodes[id] ??= { value: id === 'origin' ? 'https://ta-system.career141.com' : '' };
-vm.runInNewContext(readFileSync(new URL('../career141-browser-tracker/popup.js', import.meta.url), 'utf8'), {
+await send({ type: 'pause' });
+testTaOrigin = 'https://aura.career141.com';
+assert.equal((await send({ ...signIn, origin: 'https://ta-system.career141.com' })).ok, true, 'a signed-in Aura tab works when the extension defaults to the TA System alias');
+assert.equal(storage.pairing.origin, 'https://aura.career141.com');
+assert.equal(uploads.at(-1).url, 'https://aura.career141.com/api/ta-track/upload');
+await send({ type: 'pause' });
+delete storage.pairing;
+testTaOrigin = 'https://ta-system.career141.com';
+assert.equal((await send({ ...signIn, origin: 'https://aura.career141.com' })).ok, true, 'alias fallback works in the reverse direction');
+assert.equal(storage.pairing.origin, 'https://ta-system.career141.com');
+await send({ type: 'pause' });
+const totalTime = () => Object.values(storage.tracker.rows).reduce((sum: number, row: any) => sum + row.foregroundMs, 0);
+const beforeWeekend = totalTime();
+clock += 3 * 86400000;
+for (const start of startupListeners) start();
+await send({ type: 'status' });
+assert.equal(storage.tracker.enabled, false, 'Friday Pause remains paused after a weekend/browser restart');
+assert.equal(totalTime(), beforeWeekend, 'paused weekend receives no website time');
+await send({ ...signIn, origin: testTaOrigin });
+const beforeClose = totalTime();
+clock += 600000;
+for (const start of startupListeners) start();
+await send({ type: 'status' });
+assert.equal(storage.tracker.enabled, true, 'closing without Pause resumes tracking on browser restart');
+assert.equal(totalTime(), beforeClose, 'time while the browser was closed is not credited');
+for (const activeUrl of ['http://localhost:3100/ta-track', 'https://aura.career141.com/', 'https://ta-system.career141.com/clients']) {
+  const popupNodes: Record<string, any> = {};
+  const popupNode = (id: string) => popupNodes[id] ??= { value: id === 'origin' ? 'https://ta-system.career141.com' : '' };
+  vm.runInNewContext(readFileSync(new URL('../career141-browser-tracker/popup.js', import.meta.url), 'utf8'), {
   URL,
   document: { getElementById: popupNode },
   chrome: {
     runtime: { async sendMessage() { return { ok: true, state: { enabled: true, name: 'Gajani', consent: true } }; } },
     storage: { local: { async get() { return {}; } } },
-    tabs: { async query() { return [{ url: 'http://localhost:3100/ta-track' }]; } },
+    tabs: { async query() { return [{ url: activeUrl }]; } },
   },
 });
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(popupNodes.email.disabled, false, 'email stays editable for an unsigned legacy tracker');
 assert.equal(popupNodes.start.disabled, false);
 assert.equal(popupNodes.status.textContent, 'Sign in to start tracking');
-assert.equal(popupNodes.origin.value, 'http://localhost:3100', 'local TA Track automatically selects the local destination');
-assert.equal(popupNodes.destination.textContent, 'Reports go to: http://localhost:3100');
+assert.equal(popupNodes.origin.value, new URL(activeUrl).origin, 'the popup selects the current TA website');
+assert.equal(popupNodes.destination.textContent, `Reports go to: ${new URL(activeUrl).origin}`);
+}
 console.log("TA tracker extension: upgrade recovery, editable email, destination selection, sign-in, activity upload, offline retry and pause passed.");
