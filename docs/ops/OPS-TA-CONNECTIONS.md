@@ -1,8 +1,13 @@
 # Ops System <-> TA System: connection points
 
-**Draft for review, 27 Oct 2026.** This document lists **only the common points**, the places where the new Ops system and the existing TA System (the recruiter system) touch. For each one it gives what data crosses, which way, when, and which TA endpoint serves it. It does not design either system's screens or internals.
+**Draft for review, 27 Oct 2026 (revised the same day).** This document lists **only the common points**, the places where the new Ops system and the existing TA System (the recruiter system) touch. For each one it gives what data crosses, which way, when, and which TA contract function serves it. It does not design either system's screens or internals.
 
-**Agreed shape (owner, 27 Oct):** two separate UIs and **two separate backends**. The **TA System backend becomes an API** for Ops. Ops gets its **own new backend and database** and reads and writes TA data **only through endpoints**: no shared database, no admin keys. TA-side changes come later. This document only names what the TA API must offer.
+**Agreed shape (owner, 27 Oct, revised):** **one Convex backend and one database, but two separate systems.**
+- **What is shared:** the deployment, the database, the release pipeline and the sign-in.
+- **What is separate:** each system has its own code, its own tables, its own UI and its own rules.
+- **How they talk:** only through a small, named **contract** (section 1.2). Neither system reaches into the other's tables directly.
+
+This replaces the earlier "separate backend, HTTP endpoints only" version. The common points are the same; only the way they are carried changed. TA-side changes come later. This document only names what the contract must offer.
 
 Built from:
 - the final Ops flow: c5237, the 250-step two-system flow with its OPS/REC/LINK steps; c3626, the locked business flow; and the dated decisions of 20/22/23/26 Oct, all in `/ops`;
@@ -26,26 +31,44 @@ Field names in `code` are real TA field names unless marked **(new)**.
 ## 1. The shape of the connection
 
 ```
-            Ops UI (new)                                   TA UI (existing, unchanged for now)
-                 |                                                   |
-        Ops backend + Ops DB (new)                     TA Next.js app (src/)  ── TA Convex backend (convex/)
-   leads, ESA workflow, client comms,                 server actions, repo/store,     tables, crons, mail intake,
-   interview scheduling (client side),                can() permissions,              follow-up, Director emails
-   invoices, payments, guarantees, timers             candidate/interview/offer writes
-                 |                                         |                               |
-                 |   1) READ    GET  https://api.career141.com/integrations/v1/...   (Convex HTTP, bearer token)  ◄── exists today (Capacity Planner)
-                 |   2) EVENTS  GET  .../integrations/v1/events?after=<cursor>     (outbox feed)                ◄── new
-                 |   3) COMMAND POST https://ta-system.career141.com/api/ops/v1/... (Next.js route handlers)    ◄── new
-                 |   4) WEBHOOK POST <ops-backend>/ta-events  (optional nudge, HMAC signed)                     ◄── new
-                 └──────────────────────────────────────────────────────────────────────────────────────────────┘
+      TA UI (existing Next.js app, src/)                     Ops UI (new web app, same repo, own container)
+               |  admin key + actorId (as today)                         |  Clerk sign-in -> Convex identity
+               v                                                         v
+ +---------------------------- ONE Convex backend, ONE database (api.career141.com) -----------------------------+
+ |  TA SYSTEM                                        CONTRACT                          OPS SYSTEM               |
+ |  convex/ta/*, pipeline/*, cvs/*, mailIntake/*     convex/contract/*                 convex/ops/*             |
+ |  TA tables (jobs, applications, interviews,       taForOps.*  (TA offers Ops)       ops* tables (opsLeads,   |
+ |  offers, placements, clients, esaRecords ...)     opsForTa.*  (Ops offers TA)       opsEsaWork, opsMessages, |
+ |                                                   contractEvents (outbox table)     opsInvoices, opsGuarantees)|
+ |  TA crons (follow-up, mail intake ...)                                              Ops crons (opsTimers ...)|
+ +---------------------------------------------------------------------------------------------------------------+
+                                    one release pipeline (deploy-production.yml), one backup
 ```
 
-**Why reads and commands sit in two places (important):**
-- **Reads** are simplest from the Convex HTTP router, the same place as today's Capacity Planner API (`convex/http.ts`, `convex/integrations/partnerRead.ts`, `partnerReadHttp.ts`). It already does bearer-token auth (fails closed with 503 when the token is not set), paged reads with an opaque cursor (max 100 rows), CV download and CV upload into R2. It has **no filters and no writes**, which Ops needs.
-- **Commands must go through the Next.js app.** Many TA writes are not Convex functions on their own: they run in the app layer through the synchronous `repo` (`src/data/store.ts`), `can()`/`decideOn()` permissions (`src/lib/auth.ts`, `src/lib/openings/writes.ts`), and are committed to Convex by `ta/commit:apply`. This covers placing a candidate (`src/lib/candidates/closingWrites.ts`), interviews (`src/lib/candidates/interviewWrites.ts`), stage moves (`src/lib/openings/pipelineWrites.ts`), clients and openings (`src/app/actions.ts`). An Ops command endpoint must reuse those writers so the same rules apply: collision lock, Director-review details gate, reasons, workday gate, Bin, audit. The mobile API (`src/app/api/mobile/v1/*`, 26 routes) already shows this pattern. It is session-based for people, so Ops needs a **service** version (`/api/ops/v1/*`) with its own token.
-- **Events**: TA has no outbound webhooks today. The stage-change log `pipelineEvents` (every stage move; `jobId`, `applicationId`, `fromStage`, `toStage`, `actorType`, `createdAt`) is a ready-made feed for candidate moves. Other changes (opening created, JD approved, interview booked, offer, placement) need a small **outbox** table written in the same transaction **(new: `integrationEvents`)**. Ops pulls `GET /integrations/v1/events?after=<cursor>`; a signed webhook is only a nudge to pull now.
+### 1.1 Why one backend still has to be "two systems"
+- **One deploy folder.** `convex deploy` replaces every function with what is in the folder deployed. So all Ops backend code must live **in this repo**, under `convex/ops/`. A separate repo deploying to the same backend would wipe the TA functions (the reason for AGENTS.md hard rule 6).
+- **One schema.** `convex/schema.ts` defines all tables. Split it by owner: `convex/schema/ta.ts` and `convex/schema/ops.ts`, both spread into `schema.ts`. All Ops tables are prefixed `ops`.
+- **Shared capacity.** It is one self-hosted backend: Ops crons and timers share action slots and CPU with TA (the CV reader already ran out of slots on 26 Oct). Ops work must be batched and cursor-based like TA's follow-up sweep.
+- **Coupled releases.** Both ship through the same pipeline, so an Ops change goes through the same review, tests and owner approval as a TA change.
 
----
+### 1.2 The contract (the only door between the two)
+- **`convex/contract/taForOps.ts`**: everything Ops may read or ask of TA. These are plain TypeScript functions taking `ctx` (shared helpers, the same style as `executeStageTransition`), so an Ops write and the TA change it causes happen **in one transaction**. They are also exposed as internal queries and mutations where an Ops cron or action needs them.
+- **`convex/contract/opsForTa.ts`**: everything TA may read from Ops, for example ESA status, ops owner and guarantee state for display.
+- **`contractEvents`** (outbox table, **new**): TA writes one row whenever something Ops cares about happens (section 5); Ops consumes the rows (cron every minute, plus reactive queries in the Ops UI). TA never imports Ops code.
+- **Commands keep TA's rules.** A contract function that changes TA data must apply the same rules a TA user hits: collision lock, Director-review details gate, reasons, Bin, audit. Some of those rules live today in the Next.js app layer (`src/data/store.ts` + `can()` + `ta/commit:apply`), not in Convex: placing a candidate (`src/lib/candidates/closingWrites.ts`), interviews (`src/lib/candidates/interviewWrites.ts`), saving an ESA (`repo.saveEsa`), opening status. Those rules must be **moved into Convex** (the contract) before Ops uses them, so both systems share one implementation. Where TA already has the rule in Convex, the contract reuses it:
+  - `convex/ta/clients.ts add/update/saveContacts`;
+  - `convex/ta/openings.ts create/setWorkingStage/approveJd`;
+  - `convex/ta/applications.ts shortlist/moveStage`;
+  - `executeStageTransition`;
+  - `convex/lib/shortlistDecision.ts`;
+  - `convex/lib/dailyEmail.ts`.
+
+### 1.3 Boundary rules (how "two systems" is enforced)
+1. Files under `convex/ops/` never call `ctx.db` on a TA table and never import from `convex/ta/`, `convex/pipeline/` or similar TA modules: only from `convex/contract/`.
+2. Files under `convex/ta/` (and the rest of TA) never import from `convex/ops/`. They may write `contractEvents` and call `opsForTa` read helpers.
+3. Ops tables are prefixed `ops`, and only `convex/ops/` writes them.
+4. A test in `tests/` scans the folders and fails the build if rule 1 or 2 is broken. Review via the merge-teammate skill flags any change to `convex/contract/`, because that is an agreement between the two teams.
+5. The TA web app keeps its admin-key access. The Ops web app does **not** get the admin key: it calls public Ops functions with the user's Clerk identity (`convex/auth.config.ts` already trusts the Clerk issuer; `resolveActor` in `convex/lib/auth.ts` turns it into a user). Every Ops function checks Ops roles.
 
 ## 2. Who owns which record (system of record)
 A common point only works if each record has one owner. The other side reads it, or asks the owner to change it through a command.
@@ -53,8 +76,8 @@ A common point only works if each record has one owner. The other side reads it,
 | Record | Owner | The other side | Why |
 |---|---|---|---|
 | Lead, intro call, ESA workflow (drafts, chase, countersign, negotiation, decline) | **Ops** | TA reads ESA **status and terms** only | Ops onboards clients |
-| Client (company, industry, contacts, ops owner, banking/finance flag) | **Ops** (master) | TA keeps its `clients` table as a **mirror**, written only by Ops commands, because openings and placements point at `clients` | Openings in TA need `clientId`; TA screens show the client |
-| ESA terms used for fees (status, fee rule, guarantee days, signed date) | **Ops** | Mirrored into TA `esaRecords` (exists, dormant) so `esaFor()` keeps snapshotting fee and guarantee on Place | TA already snapshots terms at placement |
+| Client (company, industry, contacts, ops owner, banking/finance flag) | **Ops** (writer) | one shared `clients` table: Ops writes it through the contract; TA reads it (openings and placements point at it) | Ops onboards clients |
+| ESA terms used for fees (status, fee rule, guarantee days, signed date) | **Ops** | the shared `esaRecords` table (exists, dormant), written by Ops through the contract; TA's Place keeps snapshotting fee and guarantee from it | TA already snapshots terms at placement |
 | Requirement (from the requirement meeting) | **Ops** | Becomes a TA opening through a command | Ops runs the meeting; TA runs the search |
 | Opening (job), team seats, JD, job posts, stages, candidates, CVs, follow-up, Director set | **TA** | Ops reads + receives events | TA's core |
 | Client round (client set): which candidates, which CVs | **TA builds it** (`reviewRounds`, kind client) | **Ops sends it**, records receipt, ownership claims and client decisions, and pushes decisions back | Client communication belongs to Ops; the candidate list belongs to TA |
@@ -68,6 +91,8 @@ A common point only works if each record has one owner. The other side reads it,
 ---
 
 ## 3. The common points, step by step (client onboarding -> close)
+
+> With one backend, read every **TA endpoint** below as the matching **contract function** in section 4 (same data, same rules): `GET /integrations/v1/...` reads become contract queries, `POST /api/ops/v1/...` commands become contract mutations, and events go through the `contractEvents` table. Where a block says "mirror", read "the shared table".
 Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint** -> **rules** -> **notes**.
 
 ### CP-01 People directory and roles
@@ -350,37 +375,55 @@ Each block: **c5237 steps** -> **direction / kind** -> **data** -> **TA endpoint
 
 ---
 
-## 4. TA endpoint catalogue (what Ops calls)
-| # | Method + path | Kind | Status | Serves |
-|---|---|---|---|---|
-| 1 | `GET /integrations/v1/tables`, `GET /integrations/v1/tables/{table}?limit&cursor` | read | **exists** | bulk/initial sync of any whitelisted table |
-| 2 | `GET /integrations/v1/cv/{id}`; `POST /integrations/v1/cv/uploads`, `/complete` | files | **exists** | CP-26 |
-| 3 | `GET /integrations/v1/events?after&limit` | events | **new** | every TA -> Ops event (section 5) |
-| 4 | `GET /integrations/v1/people` | read | adapt | CP-01 |
-| 5 | `GET /integrations/v1/clients?nameKey|updatedSince` | read | adapt | CP-02 |
-| 6 | `GET /integrations/v1/openings?status&clientId`; `/openings/{id}` | read | adapt | CP-05, CP-06, CP-24 |
-| 7 | `GET /integrations/v1/openings/{id}/pipeline` | read | adapt | CP-07, CP-13 |
-| 8 | `GET /integrations/v1/openings/{id}/client-set/{setNumber}` | read | adapt | CP-09 |
-| 9 | `GET /integrations/v1/reports/active-positions` | read | adapt | CP-24 |
-| 10 | `POST /api/ops/v1/clients/upsert` | command | new | CP-02 |
-| 11 | `POST /api/ops/v1/esa/upsert` | command | new | CP-03 |
-| 12 | `POST /api/ops/v1/openings` | command | new | CP-04 |
-| 13 | `POST /api/ops/v1/openings/{id}/status` / `/close` / `/reopen` | command | new | CP-12, CP-22, CP-23 |
-| 14 | `POST /api/ops/v1/openings/{id}/working-stage` | command | new | CP-14 |
-| 15 | `POST /api/ops/v1/openings/{id}/ad-channel` | command | new | CP-06 |
-| 16 | `POST /api/ops/v1/cvs` | command | new | CP-06 (file a sourced CV to an opening) |
-| 17 | `GET /api/ops/v1/applications/{appId}/prepared-cv` | files | new | CP-09 |
-| 18 | `POST /api/ops/v1/client-sets/{roundId}/sent` | command | new | CP-09 |
-| 19 | `POST /api/ops/v1/applications/{appId}/client-decision` | command | new | CP-10 |
-| 20 | `POST /api/ops/v1/applications/{appId}/client-owned` | command | new | CP-11 |
-| 21 | `POST /api/ops/v1/applications/{appId}/reference-request` | command | new | CP-17 |
-| 22 | `POST /api/ops/v1/interviews`; `/{id}/reschedule`; `/{id}/outcome`; `/{id}/client-decision` | command | new | CP-15, CP-16 |
-| 23 | `POST /api/ops/v1/placements/{id}/details` / `/doj` / `/cancel` / `/left` | command | new | CP-19, CP-20, CP-22 |
-| 24 | `POST /api/ops/v1/notify` | command | new | CP-25 |
-Command response (all): `200 {ok:true, id, changed}` or `4xx {ok:false, code, message}` with TA's own refusal text (e.g. collision lock, details gate, workday rule). Every command takes an `Idempotency-Key` header; a repeat returns the first result.
+## 4. Contract catalogue (what Ops calls; replaces the HTTP endpoint list)
+The CP sections above still name each connection by its old endpoint path. With one backend, each becomes a **contract function** in `convex/contract/taForOps.ts`. **Kind**:
+- `read`: a query helper, no side effects;
+- `command`: a mutation helper that applies TA's own rules and writes `contractEvents`;
+- `file`: a signed file link.
 
-## 5. Event catalogue (TA -> Ops feed)
-Every event: `{ id, type, at, openingId?, applicationId?, candidateId?, clientId?, actor:{type,id,email?}, data:{...} }`, ordered by `id` (monotonic cursor), kept at least 30 days.
+| # | Contract function | Kind | Built on (TA today) | Serves |
+|---|---|---|---|---|
+| 1 | `people.list({role, active})` | read | `users` (never return `tokenIdentifier`) | CP-01 |
+| 2 | `clients.find({nameKey})`, `clients.get(id)` | read | `clients` (`by_nameKey`) | CP-02 |
+| 3 | `clients.upsert({...})` | command | `convex/ta/clients.ts add/update/saveContacts` | CP-02 |
+| 4 | `esa.forClient(clientId)`, `esa.upsert({...})` | read / command | `esaRecords`; port `repo.saveEsa` + `esaFor` (today in `src/data/store.ts`) | CP-03 |
+| 5 | `openings.createFromRequirement({...})` | command | `convex/ta/openings.ts create` + team seats + `setWorkingStage` + brief | CP-04 |
+| 6 | `openings.get(id)`, `openings.list({status, clientId})` | read | `jobs`, `jobPosts`, `jobAssignments`, `jobs.stageCounts` | CP-05, CP-06, CP-24 |
+| 7 | `openings.setStatus / close / reopen` | command | port `setOpeningStatus` / `repo.setOpeningStatus`; `setPostStatus` | CP-12, CP-22, CP-23 |
+| 8 | `openings.setWorkingStage({openingId, userId, mode})` | command | `convex/ta/openings.ts setWorkingStage` + `recordActiveMode` | CP-14 |
+| 9 | `openings.recordAdChannel({...})` | command | **new** fields on `jobPosts` / `jobs` | CP-06 |
+| 10 | `cvs.fileToOpening({fileId, openingId, source})` | command | `ta/cv` upload + extraction queue (`cvUploads.source`) | CP-06 |
+| 11 | `pipeline.forOpening(id)` | read | `applications`, `pipelineEvents` | CP-07, CP-13 |
+| 12 | `clientSets.get({openingId, setNumber})` | read | `reviewRounds` (kind client), EOD row fields (`src/lib/eod.ts shortlistRows`) | CP-09 |
+| 13 | `files.preparedCv(appId)`, `files.cv(cvUploadId)` | file | `src/lib/preparedCvFile.ts` (port or call through the TA app), R2/Convex storage | CP-09, CP-26 |
+| 14 | `clientSets.markSent({roundId, sentAt, receivedAt})` | command | `reviewRounds.dispatch` (today always `"held"`) | CP-09 |
+| 15 | `applications.recordClientDecision({...})` | command | `ta/applications:moveStage` + `recordShortlistDecision` (as a recorded client reply) | CP-10 |
+| 16 | `applications.markClientOwned({...})` | command | **new** `applications.clientOwnedAt` + stage move with reason | CP-11 |
+| 17 | `applications.requestReference({...})` | command | **new** reference record | CP-17 |
+| 18 | `interviews.book / reschedule / setOutcome / recordClientDecision` | command | port `writeCandidateInterview` (`src/lib/candidates/interviewWrites.ts`) into Convex | CP-15, CP-16 |
+| 19 | `offers.forApplication(appId)` | read | `offers` | CP-18 |
+| 20 | `placements.get(id)`, `placements.addDetails / changeDoj / cancel / markLeft` | read / command | `placements`; port `writeCandidateClosing` (`src/lib/candidates/closingWrites.ts`) | CP-19, CP-20, CP-22 |
+| 21 | `reports.activePositions()` | read | Reports / Master Sheet logic (`src/lib/reporting.ts`, `masterSheet.ts`) | CP-24 |
+| 22 | `notify({userId, type, title, body, jobId?, candidateId?})` | command | `notifications` insert (TA bell) | CP-25 |
+| 23 | `calendar.workingDays()` | read | `src/lib/calendar.ts` (holidays list to fill) | section 6 |
+
+And the reverse direction, `convex/contract/opsForTa.ts` (TA may read):
+
+| Function | Kind | Serves |
+|---|---|---|
+| `esaStatus(clientId)` | read | ESA declined blocks a new opening; TA shows ESA status |
+| `opsOwner(clientId)` | read | TA shows who owns the client |
+| `guaranteeState(placementId)` | read | TA shows guarantee and refund state instead of its own `refund_due` |
+| `clientSetState(roundId)` | read | TA shows sent / received / ownership clock |
+
+Command results: `{ok:true, id, changed}` or `{ok:false, code, message}` with TA's own refusal text (collision lock, details gate, workday rule). Every command takes an `idempotencyKey`; a repeat returns the first result. The **existing HTTP partner API** (`/integrations/v1`) stays for the Capacity Planner and is **not** used by Ops.
+
+## 5. Event catalogue (TA -> Ops, through the `contractEvents` table)
+- **Shape**: each row is `{ type, at, openingId?, applicationId?, candidateId?, clientId?, actor:{type,id}, data:{...}, consumedAt? }`. TA inserts the row **in the same transaction** as the change, so an event can never be lost or come early.
+- **Consumption**: Ops consumes rows in order with a cursor (a cron every minute, batched like TA's sweeps), marks them consumed, and keeps them at least 30 days.
+- **Freshness**: the Ops UI can also read TA data reactively through contract queries, so screens update live without waiting for the cron.
+- **Stage changes**: `pipelineEvents` is already written on every stage move by `executeStageTransition`; the contract can reuse it, or mirror it into `contractEvents`.
+
 | Event | Raised in TA by | Used for |
 |---|---|---|
 | `opening.created` / `opening.updated` / `opening.closed` | opening create, `setOpeningStatus`, team saves | CP-04, CP-05, CP-23 |
@@ -397,17 +440,17 @@ Every event: `{ id, type, at, openingId?, applicationId?, candidateId?, clientId
 | `candidate.rejection_notice_sent` | rejection template send | CP-21 |
 | `notification.for_ops` | escalations meant for an ops owner | CP-25 |
 
-## 6. Shared rules both backends must use the same way
+## 6. Shared rules both systems must use the same way
 1. **Identities**:
-   - people by email;
-   - clients by TA `nameKey` + Ops ref;
+   - people by the shared `users` row (one Clerk login per person); Ops roles in `opsMembers`;
+   - clients by the shared `clients` row (dedup key `nameKey`);
    - openings by TA `jobs._id` + `opsRequirementRef`;
    - candidates and applications only by TA ids (Ops never creates candidates directly; it files CVs through CP-06).
 2. **Stage names**: TA backend names are the contract (`new_cvs ... placed, rejected, unresponsive`); the translator is `convex/ta/stages.ts`.
 3. **Time**:
    - all timestamps UTC milliseconds;
    - days are **Asia/Colombo** days (TA uses Colombo days everywhere since 2 Oct);
-   - **working days** need one shared Sri Lankan holiday list. TA's `src/lib/calendar.ts` has `HOLIDAYS = []`, which must be filled and served (**new** `GET /integrations/v1/calendar`) so the 7-working-day ownership clock and the 60-working-day replacement clock match on both sides.
+   - **working days** need one shared Sri Lankan holiday list. TA's `src/lib/calendar.ts` has `HOLIDAYS = []`, which must be filled and served (contract `calendar.workingDays()`) so the 7-working-day ownership clock and the 60-working-day replacement clock match on both sides.
 4. **Money terms**: the fee rule and guarantee days come from the ESA (CP-03) and are **snapshotted on the placement** (CP-19). Ops invoices from the snapshot, never from today's ESA.
 5. **Reasons**: reject, hold, decline and drop-out carry a reason across the line (Director rejection excepted).
 6. **Messages**:
@@ -417,51 +460,57 @@ Every event: `{ id, type, at, openingId?, applicationId?, candidateId?, clientId
    - each side runs its own fail-closed safety gate (TA: `convex/lib/outreachSafety.ts`, `outboundGuard.ts`, `OUTREACH_LIVE` never in code).
 7. **One reader per mailbox**: TA reads shortlists@ for Director replies; client replies move to Ops (CP-10); interviews@ moves to Ops when Ops owns scheduling.
 
-## 7. Security for the connection
-- Two **service tokens**, one per direction, scoped (`read`, `events`, `commands`), stored only in each backend's secret manager. Same model as `CAPACITY_PLANNER_READ_TOKEN`: at least 32 random bytes, fail closed (503) when unset, server to server only, no browser CORS.
-- **Never** give Ops the Convex admin key or database access (AGENTS.md hard rule 1: no laptop or ad-hoc access to the live backend).
-- Commands run as a **service actor** recorded in TA's audit (`activityLog`, `pipelineEvents.actorType`), plus the Ops user's email in the body for "who did it".
-- Webhook nudges (optional) are HMAC-signed with a timestamp and nonce (TA already does this for the voice agent: `/api/voice-agent/events`).
-- Send only the fields each connection needs (section 3). No CV text in events; fetch files on demand.
-- New endpoints are released through the pipeline (`git push origin main:production`), never from a laptop; Ops is tested first against a non-production TA (staging is paused today, so a local or staging copy must exist first).
+## 7. Security inside one backend
+- **No admin key in the Ops UI.** Ops functions are public Convex functions that require a signed-in Clerk identity (`ctx.auth.getUserIdentity()` -> `resolveActor`). Every one checks Ops roles. The TA app keeps its current admin-key + actorId path.
+- **Two role sets, one sign-in.** The same `users` table (one Clerk login per person). Ops roles live in an Ops table (`opsMembers`: userId, role ops_owner/ops_lead/accounts/director_ops/marketing). TA roles stay in `users.taRole`. A person can hold both.
+- **Audit.**
+  - Every contract command records the acting person and system: `pipelineEvents.actorType` / `actorId`, `activityLog`, and the `contractEvents` row.
+  - Money and guarantee actions are logged in Ops tables with who and why.
+- **Outbound safety:**
+  - Candidate messages stay in TA, behind `convex/lib/outreachSafety.ts` and `outboundGuard.ts`.
+  - Ops client messages get an Ops gate of the same fail-closed design, reusing those helpers. `OUTREACH_LIVE` is never set in code.
+- **Releases.** All changes reach live only through the pipeline (AGENTS.md hard rule 1); schema changes are optional fields; data repairs are `dryRun` migrations (hard rule 5).
 
-## 8. First sync (go-live)
-1. People (CP-01).
-2. Clients (CP-02): Ops imports TA `clients`; nameKey matches become linked.
-3. ESA records (CP-03).
-4. Open openings and their teams (CP-05).
-5. Candidates in client stages: `director_shortlist`, `client_review`, `interview`, `offer`.
-6. Placements still inside a guarantee (CP-19/22).
-7. Then switch to the event feed from the cursor at sync time.
-Data repairs on the TA side are `dryRun` migrations run by the pipeline (AGENTS.md hard rule 5).
+## 8. Go-live (no copying needed)
+There is nothing to sync between two databases.
+- **Backfill the Ops tables** (`dryRun` migrations run by the pipeline):
+  - an Ops profile per existing client: ops owner, banking/finance flag;
+  - Ops guarantee rows for placements still inside 90 days;
+  - Ops members for the people who will use Ops.
+- **Start consuming** `contractEvents` from go-live.
+- **Optionally import the current sheets** (master, client, interview) into Ops tables.
 
 ## 9. What this implies for the TA System later (list only)
-**Endpoints**: the new/adapt endpoints in section 4; the outbox `integrationEvents`.
+**Contract and enforcement:**
+- `convex/contract/*`, the `contractEvents` outbox, and the boundary test;
+- split `schema.ts` into `schema/ta.ts` and `schema/ops.ts`;
+- move the app-layer writes Ops needs into Convex: ESA save, opening status, interview writes, offer/placement writes, prepared CV.
 
-**New fields**:
-- `clients`: `opsClientRef`, `bankingFinanceFlag`, `updatedAt`;
-- `esaRecords`: `declined`, fee rule;
+**New fields:**
+- `clients`: `bankingFinanceFlag`, `updatedAt`;
+- `esaRecords`: `declined`, fee rule, `countersignedAt`;
 - `jobs`: `opsRequirementRef`, `handoverAt`, hold reason;
-- `interviews`: `scheduledBy`, Teams link, `opsInterviewRef`;
+- `interviews`: `scheduledBy`, Teams link;
 - `placements`: package, offer letter, DOJ history, `replacementOf`;
 - `applications`: `clientOwnedAt`.
 
-**New values**: a source tag for TopJobs and Talent Pulse; a "monitor" mode.
+**New values:** source tags `topjobs` / `talent_pulse`; a "monitor" mode.
 
-**Behaviour**:
+**Behaviour:**
 - block openings when the ESA is declined;
 - the client round is marked sent by Ops;
 - one reader per mailbox;
-- guarantee and refund display only;
-- fix the `/placements/{id}` redirect.
+- guarantee and refund shown from Ops;
+- fix the `/placements/{id}` redirect;
+- fill the holiday calendar.
 
 These are TA customisations to do after this contract is agreed.
 
 ## 10. Questions on the connection (to settle before building)
-1. Ops is the master of clients and ESA, and TA keeps a mirror written only by Ops. Agreed?
-2. Who computes pipeline depth (Ops from the feed, or TA)? Recommendation: Ops.
+1. Ops writes clients and ESA through the contract, and TA screens read them (TA's own client edit screen becomes read-only or calls the same contract). Agreed?
+2. Who computes pipeline depth (Ops from events, or TA)? Recommendation: Ops.
 3. Client replies: move from TA's shortlists@ reader to Ops. Agreed? And interviews@?
-4. Interviews: one TA record, client side written by Ops. Agreed?
-5. Events: pull feed with an optional webhook nudge. Agreed? How fresh must Ops be (seconds or minutes)?
-6. Where does the Ops backend run (same VPS, separate container)? This decides the network path to `api.career141.com` and `ta-system.career141.com`.
+4. Interviews: one TA record, client side written by Ops through the contract. Agreed?
+5. Ops UI: a second Next.js app in this repo with its own container (recommended for "two systems"), or an `/ops` area inside the TA app?
+6. Who reviews changes to `convex/contract/` (both team leads)?
 7. Shared holiday calendar: who maintains it?
