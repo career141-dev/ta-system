@@ -35,6 +35,7 @@ const NAV = [
   // system raised was invisible.
   { href: "/alerts", label: "Alerts" },
   { href: "/reports", label: "Reports" },
+  { href: "/ta-track", label: "TA Track" },
   // Practice calls with the AI screening agent (as the CV platform's Aura page).
   { href: "/voice", label: "Voice agent" },
   { href: "/feedback", label: "Feedback" },
@@ -73,6 +74,7 @@ export function TopNav({
       (n.href !== "/workday" || ["ta", "ta_support", "ta_lead", "admin"].includes(user.role)) &&
       (n.href !== "/voice" || allows(user, "voice.practice")) &&
       (n.href !== "/strategy" || allows(user, "strategy.assign")) &&
+      (n.href !== "/ta-track" || user.role === "admin" || user.role === "ta_lead") &&
       (n.href !== "/feedback" || !isTa(user)),
   );
   const badge = alertCount > 0 && (

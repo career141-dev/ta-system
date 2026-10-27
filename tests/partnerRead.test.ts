@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { hasPartnerBearerToken, partnerPageOptions } from "../convex/lib/partnerReadAuth";
-import { PARTNER_READ_TABLES, redactPartnerSecrets } from "../convex/integrations/partnerRead";
+import { PARTNER_PRIVATE_TABLES, PARTNER_READ_TABLES, readTablePage, redactPartnerSecrets } from "../convex/integrations/partnerRead";
 
 const schema = readFileSync(path.resolve("convex/schema.ts"), "utf8");
 const schemaTables = [...schema.matchAll(/^  ([A-Za-z][A-Za-z0-9_]*): defineTable\(/gm)].map((m) => m[1]);
-assert.deepEqual([...PARTNER_READ_TABLES].sort(), schemaTables.sort(), "Partner table registry must cover the full app schema");
+assert.deepEqual([...PARTNER_READ_TABLES, ...PARTNER_PRIVATE_TABLES].sort(), schemaTables.sort(), "Partner table registry must classify the full app schema");
 assert.equal(new Set(PARTNER_READ_TABLES).size, PARTNER_READ_TABLES.length, "Partner table registry has duplicate names");
+for (const table of PARTNER_PRIVATE_TABLES) {
+  assert.equal((PARTNER_READ_TABLES as readonly string[]).includes(table), false);
+  await assert.rejects(() => (readTablePage as any)._handler({}, { table, limit: 50 }), /Unknown table/);
+}
 
 const testToken = "a".repeat(43);
 assert.equal(await hasPartnerBearerToken(`Bearer ${testToken}`, testToken), true);

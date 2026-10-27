@@ -1,0 +1,13 @@
+﻿<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>TA Browser Tracker</title><link rel="stylesheet" href="style.css"></head>
+<body class="popup"><main>
+<div class="eyebrow">CAREER141</div><h1>Browser time tracker</h1>
+<p id="status" class="status" role="status">Loading…</p><p id="account"></p>
+<label for="email">Career141 email</label><input id="email" type="email" autocomplete="email" placeholder="you@career141.com">
+<details><summary>Connection settings</summary><label for="origin">TA website address</label><input id="origin" type="url" value="https://ta-system.career141.com"><p class="muted">Use the same address where you open TA Track. If you run the app on this computer, use its address, for example http://localhost:3100.</p></details>
+<p id="destination" class="muted"></p>
+<label class="check"><input id="consent" type="checkbox"><span>I agree to share website domains, foreground/idle time and mouse activity counts with my TA system's admins and TA leads until I pause. Typed text and messages are not collected.</span></label>
+<div class="actions"><button id="start">Start tracking</button><button id="pause" class="secondary">Pause</button></div>
+<p id="sync" role="status"></p><p id="error" role="alert"></p>
+<footer>Uses the account already signed in on your TA website tab. Reports appear under TA Track for admins and TA leads. Refresh already-open websites after installing or reloading. Private windows are excluded.</footer>
+</main><script src="popup.js" type="module"></script></body></html>

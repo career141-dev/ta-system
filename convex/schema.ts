@@ -3,6 +3,17 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
+  taTrackingDevices: defineTable({
+    userId: v.id("users"), tokenHash: v.string(), expiresAt: v.number(),
+    createdAt: v.number(), lastSyncAt: v.number(), enabled: v.boolean(),
+  }).index("by_token", ["tokenHash"]).index("by_user", ["userId"]),
+  taTrackingRows: defineTable({
+    deviceId: v.id("taTrackingDevices"), userId: v.id("users"), date: v.string(), domain: v.string(),
+    foregroundMs: v.number(), activeMs: v.number(), idleMs: v.number(),
+    clicks: v.number(), scrolls: v.number(), movementSeconds: v.number(), lastSeen: v.number(),
+  }).index("by_device_date_domain", ["deviceId", "date", "domain"])
+    .index("by_date", ["date"]).index("by_user_date", ["userId", "date"])
+    .index("by_lastSeen", ["lastSeen"]),
   dailyEmailPolicy: defineTable({ key: v.string(), requiredFrom: v.string() }).index("by_key", ["key"]),
   // Drafts and transport acknowledgements share an id. A retry cannot create
   // a second original after Graph has accepted the first (16 Oct).
