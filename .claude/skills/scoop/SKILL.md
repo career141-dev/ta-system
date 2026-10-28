@@ -62,6 +62,7 @@ State after a good upload: application in the "new CVs" stage (`currentStage` `n
 ### Flow 3 - Progress panel (poll)
 
 - `ScoopUpload` polls every 4 s (`setInterval(tick, 4000)`, plus one immediate call) while any row is `reading` with an id: GET `/api/scoops/upload?openingId=&ids=` (`GET` in the route; ids capped at 20; same `mayUpload` gate; `!isConvex()` or no ids -> `{ok:true, files:[]}`).
+- A failed row shows **Try again** (PATCH `/api/scoops/upload` `{openingId,id}` -> `ta/hhUpload:retry`, shared with HH: re-reads the stored file into the same profile; uploader only) and **Remove** (list only), 28 Oct.
 - `ta/scoopUpload:status` (`internalQuery`, `optionalActor`, no job-access check of its own; first 20 ids): per id returns `missing` ("That upload no longer exists.") or `uploadProgress(upload, businessState)` from `convex/lib/cvUploadProgress.ts` plus `fileName`, candidate `name`, `applicationId`, `stage` (via `toTaStage`) and `note` (`errorMessage ?? "The CV could not be read."` if failed, else `routeNote`).
 - `businessState` = `app?.scoopReceivedAt ? (upload.routeNote ? "held" : "done") : null`. `uploadProgress` only honours it when the upload has no `processingStage` (legacy) or `stage === "completed"`; the application row can exist a few mutations before filing ends.
 - UI states and wording (`LINE` map): `uploading` "Uploading...", `reading` (label from step map), `done` "Added as a scoop", `held` "Not added" (label from progress: "Needs attention"), `failed` "Could not be read", `missing` "Not found".
@@ -222,10 +223,11 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 - 2026-10-20 `bdd78a1` (PR #223) persist scoop upload progress in localStorage, `Processing` badge, sync event; `c0a68c7` friendlier error recovery.
 - 2026-10-21 `3528eba` real progress steps (`cvUploadProgress.ts`), `processingStage`, shared HH/Scoop translator.
 - 2026-10-26 `56768fa` (PR #293, `0a5d8c4`) urgent lane: a TA's own HH/Scoop upload is read first with a slot kept for it; `enqueueExtraction` called inside the upload mutation (reading queue itself came in `138de24`, same day).
+- 2026-10-28 `d34d9a6` a scoop moved to Follow-up or Director Shortlist gets the opening's only active work location (`placeInOnlyLocation` in `ta/applications.ts`); Try again / Remove on failed scoop cards (`ta/hhUpload:retry`).
 
 <!-- skill-meta
-verified-commit: ddec547
-verified-hash: 178d8636807b2c43d8694b0a27e8eb15d7966141
+verified-commit: 2bf544c1
+verified-hash: 6c78f2bdb7aebc956c4ffdfb0df84759b0d8226e
 verified-date: 2026-10-28
 sources:
   convex/ta/scoopUpload.ts

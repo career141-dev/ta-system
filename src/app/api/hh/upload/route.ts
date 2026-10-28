@@ -4,6 +4,7 @@ import { primeStore, resetStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { currentUser } from "@/lib/session";
 import { convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
+import { safeErrorMessage } from "@/lib/userError";
 import { HEADHUNT_MAX_BYTES, mayUploadHeadHuntCv, queueHeadHuntCv } from "@/lib/openings/hhUpload";
 
 /**
@@ -69,4 +70,19 @@ export async function GET(req: NextRequest) {
     revalidatePath(`/openings/${openingId}`, "layout");
   }
   return answer({ ok: true, files });
+}
+
+/** "Try again" on a CV that could not be read: the stored file is read again (28 Oct). */
+export async function PATCH(req: NextRequest) {
+  const body = (await req.json().catch(() => null)) as { openingId?: string; id?: string } | null;
+  const { user, message, status } = await mayUpload(String(body?.openingId ?? ""));
+  if (!user) return refuse(message, status);
+  if (!body?.id) return refuse("That upload no longer exists.");
+  if (!isConvex()) return refuse("CV files are read by the candidate database, which this local build is not connected to.", 501);
+  try {
+    await convexMutation("ta/hhUpload:retry", { actorId: user.id, cvUploadId: body.id });
+    return answer({ ok: true });
+  } catch (e) {
+    return refuse(safeErrorMessage(e, "The CV could not be sent for reading again. Try again."), 500);
+  }
 }

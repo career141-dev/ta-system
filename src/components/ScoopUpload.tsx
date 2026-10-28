@@ -105,6 +105,25 @@ export function ScoopUpload({ openingId, senders }: { openingId: string; senders
 
   const patch = (key: string, p: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...p } : r)));
 
+  // A CV that could not be read is read again from the stored file (28 Oct).
+  async function retry(r: Row) {
+    if (!r.id) return;
+    patch(r.key, { state: "reading", note: null, stage: "queued", label: "Waiting for a CV reader", progress: 8 });
+    try {
+      const res = await fetch("C:/Program Files/Git/api/scoops/upload", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ openingId, id: r.id }),
+      });
+      const json = (await res.json()) as { ok: boolean; message?: string };
+      if (!json.ok) patch(r.key, { state: "failed", note: json.message ?? "Could not try again." });
+    } catch {
+      patch(r.key, { state: "failed", note: "Could not reach the server. Try again." });
+    }
+  }
+
+  const remove = (key: string) => setRows((rs) => rs.filter((r) => r.key !== key));
+
   const clearFinished = () => {
     setRows((rs) => rs.filter((r) => r.state === "uploading" || r.state === "reading"));
   };
@@ -285,6 +304,16 @@ export function ScoopUpload({ openingId, senders }: { openingId: string; senders
                     >
                       {(r.state === "uploading" || r.state === "reading") && <Spinner tone="dark" />}
                       {r.state === "reading" ? (r.label ?? LINE.reading) : LINE[r.state]}
+                      {r.state === "failed" && r.id && (
+                        <button type="button" onClick={() => retry(r)} className="ml-2 rounded-full border border-brand-line px-2.5 py-0.5 text-[11.5px] font-medium text-brand hover:bg-brand-soft cursor-pointer">
+                          Try again
+                        </button>
+                      )}
+                      {(r.state === "failed" || r.state === "held" || r.state === "missing") && (
+                        <button type="button" onClick={() => remove(r.key)} className="text-[11.5px] text-ink-faint hover:text-ink cursor-pointer">
+                          Remove
+                        </button>
+                      )}
                     </span>
                   </li>
                 ))}
