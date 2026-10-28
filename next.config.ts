@@ -6,6 +6,8 @@ import { syncPdfWorker } from "./scripts/pdf-worker.mjs";
 syncPdfWorker(path.resolve(__dirname));
 
 const nextConfig: NextConfig = {
+  // Set by `next upgrade --agent=security` (28 Oct, 16.4.0 -> 16.4.3).
+  experimental: { agentUpgrade: "security" },
   // A server that runs from .next/standalone, with only the files it traced —
   // what the production image copies (see Dockerfile). `next start` is
   // unaffected, and so is `next dev`.

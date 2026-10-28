@@ -2964,7 +2964,10 @@ export async function runDatabaseSearch(formData: FormData) {
   // turnsOf). Boolean is a literal string and always stands alone.
   const prior = mode === "boolean" ? "" : String(formData.get("prior") ?? "").trim();
   if (!said) redirect(prior ? `/database/results?${new URLSearchParams({ q: prior })}` : "/database");
-  const turns = prior ? [...prior.split(/\n+/).filter((t) => t.trim()), said.replace(/\s*\n+\s*/g, " ")] : [said];
+  // The first message is one message too: a pasted job description has many
+  // lines and was read as that many refinements, the last one winning (28 Oct).
+  const oneLine = said.replace(/\s*\n+\s*/g, " ");
+  const turns = prior ? [...prior.split(/\n+/).filter((t) => t.trim()), oneLine] : [oneLine];
   // Over 4,000 characters, the oldest refinements go — never the first request.
   while (turns.length > 2 && turns.join("\n").length > 4000) turns.splice(1, 1);
   const q = turns.join("\n").slice(0, 4000);

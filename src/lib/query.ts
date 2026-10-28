@@ -69,6 +69,11 @@ function matchVocab(text: string, vocab: string[]): string[] {
   return out;
 }
 
+/** The most years a bare "N years" allows: 2 → 4, 5 → 8, 10 → 15. */
+export function yearsBand(n: number): number {
+  return n + Math.max(2, Math.ceil(n / 2));
+}
+
 function num(m: RegExpMatchArray | null, i = 1): number | null {
   if (!m) return null;
   const n = Number(m[i]);
@@ -109,12 +114,23 @@ export function parseQuery(raw: string, vocab: Vocabulary): ParseResult {
     c.maxExperience = num(expRange, 2);
     eat(new RegExp(expRange[0], "i"));
   } else {
-    const expMin = rest.match(/\b(?:at least|minimum|min|over|more than|above)\s*(\d{1,2})\s*(?:\+)?\s*(?:years|yrs?)\b/) ??
-      rest.match(/\b(\d{1,2})\s*\+\s*(?:years|yrs?)\b/) ??
-      rest.match(/\b(\d{1,2})\s*(?:years|yrs?)\b/);
-    if (expMin) {
-      c.minExperience = num(expMin);
-      eat(new RegExp(expMin[0].replace(/[+]/g, "\\+"), "i"));
+    // "up to 3 years" names a ceiling only.
+    const expMax = rest.match(/\b(?:up to|under|max|maximum|less than|below|no more than|within)\s*(\d{1,2})\s*(?:years|yrs?)\b/);
+    if (expMax) {
+      c.maxExperience = num(expMax);
+      eat(new RegExp(expMax[0], "i"));
+    } else {
+      const open = rest.match(/\b(?:at least|minimum|min|over|more than|above)\s*(\d{1,2})\s*(?:\+)?\s*(?:years|yrs?)\b/) ??
+        rest.match(/\b(\d{1,2})\s*\+\s*(?:years|yrs?)\b/);
+      // A bare "2 years" is a level, not a floor: it asks for about that much,
+      // so a 23-year person is not an answer to it (28 Oct, owner).
+      const bare = open ? null : rest.match(/\b(\d{1,2})\s*(?:years|yrs?)\b/);
+      const expMin = open ?? bare;
+      if (expMin) {
+        c.minExperience = num(expMin);
+        if (bare) c.maxExperience = yearsBand(c.minExperience!);
+        eat(new RegExp(expMin[0].replace(/[+]/g, "\\+"), "i"));
+      }
     }
   }
 
@@ -262,6 +278,12 @@ export function parseConversation(q: string, vocab: Vocabulary): ParseResult {
       } else if (later !== null && later !== "any") {
         (c as unknown as Record<string, unknown>)[key] = later;
       }
+    }
+    // Years come as a pair: "at least 8" after "5 years" must not keep 5's
+    // ceiling. A message with only a ceiling keeps the floor before it.
+    if (r.criteria.minExperience !== null) {
+      c.minExperience = r.criteria.minExperience;
+      c.maxExperience = r.criteria.maxExperience;
     }
     ignored.push(...r.ignored);
   }

@@ -32,7 +32,8 @@ import { embedQuery } from "@/lib/embed";
 import { searchVectors } from "@/lib/qdrantSearch";
 import { maxModelCost, modelCost, reserve } from "@/lib/spend";
 import { employerMatch, excludedByEmployer, employersInText, describeEmployerHit } from "../../convex/lib/employers";
-import { intentToEngineHints, readSearchIntent, type SearchIntent } from "@/lib/searchIntent";
+import { intentToEngineHints, readSearchIntent, searchKindOf, type SearchIntent, type SearchKind } from "@/lib/searchIntent";
+import { convexQuery } from "@/lib/convexServer";
 import { referenceProfileSearchText, type ReferenceSearchProfile } from "@/lib/referenceSearchProfile";
 import { compareSearchCandidates, mergeSearchPool, quickRolePhrase, readOccupation, searchEvidenceReason, searchReviewPool, type RoleEvidence, type SearchOccupation } from "../../convex/lib/searchRoleEvidence";
 
@@ -68,6 +69,8 @@ export interface EngineSearch {
     employers?: string[];
     employerScope?: "current" | "any";
     excludeEmployers?: string[];
+    /** What the search was read as: a job description, a keyword list, a name or a role. */
+    kind?: SearchKind;
   };
   /** Conversation memory read from the natural-language turns. It contains no
    *  candidate contact data or CV text; it is only the recruiter's intent. */
@@ -282,6 +285,14 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   // 1 and 2 overlap: the words and the vectors are searched on the sentence
   // itself while the model reads it.
   const modelIntent = withModel ? intentFor(parser, args.turns) : null;
+  // What was typed (28 Oct): a pasted JD, a keyword list, a name, or a role. A
+  // reference CV is always a role-shaped search.
+  const known = args.chips.titles.length + args.chips.skills.length + args.chips.industries.length + args.chips.employers.length > 0 || !!args.location;
+  const { kind, keywords: listed } = args.referenceProfile ? { kind: "role" as SearchKind, keywords: [] as string[] } : searchKindOf(args.turns, known);
+  // A keyword list means every keyword is in the profile, whether or not the
+  // recruiter set chips.
+  const filterArgs: EngineArgs = kind === "keywords" && !args.customFilters?.length ? { ...args, customFilters: listed } : args;
+  const named = kind === "name" ? nameHits(args.turns[0]) : Promise.resolve([] as EngineHit[]);
   // Which routes failed. One down is fine — the other still answers — but an
   // empty answer with a route down is not "nothing matched": it was cached as
   // that for five minutes, and a refresh could not clear it (21 Sep).
@@ -290,10 +301,17 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     vectorPool(q, args, down),
     // The latest message on its own too: "working at ABC" glued to the
     // messages before it is a weaker query than either alone.
-    backend.keywordSearchMany(NO_ACTOR, [q, ...args.turns.slice(-2).reverse(), ...args.chips.titles, ...args.chips.skills.slice(0, 3)], FETCH_LIMIT).catch((e) => {
-      down.push(`keyword search (${(e as Error)?.message ?? e})`);
-      return [];
-    }),
+    // A pasted JD is searched on what the model read out of it, not on its
+    // 4,000 characters. Until then, or when the model is down, as before.
+    (kind === "job_description" && modelIntent
+      ? modelIntent.then((r) => (r.usage.model === "regex-fallback" ? [q.slice(0, 300)] : parser.buildSearchTerms(r.requirements, q))).catch(() => [q.slice(0, 300)])
+      : Promise.resolve(kind === "keywords" ? listed : [q, ...args.turns.slice(-2).reverse(), ...args.chips.titles, ...args.chips.skills.slice(0, 3)])
+    )
+      .then((terms) => backend.keywordSearchMany(NO_ACTOR, terms, FETCH_LIMIT))
+      .catch((e) => {
+        down.push(`keyword search (${(e as Error)?.message ?? e})`);
+        return [];
+      }),
   ]);
 
   const reading = modelIntent ? await modelIntent.catch(() => null) : null;
@@ -307,7 +325,9 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
         explicitSkills: intentHints.mustHave,
         inferredSkills: [...reference.coreSkills, ...reference.supportingSkills],
       }
-    : readOccupation(parsed, q, [...(args.customFilters ?? []), ...intentHints.mustHave]);
+    : kind === "keywords"
+      ? { targetOccupation: null, equivalentTitles: [], reportingContext: null, explicitSkills: listed, inferredSkills: [] }
+      : readOccupation(parsed, q, [...(args.customFilters ?? []), ...intentHints.mustHave]);
   const req: Requirements = {
     ...parsed,
     title: reference?.role ?? parsed.title,
@@ -382,12 +402,13 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     const similarity = vectorScore.get(id);
     return d && !d.cvFileMissing ? [{ ...d, vectorScore: similarity }] : [];
   });
+  const nameFirst = await named;
   if (pool.length === 0) {
-    return { interpretation: interpretationOf(req, modelIntent !== null), intent: searchIntent, hits: [] };
+    return { interpretation: interpretationOf(req, modelIntent !== null, kind), intent: searchIntent, hits: nameFirst };
   }
 
   // Explicit constraints remain enforced even when nobody satisfies them.
-  const candidates = strictFilters(pool, args, req);
+  const candidates = strictFilters(pool, filterArgs, req);
 
   // 4. The engine's weighted score.
   const ranked = candidates
@@ -417,11 +438,12 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     .map((c) => ({ c, score: verdicts.get(c.index)?.score ?? c.overallScore, reason: verdicts.get(c.index)?.reason ?? searchEvidenceReason(c.roleEvidence, c.cv.currentTitle ?? "", [...c.missingRequired, ...req.preferredSkills.filter(s => !c.matchedPreferred.some(m => m.toLowerCase() === s.toLowerCase()))]) }))
     .sort((a, b) => compareSearchCandidates(a.c, b.c, a.score, b.score));
 
+  const onName = new Set<string>(nameFirst.map((h) => h.candidateId));
   return {
-    interpretation: interpretationOf(req, modelIntent !== null),
+    interpretation: interpretationOf(req, modelIntent !== null, kind),
     intent: searchIntent,
-    hits: final
-      .filter((f) => f.score > 0 || !!f.c.roleEvidence)
+    hits: [...nameFirst, ...final
+      .filter((f) => !onName.has(f.c.cv._id) && (f.score > 0 || !!f.c.roleEvidence))
       .slice(0, args.limit)
       .map((f) => ({
         candidateId: f.c.cv._id,
@@ -430,8 +452,28 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
         roleEvidence: f.c.roleEvidence,
         breakdown: breakdownOf(f.c, req),
         ...(f.c.employerHit ? { employerLine: describeEmployerHit(f.c.employerHit) } : {}),
-      })),
+      }))],
   };
+}
+
+/**
+ * People whose name is what was typed (28 Oct). `quickSearch` reads names and
+ * titles, so a hit counts only when every typed word is in the person's name.
+ * A word taken for a name that is not one finds nobody here and the normal
+ * engine answers as before.
+ */
+async function nameHits(text: string): Promise<EngineHit[]> {
+  try {
+    const ids = await convexQuery<string[]>("ta/candidates:quickSearch", { q: text });
+    if (!ids?.length) return [];
+    const docs = await backend.candidateDocsByIds(NO_ACTOR, ids.slice(0, 12) as Id[], "search");
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    return docs
+      .filter((d) => !d.cvFileMissing && words.every((w) => String(d.fullName ?? "").toLowerCase().includes(w)))
+      .map((d) => ({ candidateId: d._id, score: 100, reason: "Name match", breakdown: {} }));
+  } catch {
+    return [];
+  }
 }
 
 /** Meaning: the query embedded the same way the index was, the nearest 200. */
@@ -442,10 +484,11 @@ async function vectorPool(q: string, args: EngineArgs, down: string[] = []): Pro
       down.push("meaning search (the query could not be embedded)");
       return [];
     }
-    const hits = await searchVectors(e.vectors[0], 200, { minExperience: args.minExperience ?? null });
+    const filtered = !!args.minExperience || (args.maxExperience != null && args.maxExperience < 20);
+    const hits = await searchVectors(e.vectors[0], 200, { minExperience: args.minExperience ?? null, maxExperience: args.maxExperience ?? null });
     // As the action does: a filtered search that finds nobody usually means the
     // index lacks the field, so ask by meaning alone.
-    return hits.length > 0 || !args.minExperience ? hits : await searchVectors(e.vectors[0], 200);
+    return hits.length > 0 || !filtered ? hits : await searchVectors(e.vectors[0], 200);
   } catch (err) {
     // Either route can be down without the other stopping.
     down.push(`meaning search (${(err as Error)?.message ?? err})`);
@@ -473,11 +516,16 @@ function strictFilters(list: Doc[], args: EngineArgs, req: Requirements): Doc[] 
     });
   }
   const years = (c: Doc) => c.totalExperienceYears ?? (c as { yearsOfExperience?: number }).yearsOfExperience;
-  if (args.minExperience !== undefined && args.minExperience > 0) {
-    out = out.filter((c) => years(c) == null || years(c)! >= args.minExperience!);
+  // The chips, else what the model read ("two years" written in words). A
+  // reference CV's own range is a score, not a filter, so it is left out.
+  const own = !args.referenceProfile;
+  const minYears = args.minExperience && args.minExperience > 0 ? args.minExperience : own ? req.minYearsExperience ?? undefined : undefined;
+  const maxYears = args.maxExperience ?? (own ? req.maxYearsExperience ?? undefined : undefined);
+  if (minYears !== undefined && minYears > 0) {
+    out = out.filter((c) => years(c) == null || years(c)! >= minYears);
   }
-  if (args.maxExperience !== undefined && args.maxExperience < 20) {
-    out = out.filter((c) => years(c) == null || years(c)! <= args.maxExperience!);
+  if (maxYears !== undefined && maxYears < 20) {
+    out = out.filter((c) => years(c) == null || years(c)! <= maxYears);
   }
   if (args.customFilters?.length) {
     out = out.filter((c) => {
@@ -485,9 +533,13 @@ function strictFilters(list: Doc[], args: EngineArgs, req: Requirements): Doc[] 
       const certs = ((c.certifications ?? []) as string[]).map((x) => x.toLowerCase());
       const summary = String((c as { summary?: string }).summary ?? "").toLowerCase();
       const name = String(c.fullName ?? "").toLowerCase();
+      // Titles and companies too: "Big 4" or "SAP" is as likely to be in a job
+      // line as in the skills list.
+      const r = c as unknown as { currentTitle?: string; currentJobTitle?: string; pastJobTitles?: string[]; currentEmployer?: string; employersText?: string; jobHistory?: { title?: string }[] };
+      const career = [r.currentTitle, r.currentJobTitle, ...(r.pastJobTitles ?? []), ...(r.jobHistory ?? []).map((j) => j.title), r.currentEmployer, r.employersText].filter(Boolean).join(" ").toLowerCase();
       return args.customFilters!.every((f) => {
         const t = f.toLowerCase().trim();
-        return !t || skills.some((s) => s.includes(t)) || certs.some((x) => x.includes(t)) || summary.includes(t) || name.includes(t);
+        return !t || skills.some((s) => s.includes(t)) || certs.some((x) => x.includes(t)) || summary.includes(t) || name.includes(t) || career.includes(t);
       });
     });
   }
@@ -503,15 +555,19 @@ function breakdownOf(c: Scored, req: Requirements): EngineHit["breakdown"] {
   return {
     title: c.titleScore >= 90 ? "strong match" : c.titleScore >= 70 ? "partial match" : "loose match",
     skills: c.skillScore >= 80 ? "strong match" : c.skillScore >= 50 ? "partial match" : "loose match",
-    experience: req.minYearsExperience != null ? (years >= req.minYearsExperience ? "meets target" : "below range") : "not specified",
+    experience:
+      req.maxYearsExperience != null && years > req.maxYearsExperience ? "above range"
+      : req.minYearsExperience != null ? (years >= req.minYearsExperience ? "meets target" : "below range")
+      : "not specified",
     location: c.locationStatus === "match" ? "match" : c.locationStatus === "different" ? "different" : "not specified",
     industry: c.industryScore === 100 ? "match" : "different",
     ...(c.employerHit ? { employer: c.employerHit.when === "current" ? "works there now" : "worked there before" } : {}),
   };
 }
 
-function interpretationOf(req: Requirements, read: boolean): EngineSearch["interpretation"] {
+function interpretationOf(req: Requirements, read: boolean, kind?: SearchKind): EngineSearch["interpretation"] {
   return {
+    kind,
     searchOccupation: req.searchOccupation,
     searchText: [req.title, ...req.alternativeTitles, ...req.requiredSkills.slice(0, 4)].filter(Boolean).join(" "),
     industry: req.industry ?? undefined,
@@ -629,6 +685,7 @@ const BAND_HEIGHT: Record<string, number> = {
   region_match: 65,
   "loose match": 35,
   "below range": 35,
+  "above range": 35,
   different: 20,
   "not specified": 0,
 };
@@ -738,6 +795,9 @@ export function hitsAndMisses(
   if (hit.employerLine) hits.push(hit.employerLine);
   if (b.experience === "below range" && criteria.minExperience != null) {
     misses.push(`${criteria.minExperience}+ years`);
+  }
+  if (b.experience === "above range" && criteria.maxExperience != null) {
+    misses.push(`up to ${criteria.maxExperience} years`);
   }
   return { hits: [...new Set(hits.filter(Boolean))], misses: [...new Set(misses)] };
 }

@@ -49,6 +49,13 @@ Trigger: a TA types in `SearchBox` (on `/database`, on `/database/results`, or t
    - Hits with `score > 0` or any role evidence, sliced to `limit`, carry `reason`, `roleEvidence`, a words-only `breakdown`, and `employerLine`.
 6. `ResultsView` applies the desk rules the engine does not know (`deskCriteria` empties place, years, titles, skills, industries, employers, qualifications and keeps notice, salary, availability, nationality, language) through `repo.searchDatabase`, orders by engine order, applies the Level filter (flow 6) then pages at `PAGE = 25`.
 
+Years and what was typed (28 Oct):
+
+- A bare "N years" is a band, not a floor: `parseQuery` sets `minExperience N` and `maxExperience yearsBand(N)` (N + max(2, ceil(N/2)): 2 gives 4, 5 gives 8, 10 gives 15). "at least / min / over / N+" stay open; "up to / under / less than N" set a ceiling only; "a-b years" is as written. In a conversation a later message that sets a minimum replaces both bounds; one that sets only a ceiling keeps the earlier floor. The natural-language prompt asks the model for `maxYearsExperience` by the same rule, and `requirementsIn(..., keepMaxYears)` keeps it only for searches (conversation and sentence reads, or a JD read with `{keepMaxYears:true}`), never for Job details or applicant scoring.
+- `strictFilters` filters on the chips' years, else the model's (`req.minYearsExperience`/`maxYearsExperience`); a reference CV's range stays a score. People with no recorded years pass. `buildFilter` in `qdrantSearch.ts` adds the ceiling as "in range or `totalExperienceYears` empty".
+- `runDatabaseSearch` flattens the first message to one line (a pasted JD used to become dozens of "refinements").
+- `searchKindOf(turns, known)` (`searchIntent.ts`, words only) names the search `job_description` (over 400 characters, or over 100 with JD headings), `keywords` ("profiles with X, Y", "keywords: ...", or a list of 3+ short comma parts), `name` (2-4 capitalised words and no vocabulary hit) or `role`. A JD is keyword-searched on `buildSearchTerms` of what the model read; a keyword list searches the keywords themselves, takes no occupation, and every keyword must be in skills, certifications, summary, name, a title or an employer (`customFilters`); a name runs `ta/candidates:quickSearch` and puts people whose name holds every typed word first ("Name match", score 100) before the normal list. `interpretation.kind` reaches `AiPanel` as the "Read as ..." label.
+
 Caches: `engineCache` 5 min, 50 entries, keyed by the full args JSON, in-flight runs shared; failed runs removed. Sentence reading cache `intents` 5 min, 50. `embedQuery` cache 500 entries (process memory only; assumes one app container).
 
 Refusals and messages: no embedding key in `meaning` mode shows "No embedding key is set..."; Boolean syntax errors show `parseBoolean(q).error`; zero hits shows "Nothing in the database matched that search."; empty list shows "Nobody matches all of that" with "Without X" blocker chips (not when the engine ranked).
@@ -302,11 +309,12 @@ Repo hard rules that apply: never touch the live backend from a laptop (no `conv
 - 2026-10-15 `1690586` better reference CV matching; `9cd8c5e` CV attach built into the search chat bar (`SearchBox`, `cvFile`).
 - 2026-10-20 `c0a68c7` friendly error recovery (`safeErrorMessage`).
 - 2026-10-22 `cb821c3`, `7865d66`, `5d98c89` mobile endpoints; matching state moved to `matchingSnapshot` and `src/lib/openings/matching.ts` so web and mobile share one run.
+- 2026-10-28 years band (a bare "2 years" no longer returns 5, 10, 23 years), a pasted JD read as one message, and keyword lists and names read as such (owner: TAs rarely paste a JD).
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: c245ae1ccdbef7a1ae391d8339b9089b258cd0a0
-verified-date: 2026-10-27
+verified-commit: 0d2926e
+verified-hash: 894979ac724ca0e1ae650adcdd1ba2b3253504dd
+verified-date: 2026-10-28
 sources:
   src/lib/engineSearch.ts
   src/lib/dbMatch.ts
