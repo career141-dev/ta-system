@@ -271,13 +271,14 @@ Short hashes from `git log`; dates are commit dates.
 - 2026-10-17 95a32e4 - EOD completes the workday; versioned email backups (`dailyEmailAttachments`, 31-day retention, `normalizeRetention`).
 - 2026-10-19 0a2ff43, 12369b5, f400737 - Sanduni late-Friday EOD repair migration (`admin/repairSanduniMistimedEod`).
 - 2026-10-20 bdd78a1 - Excel workbook attached to EOD; 09c78f4, 25d2048 - `admin/reopenShihabEarlyEod:run` recovery (docs/RECOVERY-SHIHAB-EOD-2026-10-20.md): his early 20 Oct EOD reopened for submission checks without resending.
+- 2026-10-28 - `admin/reopenSameeraEarlyEod:run` one-day recovery (docs/RECOVERY-SAMEERA-EOD-2026-10-28.md): Sameera's early EOD on Q COLLECTION's Industrial Engineering opening is reopened without touching the second TA's emails. The dry run reports all linked records; the write marks only her email, receipt and review round reopened, and opens her workday if EOD closed it.
 - 2026-10-21 4dd30a8 - work locations: per-location drafts, receipts, EOD; 904e51f, 23fc0f3 - workbook tabs/names by client, position, location; e28b259 - auto-detect profile updates in the composer.
 - 2026-10-22 cc0fca0, 5f8900e, fa22cc4 - TA note edits survive reload, profile updates win, drafts saved before review visits were stamped are kept (release of #243 had wiped box edits); REVISED correction flow reuses the original roster (see 95a32e4 / `previewConfirmed`).
 - 2026-10-23 f3d57d6 - EOD can be sent without CVs (activity-only); c28e1b1 - referee calls section in the email (`refereeCalls` on snapshot, `eodEmailHtml`).
 
 <!-- skill-meta
-verified-commit: ddec547
-verified-hash: a46dd27e94eb3c844a0f07f7f1e989cde1273b75
+verified-commit: a083b14
+verified-hash: d7b773ee6185779f3a38194109a1c84aa50a3edd
 verified-date: 2026-10-28
 sources:
   src/app/openings/[id]/eod/page.tsx
@@ -303,13 +304,16 @@ sources:
   convex/lib/graphMail.ts
   convex/lib/workLocationEmails.ts
   convex/admin/reopenShihabEarlyEod.ts
+  convex/admin/reopenSameeraEarlyEod.ts
   convex/admin/repairSanduniMistimedEod.ts
   convex/schema.ts
   convex/crons.ts
   docs/MIDDAY-EMAILS.md
   docs/RECOVERY-SHIHAB-EOD-2026-10-20.md
+  docs/RECOVERY-SAMEERA-EOD-2026-10-28.md
   docs/work-locations.md
   tests/dailyEmails.test.ts
+  tests/reopenSameeraEarlyEod.test.ts
   tests/eodresend.test.ts
   tests/eoddraft.test.ts
   tests/eodeffort.test.ts
