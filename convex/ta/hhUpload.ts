@@ -24,6 +24,7 @@ import { profileSlug } from "../lib/samePerson";
 import { refreshWorkdayChecks } from "./workdays";
 import { uploadProgress } from "../lib/cvUploadProgress";
 import { requireWorkLocation } from "../../src/lib/workLocations";
+import { SCOOP_CHANNEL } from "./scoopUpload";
 
 /** The channel the pipeline records; the TA System reads it as HH (src/data/convex/map.ts). */
 export const HEADHUNT_CHANNEL = "headhunting";
@@ -197,6 +198,53 @@ export const fileHeadhunt = internalMutation({
     }
     await refreshWorkdayChecks(ctx, jobId, user._id);
     return { handled: true, claimed: claimed.ok };
+  },
+});
+
+/**
+ * "Try again" on a headhunted or scoop CV that could not be read (28 Oct).
+ * The file is already stored, so it is read again from there — the TA does
+ * not have to find it and upload it a second time. The reading goes into the
+ * same profile the failed one left behind (the upload keeps its candidateId),
+ * so no second person is made.
+ */
+const RETRYABLE = new Set(["failed", "failed_retry", "extraction_failed_permanent", "needs_review"]);
+
+export const retry = internalMutation({
+  args: { actorId: v.string(), cvUploadId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const id = ctx.db.normalizeId("cvUploads", args.cvUploadId);
+    const upload = id ? await ctx.db.get(id) : null;
+    if (!upload) throw new Error("That upload no longer exists.");
+    const scoop = upload.scoopedBy === user._id;
+    if (upload.headhuntedBy !== user._id && !scoop) throw new Error("Only the person who uploaded this CV can try it again.");
+    const jobId = upload.assignToJob ? ctx.db.normalizeId("jobs", upload.assignToJob) : null;
+    if (!jobId) throw new Error("That opening no longer exists.");
+    await assertJobAccess(ctx, user, jobId, WORKS_THE_DESK);
+    await assertWorkdayScope(ctx, user, jobId);
+    if (!RETRYABLE.has(upload.status)) return { ok: true };
+
+    await ctx.db.patch(upload._id, {
+      status: "uploaded",
+      processingStage: "queued",
+      errorMessage: undefined,
+      // A TA's retry is a fresh start: the failure path marks a second failed
+      // attempt as permanent, and the requeue job sends 2+ to review.
+      extractionAttempts: 0,
+      queuedAt: Date.now(),
+      stageChangedAt: Date.now(),
+    });
+    await enqueueExtraction(ctx, upload._id, {
+      ...(upload.storageId ? { storageId: upload.storageId } : {}),
+      ...(upload.s3Key ? { s3Key: upload.s3Key } : {}),
+      ...(upload.storageProvider ? { storageProvider: upload.storageProvider } : {}),
+      fileType: upload.fileType,
+      sourceChannel: scoop ? SCOOP_CHANNEL : HEADHUNT_CHANNEL,
+      uploadedBy: user._id as string,
+      cvUploadId: upload._id,
+    });
+    return { ok: true };
   },
 });
 

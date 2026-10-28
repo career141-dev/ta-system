@@ -2,6 +2,7 @@
 
 import OpenAI from "openai";
 import type { ActionCtx } from "../_generated/server";
+import { isCompleteJson } from "./jsonAnswer";
 
 
 export type TaskType = 
@@ -349,6 +350,14 @@ export async function executeLLMWithNvidiaFallback(
             temperature: options.temperature ?? 0.1,
             max_tokens: options.max_tokens ?? 4096,
             ...(options.response_format ? { response_format: options.response_format } : {}),
+            // deepseek-v4-flash "thinks" first, and the thinking is billed
+            // against max_tokens: on a long CV it used most of the 8,192 and the
+            // JSON stopped after a few hundred characters ("not readable JSON
+            // (323 characters — likely cut off)", 28 Oct), after up to two
+            // 75-second tries. Reading a CV into fields needs no reasoning —
+            // the JD parser and Desk Copilot turned it off for the same
+            // reason (17 Sep). OpenRouter-only field; NVIDIA does not get it.
+            ...(isNvidiaModel ? {} : ({ reasoning: { enabled: false } } as object)),
           });
 
           if (response.usage) {
@@ -367,6 +376,12 @@ export async function executeLLMWithNvidiaFallback(
           }
 
           const content = response.choices[0]?.message?.content?.trim() || "";
+          // A cut-off JSON answer used to be handed straight back and the CV
+          // failed on it; it now counts as a failed try, so the second try and
+          // then the fallback model get their turn (28 Oct).
+          if (content && options.response_format?.type === "json_object" && !isCompleteJson(content)) {
+            throw new Error(`${model} gave JSON that stops part-way (${content.length} characters, finish: ${response.choices[0]?.finish_reason ?? "unknown"})`);
+          }
           if (content) {
             return { content, provider: isNvidiaModel ? "nvidia" : "openrouter", model, ...(isNvidiaModel ? { primaryError } : {}) };
           }
