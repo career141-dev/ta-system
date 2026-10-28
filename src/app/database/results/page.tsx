@@ -6,7 +6,7 @@ import { assess } from "@/lib/assessment";
 import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
-import { conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, turnsOf, withoutChip, withValue } from "@/lib/query";
+import { conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, resultsKeyOf, searchParamsOf, turnsOf, withoutChip, withValue } from "@/lib/query";
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
@@ -67,14 +67,9 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
   const forOpening = typeof sp.for === "string" ? sp.for : null;
   const referenceParam = typeof sp.ref === "string" && parseReferenceProfile(sp.ref) ? sp.ref : "";
-  const searchKey = (() => {
-    const p = new URLSearchParams();
-    for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
-      if (k === "page" || k === "candidate" || k === "msg" || typeof v !== "string") continue;
-      p.set(k, v);
-    }
-    return p.toString();
-  })();
+  // The conversation's first message, not every reply: a reply keeps the list on
+  // screen while the new answer comes (query.ts resultsKeyOf).
+  const searchKey = resultsKeyOf(sp);
 
   return (
     <main className="px-6 py-5">
@@ -536,34 +531,28 @@ async function ResultsView({
     blockers.sort((a, b) => b.found - a.found);
   }
 
+  // These links keep the address as it is (searchParamsOf) and change only their
+  // own part. Rebuilt from the parsed criteria they wrote chips into the URL, so
+  // the next render read it as a new, edited search: the loading scene came back
+  // and the engine ran again (28 Oct).
   const pageHref = (n: number) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    const p = searchParamsOf(sp, ["page", "candidate", "msg"]);
     p.set("page", String(n));
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
 
   // The level filter's links: the same search with one level ticked or unticked,
   // back on page one. Passing nothing clears them.
   const levelHref = (toggle?: string) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
+    const p = searchParamsOf(sp, ["page", "candidate", "msg", "lvl"]);
     const next = new Set(pickedLevels);
     if (toggle !== undefined) (next.has(toggle) ? next.delete(toggle) : next.add(toggle));
     for (const k of next) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
   const broaderHref = (include: boolean) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (edited) p.set("edited", "1");
+    const p = searchParamsOf(sp, ["page", "candidate", "msg", "below"]);
     if (include) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
 
@@ -611,25 +600,12 @@ async function ResultsView({
   };
 
   const candidateHref = (id: string) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (page > 1) p.set("page", String(page));
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
+    const p = searchParamsOf(sp, ["candidate", "msg"]);
     p.set("candidate", id);
     return `${base}?${p.toString()}`;
   };
 
-  const closeHref = (() => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (page > 1) p.set("page", String(page));
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
-    return `${base}?${p.toString()}`;
-  })();
+  const closeHref = `${base}?${searchParamsOf(sp, ["candidate", "msg"]).toString()}`;
   // "← Back to results" from a candidate's profile returns to exactly this list —
   // the search, every filter chip, the page. It used to keep only the sentence
   // and the page, so coming back re-read the sentence and lost the chips.
@@ -642,28 +618,34 @@ async function ResultsView({
   const activeStatus = activeCandidate ? repo.overallStatus(activeCandidate.id) : null;
   // The open candidate's own CV file, for the side panel. Only looked up, not
   // signed: the browser asks /api/cv for the file itself.
-  let activeCv: DrawerCv | null = null;
+  // Not awaited: the drawer shows the profile at once and the CV section
+  // fills in when the file's address is found (28 Oct). The lookup never
+  // rejects, so an unread promise is not an unhandled one.
+  let activeCv: Promise<DrawerCv | null> | null = null;
   if (activeCandidate && isConvex()) {
-    const found = await backend
-      .cvFile(activeCandidate.id)
-      .catch((e) => ({ ok: false as const, detail: safeErrorMessage(e, "The CV could not be loaded. Try again."), fileName: null }));
-    const fileName = (found.ok ? found.fileName : null) ?? activeCandidate.cvFileName;
-    const isPdf =
-      found.ok &&
-      (/pdf/i.test(found.fileType ?? "") ||
-        /\.pdf$/i.test(fileName ?? "") ||
-        !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(fileName ?? ""));
-    // A Word CV is shown as a PDF made from it (lib/wordToPdf); Download,
-    // which adds download=1, still saves the Word file.
-    const word = found.ok && !isPdf && isWordFile(fileName);
-    activeCv = found.ok
-      ? {
-          href: `/api/cv/${encodeURIComponent(activeCandidate.id)}${word ? "?view=pdf" : ""}`,
-          fileName,
-          inline: isPdf || word,
-          problem: null,
-        }
-      : { href: null, fileName, inline: false, problem: found.detail };
+    const cand = activeCandidate;
+    activeCv = (async (): Promise<DrawerCv> => {
+      const found = await backend
+        .cvFile(cand.id)
+        .catch((e) => ({ ok: false as const, detail: safeErrorMessage(e, "The CV could not be loaded. Try again."), fileName: null }));
+      const fileName = (found.ok ? found.fileName : null) ?? cand.cvFileName;
+      const isPdf =
+        found.ok &&
+        (/pdf/i.test(found.fileType ?? "") ||
+          /\.pdf$/i.test(fileName ?? "") ||
+          !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(fileName ?? ""));
+      // A Word CV is shown as a PDF made from it (lib/wordToPdf); Download,
+      // which adds download=1, still saves the Word file.
+      const word = found.ok && !isPdf && isWordFile(fileName);
+      return found.ok
+        ? {
+            href: `/api/cv/${encodeURIComponent(cand.id)}${word ? "?view=pdf" : ""}`,
+            fileName,
+            inline: isPdf || word,
+            problem: null,
+          }
+        : { href: null, fileName, inline: false, problem: found.detail };
+    })();
   }
   const statusLabel =
     activeStatus?.busy && activeStatus.stage
@@ -712,7 +694,9 @@ async function ResultsView({
           />
 
           <div className="rounded-xl border border-rule bg-surface p-4">
+            {/* Keyed on the conversation: a reply's wait shows here while the old list stays, and the box starts clean when the new results land. */}
             <SearchBox
+              key={q}
               vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
               prior={q}
               initialMode={mode}

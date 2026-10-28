@@ -2,7 +2,7 @@
  * The Database search as a conversation (5 Oct): each message adds to the
  * search, and a later message wins where it changes a number, a place or a title.
  */
-import { conversationText, parseConversation, parseQuery, turnsOf, yearsBand, type Vocabulary } from "@/lib/query";
+import { conversationText, parseConversation, parseQuery, resultsKeyOf, searchParamsOf, turnsOf, yearsBand, type Vocabulary } from "@/lib/query";
 import { searchKindOf } from "@/lib/searchIntent";
 
 let pass = 0, fail = 0;
@@ -59,6 +59,18 @@ const later = parseConversation("accountant 5 years\nat least 8 years", vocab).c
 eq("a later 'at least' drops the earlier ceiling", [later.minExperience, later.maxExperience], [8, null]);
 const ceiling = parseConversation("accountant 5 years\nup to 6 years", vocab).criteria;
 eq("a later ceiling keeps the floor", [ceiling.minExperience, ceiling.maxExperience], [5, 6]);
+
+console.log("\nthe results page keeps the list on screen (28 Oct)");
+const key = (sp: Record<string, string | string[] | undefined>) => resultsKeyOf(sp);
+eq("a reply keeps the key", key({ q: "java developer" }), key({ q: "java developer\nin Colombo" }));
+eq("paging, a profile and a level keep it", key({ q: "java" }), key({ q: "java", page: "2", candidate: "c1", lvl: ["Senior"], below: "1", msg: "x" }));
+eq("a new first message is a new search", key({ q: "java" }) === key({ q: "react" }), false);
+eq("a mode is a new search", key({ q: "java" }) === key({ q: "java", mode: "boolean" }), false);
+eq("an opening is a new search", key({ q: "java" }) === key({ q: "java", for: "o1" }), false);
+eq("an edited chip is a new search", key({ q: "java" }) === key({ q: "java", edited: "1", minExp: "3" }), false);
+const href = searchParamsOf({ q: "java\nin Colombo", lvl: ["Senior", "Mid"], page: "2", candidate: "c1", below: "1" }, ["page", "candidate"]);
+eq("links keep the address, less what they replace", href.toString(), "q=java%0Ain+Colombo&lvl=Senior&lvl=Mid&below=1");
+eq("an address with no chips gains none", [...searchParamsOf({ q: "java" }).keys()], ["q"]);
 
 console.log("\nwhat was typed (28 Oct)");
 eq("a role", searchKindOf(["Senior Accountant in Colombo"], true).kind, "role");
