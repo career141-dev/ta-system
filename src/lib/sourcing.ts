@@ -55,6 +55,10 @@ export interface SourcingSpec {
   targetEmployers: string[];
   /** Canonical profile keys already in the vault or a pipeline — never re-suggested. */
   alreadyKnown: string[];
+  /** The desk's choices, one line per person (28 Oct, lib/claudeSourcing deskSignals). */
+  picked?: string[];
+  selected?: string[];
+  notSelected?: string[];
 }
 
 export interface QueryPlan {

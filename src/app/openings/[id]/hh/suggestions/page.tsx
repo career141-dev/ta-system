@@ -85,7 +85,8 @@ export default async function Page({
   const matching = [...showing].filter((s) => matchesQuery(sp.q, s.name, s.headline, s.company, s.location, s.why)).sort((a, b) =>
     sort === "recent"
       ? b.generatedAt - a.generatedAt
-      : (a.tier === "priority" ? 0 : 1) - (b.tier === "priority" ? 0 : 1) || b.round - a.round,
+      // Newest first within a tier: a run that learned from picked CVs is round 0 but the freshest list.
+      : (a.tier === "priority" ? 0 : 1) - (b.tier === "priority" ? 0 : 1) || b.generatedAt - a.generatedAt,
   );
   const page = pageFrom(sp, matching.length, PAGE_SIZE);
   const rows = slicePage(matching, page, PAGE_SIZE);
@@ -216,7 +217,7 @@ export default async function Page({
                       <span className={`rounded px-1.5 py-[3px] text-[10.5px] font-medium ${TIER_TONE[s.tier]}`}>
                         {s.tier === "priority" ? "Priority" : "Screen"}
                       </span>
-                      <span className="text-[11px] text-ink-faint">round {s.round}</span>
+                      <span className="text-[11px] text-ink-faint">{s.learnedFrom ? `like the ${s.learnedFrom} picked CVs` : `round ${s.round}`}</span>
                       {takenBy.get(s.id) && (
                         <span className="rounded bg-warn-soft px-1.5 py-[3px] text-[10.5px] font-medium text-warn">
                           Kept by {userNames[takenBy.get(s.id)!] ?? "another TA"}
