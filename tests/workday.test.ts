@@ -954,6 +954,13 @@ try {
   assert.equal((await db.get(deletedDay.id))?.finishedAt, clock, "A binned opening cannot block completion of the remaining work");
   const deletedHistory = (await run("dashboard", { actorId: "deletedTa", detail: true })).history.find((day: Row) => day.id === deletedDay.id);
   assert.deepEqual(deletedHistory.jobs.map((job: Row) => job.jobId), ["deletedJob", "keptJob"], "Completed history keeps the original positions");
+  // Only the last two workdays load by default; earlier ones on request (28 Oct).
+  for (const [i, date] of ["2026-10-01", "2026-10-02", "2026-10-03"].entries())
+    put("taWorkdays", { _id: `oldDay${i}`, userId: "deletedTa", date, startedAt: i, finishedAt: i + 1, jobs: [] });
+  const recentOnly = (await run("dashboard", { actorId: "deletedTa", detail: true })).history;
+  const earlier = (await run("dashboard", { actorId: "deletedTa", detail: true, allHistory: true })).history;
+  assert.ok(recentOnly.length <= 2, "A normal load reads at most two past workdays");
+  assert.ok(earlier.length > recentOnly.length, "Load earlier workdays returns the older days too");
 
   user("restoreTa", "ta");
   put("jobs", { _id: "restoreJob", title: "Restore job", status: "active", taLeadId: "lead", assignedTaIds: ["restoreTa"] });

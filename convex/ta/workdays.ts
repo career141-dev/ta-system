@@ -1084,7 +1084,7 @@ export const emailPreflight = internalMutation({
 });
 
 export const dashboard = internalQuery({
-  args: { actorId: v.string(), detail: v.optional(v.boolean()), cursor: v.optional(v.string()), date: v.optional(v.string()), focusWorkday: v.optional(v.string()), taId: v.optional(v.string()) },
+  args: { actorId: v.string(), detail: v.optional(v.boolean()), cursor: v.optional(v.string()), date: v.optional(v.string()), focusWorkday: v.optional(v.string()), taId: v.optional(v.string()), allHistory: v.optional(v.boolean()) },
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     const role = roleOf(user);
@@ -1167,12 +1167,15 @@ export const dashboard = internalQuery({
         activity: { cvReviews: 0, profilesAdded: 0, profilesWorked: 0, researchAt: null, researchActions: 0, benchmarkActions: 0, benchmarks: 0, benchmarksAdded: 0, sent: 0, emailAt: null, jdApproved: false, postConnected: false } };
       option.carry = carryIds.has(option.id);
     }
+    // The last two days come with every load; earlier ones only when the TA
+    // presses "Load earlier workdays". Fifteen days were read on every
+    // 20-second poll whether or not anyone opened them (28 Oct).
     const history = worker
       ? await ctx.db
           .query("taWorkdays")
           .withIndex("by_user", (q) => q.eq("userId", user._id))
           .order("desc")
-          .take(15)
+          .take(args.allHistory ? 15 : 2)
       : [];
     let recent: Doc<"taWorkdays">[] = [];
     let nextCursor: string | null = null;

@@ -25,6 +25,7 @@ export async function GET(request: Request) {
       taId: new URL(request.url).searchParams.get("ta") || undefined,
       date: new URL(request.url).searchParams.get("date") || undefined,
       focusWorkday: new URL(request.url).searchParams.get("checkDay") || undefined,
+      allHistory: new URL(request.url).searchParams.get("history") === "all",
     });
     if (payload.canWork && new URL(request.url).searchParams.get("detail") === "1") {
       step = "ta/dailyEmails:sent";
