@@ -28,6 +28,17 @@ import {
   writeJdNotes,
 } from "@/lib/openings/jdWrites";
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
+import { sourceFor } from "@/lib/openings/suggestionRuns";
+import {
+  correctOpeningClient,
+  researchOpening,
+  runOpeningBenchmark,
+  runOpeningResearch,
+  searchReasonInWords,
+  toggleOpeningBenchmark,
+  updateOpeningResearchField,
+  type ResearchWriteDeps,
+} from "@/lib/openings/researchWrites";
 import { acceptStrategies, removeStrategyPicture, strategyBellDue, submitStrategies } from "@/lib/openings/strategyWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
@@ -77,11 +88,8 @@ function redirect(url: string): never {
   return nextRedirect(withRealIds(url)) as never;
 }
 import { after } from "next/server";
-import { FAILURE_MESSAGE, gemini, modelFor } from "@/lib/ai";
-import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
-import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
-import { MAX_ROUNDS, runSourcing } from "@/lib/sourcing";
-import { canonicalProfile, displayUrl, searchProvider, serperConfigured } from "@/lib/serper";
+import { gemini, modelFor } from "@/lib/ai";
+import { displayUrl, serperConfigured } from "@/lib/serper";
 import { linkKey, profileLink } from "@/lib/url";
 import { captureHistory, decideMatch, findCvCandidates, linkRowTo, matchLink, type CvHit } from "@/lib/cvMatch";
 import { splitSkills } from "../../convex/lib/jobRequirements";
@@ -93,7 +101,7 @@ import { findDatabaseMatches } from "@/lib/dbMatch";
 import { markMatching } from "@/lib/matchingNow";
 import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
-import { convexAction, convexActorForEmail, convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
+import { convexAction, convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
 import * as backend from "@/data/convex/backend";
 
 /** Keep the website's responsive 30-second assignment-bell debounce. */
@@ -271,51 +279,6 @@ async function reinstate(user: User, appId: string, openingId: string): Promise<
   return r.ok ? { ok: true } : { ok: false, message: r.message };
 }
 
-/** A sourcing or benchmark failure code as a sentence. */
-const SEARCH_NAME: Record<string, string> = { claude: "Claude web search", searxng: "SearXNG", serper: "Serper", openai: "OpenAI web search" };
-
-/**
- * Who did a Research run, from what actually answered: "Claude web search ×21,
- * SearXNG ×3 + Claude". Named from the settings, it said DeepSeek even when
- * the subscription had answered (24 Sep).
- */
-function answeredByLabel(by: { search: Record<string, number>; model: Record<string, number> }): string {
-  const list = (m: Record<string, number>, name: (k: string) => string) =>
-    Object.entries(m).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${name(k)} ×${n}`).join(", ");
-  const model = (k: string) => (k.startsWith("claude-subscription") ? "Claude" : k);
-  return [list(by.search, (k) => SEARCH_NAME[k] ?? k), list(by.model, model)].filter(Boolean).join(" + ");
-}
-
-function searchReasonInWords(code: string, detail?: string): string {
-  if (code === "no_serper") return "web search is not set up on this system. An admin needs to set SEARXNG_URL (a SearXNG instance) or a search key.";
-  // Not the same as finding nothing: the search itself failed. What to do
-  // about it depends on who was asked — our own SearXNG has no key to check,
-  // and telling the desk to check one sent them looking for something that
-  // does not exist (live, 23 Sep).
-  if (code === "search_failed") {
-    const what = detail ? ` (${detail})` : "";
-    return searchProvider() === "searxng"
-      ? `the search service could not answer${what}. Nothing is wrong with the client record — an admin needs to look at the search service.`
-      : `the search provider refused the request${what}. Check the search key and its credits.`;
-  }
-  if (code === "rounds_spent") return `all ${MAX_ROUNDS} rounds for this opening are used.`;
-  if (code === "no_opening") return "the opening could not be found. Reload the page.";
-  // Not a failure: the run that started when the job was created is still going.
-  if (code === "running") return "it is already running for this opening — it starts by itself when the job is created. The results appear here when it finishes, usually within a few minutes.";
-  // Not a failure: the opening has had its run. Named so nobody hunts for a fault.
-  if (code === "run_spent") return `Research has already been run for this opening${detail ? ` ${detail}` : ""}. It runs once per opening — ask a lead if it has to be run again.`;
-  if (code === "benchmark_spent") return `Benchmark has already been run for this opening${detail ? ` on ${detail}` : ""}. It runs once per opening — ask a lead if it has to be run again.`;
-  if (code === "nothing_found") return "the search found nothing under the client's name. Check the name on the client record.";
-  if (code === "client_not_searchable") return "the client has no searchable name (a code or \"Confidential\"). Put the real name on the client record.";
-  return reasonInWords(code);
-}
-
-/** A model failure code ("spend_cap") as the sentence it stands for. */
-function reasonInWords(reason: string | undefined): string {
-  const said = reason && (FAILURE_MESSAGE as Record<string, string>)[reason];
-  return said ?? (reason ? `${reason}.` : "no reason was given.");
-}
-
 /** The backend's own reason, without the transport's wrapping. */
 function backendMessage(e: unknown, fallback: string): string {
   return safeErrorMessage(e, fallback);
@@ -332,6 +295,11 @@ const OPENING_DEPS: OpeningWriteDeps = {
 };
 
 const JD_DEPS = { convexQuery, markTablesStale, resetStore };
+const RESEARCH_DEPS: ResearchWriteDeps = {
+  ...OPENING_DEPS,
+  after,
+  rerunSuggestions: async (openingId, userId) => { await sourceFor(openingId, userId, true); },
+};
 
 /** The primed copy is behind a backend write; drop it so the next read is fresh. */
 async function afterBackendWrite(openingId: string) {
@@ -1021,37 +989,6 @@ export async function restoreJdVersion(formData: FormData) {
 }
 
 // ─── Job details: requirements extracted from the approved JD ────────────────
-
-/**
- * The JD with its reviewed Job details appended, for the LinkedIn / X-ray
- * sourcing plan. The plan reads prose; a checked skills list and years floor
- * steer its search vocabulary better than the parser can recover from wording.
- */
-function withJobDetails(o: import("@/data/types").Opening): string {
-  const r = o.requirements;
-  const jd = o.jdMarkdown || o.title;
-  if (!r || (r.status !== "extracted" && !r.editedAt)) return jd;
-  const lines = [
-    r.requiredSkills.length ? `Required skills: ${r.requiredSkills.join(", ")}` : "",
-    r.niceToHaveSkills.length ? `Nice to have: ${r.niceToHaveSkills.join(", ")}` : "",
-    r.experienceMinYears ? `Experience: ${r.experienceMinYears}${r.experienceMaxYears ? `–${r.experienceMaxYears}` : "+"} years` : "",
-    r.seniorityLevel ? `Seniority: ${r.seniorityLevel.replace(/_/g, " ")}` : "",
-    r.location ? `Location: ${r.location}` : "",
-    r.educationLevel ? `Education: ${r.educationLevel.replace(/_/g, " ")}` : "",
-    r.languagesRequired.length ? `Languages: ${r.languagesRequired.join(", ")}` : "",
-  ].filter(Boolean);
-  return lines.length ? `${jd}\n\n## Job details (reviewed)\n${lines.map((l) => `- ${l}`).join("\n")}` : jd;
-}
-
-/** The structured salary range, as the sourcing salary rule reads it, when no free-text note exists. */
-function salaryNoteOf(o: import("@/data/types").Opening): string {
-  const r = o.requirements;
-  if (!r || (r.salaryMin == null && r.salaryMax == null)) return "";
-  const cur = r.salaryCurrency ?? "LKR";
-  const fmt = (n: number | null) => (n == null ? "" : n.toLocaleString("en-US"));
-  if (r.salaryMin != null && r.salaryMax != null) return `${cur} ${fmt(r.salaryMin)} - ${fmt(r.salaryMax)}`;
-  return r.salaryMax != null ? `up to ${cur} ${fmt(r.salaryMax)}` : `from ${cur} ${fmt(r.salaryMin)}`;
-}
 
 /**
  * Wait for a requirements extraction to finish (it runs in the backend after
@@ -2981,136 +2918,28 @@ export async function placeUnmatchedInline(_: ActionResult | null, formData: For
 
 export async function runResearch(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
-  const res = await researchOpening(openingId, user.id, isDeskWide(user));
-  revalidatePath(`/openings/${openingId}/hh/research`);
-  if (!res.ok) await fail(`Research did not run — ${searchReasonInWords(res.reason ?? "", res.detail)}`);
-  const filled = res.filled ?? 0;
-  if (filled === 0) {
-    await note(
-      "The search ran but nothing could be sourced, so every field is still empty. Try again, or fill in what you know by hand.",
-    );
-  }
-  const rivals = res.competitors ? ` and ${res.competitors} ${res.competitors === 1 ? "competitor" : "competitors"}` : "";
-  if (res.modelNote) {
-    await note(
-      `The client's website, LinkedIn page${rivals} were found, but the AI could not sort the pages into fields — ${reasonInWords(res.modelNote)} Try again, or fill in the rest by hand.`,
-    );
-  }
-  const o = repo.opening(openingId);
-  const bench =
-    res.people === undefined
-      ? ` Benchmark was not run: ${o?.title ?? "this"} is a ${SENIORITY_LABEL[seniorityOf(o?.title ?? "")]} role — use Find them below if it is needed.`
-      : res.benchmarkNote
-        ? ` Benchmark could not name anyone — ${reasonInWords(res.benchmarkNote)}`
-        : ` Benchmark: ${res.people} ${res.people === 1 ? "person" : "people"} holding the role, each with a source.`;
-  await done(`Research filled in ${filled} of 8 fields${rivals}${res.sources ? ` from ${res.sources} sources` : ""}.${bench} Check anything going in front of the client.`);
+  const result = await runOpeningResearch(user, openingId, RESEARCH_DEPS);
+  if (!result.ok) return fail(result.message);
+  if (result.tone === "note") await note(result.message);
+  await done(result.message);
 }
 
 export async function runBenchmark(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
-  const o = repo.opening(openingId);
-  if (!o) await fail("The opening could not be found. Reload the page and try again.");
-  const client = repo.client(o!.clientId);
-  if (!serperConfigured()) await fail(`Benchmark did not run — ${searchReasonInWords("no_serper")}`);
-  // Once per opening, like Research (23 Sep). The rows are the record: a
-  // senior role researched has already been benchmarked inside that run, so
-  // this button is spent too — it is the same search, asked once. A lead can
-  // run it again, as with Research.
-  const already = repo.benchmarks(openingId);
-  if (already.length && !isDeskWide(user)) {
-    const when = dateAt(Math.max(...already.map((b) => b.generatedAt)));
-    await fail(`Benchmark did not run — ${searchReasonInWords("benchmark_spent", when)}`);
-  }
-  // Who holds the role now, at the client and at the competitors Research
-  // found — their own people pages, then the web (lib/incumbents, 22 Sep).
-  // Pressed by hand, it runs for any role; Research runs it only for senior ones.
-  const research = repo.research(openingId)?.fields;
-  const run = await findIncumbents(
-    {
-      title: o!.title,
-      where: o!.locations.join(", "),
-      companies: [
-        { name: client?.name ?? "the client", website: research?.websiteLink || null, isClient: true },
-        ...(research?.competitorProfiles ?? []).map((c) => ({ name: c.name, website: c.website || null, isClient: false })),
-      ],
-    },
-    WEB,
-  );
-  if (run.modelNote) await fail(`Benchmark did not run — ${reasonInWords(run.modelNote)}`);
-  saveBenchmarks(openingId, run.rows);
-  revalidatePath(`/openings/${openingId}/hh/research`);
-  const searched = `${run.searches} web ${run.searches === 1 ? "search" : "searches"}`;
-  if (run.rows.length === 0) {
-    await note(
-      `Nobody could be named (${searched}). A person is shown only when a page or search result says they hold the role${research ? "" : " — run Research first so the competitors are searched too"}.`,
-    );
-  }
-  await done(`Found ${run.rows.length} ${run.rows.length === 1 ? "person" : "people"} holding the role, each with a source · ${searched}.`);
+  const result = await runOpeningBenchmark(user, openingId, RESEARCH_DEPS);
+  if (!result.ok) return fail(result.message);
+  if (result.tone === "note") await note(result.message);
+  await done(result.message);
 }
 
 export async function pickBenchmark(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { benchmark: "entryId", opening: "openingId" });
-  repo.toggleBenchmark(String(formData.get("entryId")));
-  revalidatePath(`/openings/${String(formData.get("openingId"))}/hh`, "layout");
-}
-
-/**
- * The sourcing run itself, callable from the action or straight after the JD is
- * approved. Returns rather than redirects so the caller decides what happens.
- */
-type SourceRun = { found: number; scanned: number; queries: number; cost: number; rejected?: number; note?: string; error?: string };
-
-/** `extraRound`: past the round limit — the rounds before were about the wrong company (correctClientAndRerun). */
-async function sourceFor(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
-  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId, extraRound));
-}
-
-async function sourceForNow(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
-  const o = repo.opening(openingId);
-  if (!o) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "no_opening" };
-  const client = repo.client(o.clientId);
-  const existing = repo.suggestions(openingId);
-  const round = existing.length ? Math.max(...existing.map((s) => s.round)) + 1 : 1;
-  if (round > MAX_ROUNDS && !extraRound) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "rounds_spent" };
-
-  const alreadyKnown = [
-    ...repo.linkVault(openingId).map((l) => canonicalProfile(l.linkedinUrl)),
-    ...existing.map((s) => canonicalProfile(s.linkedinUrl ?? "")),
-  ].filter((x): x is string => Boolean(x));
-
-  const run = await runSourcing(
-    {
-      title: o.title,
-      clientName: client?.name ?? "the client",
-      clientCompanyNames: [client?.name ?? ""].filter(Boolean),
-      clientNotes: client?.researchNotes,
-      jdText: withJobDetails(o),
-      locations: o.locations,
-      targetNationalities: o.targetNationalities,
-      targetGender: o.targetGender,
-      salaryNote: o.packageNotes || salaryNoteOf(o),
-      targetEmployers: repo.benchmarks(openingId).filter((b) => b.isSelected).map((b) => b.company),
-      alreadyKnown,
-    },
-    round,
-  );
-  if (run.error) return { found: 0, scanned: run.scanned, queries: run.queries.length, cost: run.cost, error: run.error };
-  // A run belongs to whoever asked for it — see lib/visibility.
-  repo.addSuggestions(
-    openingId,
-    run.suggestions.map((s) => ({ ...s, openingId, generatedFor: forUserId ?? null, keptBy: null })),
-  );
-  if (isConvex()) await freshAfter(convexMutation)("ta/workdays:recordSourcingRun", { jobId: openingId, ...(forUserId ? { userId: forUserId } : {}), round, count: run.suggestions.length });
-  return {
-    found: run.suggestions.length, scanned: run.scanned,
-    queries: run.queries.length, cost: run.cost,
-    rejected: run.rejected ?? 0, note: run.note,
-  };
+  const result = await toggleOpeningBenchmark(await getCurrentUser(), String(formData.get("openingId")), String(formData.get("entryId")), RESEARCH_DEPS);
+  if (!result.ok) await fail(result.message);
 }
 
 export async function runSuggestions(formData: FormData) {
@@ -3147,42 +2976,9 @@ export async function runSuggestions(formData: FormData) {
  */
 export async function correctClientAndRerun(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.sourcing", { opening: "openingId" });
-  const openingId = String(formData.get("openingId"));
-  const o = repo.opening(openingId);
-  const client = o ? repo.client(o.clientId) : null;
-  if (!o || !client) await fail("This job has no client set. Set the client on the job first.");
-  const notes = String(formData.get("researchNotes") ?? "").trim().slice(0, 2000);
-  if (!notes) await fail("Write what you know about the client first — the website, the LinkedIn page or the full company name.");
-  if (notes === (client!.researchNotes ?? "").trim()) {
-    await fail("These are the details Research already has. Change or add something, then run again.");
-  }
-
-  if (isConvex()) {
-    const actor = await convexActorForEmail(user.email);
-    await freshAfter(convexMutation)("ta/clients:update", { actorId: actor?._id, clientId: client!.id, researchNotes: notes });
-  } else {
-    repo.updateClient(client!.id, { researchNotes: notes });
-  }
-
-  after(async () => {
-    // Benchmark rows name people at the wrong company's competitors, and
-    // Suggestions searches their employers first — they go before the re-run.
-    repo.replaceBenchmarks(openingId, []);
-    const res = await researchOpening(openingId, user.id, true).catch(() => null);
-    if (res?.ok) {
-      // Set aside, not deleted, and not marked "not relevant": nobody judged
-      // them, and that mark steers the next round away from people like them.
-      repo.dismissNewSuggestions(openingId);
-      await sourceFor(openingId, user.id, true).catch(() => undefined);
-    }
-    revalidatePath(`/openings/${openingId}`, "layout");
-  });
-  revalidatePath(`/openings/${openingId}`, "layout");
-  revalidatePath("/clients");
-  await done(
-    `Saved on ${client!.name}. Research and Suggestions are running again with these details — it takes a few minutes; reload this page to see them.`,
-  );
+  const result = await correctOpeningClient(await getCurrentUser(), String(formData.get("openingId")), String(formData.get("researchNotes") ?? ""), RESEARCH_DEPS);
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /** Keeping a profile sends it to the link vault, where the approach is logged. */
@@ -3322,129 +3118,6 @@ export async function dismissSuggestion(formData: FormData) {
   revalidatePath(`/openings/${String(formData.get("openingId"))}/hh/suggestions`);
 }
 
-/**
- * Market research for an opening. Once per opening, for the whole desk.
- *
- * Search the client, search its competitors, read their pages, then sort what
- * was read into fields (lib/researchSearch, 22 Sep). Replaced one model call
- * that searched by itself and never opened the client's or a competitor's site.
- */
-/**
- * Research or Suggestions already running for an opening, in this server.
- * Both start by themselves when a job is created (24 Sep); a TA pressing the
- * button while that run is still going would start a second one — twice the
- * searches, and two rounds numbered the same. The second press is told to wait.
- */
-const runningNow = new Set<string>();
-
-async function alone<T>(key: string, busy: T, work: () => Promise<T>): Promise<T> {
-  if (runningNow.has(key)) return busy;
-  runningNow.add(key);
-  try {
-    return await work();
-  } finally {
-    runningNow.delete(key);
-  }
-}
-
-async function researchOpening(openingId: string, userId: string, canRerun = false): ReturnType<typeof researchOpeningNow> {
-  return alone(`research:${openingId}`, { ok: false, reason: "running" }, () => researchOpeningNow(openingId, userId, canRerun));
-}
-
-async function researchOpeningNow(
-  openingId: string,
-  userId: string,
-  /** A lead, director or admin may run it a second time. */
-  canRerun = false,
-): Promise<{
-  ok: boolean;
-  reason?: string;
-  /** What the search provider said, when it was the search that failed. */
-  detail?: string;
-  filled?: number;
-  sources?: number;
-  competitors?: number;
-  modelNote?: string;
-  /** People found for Benchmark; undefined when it was not run. */
-  people?: number;
-  benchmarkNote?: string;
-}> {
-  const c = contextFor(openingId);
-  const o = repo.opening(openingId);
-  if (!c || !o) return { ok: false, reason: "no_opening" };
-  // One attempt per opening, for the whole desk — 23 September. A run is about
-  // thirty web searches and a model pass over everything they returned, and the
-  // same client was being researched again and again.
-  //
-  // A lead, director or admin can still run it again, because an opening
-  // created with the client's name misspelt would otherwise never be
-  // researchable by anyone (review, 23 Sep).
-  //
-  // The report is the record, because it is written only when a run produced
-  // one: a search the provider refused costs the opening nothing.
-  const already = repo.research(openingId);
-  if (already && !canRerun) {
-    const who = repo.users().find((u) => u.id === already.generatedBy)?.name;
-    return { ok: false, reason: "run_spent", detail: `${who ? `by ${who} ` : ""}on ${dateAt(already.generatedAt)}` };
-  }
-  const res = await researchViaSearch({
-    clientName: c.clientName,
-    industry: c.industry,
-    where: c.locations.join(", "),
-    title: c.title,
-    // Who holds the role now — only worth finding for a senior or C-level role.
-    benchmark: benchmarkByDefault(c.title),
-    clientNotes: repo.client(o.clientId)?.researchNotes,
-  });
-  if (!res.ok) return { ok: false, reason: res.reason, detail: res.detail };
-  if (res.benchmarks) saveBenchmarks(openingId, res.benchmarks);
-  // A field a TA corrected by hand survives a lead's re-run: the correction is
-  // the better answer, and losing it is what made people stop correcting.
-  const prior = repo.research(openingId);
-  const fields = { ...res.fields };
-  for (const k of prior?.editedFields ?? []) {
-    if (k in fields && prior) {
-      (fields as unknown as Record<string, unknown>)[k] =
-        (prior.fields as unknown as Record<string, unknown>)[k];
-    }
-  }
-  repo.saveResearch({
-    openingId,
-    clientId: o.clientId,
-    fields,
-    editedFields: prior?.editedFields ?? [],
-    markdown: res.markdown,
-    sources: res.sources,
-    searches: res.searches,
-    model: answeredByLabel(res.answeredBy),
-    generatedBy: userId,
-    generatedAt: Date.now(),
-  });
-  // The eight named fields; the competitor profiles are counted on their own.
-  const { competitorProfiles, ...named } = fields;
-  const filled = Object.values(named).filter((x) => (Array.isArray(x) ? x.length > 0 : String(x ?? "").trim() !== "")).length;
-  return {
-    ok: true,
-    filled,
-    sources: res.sources.length,
-    competitors: competitorProfiles?.length ?? 0,
-    modelNote: res.modelNote,
-    people: res.benchmarks?.length,
-    benchmarkNote: res.benchmarkNote,
-  };
-}
-
-/** New benchmark rows, keeping the TA's ticks on anyone found again. */
-function saveBenchmarks(openingId: string, rows: IncumbentRow[]) {
-  const ticked = new Set(
-    repo.benchmarks(openingId).filter((b) => b.isSelected).map((b) => `${(b.name ?? "").toLowerCase()}|${b.company.toLowerCase()}`),
-  );
-  repo.replaceBenchmarks(
-    openingId,
-    rows.map((r) => ({ ...r, openingId, isSelected: ticked.has(`${(r.name ?? "").toLowerCase()}|${r.company.toLowerCase()}`) })),
-  );
-}
-
 export async function generateJdWithModel(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
@@ -3460,20 +3133,13 @@ export async function generateJdWithModel(formData: FormData) {
 /** A TA correcting a generated field. Marked, so regeneration leaves it alone. */
 export async function editResearchField(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  const key = String(formData.get("field"));
-  const value = String(formData.get("value") ?? "");
-  const r = repo.research(openingId);
-  if (!r || !(key in r.fields)) return;
-  const isList = Array.isArray((r.fields as unknown as Record<string, unknown>)[key]);
-  repo.updateResearchField(
-    openingId,
-    key,
-    isList ? value.split(/[;\n]/).map((x) => x.trim()).filter(Boolean) : value,
-  );
-  revalidatePath(`/openings/${openingId}/hh/research`);
-  await back("Saved.");
+  const field = String(formData.get("field"));
+  const report = repo.research(openingId);
+  if (!report || !(field in report.fields)) return;
+  const result = await updateOpeningResearchField(await getCurrentUser(), openingId, field, String(formData.get("value") ?? ""), RESEARCH_DEPS);
+  if (!result.ok) await fail(result.message);
+  await back(result.message);
 }
 
 // ─── The assistant (spec §8A.3) ──────────────────────────────────────────────
