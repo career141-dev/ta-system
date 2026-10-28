@@ -50,7 +50,7 @@ Naming: UI says "End of Day Submission" and "Midday email"; code says `eod` / `m
 | Correction with different location | "A correction must keep its original work location." |
 | Worker with no active workday containing the job (`workday()`; day matches `closureReason==="eod"` or unfinished) | "Start today's workday and add this opening before sending." |
 | Location added after the workday began (`workEntry.workLocationIds` set and missing it) | "This location was added after today's work started. Its daily emails begin tomorrow." (entries with no `workLocationIds` adopt `activeWorkLocationIds(job)` on first send) |
-| Any `dailyEmails` on the job + location in `sending`, `uncertain` or `accepted && !finalizedAt` (any date) | "An email on this location is still sending or needs reconciliation." |
+| Any of this TA's own `dailyEmails` on the job + location (other TAs' do not block, 28 Oct) in `sending`, `uncertain` or `accepted && !finalizedAt` (any date) | "An email on this location is still sending or needs reconciliation." |
 | `dailySendProblem(emails, type, requireMidday, revised)` | sending/uncertain; original EOD already accepted today; EOD without midday when required |
 | `snapshot.workbookLinkIds` row missing / other opening / other location | "A workbook row changed location. Reload and review the email before sending." |
 | Day finished (`finishedAt`) and entry `100%` without accepted original EOD | "The workday clock has stopped. Change this unfinished position to Follow-up or Add-on before sending." |
@@ -276,9 +276,9 @@ Short hashes from `git log`; dates are commit dates.
 - 2026-10-23 f3d57d6 - EOD can be sent without CVs (activity-only); c28e1b1 - referee calls section in the email (`refereeCalls` on snapshot, `eodEmailHtml`).
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: 18833f4d20e105ac2023463ed6e8bb3d9a44cab2
-verified-date: 2026-10-27
+verified-commit: ddec547
+verified-hash: a46dd27e94eb3c844a0f07f7f1e989cde1273b75
+verified-date: 2026-10-28
 sources:
   src/app/openings/[id]/eod/page.tsx
   src/app/openings/[id]/midday/page.tsx

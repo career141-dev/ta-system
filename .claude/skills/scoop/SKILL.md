@@ -148,6 +148,7 @@ Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only
 2. `fileScoop` must not set `ownerTaId`. Created with `scoopFlag` design on 29 Sep (commit 4e42d2b); setting it makes Shortlist think the person is already the TA's and skip the claim/move to Follow-up.
 3. Owner check before flagging side effects: HH upload copied the pattern on 2 Oct (38943a8) after a refused claim still changed channel and counted a row on the uploader's sheet. Do not flag-then-check.
 4. `scoopFlag` is idempotent and never rewrites `scoopReceivedAt` or an existing sender (tests/scoopmail.test.ts). Re-uploading a CV must not move a scoop to a different day, because the SCOOP column's identity is the flag, not the day.
+4a. A scoop is filed with no `workLocationId`; stage pages show one location at a time. `claimForTa` and `moveStage` (`placeInOnlyLocation`) give it the opening's only active location (28 Oct), else it sits under "Location not assigned" after Shortlist. Openings with several locations still need the TA to pick the tab.
 5. SCOOP column counts only CVs sent to the Director today by that TA, one column per CV, order backup > scoop > add-on > source (the desk, 28 Sep, 8ce23da; `tests/eodeffort.test.ts`). Colombo day, via `colomboDayStart`, never the server's UTC day.
 6. The CV platform is the only reader: nothing in `scoopUpload.ts` parses a CV. Merge safety for contact details (agency phone on a scoop CV) lives in `convex/lib/sameCandidate.ts` and `samePerson.ts` (59d0d0a, 1 Oct).
 7. Urgent lane: a TA-watched upload (`scoopedBy` or `headhuntedBy`) is started before background work and one slot of three is always free for it; `BACKGROUND_SLOTS = MAX - 1` (56768fa, 26 Oct). Test: `tests/extractionqueue.test.ts` also asserts via source text that `scoopUpload.ts` contains `await enqueueExtraction(ctx, cvUploadId,` and no `runAfter(0, internal.cvs.cvExtraction.processCvExtraction`, and that `eq("urgent", true)` appears before `eq("urgent", undefined)` in `startNextTurns`. Renaming those breaks the test on purpose.
@@ -223,9 +224,9 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 - 2026-10-26 `56768fa` (PR #293, `0a5d8c4`) urgent lane: a TA's own HH/Scoop upload is read first with a slot kept for it; `enqueueExtraction` called inside the upload mutation (reading queue itself came in `138de24`, same day).
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: cc48939f404b0ae3e716d8fbf80b3c5e4f840a11
-verified-date: 2026-10-27
+verified-commit: ddec547
+verified-hash: 178d8636807b2c43d8694b0a27e8eb15d7966141
+verified-date: 2026-10-28
 sources:
   convex/ta/scoopUpload.ts
   convex/lib/scoopMail.ts
