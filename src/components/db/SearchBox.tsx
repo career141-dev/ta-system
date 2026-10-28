@@ -181,25 +181,22 @@ export function SearchBox({
             <span>{attachedFile ? "CV attached" : "Attach CV"}</span>
           </button>
 
-          <span className="tabular text-[11.5px] text-ink-faint">
-            {q.length.toLocaleString()}/4,000
-          </span>
-          <div className="ml-auto flex rounded-full bg-tag p-0.5 text-[11px]">
-            {(["natural", "meaning", "boolean"] as const).map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setMode(m)}
-                className={`rounded-full px-2.5 py-1 transition-colors ${
-                  mode === m
-                    ? "bg-surface font-medium text-ink shadow-[0_1px_2px_rgba(23,28,24,0.08)]"
-                    : "text-ink-soft hover:text-ink"
-                }`}
-              >
-                {m === "natural" ? "Plain English" : m === "meaning" ? "By meaning" : "Boolean"}
-              </button>
-            ))}
-          </div>
+          {/* The narrow chat box has no room for the count until the text is long. */}
+          {(!compact || q.length > 3000) && (
+            <span className="tabular text-[11.5px] text-ink-faint">
+              {q.length.toLocaleString()}/4,000
+            </span>
+          )}
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as typeof mode)}
+            aria-label="Search method"
+            className="ml-auto rounded-full border border-rule bg-tag px-2.5 py-1 text-[11.5px] text-ink outline-none focus:border-brand"
+          >
+            <option value="natural">Plain English</option>
+            <option value="meaning">By meaning</option>
+            <option value="boolean">Boolean</option>
+          </select>
           {compact && (
             <button
               disabled={(!q.trim() && !attachedFile) || isSubmitting}

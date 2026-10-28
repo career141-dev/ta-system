@@ -7,6 +7,13 @@ import { criteriaToParams, describe, describeBoolean, parseBoolean, toBooleanStr
 import { appendSearchTurn, type SearchIntent } from "@/lib/searchIntent";
 import type { ReferenceSearchProfile } from "@/lib/referenceSearchProfile";
 
+const KIND_LABEL: Record<string, string> = {
+  job_description: "a job description",
+  keywords: "keywords",
+  name: "a name",
+  role: "a role",
+};
+
 /**
  * The left rail — spec §6D.2, modelled on Recruiter's AI-assisted search panel.
  *
@@ -25,6 +32,7 @@ export function AiPanel({
   total,
   read: engineRead = null,
   engineTerms = null,
+  kind = null,
   companies = null,
   intent = null,
   referenceProfile = null,
@@ -44,6 +52,8 @@ export function AiPanel({
   read?: string | null;
   /** The terms the engine searched on. Absent when it did not run. */
   engineTerms?: string[] | null;
+  /** What the search was read as: job_description, keywords, name or role. */
+  kind?: string | null;
   /** The companies the engine read out of the conversation (9 Oct). The first
    *  name is the one asked for; the rest are its other spellings. */
   companies?: { names: string[]; scope: "current" | "any"; exclude: string[] } | null;
@@ -94,6 +104,11 @@ export function AiPanel({
         <span className="text-[15px] font-semibold">
           <span className="tabular">{total.toLocaleString()}</span> {total === 1 ? "result" : "results"}
         </span>
+        {kind && KIND_LABEL[kind] && (
+          <span className="rounded-full bg-tag px-2.5 py-0.5 text-[11px] text-ink-soft" title="How this search was read">
+            Read as {KIND_LABEL[kind]}
+          </span>
+        )}
         <button
           onClick={() => setShowFilters((v) => !v)}
           className="ml-auto text-[12.5px] font-medium text-accent hover:underline"

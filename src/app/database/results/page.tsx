@@ -270,6 +270,7 @@ async function ResultsView({
   let engineHits = new Map<string, EngineHit>();
   let engineRead: string | null = null;
   let engineTerms: string[] | null = null;
+  let engineKind: string | null = null;
   let engineCompanies: { names: string[]; scope: "current" | "any"; exclude: string[] } | null = null;
   const searchIntent = engine?.intent ?? null;
 
@@ -291,6 +292,7 @@ async function ResultsView({
     engineRead = engine.interpretation?.interpretation || null;
     engineTerms = engine.interpretation?.keywords?.length ? engine.interpretation.keywords : null;
     const read = engine.interpretation;
+    engineKind = read?.kind ?? null;
     if (read?.employers?.length || read?.excludeEmployers?.length) {
       engineCompanies = { names: read.employers ?? [], scope: read.employerScope ?? "any", exclude: read.excludeEmployers ?? [] };
     }
@@ -688,11 +690,9 @@ async function ResultsView({
 
   return (
     <>
-      <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[400px_1fr]">
+      {/* Chat on the left, results in the middle, Level on the right (28 Oct). LevelFilter hides itself under two options, so the third column only exists when it has something to show. */}
+      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${levelChoices.length >= 2 ? "xl:grid-cols-[400px_1fr_220px]" : "xl:grid-cols-[400px_1fr]"}`}>
         <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
-          {/* First, so it is in view without scrolling past the explanation below. */}
-          <LevelFilter options={levelChoices} picked={pickedLevels} hrefFor={levelHref} jobTitle={target?.title ?? null} />
-
           <AiPanel
             criteria={criteria}
             ignored={ignored}
@@ -703,6 +703,7 @@ async function ResultsView({
             total={total}
             read={engineRead}
             engineTerms={engineTerms}
+            kind={engineKind}
             companies={engineCompanies}
             intent={searchIntent}
             referenceProfile={referenceProfile}
@@ -743,7 +744,7 @@ async function ResultsView({
           </div>
         </aside>
 
-        <div className="min-w-0">
+        <div className="order-2 min-w-0 xl:order-none">
           {refining && (
             <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-soft px-4 py-3 text-[12.5px]">
               <span aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
@@ -947,6 +948,12 @@ async function ResultsView({
 
           <Pager page={page} pageSize={PAGE} total={total} href={pageHref} />
         </div>
+
+        {levelChoices.length >= 2 && (
+          <aside className="order-1 xl:sticky xl:top-[80px] xl:order-none">
+            <LevelFilter options={levelChoices} picked={pickedLevels} hrefFor={levelHref} jobTitle={target?.title ?? null} />
+          </aside>
+        )}
       </div>
 
       {activeCandidate && (

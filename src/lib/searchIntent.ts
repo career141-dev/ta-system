@@ -43,6 +43,40 @@ const STOP = /\b(?:with|who|that|for|from|at|in|around|near|must|needs?|required
 const ROLE_PREFIX = /^(?:find me|find|show me|show|search for|search|looking for|look for|we need|i need|need|want|give me|source)\s+(?:an|a|the|some)?\s*/i;
 const LIST_SPLIT = /\s*(?:,|;|\/|\band\b|\bor\b|\bplus\b|\bwith\b)\s*/i;
 
+export type SearchKind = "job_description" | "keywords" | "name" | "role";
+
+const JD_MARKERS = /\b(?:responsibilit(?:y|ies)|requirements?|qualifications?|job description|key duties|about the role|what you.?ll do)\b/i;
+const KEYWORD_LEAD = /^(?:(?:find|show|search for|get)\s+)?(?:me\s+)?(?:profiles?|candidates?|people|cvs?|resumes?)\s+(?:with|that have|having|containing|who have|mentioning)\s+(.+)$/i;
+const NAME_SHAPE = /^[A-Z][A-Za-z'’.-]+(?:\s+[A-Z][A-Za-z'’.-]+){1,3}$/;
+
+/**
+ * What kind of thing the recruiter typed, from the words alone (28 Oct). TAs
+ * rarely paste a job description: they type a role, a keyword list or a name,
+ * and each wants a different reading. `known` is whether the parser already
+ * found a title, skill, industry, company or place in it; a name is only a
+ * name when it found none. Wrong guesses cost little: the normal engine still
+ * runs for everything but the keyword filter, which is only set on a clear list.
+ */
+export function searchKindOf(turns: string[], known: boolean): { kind: SearchKind; keywords: string[] } {
+  const first = (turns[0] ?? "").trim();
+  if (first.length > 400 || (first.length > 100 && JD_MARKERS.test(first))) return { kind: "job_description", keywords: [] };
+  if (turns.length > 1) return { kind: "role", keywords: [] };
+
+  const split = (s: string) =>
+    s.split(/\s*(?:,|;|\/|\band\b)\s*/i).map((t) => t.trim().replace(/^["']|["']$/g, "")).filter((t) => t.length > 1);
+  const lead = first.match(KEYWORD_LEAD) ?? first.match(/^keywords?\s*[:\-]?\s*(.+)$/i);
+  if (lead) {
+    const keywords = split(lead[1]);
+    if (keywords.length > 0) return { kind: "keywords", keywords };
+  }
+  const parts = first.split(/\s*,\s*/).filter(Boolean);
+  if (parts.length >= 3 && parts.every((p) => p.split(/\s+/).length <= 3) && !/\b(?:in|at|from|years?|yrs?)\b/i.test(first)) {
+    return { kind: "keywords", keywords: split(first) };
+  }
+  if (!known && NAME_SHAPE.test(first)) return { kind: "name", keywords: [] };
+  return { kind: "role", keywords: [] };
+}
+
 export function readSearchIntent(turnsOrQuery: string[] | string, previousIntent?: SearchIntent | null): SearchIntent {
   const turns = Array.isArray(turnsOrQuery) ? turnsOrQuery : turnsOf(turnsOrQuery);
   const next = normalizeIntent({

@@ -65,7 +65,7 @@ function normalizeRequirements(req: SearchRequirements): SearchRequirements {
  * to raw words ("accountant, with, years…") (21 September). Null when the
  * reply holds no usable reading.
  */
-function requirementsIn(content: string, text: string): SearchRequirements | null {
+function requirementsIn(content: string, text: string, keepMaxYears = false): SearchRequirements | null {
   const from = content.indexOf("{");
   const to = content.lastIndexOf("}");
   const parsed = JSON.parse(from >= 0 && to > from ? content.slice(from, to + 1) : content) as Partial<SearchRequirements>;
@@ -87,6 +87,9 @@ function requirementsIn(content: string, text: string): SearchRequirements | nul
     requiredSkills: parsed.requiredSkills ?? [],
     preferredSkills: parsed.preferredSkills ?? [],
     minYearsExperience: typeof parsed.minYearsExperience === "number" ? parsed.minYearsExperience : null,
+    // Database search only (28 Oct). Job details and applicant scoring never
+    // read a ceiling from this, so a JD read for an opening is unchanged.
+    ...(keepMaxYears ? { maxYearsExperience: typeof parsed.maxYearsExperience === "number" ? parsed.maxYearsExperience : null } : {}),
     industry: parsed.industry ?? null,
     seniority: parsed.seniority ?? null,
     location: parsed.location ?? null,
@@ -114,7 +117,8 @@ type Reading = {
 
 export async function extractSearchRequirements(
   text: string,
-  kind: "job_description" | "natural_language"
+  kind: "job_description" | "natural_language",
+  opts: { keepMaxYears?: boolean } = {},
 ): Promise<Reading> {
   const prompt =
     kind === "job_description"
@@ -144,7 +148,7 @@ If a skill is implied by the role and clearly important, include it in requiredS
 For occupationSynonyms, include alternative job titles that represent the same occupation as the primary title — not seniority variations, but genuinely equivalent role names a candidate might use on their CV. For example for "Accountant" include ["Finance Officer", "Accounts Executive"].`
       : NATURAL_LANGUAGE_PROMPT;
   return (
-    (await readRequirements(prompt, text.slice(0, 7000), text, kind === "natural_language")) ??
+    (await readRequirements(prompt, text.slice(0, 7000), text, kind === "natural_language", kind === "natural_language" || !!opts.keepMaxYears)) ??
     fallbackRequirements(text)
   );
 }
@@ -159,6 +163,7 @@ Return ONLY valid JSON with these fields:
   "requiredSkills": ["core skills explicitly or implicitly requested"],
   "preferredSkills": ["supporting skills or nice-to-have signals"],
   "minYearsExperience": number or null,
+  "maxYearsExperience": number or null,
   "industry": "industry or null",
   "seniority": "junior, mid, senior, lead, executive, or null",
   "location": "location or null",
@@ -173,6 +178,9 @@ Return ONLY valid JSON with these fields:
   "clientContactEmail": null,
   "salaryRange": "salary range if mentioned, or null"
 }
+Years: a plain "2 years" or "2 years experience" asks for about that much, so set minYearsExperience 2 and maxYearsExperience 4 (the figure plus 2, or plus half of it when that is more: 5 gives 5 to 8, 10 gives 10 to 15). "at least 5", "5+", "more than 5" set minYearsExperience only. "up to 3", "under 3", "less than 3" set maxYearsExperience only. "3 to 5 years" sets both as written. Never set a maximum the recruiter did not imply.
+Pasted job description: when the text is a whole job description, title is the role being hired for (never the hiring company's name), requiredSkills are the must-haves it lists, and the years are the range it states. Ignore the company intro, benefits and how-to-apply parts.
+Keyword lists: when the query is only keywords ("profiles with SAP, IFRS, Big 4"), set title to the keywords joined with spaces, leave alternativeTitles and occupationSynonyms empty, targetOccupation null (when asked for it), and put each keyword exactly as written in requiredSkills. Do not guess a job role for them.
 Companies: a company named in the query is where the CANDIDATE works or worked, so it goes in employers. "HR personnel in Dialog", "engineers at Brandix", "ex-MAS", "working at ABC" all name employers. "in Bangladesh", "in Colombo" are places and go in location. A company is never the hiring client here: leave clientCompany null.
 If the query is vague, infer the most likely role and include likely related skills so the search remains broad enough.
 For occupationSynonyms, include alternative job titles that represent the same occupation as the primary title — not seniority variations, but genuinely equivalent role names a candidate might use on their CV.`;
@@ -181,7 +189,7 @@ For occupationSynonyms, include alternative job titles that represent the same o
  * The model chain for one reading: Claude first when a TA is watching, then
  * DeepSeek, then NVIDIA where its key is set. Null when none gave a usable answer.
  */
-async function readRequirements(prompt: string, userText: string, text: string, claudeFirst: boolean): Promise<Reading | null> {
+async function readRequirements(prompt: string, userText: string, text: string, claudeFirst: boolean, keepMaxYears = false): Promise<Reading | null> {
   // Claude first for a search sentence (6 Oct, at the owner's request), DeepSeek
   // second. Only a sentence typed into search: a pasted job description still
   // goes to DeepSeek, as extraction does. A TA is watching this one, so it waits
@@ -190,7 +198,7 @@ async function readRequirements(prompt: string, userText: string, text: string, 
   if (claudeFirst) {
     try {
       const answer = await askClaudeFirst("match_read", prompt, userText, claudeBudgetMs("match_read"));
-      const requirements = answer ? requirementsIn(answer, text) : null;
+      const requirements = answer ? requirementsIn(answer, text, keepMaxYears) : null;
       if (requirements) {
         return { requirements, usage: { promptTokens: 0, completionTokens: 0, model: "claude-subscription" } };
       }
@@ -231,7 +239,7 @@ async function readRequirements(prompt: string, userText: string, text: string, 
       const outputTokens = response.usage?.completion_tokens || 0;
       const content = response.choices[0]?.message?.content ?? "{}";
 
-      const requirements = requirementsIn(content, text);
+      const requirements = requirementsIn(content, text, keepMaxYears);
       if (requirements) {
         return {
           requirements,
@@ -308,7 +316,7 @@ export function conversationMessage(turns: string[]): string {
 /** A model's reply to the conversation, read the same way as a single sentence. */
 export function conversationReply(reply: string, turns: string[]): SearchRequirements | null {
   try {
-    return requirementsIn(reply, turns.join(". "));
+    return requirementsIn(reply, turns.join(". "), true);
   } catch {
     return null;
   }
@@ -323,7 +331,7 @@ export async function extractConversationRequirements(turns: string[], opts: { r
   if (said.length <= 1 && !opts.roleAware) return extractSearchRequirements(said[0] ?? "", "natural_language");
   const joined = said.map((t) => t.replace(/[.\s]+$/, "")).join(". ");
   return (
-    (await readRequirements(`${NATURAL_LANGUAGE_PROMPT}\n\n${CONVERSATION_RULES}${opts.roleAware ? ROLE_AWARE_SEARCH : ""}`, conversationMessage(said), joined, true)) ??
+    (await readRequirements(`${NATURAL_LANGUAGE_PROMPT}\n\n${CONVERSATION_RULES}${opts.roleAware ? ROLE_AWARE_SEARCH : ""}`, conversationMessage(said), joined, true, true)) ??
     fallbackRequirements(joined)
   );
 }

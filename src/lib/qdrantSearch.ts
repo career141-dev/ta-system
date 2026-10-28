@@ -26,6 +26,8 @@ export interface QdrantFilters {
   locationCity?: string | null;
   locationCountry?: string | null;
   minExperience?: number | null;
+  /** A ceiling on years (28 Oct). People with no years recorded still pass. */
+  maxExperience?: number | null;
   seniorityLevel?: string | null;
   /** Every one of these must be present, so use it sparingly. */
   mustHaveSkills?: string[];
@@ -49,7 +51,16 @@ function headers(): Record<string, string> {
 
 function buildFilter(f: QdrantFilters): unknown | undefined {
   const must: unknown[] = [];
-  if (f.minExperience != null && f.minExperience > 0) {
+  const hasMax = f.maxExperience != null && f.maxExperience < 20;
+  if (hasMax) {
+    // "Unknown years" is not "too many": the range or an empty field.
+    must.push({
+      should: [
+        { key: "totalExperienceYears", range: { ...(f.minExperience ? { gte: f.minExperience } : {}), lte: f.maxExperience } },
+        { is_empty: { key: "totalExperienceYears" } },
+      ],
+    });
+  } else if (f.minExperience != null && f.minExperience > 0) {
     must.push({ key: "totalExperienceYears", range: { gte: f.minExperience } });
   }
   if (f.locationCity?.trim()) must.push({ key: "locationCity", match: { value: f.locationCity.trim() } });
