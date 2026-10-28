@@ -31,6 +31,7 @@ import { workingStageKey } from "../../src/lib/workingStage";
 import { executeStageTransition, PipelineStage } from "../pipeline/pipelineStateMachine";
 import { recordShortlistDecision } from "../lib/shortlistDecision";
 import { isGone } from "../../src/lib/bin";
+import { activeWorkLocationIds } from "../../src/lib/workLocations";
 
 
 
@@ -140,6 +141,18 @@ export const shortlist = internalMutation({
   },
 });
 
+/**
+ * A scoop is filed with no work location, and the stage pages show one location
+ * at a time — on a one-location opening that is the real one, so a scoop moved
+ * to Follow-up or Director Shortlist sat under "Location not assigned" and looked
+ * lost (28 Oct). With one active location there is nothing to choose: give it.
+ */
+async function placeInOnlyLocation(ctx: MutationCtx, app: Doc<"applications">) {
+  if (app.workLocationId) return;
+  const only = activeWorkLocationIds((await ctx.db.get(app.jobId)) ?? {});
+  if (only.length === 1) await ctx.db.patch(app._id, { workLocationId: only[0] });
+}
+
 /** Stages a claim moves into TA Follow-up; every other stage stays where it is. */
 const PULLED_INTO_FOLLOW_UP = new Set<string>(["new_cv", "matched", "ai_follow_up", "rejected", "dropped_out"]);
 
@@ -164,6 +177,7 @@ export async function claimForTa(
     return { ok: true as const, alreadyMine: true, setNumber: app.setNumber ?? null };
   }
 
+  await placeInOnlyLocation(ctx, app);
   const now = Date.now();
   const setNumber = await nextSetNumber(ctx, app.jobId, user._id, now);
   // On an Add-on day what the TA shortlists is an add-on (the desk, 28 Sep).
@@ -299,6 +313,7 @@ export const moveStage = internalMutation({
       }
     }
     assertNotAnotherTasCandidate(user, app);
+    await placeInOnlyLocation(ctx, app);
 
     const result = await executeStageTransition(ctx, {
       applicationId: appId,
