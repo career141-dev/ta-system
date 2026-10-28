@@ -151,8 +151,9 @@ export const begin = internalMutation({
     const setup = day && args.submissionType === "eod" ? await requiredChecks(ctx, day, day.jobs.find(j => j.jobId === args.jobId)!) : null;
     const date = workdayDate(Date.now());
     const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, date)).filter(e => inWorkLocation(e, locationId ?? ""));
-    // Pending sends on older dates also hold the opening until reconciled.
-    const all = await ctx.db.query("dailyEmails").withIndex("by_job", q => q.eq("jobId", args.jobId)).collect();
+    // Pending sends on older dates also hold the opening until reconciled — this TA's own: with
+    // two TAs on one job, Priya's stuck email blocked Sameera's EOD with no email of his (28 Oct).
+    const all = (await ctx.db.query("dailyEmails").withIndex("by_job", q => q.eq("jobId", args.jobId)).collect()).filter(e => e.userId === user._id);
     if (all.some(e => (!e.workLocationId || e.workLocationId === locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("An email on this location is still sending or needs reconciliation.");
     const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent);
     if (problem) throw new Error(problem);
