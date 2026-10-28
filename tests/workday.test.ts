@@ -890,6 +890,8 @@ try {
   // Assignment selectors remain available before a TA records any work.
   user("notStartedTa", "ta");
   put("jobs", { _id: "notStartedJob", title: "Not started position", taLeadId: "lead", assignedTaIds: ["notStartedTa"] });
+  // Saving an opening writes an assignment row for each TA (ta/openings.ts); the lead's choices are read from those rows (28 Oct).
+  put("jobAssignments", { _id: "notStartedAssignment", jobId: "notStartedJob", userId: "notStartedTa", assignmentRole: "primary_recruiter", isActive: true });
   user("unassignedTa", "ta");
   const selectorView = await run("dashboard", { actorId: "lead", detail: true, date: workdayDate(clock), taId: "notStartedTa" });
   assert.ok(selectorView.teamAssignments.some((a: Row) => a.userId === "notStartedTa" && a.jobId === "notStartedJob"));

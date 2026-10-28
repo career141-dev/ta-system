@@ -1124,7 +1124,12 @@ export const dashboard = internalQuery({
         q.eq("userId", user._id).eq("isActive", true),
       )
       .collect();
-    const listed = await ctx.db.query("jobs").take(1000);
+    // Only the openings this person is assigned to are read. Reading every
+    // opening (with its embedding and saved match results) went over the
+    // backend's 16 MB per-query limit, and Today's Checks showed "Could not
+    // load workday checks" for TAs and admins alike (28 Oct). Saving an
+    // opening writes a jobAssignments row for each TA, and assignedJob (used
+    // to add a position) goes by those rows too.
     const assignedIds = new Set(
       assignments
         .filter((a) => recruiters.includes(a.assignmentRole))
@@ -1133,14 +1138,7 @@ export const dashboard = internalQuery({
     const assignedJobs = await Promise.all(
       [...assignedIds].map((id) => ctx.db.get(id as Id<"jobs">)),
     );
-    const selectableJobs = [
-      ...new Map(
-        [
-          ...listed,
-          ...assignedJobs.filter((job): job is Doc<"jobs"> => !!job),
-        ].map((job) => [job._id, job]),
-      ).values(),
-    ];
+    const selectableJobs = assignedJobs.filter((job): job is Doc<"jobs"> => !!job);
     const previousDays = worker ? await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", user._id)).collect() : [];
     const workedJobs = new Set(previousDays.filter(d => d.finishedAt !== undefined).flatMap(d => d.jobs.map(j => j.jobId)));
     const assignmentModes = new Map(assignments.map(a => [a.jobId as string, a.workingStage]));
@@ -1225,14 +1223,17 @@ export const dashboard = internalQuery({
       nextCursor = page.isDone ? null : page.continueCursor;
     }
     // Assignment choices must exist even before a TA starts a workday.
-    const reviewJobs = !review ? [] : deskWide
-      ? await ctx.db.query("jobs").collect()
-      : await ctx.db.query("jobs").filter(q => q.eq(q.field("taLeadId"), user._id)).collect();
+    // From the small assignment rows, not a scan of every opening (see above):
+    // only openings with a recruiter on them can list a TA here.
+    const allAssignments = review ? await ctx.db.query("jobAssignments").collect() : [];
+    const byJob = new Map<string, Doc<"jobAssignments">[]>();
+    for (const a of allAssignments) if (a.isActive && recruiters.includes(a.assignmentRole)) byJob.set(a.jobId as string, [...(byJob.get(a.jobId as string) ?? []), a]);
+    const reviewJobs = (await Promise.all([...byJob.keys()].map((id) => ctx.db.get(id as Id<"jobs">))))
+      .filter((job): job is Doc<"jobs"> => !!job);
     const teamAssignments = review ? await Promise.all(reviewJobs
       .filter(job => !isGone(job) && (deskWide || job.taLeadId === user._id))
       .map(async job => {
-        const assigned = await ctx.db.query("jobAssignments")
-          .withIndex("by_jobId", q => q.eq("jobId", job._id)).collect();
+        const assigned = byJob.get(job._id as string) ?? [];
         const ids = new Set([...(job.assignedTaIds ?? []), ...assigned
           .filter(a => a.isActive && recruiters.includes(a.assignmentRole)).map(a => a.userId)]);
         const users = await Promise.all([...ids].map(id => ctx.db.get(id)));
