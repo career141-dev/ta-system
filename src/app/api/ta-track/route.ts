@@ -5,6 +5,7 @@ import { convexActorForEmail, convexMutation, convexQuery } from "@/lib/convexSe
 import { canPairTaTracking, canViewTaTracking, validTrackingDate, type TrackingReport } from "@/lib/taTracking";
 import { trackingLoginRequest } from "@/lib/taTrackingLogin";
 import { trackingErrorMessage } from "@/lib/taTrackingError";
+import { isTrackingSameOrigin } from "@/lib/taTrackingOrigin";
 
 export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
@@ -29,7 +30,7 @@ export async function GET(req: Request) {
 
 export async function POST(req: Request) {
   // Pairing/revocation use the signed-in account, never a supplied TA id.
-  if (req.headers.get("origin") !== new URL(req.url).origin) return Response.json({ error: "Invalid origin." }, { status: 403 });
+  if (!isTrackingSameOrigin(req)) return Response.json({ error: "Invalid origin." }, { status: 403 });
   await primeStore();
   const user = await currentUser();
   if (!user) return Response.json({ error: "Sign in to continue." }, { status: 401 });
