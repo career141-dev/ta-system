@@ -574,13 +574,17 @@ export function WorkdayDashboard() {
   const [jobFilter, setJobFilter] = useSavedChoice("workday-filter-job");
   const [status, setStatus] = useSavedChoice("workday-filter-status");
   const [cursor, setCursor] = useState("");
+  // Past workdays beyond the last two are fetched only on request (28 Oct).
+  const [allHistory, setAllHistory] = useState(false);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const params = useSearchParams();
   const requestedDay = params.get("checkDay");
   const requestedJob = params.get("checkJob") ?? "";
   const requestedFocus = `${requestedDay}:${requestedJob}:${params.get("checkTask")}`;
   const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
   const focus = requestedDay && dismissedFocus !== requestedFocus ? { day: requestedDay, job: requestedJob } : null;
-  const { data, error, load } = useWorkday(true, true, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}&ta=${encodeURIComponent(ta)}`);
+  const { data, error, load } = useWorkday(true, true, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}&ta=${encodeURIComponent(ta)}${allHistory ? "&history=all" : ""}`);
+  useEffect(() => setHistoryLoading(false), [data, error]);
   const teamChoices = [...(data?.teamAssignments ?? []), ...(data?.team ?? []).flatMap(day => day.jobs.map(job => ({ userId: day.userId, name: day.name, jobId: job.jobId, title: job.title })))];
   const taChoices = [...new Map([...(data?.teamMembers ?? []), ...teamChoices].map(choice => [choice.userId, choice.name])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const positionChoices = [...new Map(teamChoices.filter(choice => !ta || choice.userId === ta).map(choice => [choice.jobId, choice.title])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
@@ -650,9 +654,21 @@ export function WorkdayDashboard() {
               </summary>
               <div className="mt-4 space-y-4">
                 <label className="block text-xs">Previous day<input type="date" value={date} onChange={e => { setDate(e.target.value); setCursor(""); }} className={inputClass} /></label>
-                {data.history.filter(day => !date || day.date === date).map((day) => (
+                {data.history.filter(day => !date || date === workdayDate(Date.now()) || day.date === date).map((day) => (
                   <DailyReview key={day.id} day={day} />
                 ))}
+                <button
+                  type="button"
+                  disabled={historyLoading}
+                  onClick={() => {
+                    setHistoryLoading(true);
+                    if (allHistory) void load();
+                    else setAllHistory(true);
+                  }}
+                  className="inline-flex items-center gap-2 text-sm text-brand underline disabled:opacity-60"
+                >
+                  {historyLoading ? "Loading past workdays…" : allHistory ? "Refresh past workdays" : "Load earlier workdays"}
+                </button>
               </div>
             </details>
           )}
