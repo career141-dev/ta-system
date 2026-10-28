@@ -99,3 +99,13 @@ export const strategyWriteBody = z.discriminatedUnion("action", [
   }).strict(),
   z.object({ action: z.literal("remove_proof"), rowId: z.string().min(1).max(200), proofId: z.string().min(1).max(300) }).strict(),
 ]);
+
+const researchField = z.enum(["similarDesignation", "websiteLink", "servicesProvider", "country", "location", "competitors", "socialMedia", "companyOverview"]);
+export const researchWriteBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("run_research") }).strict(),
+  z.object({ action: z.literal("correct_client"), researchNotes: text(2_000) }).strict(),
+  z.object({ action: z.literal("edit_field"), field: researchField, value: text(20_000) }).strict(),
+  z.object({ action: z.literal("run_benchmark") }).strict(),
+  z.object({ action: z.literal("toggle_benchmark"), entryId: z.string().min(1).max(200) }).strict(),
+  z.object({ action: z.literal("confirm"), unavailable: z.partialRecord(researchField, text(1_000)) }).strict(),
+]);

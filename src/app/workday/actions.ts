@@ -5,6 +5,7 @@ import { unstable_rethrow } from "next/navigation";
 import { primeStore } from "@/data/prime";
 import { getCurrentUser } from "@/lib/session";
 import { convexMutation } from "@/lib/convexServer";
+import { confirmOpeningResearch } from "@/lib/openings/researchWrites";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { checkResearchSubmission } from "@/lib/eod-format";
 import { workdayErrorMessage } from "@/lib/workdayErrors";
@@ -67,6 +68,12 @@ export async function changeWorkday(
       if (checked.url) form.set("link", checked.url);
     }
     const reasons = Object.fromEntries([...form.entries()].filter(([key]) => key.startsWith("unavailable:")).map(([key, val]) => [key.slice(12), String(val).trim()]));
+    if (value("kind") === "research") {
+      const jobId = value("jobId");
+      await primeStore({ openingId: jobId });
+      const result = await confirmOpeningResearch(user, jobId, reasons, { convexMutation, revalidatePath });
+      return { ok: result.ok, message: result.message };
+    }
     Object.assign(args, { jobId: value("jobId"), kind: value("kind"), reason: value("reason"), reasons, link: value("link"), confirmed: value("confirmed") === "on" });
   } else return { ok: false, message: "Unknown workday action." };
   try {
