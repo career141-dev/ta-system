@@ -2,7 +2,7 @@
  * The Database search as a conversation (5 Oct): each message adds to the
  * search, and a later message wins where it changes a number, a place or a title.
  */
-import { conversationText, parseConversation, parseQuery, resultsKeyOf, searchParamsOf, turnsOf, yearsBand, type Vocabulary } from "@/lib/query";
+import { conversationText, parseConversation, parseQuery, resultsKeyOf, searchParamsOf, turnCounts, turnsOf, yearsBand, type Vocabulary } from "@/lib/query";
 import { searchKindOf } from "@/lib/searchIntent";
 
 let pass = 0, fail = 0;
@@ -71,6 +71,14 @@ eq("an edited chip is a new search", key({ q: "java" }) === key({ q: "java", edi
 const href = searchParamsOf({ q: "java\nin Colombo", lvl: ["Senior", "Mid"], page: "2", candidate: "c1", below: "1" }, ["page", "candidate"]);
 eq("links keep the address, less what they replace", href.toString(), "q=java%0Ain+Colombo&lvl=Senior&lvl=Mid&below=1");
 eq("an address with no chips gains none", [...searchParamsOf({ q: "java" }).keys()], ["q"]);
+
+console.log("\nthe chat's counts (29 Oct)");
+eq("a first message has only today's count", turnCounts(undefined, 1, 142), [142]);
+eq("earlier counts are carried, today's is last", turnCounts("142,38", 3, 12), [142, 38, 12]);
+eq("an unknown count stays unknown", turnCounts(",38", 3, 12), [null, 38, 12]);
+eq("a count list that does not fit is not trusted", turnCounts("142", 3, 12), [null, null, 12]);
+eq("junk is not a count", turnCounts("a,5", 3, 12), [null, 5, 12]);
+eq("counts do not make a different search", resultsKeyOf({ q: "java", n: "25" }), resultsKeyOf({ q: "java\nin Colombo", n: "25,10" }));
 
 console.log("\nwhat was typed (28 Oct)");
 eq("a role", searchKindOf(["Senior Accountant in Colombo"], true).kind, "role");

@@ -6,8 +6,11 @@ import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { DbTabs } from "@/components/db/DbTabs";
 import { ReferralCard } from "@/components/db/ReferralCard";
-import { inputClass } from "@/components/form";
+import { ReferralSearchBox } from "@/components/db/ReferralSearchBox";
+import { CopyButton } from "@/components/db/CopyButton";
 import { referralSearch } from "@/lib/referralSearch";
+import { findByNames, type HeldCv, type NameCheck } from "@/lib/nameCheck";
+import { nameList } from "@/lib/nameMatch";
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -34,8 +37,12 @@ export default async function ReferralSearchPage({ searchParams }: { searchParam
   const sp = await searchParams;
   await primeStore();
   const user = await pageUser("database.read");
-  const q = one(sp.q).trim().slice(0, 500);
+  // Up to 4,000 characters: a pasted list of names is long. A question is still
+  // cut to 500 before a model reads it (see Results).
+  const q = one(sp.q).trim().slice(0, 4000);
   const drop = many(sp.x).slice(0, 30);
+  // "Not names — search it as a question": for a company list that reads as names.
+  const asQuestion = one(sp.as) === "search";
 
   return (
     <main className="mx-auto max-w-[760px] px-4 pb-24 pt-8 sm:px-6">
@@ -47,18 +54,7 @@ export default async function ReferralSearchPage({ searchParams }: { searchParam
         Find the referees named on CVs — by title, by company, or both. Ask the way you would ask a colleague.
       </p>
 
-      <form method="GET" action="/database/referral" className="flex gap-2">
-        <input
-          name="q"
-          defaultValue={q}
-          maxLength={500}
-          autoFocus={!q}
-          placeholder="e.g. HR Managers at Dialog, or contact details of referees from retail companies"
-          className={inputClass}
-          aria-label="Referral search"
-        />
-        <button className="shrink-0 rounded-lg bg-brand px-5 text-[13px] font-medium text-white transition-opacity hover:opacity-90">Search</button>
-      </form>
+      <ReferralSearchBox defaultValue={q} autoFocus={!q} />
 
       {!q && (
         <ul className="mt-4 flex flex-wrap justify-center gap-1.5">
@@ -77,22 +73,80 @@ export default async function ReferralSearchPage({ searchParams }: { searchParam
 
       {q && (
         <Suspense
-          key={`${q}|${drop.join("|")}`}
+          key={`${q}|${drop.join("|")}|${asQuestion}`}
           fallback={
             <div className="mt-8 rounded-xl border border-rule bg-surface px-8 py-14 text-center" role="status" aria-live="polite">
-              <p className="text-[14px] font-medium">Searching for “{q.slice(0, 80)}”</p>
+              <p className="text-[14px] font-medium">Searching for “{q.replace(/\s+/g, " ").slice(0, 80)}”</p>
               <p className="mt-1.5 text-[12px] text-ink-faint">A new search can take several seconds; the same search again is instant.</p>
             </div>
           }
         >
-          <Results q={q} drop={drop} email={user.email} />
+          <Results q={q} drop={drop} email={user.email} asQuestion={asQuestion} />
         </Suspense>
       )}
     </main>
   );
 }
 
-async function Results({ q, drop, email }: { q: string; drop: string[]; email: string }) {
+const STATUS = {
+  in: { label: "In our system", tone: "bg-brand-soft text-brand" },
+  maybe: { label: "Maybe — similar name", tone: "bg-warn-soft text-warn" },
+  none: { label: "Not found", tone: "bg-tag text-ink-faint" },
+} as const;
+
+const HOW = { same: "Same name", likely: "Same name, fuller or shorter form", maybe: "Similar name — check it is them" } as const;
+
+/** A pasted list of names, and whether we hold a CV for each. */
+function NameCheckList({ q, checks, quiet = false }: { q: string; checks: NameCheck[]; quiet?: boolean }) {
+  const count = (s: NameCheck["status"]) => checks.filter((c) => c.status === s).length;
+  const missing = checks.filter((c) => c.status === "none").map((c) => c.name);
+  const asQuestion = `/database/referral?${new URLSearchParams({ q, as: "search" }).toString()}`;
+  return (
+    <section className="mt-6">
+      {!quiet && <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-rule bg-surface px-5 py-4">
+        <p className="text-[14px] font-medium">
+          <span className="tabular">{checks.length}</span> names · <span className="tabular text-brand">{count("in")}</span> in our system
+          {count("maybe") > 0 && <> · <span className="tabular">{count("maybe")}</span> maybe</>} · <span className="tabular">{count("none")}</span> not found
+        </p>
+        {missing.length > 0 && (
+          <span className="ml-auto flex items-center gap-1 text-[12px] text-ink-faint">
+            Not found <CopyButton text={missing.join("\n")} label="the names not found" />
+          </span>
+        )}
+        <p className="basis-full text-[11.5px] text-ink-faint">
+          A match is by name only. Open the CV to check it is the same person.{" "}
+          <Link href={asQuestion} className="text-accent hover:underline">Not names? Search it as a question</Link>
+        </p>
+      </div>}
+      <ul className={`${quiet ? "" : "mt-4 "}flex flex-col gap-2.5`}>
+        {checks.map((c) => (
+          <li key={c.name} className="rounded-xl border border-rule bg-surface px-5 py-3.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium ${STATUS[c.status].tone}`}>{STATUS[c.status].label}</span>
+              <p className="text-[14px] font-semibold">{c.name}</p>
+            </div>
+            {c.matches.length > 0 && (
+              <ul className="mt-2 flex flex-col gap-1.5 border-t border-rule/70 pt-2">
+                {c.matches.map((m) => (
+                  <li key={m.id} className="text-[12.5px]">
+                    <Link href={`/candidates/${m.id}`} className="font-medium text-brand hover:underline">{m.fullName}</Link>
+                    <span className="text-ink-faint">
+                      {" "}
+                      {[[m.title, m.employer].filter(Boolean).join(" at "), m.location].filter(Boolean).join(" · ")}
+                    </span>
+                    <span className="ml-2 text-[11.5px] text-ink-soft">— {HOW[m.how]}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+async function Results({ q, drop, email, asQuestion }: { q: string; drop: string[]; email: string; asQuestion: boolean }) {
   if (!isConvex()) {
     return (
       <p className="mt-8 rounded-xl border border-rule bg-surface px-6 py-10 text-center text-[13px] text-ink-soft">
@@ -109,9 +163,27 @@ async function Results({ q, drop, email }: { q: string; drop: string[]; email: s
     // Reads go without an actor (convex/ta/guard optionalActor).
   }
 
+  // A pasted list of names is a different question: who of these do we hold?
+  const names = asQuestion ? null : nameList(q);
+  let own: NameCheck[] = [];
+  if (names) {
+    try {
+      own = await findByNames(names, actorId);
+    } catch (e) {
+      console.warn("[referral-search] name check failed:", (e as Error)?.message);
+      return (
+        <p className="mt-8 rounded-xl border border-rule bg-surface px-6 py-10 text-center text-[13px] text-ink-soft">
+          Could not check the names just now. Try again in a moment.
+        </p>
+      );
+    }
+    if (names.length >= 2) return <NameCheckList q={q} checks={own} />;
+  }
+
   let a;
   try {
-    a = await referralSearch(q, drop, actorId);
+    // A question is read by a model: still at most 500 characters of it.
+    a = await referralSearch(q.slice(0, 500), drop, actorId);
   } catch (e) {
     console.warn("[referral-search] failed:", (e as Error)?.message);
     return (
@@ -119,6 +191,15 @@ async function Results({ q, drop, email }: { q: string; drop: string[]; email: s
         Could not search the referees just now. Try again in a moment.
       </p>
     );
+  }
+
+  // Beside each referee: do we hold a CV for someone with this name? A prompt to
+  // open the CV and look, not a claim that it is them. A failed lookup shows none.
+  const held = new Map<string, HeldCv[]>();
+  try {
+    for (const c of await findByNames(a.people.map((p) => p.name), actorId, { loose: false })) held.set(c.name, c.matches);
+  } catch (e) {
+    console.warn("[referral-search] referee name check failed:", (e as Error)?.message);
   }
 
   const here = (left: string[]) => {
@@ -136,6 +217,12 @@ async function Results({ q, drop, email }: { q: string; drop: string[]; email: s
 
   return (
     <section className="mt-6">
+      {names && names.length === 1 && own[0]?.status !== "none" && (
+        <div className="mb-5">
+          <p className="mb-2 text-[11.5px] text-ink-faint">Do we hold a CV for this name?</p>
+          <NameCheckList q={q} checks={own} quiet />
+        </div>
+      )}
       <div className="rounded-xl border border-rule bg-surface px-5 py-4">
         <p className="text-[11.5px] text-ink-faint">
           Searching for
@@ -196,7 +283,7 @@ async function Results({ q, drop, email }: { q: string; drop: string[]; email: s
           </p>
           <ul className="flex flex-col gap-3">
             {a.people.map((p) => (
-              <ReferralCard key={p.id} p={p} />
+              <ReferralCard key={p.id} p={p} cvs={held.get(p.name) ?? []} />
             ))}
           </ul>
         </>
