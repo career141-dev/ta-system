@@ -247,6 +247,10 @@ async function handleMessage(ctx: ActionCtx, token: string, m: Doc<"mailIntakeMe
           channel: "email",
           inboxEmail: m.mailbox,
           senderEmail: fromAddress,
+          subject,
+          // The application matched just above. Left out, the extraction
+          // re-guessed from the last outbound on any channel (29 Oct).
+          applicationId: reply.applicationId,
         });
         await ctx.runMutation(internal.mailIntake.model.finishMessage, {
           id: m._id,

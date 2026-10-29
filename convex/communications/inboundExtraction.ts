@@ -5,6 +5,7 @@ import { getOpenAI, getModelForTask } from "../lib/llm";
 import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
 import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod } from "../lib/answered";
 import { buildStructuredEmailHtml } from "./emailHtml";
+import { isAutomaticReply, latestReplyText } from "../lib/mailParse";
 import { isFollowUpStage } from "../ta/stages";
 
 export const extractDetailsFromText = internalAction({
@@ -14,6 +15,8 @@ export const extractDetailsFromText = internalAction({
     channel: v.optional(v.string()),
     inboxEmail: v.optional(v.string()),
     messageId: v.optional(v.string()),
+    /** An email's subject — used only to recognise an automatic reply. */
+    subject: v.optional(v.string()),
     /** The From address of the email being answered — a thread reply goes back to it. */
     senderEmail: v.optional(v.string()),
     /**
@@ -30,15 +33,26 @@ export const extractDetailsFromText = internalAction({
     applicationId: v.optional(v.id("applications")),
   },
   handler: async (ctx, args) => {
+    // An email is read for what the candidate wrote this time: the raw HTML
+    // with our own earlier email quoted under it was handed to the model
+    // (lib/mailParse.ts latestReplyText, 29 Oct).
+    const textBody = args.channel === "email" ? latestReplyText(args.textBody) : args.textBody;
     // Only an empty message is skipped. "No", "ok", "hi" and "0" are answers to
     // the question just asked — a three-character floor dropped them unread and
     // the candidate got nothing back (Astra review, 29 Oct).
-    if (!args.textBody || !args.textBody.trim()) {
+    // An out-of-office is not the candidate answering. Read as one it became
+    // a promised date ("away until 3 Nov") or got the missing list mailed to
+    // an empty inbox (29 Oct). Recorded on the thread already; a TA sees it.
+    if (args.channel === "email" && isAutomaticReply(args.subject, textBody)) {
+      console.log(`[Inbound Extraction] Automatic reply from candidate ${args.candidateId} — not answered.`);
+      return;
+    }
+    if (!textBody || !textBody.trim()) {
       console.warn(`[Inbound Extraction] Skipping extraction — text body is empty.`);
       return;
     }
 
-    console.log(`[Inbound Extraction] Starting extraction for candidate ${args.candidateId} (channel: ${args.channel || "whatsapp"}). Text: "${args.textBody.substring(0, 200)}"`);
+    console.log(`[Inbound Extraction] Starting extraction for candidate ${args.candidateId} (channel: ${args.channel || "whatsapp"}). Text: "${textBody.substring(0, 200)}"`);
 
     const activeApp = args.applicationId
       ? await ctx.runQuery(internal.communications.inboundExtraction.getApplicationForCandidate, {
@@ -278,7 +292,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           model,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: args.textBody },
+            { role: "user", content: textBody },
           ],
           temperature: 0.1,
         });
@@ -383,8 +397,8 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       // Candidate Inquiry placement (executed STRICTLY AFTER AI Analysis)
       try {
         const dq = extracted.detectedQuestion;
-        const textLower = args.textBody.toLowerCase();
-        const hasQuestion = dq?.hasQuestion === true || extracted.intent === "asked_question" || args.textBody.includes("?") ||
+        const textLower = textBody.toLowerCase();
+        const hasQuestion = dq?.hasQuestion === true || extracted.intent === "asked_question" || textBody.includes("?") ||
           textLower.includes("visa") || textLower.includes("remote") || textLower.includes("salary") || textLower.includes("relocat");
 
         if (hasQuestion) {
@@ -417,8 +431,9 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
             candidateId: args.candidateId,
             applicationId: activeApp._id,
             jobId: activeApp.jobId,
-            channel: "whatsapp",
-            questionText: dq?.questionText || args.textBody,
+            // Was always "whatsapp", so email questions were filed under WhatsApp.
+            channel: args.channel === "email" ? "email" : "whatsapp",
+            questionText: dq?.questionText || textBody,
             category,
             importanceLevel,
             aiAutoReplyText: extracted.nextActionMessage || undefined,
@@ -431,10 +446,10 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       }
 
       const hasUpdates = Object.keys(updates).length > 0 || extracted.cvReceived === true;
-      const isQuestion = extracted.intent === "asked_question" || (extracted.detectedQuestion && extracted.detectedQuestion.hasQuestion === true) || args.textBody.includes("?");
+      const isQuestion = extracted.intent === "asked_question" || (extracted.detectedQuestion && extracted.detectedQuestion.hasQuestion === true) || textBody.includes("?");
       const isEta = extracted.intent === "promised_eta" || extracted.intent === "provided_eta" || extracted.intent === "interested_no_eta";
 
-      if (hasUpdates || isQuestion || isEta || args.textBody.trim().length > 0) {
+      if (hasUpdates || isQuestion || isEta || textBody.trim().length > 0) {
         if (hasUpdates) {
           console.log(`[Inbound Extraction] Extracted updates for candidate ${args.candidateId}:`, updates);
           await ctx.runMutation(internal.candidates.candidates.updateCandidateDetails, {
@@ -505,7 +520,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         if (extracted.intent === "opt_out") {
           await ctx.runMutation(internal.candidates.candidates.setDoNotContact, {
             candidateId: args.candidateId,
-            reason: `Asked on ${args.channel === "email" ? "email" : "WhatsApp"}: "${args.textBody.trim().slice(0, 200)}"`,
+            reason: `Asked on ${args.channel === "email" ? "email" : "WhatsApp"}: "${textBody.trim().slice(0, 200)}"`,
           });
         }
 
@@ -562,7 +577,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         if (stop) {
           await ctx.runMutation(internal.communications.followUpMutations.flagForTaReview, {
             applicationId: activeApp._id,
-            reason: `${stop}: "${args.textBody.trim().slice(0, 200)}"`,
+            reason: `${stop}: "${textBody.trim().slice(0, 200)}"`,
           });
         }
 
@@ -599,14 +614,22 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
             }
           }
 
-          // Build the structured rich HTML rendering for the email channel
+          // The email says what was decided above. It was always built as
+          // "we recorded your update + still missing: CV, salary… please reply
+          // with these details", so a candidate who said "not interested" or
+          // "I'll send it tonight" was emailed the list anyway (29 Oct).
+          const asking = !stop && !isCompleted && !etaPromised && remainingMissing.length > 0;
+          const answerLine = asking
+            ? (extracted.intent === "interested_no_eta" ? replyMessage : aiAnswer)
+            : isCompleted && !stop ? null : replyMessage;
           const replyHtml = buildStructuredEmailHtml({
             candidateName: updatedCandidate?.fullName || "there",
             jobTitle: job.title,
-            prelude: preludeText,
-            aiAnswer,
+            prelude: asking || (isCompleted && !stop) ? preludeText : undefined,
+            aiAnswer: answerLine,
             recordedDetails: recordedDetails.length > 0 ? recordedDetails : undefined,
-            remainingMissing: remainingMissing.length > 0 ? remainingMissing : undefined,
+            remainingMissing: asking ? remainingMissing : undefined,
+            ctaText: asking ? undefined : stop ? "If anything changes, just reply to this email." : "Thank you!",
           });
 
           // Send immediate reply over the originating channel (Email or WhatsApp)

@@ -15,20 +15,24 @@ import assert from "node:assert/strict";
 import test, { afterEach, beforeEach, mock } from "node:test";
 import { getFunctionName } from "convex/server";
 import { extractDetailsFromText } from "../convex/communications/inboundExtraction";
+import { isAutomaticReply, latestReplyText } from "../convex/lib/mailParse";
 
 let model: Record<string, unknown> | "fail";
 let prompts: string[];
+let userTexts: string[];
 let savedKey: string | undefined;
 
 beforeEach(() => {
   savedKey = process.env.OPENROUTER_API_KEY;
   process.env.OPENROUTER_API_KEY = "test-only-not-a-real-key";
   prompts = [];
+  userTexts = [];
   mock.method(globalThis, "fetch", async (input: string | URL | Request, init?: RequestInit) => {
     const url = String(input);
     if (!url.startsWith("https://openrouter.ai/")) throw new Error(`Unexpected fetch: ${url}`);
     const body = JSON.parse(String(init?.body));
     prompts.push(body.messages[0].content);
+    userTexts.push(body.messages[1].content);
     if (model === "fail") return new Response("upstream down", { status: 500 });
     return Response.json({
       id: "x", object: "chat.completion", created: 0, model: "fake",
@@ -81,14 +85,15 @@ function world(jobExtra: Record<string, unknown> = {}) {
       if (name === "scheduleDynamicFollowUp") Object.assign(app, { nextFollowUpScheduledAt: Date.now() + args.nextActionTimeHours * 3600_000, nextFollowUpMessage: args.messageBody });
       if (name === "updateCandidateEta") Object.assign(app, { nextFollowUpScheduledAt: args.candidateEtaMs, nextFollowUpMessage: args.nextFollowUpMessage, waitingForCandidateEta: true });
       if (name === "flagForTaReview") Object.assign(app, { flaggedForTaReview: true, nextFollowUpScheduledAt: undefined, nextFollowUpMessage: undefined });
-      if (name === "recordLocalWhatsappOutbound") return "comm1";
+      if (name === "recordLocalWhatsappOutbound" || name === "createOutboundEmailRecord") return "comm1";
       return null;
     },
     scheduler: { runAfter: async (_ms: number, ref: any, args: any) => { sends.push({ name: getFunctionName(ref), args }); } },
   };
+  const email = () => sends.find((s) => s.name.endsWith(":sendGraphEmail"))?.args.bodyHtml as string | undefined;
   const reply = () => sends.find((s) => s.name.endsWith(":sendWhatsApp"))?.args.body as string | undefined;
   const called = (n: string) => mutations.some((m) => m.name === n);
-  return { ctx, app, candidate, mutations, sends, reply, called };
+  return { ctx, app, candidate, mutations, sends, reply, email, called };
 }
 
 const turn = (w: ReturnType<typeof world>, textBody: string) =>
@@ -174,4 +179,68 @@ test("a model that keeps failing still leaves the candidate a follow-up", async 
   await turn(w, "hello");
   assert.ok(prompts.length <= 2, "more than two model attempts");
   assert.ok(w.called("scheduleDynamicFollowUp"), "the failure escaped the fail-open path");
+});
+
+// ── Email replies: the same handler, reached from the mailbox readers ────────
+
+const emailTurn = (w: ReturnType<typeof world>, textBody: string, subject = "Re: Accountant role") =>
+  (extractDetailsFromText as any)._handler(w.ctx, { candidateId: "cand1", applicationId: "app1", textBody, subject, channel: "email" });
+
+const quotedHtml = `<div>Expected is 200k, notice one month</div><br>
+<div>On Tue, 28 Oct 2026 at 10:02, Career141 &lt;job@career141.com&gt; wrote:</div>
+<blockquote>Please share: Current Salary, Expected Salary, Notice Period. Can you reply?</blockquote>`;
+
+test("an email is read for the new words only, not our quoted email under it", async () => {
+  const w = world();
+  model = { ...empty, intent: "provided_partial", expectedSalary: 200000, noticePeriodDays: 30, nextActionMessage: null };
+  await emailTurn(w, quotedHtml);
+  assert.equal(userTexts[0], "Expected is 200k, notice one month");
+});
+
+test("an email 'not interested' is not answered with the missing list", async () => {
+  const w = world();
+  model = { ...empty, intent: "not_interested", nextActionMessage: null };
+  await emailTurn(w, "Thanks, but I am not interested any more.");
+  const html = w.email() ?? "";
+  assert.match(html, /keep you in mind/);
+  assert.doesNotMatch(html, /still waiting|CV Document|these details/i);
+  assert.equal(w.app.flaggedForTaReview, true);
+});
+
+test("an email promise gets the promise answered, not the missing list", async () => {
+  const w = world();
+  model = { ...empty, intent: "promised_eta", candidateEtaMinutes: 240, nextActionTimeHours: 4, nextActionMessage: "No problem — we'll check in this evening." };
+  await emailTurn(w, "I'll send the CV this evening");
+  const html = w.email() ?? "";
+  assert.match(html, /check in this evening/);
+  assert.doesNotMatch(html, /still waiting/);
+  assert.equal(w.app.waitingForCandidateEta, true);
+});
+
+test("an email that still needs details asks for exactly what is missing", async () => {
+  const w = world();
+  model = { ...empty, intent: "provided_partial", expectedSalary: 200000, nextActionMessage: null };
+  await emailTurn(w, "Expected 200k");
+  const html = w.email() ?? "";
+  assert.match(html, /Expected Salary: 200000/);
+  assert.match(html, /CV Document/);
+  assert.equal(html.split("Expected Salary").length - 1, 1, "expected salary was asked for again");
+});
+
+test("an out-of-office is not answered", async () => {
+  const w = world();
+  model = { ...empty, intent: "promised_eta", candidateEtaMinutes: 6000 };
+  await emailTurn(w, "I am away until 3 November.", "Automatic reply: Accountant role");
+  assert.equal(prompts.length, 0);
+  assert.equal(w.sends.length, 0);
+});
+
+test("quoted-thread cutting and auto-reply spotting", () => {
+  assert.equal(latestReplyText("Notice is 2 months\r\n\r\nFrom: Career141 <job@career141.com>\r\nSent: Tuesday\r\nTo: me\r\nSubject: x\r\n\r\nPlease share"), "Notice is 2 months");
+  assert.equal(latestReplyText("Yes\n________________________________\nFrom: Career141"), "Yes");
+  assert.equal(latestReplyText("ok\n> old line"), "ok");
+  assert.equal(latestReplyText("<p>Hi,</p><p>CV attached</p>"), "Hi,\nCV attached");
+  assert.ok(isAutomaticReply("Out of Office: Accountant", "x"));
+  assert.ok(isAutomaticReply("Re: role", "This is an automatic reply. I am away."));
+  assert.ok(!isAutomaticReply("Re: role", "I'm on leave until Monday, will send my CV then"));
 });
