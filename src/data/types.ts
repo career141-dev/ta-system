@@ -1186,6 +1186,8 @@ export interface ProfileSuggestion {
   generatedFor?: Id | null;
   /** Who claimed it. Keeping a profile is the claim — see lib/visibility. */
   keptBy?: Id | null;
+  /** Found by a run that learned from this many picked CVs (28 Oct, actions learnFromPicks). Round 0. */
+  learnedFrom?: number | null;
 }
 
 /**

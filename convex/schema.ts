@@ -2904,6 +2904,8 @@ export default defineSchema({
     generatedFor: v.optional(v.union(v.id("users"), v.null())),
     /** Keeping a profile is the claim — see src/lib/visibility.ts. */
     keptBy: v.optional(v.union(v.id("users"), v.null())),
+    /** Found by a run that learned from this many picked CVs (28 Oct). Such rows are round 0. */
+    learnedFrom: v.optional(v.union(v.number(), v.null())),
   })
     .index("by_opening", ["openingId"])
     .index("by_opening_status", ["openingId", "status"]),

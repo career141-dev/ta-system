@@ -22,11 +22,33 @@ import { aboutClient, type SourcingRun, type SourcingSpec } from "./sourcing";
  * their profile address is one the WebSearch tool returned. When Claude
  * cannot answer, the run carries on the old way (runSourcing).
  */
-const TIMEOUT_MS = 8 * 60_000;
-export const CLAUDE_MAX_PEOPLE = 20;
+// A second search per person to check them (28 Oct) takes longer than the
+// first sweep alone did.
+const TIMEOUT_MS = 12 * 60_000;
+/**
+ * Few and right (28 Oct): TAs said the people suggested did not fit — a
+ * procurement head with 28 years for a shipping executive role, because her
+ * headline said "Supply Chain & Logistics". Eight people who pass every check
+ * are worth more than twenty to re-screen.
+ */
+export const CLAUDE_MAX_PEOPLE = 8;
 
 export function claudeSourcingOn(): boolean {
   return claudeSearchEnabled();
+}
+
+/**
+ * What the desk has shown it wants (28 Oct), with nothing asked of the TAs:
+ * the people they moved on to TA Follow-up, the suggestions they selected and
+ * the ones they turned down. Their choices are the brief the JD could not be.
+ */
+export function deskSignals(s: Pick<SourcingSpec, "picked" | "selected" | "notSelected">): string {
+  const list = (xs: string[] | undefined) => (xs ?? []).map((x) => `- ${x}`).join("\n");
+  return [
+    s.picked?.length ? `\n\nPEOPLE THE RECRUITERS PICKED for this job (from their CVs). Find people like them — the same kind of work, level and years — and search their employers:\n${list(s.picked)}` : "",
+    s.selected?.length ? `\n\nSuggestions the recruiters SELECTED. More like these:\n${list(s.selected)}` : "",
+    s.notSelected?.length ? `\n\nSuggestions the recruiters TURNED DOWN. Work out what they have in common (level, years, function, industry) and suggest nobody like them:\n${list(s.notSelected)}` : "",
+  ].join("");
 }
 
 export function headhuntPrompt(s: SourcingSpec, market: string): string {
@@ -48,21 +70,26 @@ ${s.jdText.slice(0, 6000)}
 """
 
 How to work
-1. Read the job description and work out the must-haves: the type of work, the years of experience, the industry and the level.
-2. Use the WebSearch tool to find LinkedIn profiles of people doing this work now in ${market}. Search the way a headhunter would: site:linkedin.com/in with the job titles people really use (one level below and above too), the key skills, and the companies where such people work — the client's competitors and similar firms. Run at least 6 different searches, with different titles and companies.
-3. Judge every person the searches return against the must-haves, from what the search result shows: their current title, company, location and anything else it says.
-4. Keep only people who plausibly fit. Leave out people who are clearly too junior, too senior, in the wrong field, or outside ${market}, unless the nationalities the client wants mean they should be included.
+1. Read the job description and write down five must-haves for yourself:
+   FUNCTION — the work itself (for example shipping and freight operations; procurement or general supply chain is a different function);
+   LEVEL — the job's level, with one rung below and one above allowed;
+   YEARS — the experience range the job states;
+   INDUSTRY — the sector the job asks for;
+   LOCATION — where they must be.
+2. Use the WebSearch tool to find LinkedIn profiles of people doing this work now in ${market}. Search the way a headhunter would: site:linkedin.com/in with the job titles people really use (one level below and above too), the key skills, and the companies where such people work — the client's competitors and similar firms. Run at least 8 different searches, with different titles and companies.
+3. For every person who looks promising, run ONE more search on their name and company to check them: their real years, what they actually do, their level. A headline can mislead — "Supply Chain & Logistics Manager" may be a procurement head with 28 years.
+4. Keep a person only when the search results show they pass ALL five must-haves. Unknown is not a pass: if a must-have cannot be seen, leave them out. Fewer people is fine.${deskSignals(s)}
 
 Rules
 - Only people whose LinkedIn profile link appeared in your search results. Never write a link yourself and never make up a person.
 - Only personal profiles (linkedin.com/in/...), not company pages or job posts.
 - Never suggest anyone who works at ${client} now. They are our client.
-- Say honestly what you could not see: if their years of experience or their exact work are not shown, say so in the concern.
+- "why" shows the proof, one tick per must-have, from what the searches showed: "✓ Function: … ✓ Level: … ✓ Years: … ✓ Industry: … ✓ Location: …".
 - Plain English and factual.
 
 Answer with JSON only, no other text, best fit first, up to ${CLAUDE_MAX_PEOPLE} people:
 [
-  {"name": "", "link": "the linkedin.com/in link exactly as the search returned it", "headline": "their current job title", "company": "their current company", "location": "", "fit": "strong or possible", "why": "why they fit this job, from what the search showed", "concern": "what does not fit or could not be seen; empty if nothing"}
+  {"name": "", "link": "the linkedin.com/in link exactly as the search returned it", "headline": "their current job title", "company": "their current company", "location": "", "years": "their years of experience, a number, or null", "level": "far_below, below, match, above or far_above against the job", "sameFunction": "true only when their work is the job's function", "fit": "strong or possible", "why": "the five ticks with the proof", "concern": "anything a recruiter should still check; empty if nothing"}
 ]`;
 }
 
@@ -111,6 +138,13 @@ export function readHeadhunt(stream: string, s: SourcingSpec, round: number, now
       continue;
     }
     if (known.has(key) || seen.has(key) || atClient(text("company"))) continue;
+    // The bar, enforced here and not only asked for (28 Oct): a level far off
+    // the job, a different function, or nothing to judge them on is no suggestion.
+    const sameFunction = p.sameFunction === true || String(p.sameFunction).toLowerCase() === "true";
+    if (/far/i.test(text("level")) || !sameFunction || (!text("headline") && !text("company"))) {
+      rejected++;
+      continue;
+    }
     seen.add(key);
     const title = found.get(returned.get(key)!) ?? "";
     const concern = text("concern");
@@ -134,10 +168,12 @@ export function readHeadhunt(stream: string, s: SourcingSpec, round: number, now
     if (suggestions.length >= CLAUDE_MAX_PEOPLE) break;
   }
   const searches = Math.max(1, (stream.match(/"name"\s*:\s*"WebSearch"/g) ?? []).length);
+  // The searches Claude ran, so the page counts them (it showed "0 searches").
+  const queries = [...stream.matchAll(/"name"\s*:\s*"WebSearch"\s*,\s*"input"\s*:\s*\{\s*"query"\s*:\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]);
   return {
     suggestions,
     plan: null,
-    queries: [],
+    queries,
     credits: searches,
     scanned: returned.size,
     rejected,
