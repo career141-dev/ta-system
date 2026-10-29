@@ -546,8 +546,9 @@ export const checkAndRecordFollowUpReply = internalMutation({
     // goes out instead.
     if (!isFollowUpStage(activeApp.currentStage)) {
       console.log(`[checkAndRecordFollowUpReply] Application ${activeApp._id} is in ${activeApp.currentStage}, not Follow-up. Recorded; no AI reply.`);
-    } else if (args.textBody && args.textBody.trim().length > 2) {
-      // ONLY run text extraction if textBody is non-empty (> 2 chars to skip trivial "ok", "hi")
+    } else if (args.textBody && args.textBody.trim()) {
+      // Any non-empty text. It skipped two characters and under, so a "no" to
+      // "are you open to relocating?" was never read (Astra review, 29 Oct).
       // Run text extraction in background to parse details
       await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
         candidateId: candidate._id,

@@ -77,6 +77,9 @@ test("both live reply paths pin the application", () => {
   for (const file of [
     "convex/communications/whatsappOutbound.ts",
     "convex/communications/graphEmailMutations.ts",
+    // Since 29 Oct: mail intake (job@ and the TA mailboxes) knew the
+    // application and did not pass it.
+    "convex/mailIntake/process.ts",
   ]) {
     for (const call of extractionCalls(read(file))) {
       assert.match(

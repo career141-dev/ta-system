@@ -791,6 +791,7 @@ export const checkAndRecordEmailReply = internalMutation({
         inboxEmail: args.inboxEmail,
         messageId: args.messageId,
         senderEmail: args.senderEmail,
+        subject: args.subject,
         // The application this email was matched to, just above.
         applicationId: followUpApp._id,
       });

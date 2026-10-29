@@ -90,7 +90,7 @@ Trigger: cron `ta-mail-intake-process` (1 min) -> `process.processReady({ignoreG
 | `shortlist` (shortlists@) | section 7 | `filed`, `held`, `skipped`, `failed` |
 | shared | `isNotAnApplication(from, subject)` (own `@career141.com`/`*.onmicrosoft.com`, auto-replies, bounces) | `skipped` |
 | shared, no CV | LinkedIn sender with no named applicant ("job expiring", summaries) | `skipped` |
-| shared, no CV, not LinkedIn | `model.replyingCandidate` finds the sender by `candidates.by_email` and a live application; if found -> `recordInboundEmail` + `extractDetailsFromText` | `filed` "A reply from X, read into their record" else `no_cv` |
+| shared, no CV, not LinkedIn | `model.replyingCandidate` finds the sender by `candidates.by_email` and a live application; if found -> `recordInboundEmail` + `extractDetailsFromText` (with `applicationId` and `subject` since 29 Oct; it re-guessed the application) | `filed` "A reply from X, read into their record" else `no_cv` |
 | shared, no CV, LinkedIn with name | find by `candidateByLinkedin` (`candidates.by_linkedinUrl`) or `createCandidate`; `noteCandidate` records the id at once so a retry reuses it; `placeCandidate` | `filed` (routed) or `database` |
 | shared with CV(s) | `ingestCvs`; CV already held by hash -> person placed and noted; other upload still being read -> waits on it | markExtracting, or `duplicate`/`filed`/`failed` |
 
@@ -136,7 +136,7 @@ Chrome extension touchpoint (not mail): `POST /api/extension/capture` (`src/app/
 
 ### 6. Candidate replies (job@) and hand-off to /follow-up
 
-Poller path: `emailAgent.checkAndRecordEmailReply` (mutation, so the check+insert is one transaction): maps the test mailbox sender back to the last outbound's candidate when `!outreachLive()` and `OUTREACH_TEST_EMAIL` matches; looks up `candidates.by_email` with the sender as written (no lower-casing); dedupes on `communications.by_externalMessageId` (the 2 Oct double-AI-reply bug); picks the newest application in a follow-up stage (`isFollowUpStage`) else `apps[0]`; inserts an inbound `communications` row (`deliveryStatus: "read"`); only if an application is in Follow-up it schedules `inboundExtraction.extractDetailsFromText` with `applicationId`. Returns `isFollowUpReply` (stage `follow_up`, or rejected for "Did not complete requirements within 7-day window"). That is where intake stops; the AI reading and any reply are /follow-up's (and go through `mayReplyTo` + do-not-contact guards).
+Poller path: `emailAgent.checkAndRecordEmailReply` (mutation, so the check+insert is one transaction): maps the test mailbox sender back to the last outbound's candidate when `!outreachLive()` and `OUTREACH_TEST_EMAIL` matches; looks up `candidates.by_email` with the sender as written (no lower-casing); dedupes on `communications.by_externalMessageId` (the 2 Oct double-AI-reply bug); picks the newest application in a follow-up stage (`isFollowUpStage`) else `apps[0]`; inserts an inbound `communications` row (`deliveryStatus: "read"`); only if an application is in Follow-up it schedules `inboundExtraction.extractDetailsFromText` with `applicationId` and `subject` (the subject spots out-of-office replies). The body is passed raw; the extraction itself cuts it to the new words (`lib/mailParse.ts latestReplyText`). Returns `isFollowUpReply` (stage `follow_up`, or rejected for "Did not complete requirements within 7-day window"). That is where intake stops; the AI reading and any reply are /follow-up's (and go through `mayReplyTo` + do-not-contact guards).
 
 Intake path (only if job@ is enabled in Settings): `replyingCandidate` + `recordInboundEmail` (dedupe by `sentAt === receivedAt` among inbound rows, sets `applications.lastCandidateReplyAt`), `applicationIdFrom` reads an `x-c141-candidatejobid` echo from the quoted body to pick the application, else the one last written to. Candidate mail with a CV attached goes down the CV branch instead.
 
@@ -292,9 +292,9 @@ Repo rules that apply: never run `convex deploy/run/import/env set` against live
 - 2026-10-26 `5ed2893`, `f7aaab4`, `2b9c52f`, `5bd92af` `setCvs.ts`: CVs a TA put forward by email are filed onto their opening.
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: 2a61103822aaa73997e8e5aac49bf56ca0e7612b
-verified-date: 2026-10-27
+verified-commit: c2aa0274
+verified-hash: 7cbf1cfe1ec2e8c268f25f5b259d47fb2bdb20f6
+verified-date: 2026-10-29
 sources:
   convex/mailIntake/**
   convex/communications/emailAgent.ts

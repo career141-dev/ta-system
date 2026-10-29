@@ -149,3 +149,51 @@ export function parseApplicationEmail(input: {
     text: text.slice(0, 20000),
   };
 }
+
+/*
+ * Where the quoted thread starts in a reply. Gmail: "On Tue, 28 Oct 2026 at
+ * 10:02, Career141 <job@…> wrote:". Outlook: an underscore rule, or a
+ * "From: … Sent: …" header block. Older clients: "-----Original Message-----"
+ * and "> " lines.
+ */
+const QUOTE_START: RegExp[] = [
+  /^\s*On\b.{0,200}\bwrote:\s*$/im,
+  /^\s*_{10,}\s*$/m,
+  /^\s*-{2,}\s*Original Message\s*-{2,}/im,
+  /^\s*From:\s.+\n(?:.*\n){0,3}?\s*(?:Sent|Date):\s/im,
+  /^\s*>/m,
+];
+
+/**
+ * Only what the candidate wrote this time: HTML to text, the quoted thread cut
+ * off.
+ *
+ * The reply bot was handed the raw HTML body with our own earlier email
+ * quoted under it, so "Current Salary / Expected Salary / Notice Period" from
+ * OUR message was read as the candidate's, and every "?" in it made the reply
+ * a question (29 Oct). Empty when they wrote nothing above the quote.
+ */
+export function latestReplyText(body: string): string {
+  // "\r\n" first: "." does not match "\r", so Outlook's "From: … Sent:" block
+  // was never found. HTML only when there are real tags — a plain-text reply
+  // quoting "<job@career141.com>" is not HTML.
+  const raw = String(body ?? "").replace(/\r\n?/g, "\n");
+  const text = /<\/?(?:p|div|br|span|html|body|table|blockquote)\b/i.test(raw) ? htmlToText(raw) : raw;
+  let cut = text.length;
+  for (const re of QUOTE_START) {
+    const m = re.exec(text);
+    if (m && m.index < cut) cut = m.index;
+  }
+  return text.slice(0, cut).split("\n").map((l) => l.trim()).join("\n").trim();
+}
+
+/**
+ * An out-of-office or other automatic reply: by its subject ("Automatic reply:",
+ * "Out of Office:", "Auto:"), or by an opening that says it is automatic. Only
+ * words a person would not write themselves count — "I'm on leave until
+ * Monday, will send my CV then" is a real answer with a real date.
+ */
+export function isAutomaticReply(subject: string | undefined, body: string): boolean {
+  if (/^\s*(automatic reply|auto(?:matic)?[- ]?response|out of (?:the )?office|auto)\s*:/i.test(subject ?? "")) return true;
+  return /\b(this is an automatic(?:ally generated)? (?:reply|response|message)|auto-?reply)\b/i.test(String(body ?? "").slice(0, 300));
+}
