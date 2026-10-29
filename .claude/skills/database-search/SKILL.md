@@ -81,6 +81,12 @@ Refusals and messages: no embedding key in `meaning` mode shows "No embedding ke
 
 Spotlights counts (free to approach, already being worked, can move in 30 days, placed before), Widen-the-area chips (only when the engine did not rank), `AiPanel` (current filters as removable chips, "As boolean" copy string for LinkedIn Recruiter, clarifying-question links), bulk bar (`addManyToOpening` when `for` opening is open, `DownloadCvsButton`), `DbCandidateDrawer` for `?candidate=` with prev/next and the CV via `/api/cv/[id]` (Word shown as PDF with `?view=pdf`).
 
+### 5a. The chat rail (29 Oct)
+
+The left rail is a chat (`AiPanel.tsx`): each message the TA typed is a bubble and the reply under it says how many people that message showed ("142 candidates", then "38 · narrowed from 142", then "12 · narrowed from 38"); every message adds to the search before it. The newest reply also carries the reading (`engineRead`), company rules, intent summary, search terms, clarifying questions and a "How this search works" fold (first message only). The conversation scrolls inside the rail and stays at the newest message; the reply box (`SearchBox`) is pinned under it and the rail is `lg:h-[calc(100vh-96px)]`. The earlier counts are what the TA saw at the time and travel in the address as `n` ("142,38"): `SearchBox` posts `history` as hidden `n`, `runDatabaseSearch` re-validates it (one entry per earlier message or none, trimmed with the turns it drops), `turnCounts` in `query.ts` reads it and the page adds today's `foundTotal` (before any filter beside the list). `resultsKeyOf` ignores `n`. A turn with no known count gets no reply bubble. Clarification links are replies: they carry `n`, and carry filter chips only when `edited`.
+
+Layout: three columns from `lg` (1024px: chat 300, results, filters 220) and wider from `xl` (400 / 240). Below `lg` everything stacks (chat, filters, results). It used to start at `xl` (1280px), so on a narrower window the chat filled a screen and the filters were far below it.
+
 ### 5b. Filters beside the results (29 Oct)
 
 The right-hand column (sticky, scrolls inside) holds, top to bottom: "Clear all filters · N of M shown" (only while one is on), the Experience range slider, Level, then tick lists for Job title, Location, Notice period, Availability and Industry (`src/lib/facets.ts`, `FacetFilter.tsx`, `ExperienceRange.tsx`). Params: `xmin`/`xmax` (the range, 0 to 30 where 30 is "30+"; a full-width slider writes nothing), `lvl`, `jt`, `loc`, `np`, `av`, `ind` (repeated); `FILTER_PARAMS` in `query.ts` lists them and `resultsKeyOf` ignores them, so a filter never shows the loading scene (the old list stays, then swaps).
@@ -109,6 +115,8 @@ Trigger: paperclip "Attach CV" in `SearchBox` (`accept .pdf,.docx,.txt`, limit `
 - Read: `/database` calls `ta/search:savedSearches` ("Your saved searches", "Saved by the team", the latter every owner's). Delete: `deleteSearch`; the mutation refuses other owners unless role `admin` or `ta_manager`. Saved reports are `savedReports` (reports skill), not here.
 
 ### 9. Referral Search
+
+Names (29 Oct): the box is `ReferralSearchBox` (a textarea that grows to eight lines; Enter searches, Shift+Enter is a new line; up to 4,000 characters, a question is still cut to 500 before a model reads it). `nameList(q)` (`src/lib/nameMatch.ts`) reads a pasted block as names when every chunk (split on lines, commas, semicolons, tabs, bars; numbering, bullets and Mr/Dr stripped; at most 100) is two to five words with no role or company word ("HR Managers at Dialog" is not a name). Two or more names show the Name check instead of the referee search: `findByNames` (`src/lib/nameCheck.ts`) runs `ta/candidates:quickSearch` per name (6 at a time, kept 5 minutes; a name nobody matches is retried word by word), primes the hits, and grades each with `nameMatch` (`same`, `likely` for a middle name or an initial, `maybe` for a one-letter typo; sharing only a first name or surname is nothing). Rows say "In our system", "Maybe — similar name" or "Not found", link to `/candidates/[id]`, and the not-found names can be copied. "Not names? Search it as a question" (`?as=search`) forces the referee search. One name shows its check above the referee results only if someone was found. Under every referee card, `ReferralCard` says "We have a CV for X — maybe them, open it to check" when `findByNames(..., { loose: false })` (one indexed search each, up to 60) finds the same or a similar name. A failed lookup throws for the list ("Could not check the names just now", never "not found") and shows nothing for the referee lines. Match is by name only and gives name, title, employer and place, never contact details.
 
 `/database/referral`: GET form `?q=` (max 500 characters) and `x=` for dropped chips (max 30). `referralSearch` (`src/lib/referralSearch.ts`): `readReferralQuery` (cached 5 min, 200 entries) asks Claude (`askBridge` task `match_read`), then DeepSeek (`getOpenAI("jd_extraction", 20_000)`, `max_tokens 500`, spend reserved), then `ruleRead` words. Then `ta/referenceSearch:search` (no model, deterministic): up to `MAX_TERMS = 8` terms, `PER_TERM = 400` rows per search index (`search_company`, `search_designation`, `search_name` on `referees`), `SHOW = 60` people, 5 named-by candidates each, `isPlausibleReferee` filter, "deep" flag when an index hit its limit. Not available outside Convex mode (page says so). Returns phone and email, so internal query only.
 
@@ -322,7 +330,7 @@ Repo hard rules that apply: never touch the live backend from a laptop (no `conv
 - 2026-10-28 years band (a bare "2 years" no longer returns 5, 10, 23 years), a pasted JD read as one message, and keyword lists and names read as such (owner: TAs rarely paste a JD).
 
 <!-- skill-meta
-verified-commit: 87e2f1a
+verified-commit: 2beedee
 verified-hash: 78a085b8341ff97ea59fb52db63b5650f070fcd6
 verified-date: 2026-10-29
 sources:
