@@ -32,7 +32,7 @@ Neighbours (go there for the rest):
 Trigger: a TA types in `SearchBox` (on `/database`, on `/database/results`, or the header bar on those two pages) and presses Enter or Search. Actor: anyone with `database.read` (everyone except role `client`).
 
 1. `runDatabaseSearch` (`src/app/actions.ts`): authorizes `database.read`; optional `cvFile` goes through `extractBlueprintFromFile` (see flow 7); a reply carries `prior`, and the messages are kept one per line: `turns = [...prior lines, new message]`. Over 4,000 characters the oldest refinement (index 1) is dropped, never the first request. Redirects to `/database/results?q=<turns joined by \n>[&ref=][&mode=boolean|meaning][&for=<openingId>]`. Boolean never carries `prior`.
-2. `ResultsPage` (`src/app/database/results/page.tsx`) renders the frame at once and streams `Results` inside `<Suspense key={searchKey}>`. The key is every param except `page`, `candidate`, `msg`, so paging or opening a candidate keeps the list on screen.
+2. `ResultsPage` (`src/app/database/results/page.tsx`) renders the frame at once and streams `Results` inside `<Suspense key={searchKey}>`. The key is `resultsKeyOf(sp)` (`src/lib/query.ts`): every string param except `page`, `candidate`, `msg`, `below`, `lvl`, with `q` reduced to its first message. Paging, opening a candidate, a level tick and a chat reply keep the list on screen (a reply shows its wait under the chat box, `SearchBox key={q}` starts clean when the new results land); a new first message, mode, opening, reference or edited chip shows the full "Searching" scene. The page's own links (`pageHref`, `levelHref`, `broaderHref`, `candidateHref`, `closeHref`) are built from `searchParamsOf(sp, drop)`, the address as it is: rebuilt from parsed criteria they wrote chips into the URL, which flipped `edited`, re-ran the engine and replayed the scene (28 Oct). Chip removal and widen links still go through `withoutChip`/`withValue`.
 3. `Results` decides which of the three modes runs. `natural` plus Convex store plus a non-empty `q` goes to the engine; `boolean` and `meaning` do not (see flows 3, 4).
 4. Engine path: `cachedEngineSearch` first (answer held, no wait). Otherwise `engineSearch(q, criteria, ENGINE_LIMIT=400, edited, referenceProfile)` is started and `quickEngineSearch` (no model, about a second) is awaited and shown with a "First results, AI is still refining them" banner inside a Suspense whose child `EngineResults` awaits the full run and replaces the list. If the full run throws, `engineError` is set and the words-only fallback runs (`keywordRetrieve(terms, 150)`) with the banner "Ranked on words only - the matching engine could not run (...)".
 5. `runEngine` (`src/lib/engineSearch.ts`) is a hand copy of `convex/matching/search.ts aiSearch`, not a call to it. Steps:
@@ -56,6 +56,8 @@ Years and what was typed (28 Oct):
 - `runDatabaseSearch` flattens the first message to one line (a pasted JD used to become dozens of "refinements").
 - `searchKindOf(turns, known)` (`searchIntent.ts`, words only) names the search `job_description` (over 400 characters, or over 100 with JD headings), `keywords` ("profiles with X, Y", "keywords: ...", or a list of 3+ short comma parts), `name` (2-4 capitalised words and no vocabulary hit) or `role`. A JD is keyword-searched on `buildSearchTerms` of what the model read; a keyword list searches the keywords themselves, takes no occupation, and every keyword must be in skills, certifications, summary, name, a title or an employer (`customFilters`); a name runs `ta/candidates:quickSearch` and puts people whose name holds every typed word first ("Name match", score 100) before the normal list. `interpretation.kind` reaches `AiPanel` as the "Read as ..." label.
 
+Shared reads (28 Oct): the quick pass and the full run start together, so the keyword searches, the Qdrant search and each person's search-shaped document are read once per 30 s (`share`/`searchDocs` in `engineSearch.ts`, up to 1,500 entries); a failed read is dropped at once and each caller still sees the failure. `DbCandidateDrawer` gets `cv` as a promise: the profile shows at once and the CV section waits for `backend.cvFile` behind its own Suspense.
+
 Caches: `engineCache` 5 min, 50 entries, keyed by the full args JSON, in-flight runs shared; failed runs removed. Sentence reading cache `intents` 5 min, 50. `embedQuery` cache 500 entries (process memory only; assumes one app container).
 
 Refusals and messages: no embedding key in `meaning` mode shows "No embedding key is set..."; Boolean syntax errors show `parseBoolean(q).error`; zero hits shows "Nothing in the database matched that search."; empty list shows "Nobody matches all of that" with "Without X" blocker chips (not when the engine ranked).
@@ -78,6 +80,12 @@ Refusals and messages: no embedding key in `meaning` mode shows "No embedding ke
 ### 5. Search results page extras
 
 Spotlights counts (free to approach, already being worked, can move in 30 days, placed before), Widen-the-area chips (only when the engine did not rank), `AiPanel` (current filters as removable chips, "As boolean" copy string for LinkedIn Recruiter, clarifying-question links), bulk bar (`addManyToOpening` when `for` opening is open, `DownloadCvsButton`), `DbCandidateDrawer` for `?candidate=` with prev/next and the CV via `/api/cv/[id]` (Word shown as PDF with `?view=pdf`).
+
+### 5b. Filters beside the results (29 Oct)
+
+The right-hand column (sticky, scrolls inside) holds, top to bottom: "Clear all filters · N of M shown" (only while one is on), the Experience range slider, Level, then tick lists for Job title, Location, Notice period, Availability and Industry (`src/lib/facets.ts`, `FacetFilter.tsx`, `ExperienceRange.tsx`). Params: `xmin`/`xmax` (the range, 0 to 30 where 30 is "30+"; a full-width slider writes nothing), `lvl`, `jt`, `loc`, `np`, `av`, `ind` (repeated); `FILTER_PARAMS` in `query.ts` lists them and `resultsKeyOf` ignores them, so a filter never shows the loading scene (the old list stays, then swaps).
+
+Strict: a filter hides everyone it does not match, even if that leaves one or two people; clearing it returns the list. OR within one tick list, AND across lists, the range and Level (`rowMatches`). People with no `totalExperienceYears` are hidden while the range is narrowed (the box says how many). Counts on an option are what ticking it would give with every other filter applied (`facetOptions`); Level's own counts are still over the whole list. Job title is the current title lower-cased with punctuation dropped; location is the part of `location` before the first comma; notice bands are 0-14, 15-30, 31-60, over 60, not stated; availability reads the row's `signals`. All of it is in memory over the engine's held list (up to 400), so a change is a re-render, not a search; after the 5-minute engine cache expires a filter click re-runs the search behind the old list. Spotlight counts, pager, drawer previous/next and bulk bar follow the filters. A chat reply clears them and saved searches do not keep them.
 
 ### 6. Levels
 
@@ -262,7 +270,7 @@ Where to edit:
 | Number of matches / floor | `LIMITS`, `RULES_FLOOR`, `CLAUDE_EXTRA`, `CLAUDE_POOL_MAX` in `dbMatch.ts`; `safetyFloor` and the top-30 slice in `agent2.ts` | `MatchingStatus` copy |
 | Levels | `convex/lib/roleLevel.ts`, `src/lib/levels.ts` | `LevelFilter`, `levelSectionFor` call sites |
 | Prompts / which model | `convex/lib/jdParser.ts`, `cvScoring.ts`, `claudeMatch.ts`, `referralSearch.ts`; budgets in `claudeFirst.ts` | the model table above and `~/.claude` ai-model-map skill; keep name-free |
-| A new URL param | `ResultsPage` `searchKey`, every `*Href` builder in `ResultsView` (`pageHref`, `levelHref`, `broaderHref`, `candidateHref`, `closeHref`), `criteriaToParams` | else it is lost on paging or back |
+| A new URL param | `resultsKeyOf` (decide whether it is a new search), the `*Href` builders in `ResultsView` (they copy the address via `searchParamsOf`, so a new param survives unless a builder drops it), `criteriaToParams` for chip links | else it is lost on paging or back |
 | Header search scope | `src/lib/searchScope.ts` | `tests/searchScope.test.ts` |
 | Saved search fields | `convex/schema.ts savedSearches`, `convex/ta/search.ts`, `convex/ta/model/tables.ts` (the `identity(...)` column list), `saveSearch` action, `/database` page type | additive optional fields only |
 | New matches field on applications | `convex/schema.ts`, `convex/ta/model/tables.ts` (`applications` `toDoc`/`fromDoc`), `src/data/types.ts`, `repo.addCandidateToOpening` | seed, mobile projections |
@@ -309,12 +317,14 @@ Repo hard rules that apply: never touch the live backend from a laptop (no `conv
 - 2026-10-15 `1690586` better reference CV matching; `9cd8c5e` CV attach built into the search chat bar (`SearchBox`, `cvFile`).
 - 2026-10-20 `c0a68c7` friendly error recovery (`safeErrorMessage`).
 - 2026-10-22 `cb821c3`, `7865d66`, `5d98c89` mobile endpoints; matching state moved to `matchingSnapshot` and `src/lib/openings/matching.ts` so web and mobile share one run.
+- 2026-10-29 filters beside the results: experience range, job title, location, notice period, availability, industry (strict, in memory, no reload).
+- 2026-10-28 the full "Searching" scene no longer replays on a chat reply, a profile, a page or a level tick (links keep the address; the boundary keys on the first message).
 - 2026-10-28 years band (a bare "2 years" no longer returns 5, 10, 23 years), a pasted JD read as one message, and keyword lists and names read as such (owner: TAs rarely paste a JD).
 
 <!-- skill-meta
-verified-commit: 0d2926e
-verified-hash: 894979ac724ca0e1ae650adcdd1ba2b3253504dd
-verified-date: 2026-10-28
+verified-commit: 87e2f1a
+verified-hash: 78a085b8341ff97ea59fb52db63b5650f070fcd6
+verified-date: 2026-10-29
 sources:
   src/lib/engineSearch.ts
   src/lib/dbMatch.ts

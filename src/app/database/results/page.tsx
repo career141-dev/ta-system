@@ -6,7 +6,7 @@ import { assess } from "@/lib/assessment";
 import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
-import { conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, turnsOf, withoutChip, withValue } from "@/lib/query";
+import { FILTER_PARAMS, conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, resultsKeyOf, searchParamsOf, turnsOf, withoutChip, withValue } from "@/lib/query";
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
@@ -24,8 +24,11 @@ import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import type { DrawerCv } from "@/components/db/DbCandidateDrawer";
 import { keywordRetrieve } from "@/lib/retrieve";
-import { inSelectedLevels, levelOptions } from "@/lib/levels";
+import { levelOptions } from "@/lib/levels";
 import { LevelFilter } from "@/components/db/LevelFilter";
+import { FacetFilter } from "@/components/db/FacetFilter";
+import { ExperienceRange } from "@/components/db/ExperienceRange";
+import { EXPERIENCE_MAX, FACETS, anyActive, facetOptions, hiddenForUnknownYears, pickedFrom, rowMatches } from "@/lib/facets";
 import {
   cachedEngineSearch,
   deskCriteria,
@@ -67,14 +70,9 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
   const mode = sp.mode === "boolean" ? "boolean" : sp.mode === "meaning" ? "meaning" : "natural";
   const forOpening = typeof sp.for === "string" ? sp.for : null;
   const referenceParam = typeof sp.ref === "string" && parseReferenceProfile(sp.ref) ? sp.ref : "";
-  const searchKey = (() => {
-    const p = new URLSearchParams();
-    for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
-      if (k === "page" || k === "candidate" || k === "msg" || typeof v !== "string") continue;
-      p.set(k, v);
-    }
-    return p.toString();
-  })();
+  // The conversation's first message, not every reply: a reply keeps the list on
+  // screen while the new answer comes (query.ts resultsKeyOf).
+  const searchKey = resultsKeyOf(sp);
 
   return (
     <main className="px-6 py-5">
@@ -453,10 +451,15 @@ async function ResultsView({
   const pickedLevels = new Set(
     (Array.isArray(sp.lvl) ? sp.lvl : sp.lvl ? [sp.lvl] : []).filter((k) => levelChoices.some((o) => o.key === k)),
   );
-  if (pickedLevels.size) {
-    results.splice(0, results.length, ...results.filter((r) => inSelectedLevels(r.candidate, pickedLevels)));
+  // The filters beside the list (lib/facets): Level, the experience range and the
+  // tick lists narrow it together, strictly; clearing them returns all of it.
+  const everyone = [...results];
+  const picked = pickedFrom(sp, pickedLevels);
+  const filtering = anyActive(picked);
+  if (filtering) {
+    results.splice(0, results.length, ...results.filter((r) => rowMatches(r, picked)));
   }
-  const total = pickedLevels.size ? results.length : foundTotal;
+  const total = filtering ? results.length : foundTotal;
   const strongReferenceMatches = referenceProfile
     ? results.filter((r) => (engineHits.get(r.candidate.id)?.score ?? 0) >= FIT_BANDS.strong).length
     : 0;
@@ -525,7 +528,7 @@ async function ResultsView({
   // When nothing comes back, name the condition responsible rather than telling
   // the TA to guess at it.
   const blockers: { label: string; found: number; href: string }[] = [];
-  if (total === 0 && mode !== "boolean" && !engineRanked) {
+  if (total === 0 && mode !== "boolean" && !engineRanked && !filtering) {
     for (const chip of describe(criteria)) {
       const relaxed = criteriaFromParams(
         Object.fromEntries(new URLSearchParams(withoutChip(criteria, chip).slice(1))),
@@ -536,34 +539,45 @@ async function ResultsView({
     blockers.sort((a, b) => b.found - a.found);
   }
 
+  // These links keep the address as it is (searchParamsOf) and change only their
+  // own part. Rebuilt from the parsed criteria they wrote chips into the URL, so
+  // the next render read it as a new, edited search: the loading scene came back
+  // and the engine ran again (28 Oct).
   const pageHref = (n: number) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
+    const p = searchParamsOf(sp, ["page", "candidate", "msg"]);
     p.set("page", String(n));
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
 
   // The level filter's links: the same search with one level ticked or unticked,
   // back on page one. Passing nothing clears them.
   const levelHref = (toggle?: string) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
+    const p = searchParamsOf(sp, ["page", "candidate", "msg", "lvl"]);
     const next = new Set(pickedLevels);
     if (toggle !== undefined) (next.has(toggle) ? next.delete(toggle) : next.add(toggle));
     for (const k of next) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
+  // A tick list's link: this option ticked or unticked, back on page one.
+  const facetHref = (param: string, key: string) => {
+    const p = searchParamsOf(sp, ["page", "candidate", "msg", param]);
+    const next = new Set(picked.ticks.get(param));
+    next.has(key) ? next.delete(key) : next.add(key);
+    for (const k of next) p.append(param, k);
+    return `${base}?${p.toString()}`;
+  };
+  const facetClearHref = (param: string) => `${base}?${searchParamsOf(sp, ["page", "candidate", "msg", param]).toString()}`;
+  const clearFiltersHref = `${base}?${searchParamsOf(sp, ["page", "candidate", "msg", ...FILTER_PARAMS]).toString()}`;
+  const rangeRest = searchParamsOf(sp, ["page", "candidate", "msg", "xmin", "xmax"]).toString();
+  const facetBlocks = FACETS.map((f) => ({
+    facet: f,
+    options: facetOptions(f, everyone, picked).map((o) => ({ ...o, href: facetHref(f.param, o.key) })),
+  })).filter((b) => b.options.length > 0);
+  const hasYears = everyone.some((r) => r.candidate.totalExperienceYears != null);
+  const showFilters = levelChoices.length >= 2 || hasYears || facetBlocks.length > 0;
   const broaderHref = (include: boolean) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (edited) p.set("edited", "1");
+    const p = searchParamsOf(sp, ["page", "candidate", "msg", "below"]);
     if (include) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
 
@@ -611,25 +625,12 @@ async function ResultsView({
   };
 
   const candidateHref = (id: string) => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (page > 1) p.set("page", String(page));
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
+    const p = searchParamsOf(sp, ["candidate", "msg"]);
     p.set("candidate", id);
     return `${base}?${p.toString()}`;
   };
 
-  const closeHref = (() => {
-    const p = criteriaToParams(criteria);
-    for (const [k, v] of Object.entries(extra)) p.set(k, v);
-    if (page > 1) p.set("page", String(page));
-    if (edited) p.set("edited", "1");
-    if (showBelow) p.set("below", "1");
-    for (const k of pickedLevels) p.append("lvl", k);
-    return `${base}?${p.toString()}`;
-  })();
+  const closeHref = `${base}?${searchParamsOf(sp, ["candidate", "msg"]).toString()}`;
   // "← Back to results" from a candidate's profile returns to exactly this list —
   // the search, every filter chip, the page. It used to keep only the sentence
   // and the page, so coming back re-read the sentence and lost the chips.
@@ -642,28 +643,34 @@ async function ResultsView({
   const activeStatus = activeCandidate ? repo.overallStatus(activeCandidate.id) : null;
   // The open candidate's own CV file, for the side panel. Only looked up, not
   // signed: the browser asks /api/cv for the file itself.
-  let activeCv: DrawerCv | null = null;
+  // Not awaited: the drawer shows the profile at once and the CV section
+  // fills in when the file's address is found (28 Oct). The lookup never
+  // rejects, so an unread promise is not an unhandled one.
+  let activeCv: Promise<DrawerCv | null> | null = null;
   if (activeCandidate && isConvex()) {
-    const found = await backend
-      .cvFile(activeCandidate.id)
-      .catch((e) => ({ ok: false as const, detail: safeErrorMessage(e, "The CV could not be loaded. Try again."), fileName: null }));
-    const fileName = (found.ok ? found.fileName : null) ?? activeCandidate.cvFileName;
-    const isPdf =
-      found.ok &&
-      (/pdf/i.test(found.fileType ?? "") ||
-        /\.pdf$/i.test(fileName ?? "") ||
-        !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(fileName ?? ""));
-    // A Word CV is shown as a PDF made from it (lib/wordToPdf); Download,
-    // which adds download=1, still saves the Word file.
-    const word = found.ok && !isPdf && isWordFile(fileName);
-    activeCv = found.ok
-      ? {
-          href: `/api/cv/${encodeURIComponent(activeCandidate.id)}${word ? "?view=pdf" : ""}`,
-          fileName,
-          inline: isPdf || word,
-          problem: null,
-        }
-      : { href: null, fileName, inline: false, problem: found.detail };
+    const cand = activeCandidate;
+    activeCv = (async (): Promise<DrawerCv> => {
+      const found = await backend
+        .cvFile(cand.id)
+        .catch((e) => ({ ok: false as const, detail: safeErrorMessage(e, "The CV could not be loaded. Try again."), fileName: null }));
+      const fileName = (found.ok ? found.fileName : null) ?? cand.cvFileName;
+      const isPdf =
+        found.ok &&
+        (/pdf/i.test(found.fileType ?? "") ||
+          /\.pdf$/i.test(fileName ?? "") ||
+          !/\.(docx?|rtf|txt|png|jpe?g)$/i.test(fileName ?? ""));
+      // A Word CV is shown as a PDF made from it (lib/wordToPdf); Download,
+      // which adds download=1, still saves the Word file.
+      const word = found.ok && !isPdf && isWordFile(fileName);
+      return found.ok
+        ? {
+            href: `/api/cv/${encodeURIComponent(cand.id)}${word ? "?view=pdf" : ""}`,
+            fileName,
+            inline: isPdf || word,
+            problem: null,
+          }
+        : { href: null, fileName, inline: false, problem: found.detail };
+    })();
   }
   const statusLabel =
     activeStatus?.busy && activeStatus.stage
@@ -691,7 +698,7 @@ async function ResultsView({
   return (
     <>
       {/* Chat on the left, results in the middle, Level on the right (28 Oct). LevelFilter hides itself under two options, so the third column only exists when it has something to show. */}
-      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${levelChoices.length >= 2 ? "xl:grid-cols-[400px_1fr_220px]" : "xl:grid-cols-[400px_1fr]"}`}>
+      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${showFilters ? "xl:grid-cols-[400px_1fr_240px]" : "xl:grid-cols-[400px_1fr]"}`}>
         <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
           <AiPanel
             criteria={criteria}
@@ -712,7 +719,9 @@ async function ResultsView({
           />
 
           <div className="rounded-xl border border-rule bg-surface p-4">
+            {/* Keyed on the conversation: a reply's wait shows here while the old list stays, and the box starts clean when the new results land. */}
             <SearchBox
+              key={q}
               vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
               prior={q}
               initialMode={mode}
@@ -848,7 +857,17 @@ async function ResultsView({
               </div>
             )}
 
-            {shown.length === 0 ? (
+            {shown.length === 0 && filtering ? (
+              <div className="px-8 py-16 text-center">
+                <p className="text-[14px] font-medium">No one matches these filters</p>
+                <p className="mt-2 text-[12.5px] text-ink-soft">
+                  <Link href={clearFiltersHref} scroll={false} className="font-medium text-accent hover:underline">
+                    Clear the filters
+                  </Link>{" "}
+                  to see all {everyone.length.toLocaleString()} again.
+                </p>
+              </div>
+            ) : shown.length === 0 ? (
               <div className="px-8 py-16 text-center">
                 <p className="text-[14px] font-medium">{mode === "meaning" ? "Nobody relevant found" : "Nobody matches all of that"}</p>
                 {mode === "meaning" && below > 0 && (
@@ -949,9 +968,28 @@ async function ResultsView({
           <Pager page={page} pageSize={PAGE} total={total} href={pageHref} />
         </div>
 
-        {levelChoices.length >= 2 && (
-          <aside className="order-1 xl:sticky xl:top-[80px] xl:order-none">
+        {showFilters && (
+          <aside className="order-1 flex flex-col gap-3 xl:sticky xl:top-[80px] xl:order-none xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
+            {filtering && (
+              <Link href={clearFiltersHref} scroll={false} className="rounded-xl border border-brand-line bg-brand-soft px-4 py-2 text-center text-[12.5px] font-medium text-brand hover:underline">
+                Clear all filters · {results.length.toLocaleString()} of {everyone.length.toLocaleString()} shown
+              </Link>
+            )}
+            {hasYears && (
+              <ExperienceRange
+                key={picked.range ? picked.range.join("-") : "any"}
+                lo={picked.range?.[0] ?? 0}
+                hi={picked.range?.[1] ?? EXPERIENCE_MAX}
+                max={EXPERIENCE_MAX}
+                base={base}
+                rest={rangeRest}
+                hidden={hiddenForUnknownYears(everyone, picked)}
+              />
+            )}
             <LevelFilter options={levelChoices} picked={pickedLevels} hrefFor={levelHref} jobTitle={target?.title ?? null} />
+            {facetBlocks.map((b, i) => (
+              <FacetFilter key={b.facet.param} label={b.facet.label} options={b.options} clearHref={facetClearHref(b.facet.param)} open={i === 0} />
+            ))}
           </aside>
         )}
       </div>

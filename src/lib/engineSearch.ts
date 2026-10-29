@@ -230,6 +230,50 @@ const MODEL = "deepseek/deepseek-v4-flash";
 const FETCH_LIMIT = 100;
 const POOL_CAP = 200;
 
+/*
+ * Backend reads shared between the quick pass and the full run (28 Oct).
+ *
+ * A new search starts both, and each searched the full-text indexes, searched
+ * Qdrant and loaded the same few hundred candidate documents, one run's worth
+ * of reads twice over. A read is now kept for SHARE_MS, so the second run (and
+ * a reply typed a moment later) reuses it. Short on purpose: a CV that arrives
+ * is in the next search after that. A failed read is dropped at once, so a
+ * route that was down is asked again, and each caller still sees the failure.
+ */
+const SHARE_MS = 30_000;
+const SHARE_MAX = 1_500;
+const shared = new Map<string, { at: number; p: Promise<unknown> }>();
+
+function share<T>(key: string, read: () => Promise<T>): Promise<T> {
+  const held = shared.get(key);
+  if (held && Date.now() - held.at < SHARE_MS) return held.p as Promise<T>;
+  const p = read();
+  const entry = { at: Date.now(), p };
+  shared.set(key, entry);
+  p.catch(() => {
+    if (shared.get(key) === entry) shared.delete(key);
+  });
+  while (shared.size > SHARE_MAX) shared.delete(shared.keys().next().value!);
+  return p;
+}
+
+/** The search-shaped documents for these people, each loaded once per SHARE_MS. */
+async function searchDocs(ids: Id[]): Promise<LiveCandidate[]> {
+  const now = Date.now();
+  const held = (id: Id) => {
+    const h = shared.get(`doc:${id}`);
+    return h && now - h.at < SHARE_MS ? (h.p as Promise<LiveCandidate | null>) : null;
+  };
+  const missing = ids.filter((id) => !held(id));
+  const fresh = new Map<Id, Promise<LiveCandidate | null>>();
+  if (missing.length) {
+    const byId = backend.candidateDocsByIds(NO_ACTOR, missing, "search").then((docs) => new Map(docs.map((d) => [d._id as string, d])));
+    for (const id of missing) fresh.set(id, share(`doc:${id}`, () => byId.then((m) => m.get(id) ?? null)));
+  }
+  const docs = await Promise.all(ids.map((id) => fresh.get(id) ?? held(id) ?? Promise.resolve(null)));
+  return docs.filter((d): d is LiveCandidate => d !== null);
+}
+
 const modules = () =>
   Promise.all([
     import("../../convex/lib/jdParser"),
@@ -307,7 +351,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
       ? modelIntent.then((r) => (r.usage.model === "regex-fallback" ? [q.slice(0, 300)] : parser.buildSearchTerms(r.requirements, q))).catch(() => [q.slice(0, 300)])
       : Promise.resolve(kind === "keywords" ? listed : [q, ...args.turns.slice(-2).reverse(), ...args.chips.titles, ...args.chips.skills.slice(0, 3)])
     )
-      .then((terms) => backend.keywordSearchMany(NO_ACTOR, terms, FETCH_LIMIT))
+      .then((terms) => share(`kw:${JSON.stringify(terms)}`, () => backend.keywordSearchMany(NO_ACTOR, terms, FETCH_LIMIT)))
       .catch((e) => {
         down.push(`keyword search (${(e as Error)?.message ?? e})`);
         return [];
@@ -373,7 +417,8 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
     if (occupation.targetOccupation) terms.add(occupation.targetOccupation);
     for (const t of occupation.equivalentTitles.slice(0, 3)) if (t) terms.add(t);
     terms.add(req.title && req.title.length > 2 ? req.title : q);
-    secondPass = backend.keywordSearchMany(NO_ACTOR, [...terms].slice(0, 6), FETCH_LIMIT).catch((e) => {
+    const second = [...terms].slice(0, 6);
+    secondPass = share(`kw:${JSON.stringify(second)}`, () => backend.keywordSearchMany(NO_ACTOR, second, FETCH_LIMIT)).catch((e) => {
       down.push(`keyword search (${(e as Error)?.message ?? e})`);
       return [];
     });
@@ -392,7 +437,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
 
   // The search shape: summary, past titles and every employer, which the
   // score reads and a plain list leaves out (9 Oct).
-  const docs = await backend.candidateDocsByIds(NO_ACTOR, ids, "search");
+  const docs = await searchDocs(ids as Id[]);
   const byId = new Map(docs.map((d) => [d._id, d]));
   const pool: Doc[] = ids.flatMap((id) => {
     if (reference?.sourceCandidateId === id) return [];
@@ -485,10 +530,12 @@ async function vectorPool(q: string, args: EngineArgs, down: string[] = []): Pro
       return [];
     }
     const filtered = !!args.minExperience || (args.maxExperience != null && args.maxExperience < 20);
-    const hits = await searchVectors(e.vectors[0], 200, { minExperience: args.minExperience ?? null, maxExperience: args.maxExperience ?? null });
+    const near = (f: { minExperience: number | null; maxExperience: number | null } | undefined) =>
+      share(`vec:${q}:${f ? `${f.minExperience}:${f.maxExperience}` : "any"}`, () => (f ? searchVectors(e.vectors[0], 200, f) : searchVectors(e.vectors[0], 200)));
+    const hits = await near({ minExperience: args.minExperience ?? null, maxExperience: args.maxExperience ?? null });
     // As the action does: a filtered search that finds nobody usually means the
     // index lacks the field, so ask by meaning alone.
-    return hits.length > 0 || !filtered ? hits : await searchVectors(e.vectors[0], 200);
+    return hits.length > 0 || !filtered ? hits : await near(undefined);
   } catch (err) {
     // Either route can be down without the other stopping.
     down.push(`meaning search (${(err as Error)?.message ?? err})`);

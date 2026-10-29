@@ -519,6 +519,50 @@ export function criteriaToParams(c: SearchCriteria): URLSearchParams {
   return q;
 }
 
+/**
+ * The filters beside the results (lib/facets): Level, the experience range and
+ * the tick lists. They narrow the list on screen, so they are not part of what
+ * makes a search a different search.
+ */
+export const FILTER_PARAMS = ["lvl", "xmin", "xmax", "jt", "loc", "np", "av", "ind"];
+
+/**
+ * The page's own address as it is, less the named parameters (28 Oct).
+ *
+ * The results page's links (page, candidate, level) used to be rebuilt from the
+ * parsed criteria, which wrote title, skill and years chips into the URL the
+ * first time anything was clicked. That made the address read as a new,
+ * "edited" search: the loading scene came back and the engine ran again, so
+ * opening a profile could change the list. A link now keeps the address and
+ * changes only its own part.
+ */
+export function searchParamsOf(sp: SearchParams, drop: string[] = []): URLSearchParams {
+  const out = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp)) {
+    if (v === undefined || drop.includes(k)) continue;
+    for (const x of Array.isArray(v) ? v : [v]) out.append(k, x);
+  }
+  return out;
+}
+
+/**
+ * What identifies "the same search" for the results page's loading boundary.
+ *
+ * Paging, opening a candidate, a level tick and the broader-matches switch keep
+ * it. So does a reply in the chat: only the conversation's first message counts,
+ * so a refinement keeps the list on screen and swaps in the new one when it is
+ * ready, instead of showing the full loading scene. A new first message, a mode,
+ * an opening, a reference CV or an edited chip is a different search.
+ */
+export function resultsKeyOf(sp: SearchParams): string {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
+    if (["page", "candidate", "msg", "below", ...FILTER_PARAMS].includes(k) || typeof v !== "string") continue;
+    p.set(k, k === "q" ? (turnsOf(v)[0] ?? "") : v);
+  }
+  return p.toString();
+}
+
 /** The URL with one chip taken out — what the chip's ✕ links to. */
 export function withoutChip(c: SearchCriteria, chip: Chip, extra: Record<string, string> = {}): string {
   const next = structuredClone(c);
