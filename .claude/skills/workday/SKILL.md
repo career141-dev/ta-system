@@ -222,7 +222,7 @@ Partner read lists the workday tables in `convex/integrations/partnerRead.ts` (k
 ## Known quirks, gaps and unverified items
 
 - `docs/TA-WORKDAY-FEATURE-PLAN.md` (13 Oct) is superseded: it describes `/workday` page and Start/Finish buttons. `docs/WORKDAY-CHECKS.md` is the maintained doc.
-- Drawer default mode vs stored default differ (`dashboard.options` uses "Follow-up" for previously worked jobs; `repo.workingStage`/`eodContext` default "100%").
+- Drawer default mode vs stored default differ (`dashboard.options` uses "Follow-up" for jobs worked in the last 30 days (only read when a job has no stage of its own, 29 Oct); `repo.workingStage`/`eodContext` default "100%").
 - "Save team resets stages" (see Work modes); backend-side effect unverified.
 - `excel_profiles` counts all-time own profiles on the job, not only today's; the doc says "added by the TA".
 - `jd_review` confirmation is per (user, job) across days; `chatgpt` confirmation is per day.
@@ -275,8 +275,8 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` against
 - 2026-10-26 `d5497ab` `/api/workday` logs which call failed on 503 (reviewers' panel failed on every 20 s poll).
 
 <!-- skill-meta
-verified-commit: 66aa2ca
-verified-hash: 395d6834b91cc9fa3a74d6de0506b80e2e659d3c
+verified-commit: 8bb1c68
+verified-hash: 662fb12f638a72cd3dcbc6ac7e7218e78b344c08
 verified-date: 2026-10-29
 sources:
   convex/ta/workdays.ts

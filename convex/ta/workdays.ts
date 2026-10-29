@@ -1177,9 +1177,15 @@ export const dashboard = internalQuery({
       [...assignedIds].map((id) => ctx.db.get(id as Id<"jobs">)),
     );
     const selectableJobs = assignedJobs.filter((job): job is Doc<"jobs"> => !!job);
-    const previousDays = worker ? await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", user._id)).collect() : [];
-    const workedJobs = new Set(previousDays.filter(d => d.finishedAt !== undefined).flatMap(d => d.jobs.map(j => j.jobId)));
     const assignmentModes = new Map(assignments.map(a => [a.jobId as string, a.workingStage]));
+    // Only a position with no stage of its own needs the history, and only its
+    // last 30 days: every workday ever read, each with its saved completion,
+    // was most of the 16 MB this query read and ran past the 1 s limit (29 Oct).
+    // shortcut: a position last worked over 30 days ago shows as 100% again, not Follow-up.
+    const previousDays = worker && selectableJobs.some(j => !assignmentModes.get(j._id))
+      ? await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", user._id)).order("desc").take(30)
+      : [];
+    const workedJobs = new Set(previousDays.filter(d => d.finishedAt !== undefined).flatMap(d => d.jobs.map(j => j.jobId)));
     const options = worker
       ? selectableJobs
           .filter(
