@@ -21,6 +21,10 @@ Neighbours (do not duplicate, link):
 
 **Terminology trap.** Owners sometimes say "scoops" when they mean sets (the five-CV batches, `setNumber`, the SETS cell of the EOD sheet). In code, "scoop" is only the lead-sent CV described here. Also, `taSourcingChannel`/`sourcingChannel` = `"SCOOP"` is a different thing: the Guidelines tab's code for a *database pick* (TBR, "Database - shortlisted and reviewed"). It is not a Scoops-tab upload and `effortBucket` deliberately treats it as no column. Four different "scoop" markers exist (see Data).
 
+## Adding a candidate to another job
+
+Candidate rows, including scoop rows, can add a candidate to another assigned job via `ta/applications:addToAssignedJob`; the original application is retained.
+
 ## How it works now
 
 ### Flow 1 - Upload (TA, Scoops tab)

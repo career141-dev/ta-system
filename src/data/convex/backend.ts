@@ -241,6 +241,12 @@ export async function shortlist(
   });
 }
 
+export async function addToAssignedJob(actor: Actor, applicationId: Id, destinationId: Id) {
+  return convexMutation<{ alreadyInFollowUp: boolean }>("ta/applications:addToAssignedJob", {
+    actorId: requireActorId(actor), applicationId, destinationId,
+  });
+}
+
 export async function moveStage(actor: Actor, applicationId: Id, stage: string, reason?: string) {
   // `ownerTaId` comes back, with success false, when a move into TA Follow-up
   // finds another TA has already claimed them (convex/ta/applications.ts).

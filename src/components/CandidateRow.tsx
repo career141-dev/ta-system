@@ -5,7 +5,7 @@ import type { Application, Candidate, User } from "@/data/types";
 import { STAGE_LABEL } from "@/data/types";
 import { RowActions } from "./RowActions";
 import { cameFromTables, directorReviewBlockers } from "@/lib/pipeline";
-import { claimCandidate } from "@/app/actions";
+import { addCandidateToJob, claimCandidate } from "@/app/actions";
 import { SubmitButton } from "./Submit";
 import { RowCheck } from "./BulkSelect";
 import { ContactLinks } from "./ContactLinks";
@@ -29,6 +29,7 @@ export function CandidateRow({
   canDecideDirector = false,
   canDecideClient = false,
   selectForm,
+  destinationJobs = [],
 }: {
   app: Application;
   candidate: Candidate;
@@ -44,6 +45,7 @@ export function CandidateRow({
   canDecideClient?: boolean;
   /** The list's bulk bar (components/BulkSelect), when rows can be ticked. */
   selectForm?: string;
+  destinationJobs?: { id: string; title: string }[];
 }) {
   const stamp = (t: number) =>
     dateAt(t);
@@ -191,6 +193,21 @@ export function CandidateRow({
             canDecideClient={canDecideClient}
             backToTables={cameFromTables(app, repo.linkVault(openingId))}
           />
+        )}
+
+        {!locked && isConvex() && destinationJobs.length > 0 && (
+          <details className="w-full text-left text-[12px]">
+            <summary className="cursor-pointer text-brand">Add to another job</summary>
+            <form action={addCandidateToJob} className="mt-2 flex flex-col gap-2">
+              <input type="hidden" name="appId" value={app.id} />
+              <input type="hidden" name="openingId" value={openingId} />
+              <select name="destinationId" required defaultValue="" aria-label="Destination job" className="w-full rounded border border-rule bg-white p-2">
+                <option value="" disabled>Choose a job</option>
+                {destinationJobs.map(job => <option key={job.id} value={job.id}>{job.title}</option>)}
+              </select>
+              <SubmitButton pendingLabel="Adding…" className="rounded bg-brand px-3 py-2 text-white">Add to TA Follow-up</SubmitButton>
+            </form>
+          </details>
         )}
 
         {/* In Follow-up, the three ways to reach them, one press each. */}

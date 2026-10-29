@@ -322,6 +322,25 @@ async function afterBackendWrite(openingId: string) {
   revalidatePath(`/openings/${openingId}`, "layout");
 }
 
+export async function addCandidateToJob(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const openingId = String(formData.get("openingId") ?? "");
+  const destinationId = String(formData.get("destinationId") ?? "");
+  if (!destinationId) await fail("Choose a job.");
+  if (!isConvex()) await fail("Adding to another job requires the backend.");
+  let alreadyInFollowUp = false;
+  try {
+    const result = await backend.addToAssignedJob({ id: user.id }, String(formData.get("appId")), destinationId);
+    alreadyInFollowUp = result.alreadyInFollowUp;
+  } catch (e) {
+    await fail(backendMessage(e, "Could not add the candidate to that job."));
+  }
+  await afterBackendWrite(openingId);
+  revalidatePath(`/openings/${destinationId}`, "layout");
+  await back(alreadyInFollowUp ? "This candidate is already in TA Follow-up on that job." : "Added to the other job’s TA Follow-up.");
+}
+
 export async function claimCandidate(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });

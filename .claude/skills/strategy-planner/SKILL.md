@@ -16,6 +16,10 @@ Not in this skill (neighbours):
 - /openings - opening pages, sidebar, access requests (`ta/openingAccess`); only the strategy hooks are here.
 - /follow-up, /scoop, /sets-shortlist, /voice-agent, /email-intake, /cv-extraction, /database-search - no strategy logic. NOTE: "SCOOP" is just one string in the strategy list (`DESK_STRATEGIES`), not a link to /scoop.
 
+## Adding a candidate to another job
+
+The shared actions module includes `addCandidateToJob`; it does not change strategy assignments.
+
 ## How it works now
 
 Vocabulary: a **strategy** is a catalogue entry (name, description, heading). A **row** (`strategyAssignments`) exists for one strategy on one job only once the lead has acted on it ("A strategy nobody has acted on has no row"). **Ticked** = the lead chose it for the job; TAs only see ticked rows and struck-through rows. **Done by** = TAs put on the row. **Accepted** = the TA acknowledged a new assignment.

@@ -21,6 +21,10 @@ Not here (link only):
 
 Terminology trap: **Sets** = numbered batches of a TA's shortlisted CVs (`convex/lib/sets.ts`). **Scoops** = CVs sent to the TA. Ask if the user is ambiguous.
 
+## Adding a candidate to another job
+
+Candidate rows offer “Add to another job”: `ta/applications:addToAssignedJob` verifies assignments and destination workday, keeps the source application, and claims or advances an early-stage destination to TA Follow-up. A colleague’s destination ownership is retained; later and closed stages are protected, and an existing TA Follow-up is unchanged. The destination stage history names the source job.
+
 ## How it works now
 
 Stage vocabulary: backend `currentStage` (stored) vs TA names, translated only in `convex/ta/stages.ts` (`toTaStage`/`toBackendStage`).
@@ -255,6 +259,7 @@ verified-commit: d078fcb
 verified-hash: d3e8629aa771f13d9e66ec6bd04da3295b6ec889
 verified-date: 2026-10-27
 sources:
+  tests/addToAssignedJob.test.ts
   convex/lib/sets.ts
   convex/lib/backup.ts
   convex/lib/shortlistDecision.ts

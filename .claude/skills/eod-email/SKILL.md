@@ -16,6 +16,10 @@ Lives elsewhere:
 
 Naming: UI says "End of Day Submission" and "Midday email"; code says `eod` / `midday` (`SubmissionType`), `dailyEmails` (new, 16 Oct), `eodEmailCopies` (legacy, 8 Oct), `taWorkdayMail` (receipt per send).
 
+## Adding a candidate to another job
+
+The shared actions module includes `addCandidateToJob`; destination shortlisting follows the existing set and workday rules and does not alter EOD sending.
+
 ## How it works now
 
 ### Flow A - Original EOD (director kind)

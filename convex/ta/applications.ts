@@ -18,12 +18,13 @@
 // the pipeline events and the Meta events all still fire.
 
 import { v } from "convex/values";
+import { internal } from "../_generated/api";
 import { assertWorkdayScope } from "../lib/workdayScope";
 import { internalMutation, internalQuery, type MutationCtx } from "../_generated/server";
-import { Doc, Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { projectApplication } from "./model/projections";
 import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, isTaOnOwnDesk, WORKS_THE_DESK, optionalActor} from "./guard";
-import { toTaStage, toBackendStage, directorReviewBlockers } from "./stages";
+import { toTaStage, toBackendStage, directorReviewBlockers, assignedJobDestination } from "./stages";
 import { followUpOn } from "../lib/followUpScope";
 import { nextSetFor } from "../lib/sets";
 import { backupPrimary } from "../lib/backup";
@@ -273,6 +274,60 @@ async function workingStageOf(ctx: { db: any }, jobId: Id<"jobs">, userId: Id<"u
     .first();
   return held?.value ?? "100%";
 }
+
+/** Add the same person to another assigned opening without disturbing the source. */
+export const addToAssignedJob = internalMutation({
+  args: { actorId: v.optional(v.string()), applicationId: v.string(), destinationId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const source = await ctx.db.get(args.applicationId as Id<"applications">);
+    if (!source) throw new Error("Application not found.");
+    const destinationId = args.destinationId as Id<"jobs">;
+    if (source.jobId === destinationId) throw new Error("Choose another job.");
+    const sourceJob = await ctx.db.get(source.jobId);
+    const destination = await ctx.db.get(destinationId);
+    if (!sourceJob || isGone(sourceJob) || !destination || isGone(destination) || !["active", "draft"].includes(destination.status))
+      throw new Error("That job is no longer available.");
+    for (const job of [sourceJob, destination]) {
+      const assignment = await ctx.db.query("jobAssignments")
+        .withIndex("by_jobId_userId", q => q.eq("jobId", job._id).eq("userId", user._id))
+        .filter(q => q.eq(q.field("isActive"), true)).first();
+      if (!assignment && !(job.assignedTaIds ?? []).includes(user._id))
+        throw new Error("You must be assigned to both jobs.");
+      await assertJobAccess(ctx, user, job._id, WORKS_THE_DESK);
+    }
+    assertNotAnotherTasCandidate(user, source);
+    await assertWorkdayScope(ctx, user, destinationId);
+    const candidate = await ctx.db.get(source.candidateId);
+    if (!candidate) throw new Error("Candidate not found.");
+    const candidateId = candidate.mergedInto ?? source.candidateId;
+    let app = await ctx.db.query("applications").withIndex("by_candidate_job", q =>
+      q.eq("candidateId", candidateId).eq("jobId", destinationId)).first();
+    const reason = `Added from job: ${sourceJob.title} (${sourceJob._id})`;
+    if (app && assignedJobDestination(app.currentStage) === "already") return { alreadyInFollowUp: true };
+    if (app && assignedJobDestination(app.currentStage) === "protected")
+      throw new Error("This candidate is already further along or closed on the destination job.");
+    if (!app) {
+      const id = await ctx.runMutation(internal.applications.applications.createApplication, {
+        candidateId, jobId: destinationId, cvFileId: source.cvFileId,
+        sourceChannel: "job_transfer", stage: "new_cvs",
+      });
+      if (!id) throw new Error("Candidate not found.");
+      app = await ctx.db.get(id);
+      if (!app) throw new Error("Could not create the application.");
+    }
+    if (!app.ownerTaId) {
+      await claimForTa(ctx, user, app, reason);
+    } else {
+      await placeInOnlyLocation(ctx, app);
+      await executeStageTransition(ctx, {
+        applicationId: app._id, targetStage: "follow_up", actorId: user._id, reason,
+        bypassRoleCheck: true, skipAutoOutreach: !followUpOn(destination),
+      });
+    }
+    return { alreadyInFollowUp: false };
+  },
+});
 
 /** Move a candidate, named in the TA platform's stage vocabulary. */
 export const moveStage = internalMutation({
