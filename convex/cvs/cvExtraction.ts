@@ -152,6 +152,14 @@ const makeNumber = (val: any) => {
   return isNaN(num) ? null : num;
 };
 
+// A salary read off a CV: "150,000" is a figure, "" or "negotiable" is not. makeNumber
+// would turn "" into 0, which is an answer ("no pay"), not a blank.
+const makeSalary = (val: any) => {
+  if (val === null || val === undefined) return null;
+  const num = typeof val === "number" ? val : Number(String(val).replace(/[,\s]/g, ""));
+  return Number.isFinite(num) && num > 0 ? num : null;
+};
+
 const makeString = (val: any) => {
   if (val === null || val === undefined) return null;
   return String(val);
@@ -206,7 +214,10 @@ export const cvExtractionSchema = z.object({
   seniorityLevel: z.preprocess(makeString, z.string().nullable().optional()),
   industries: z.preprocess(makeArray, z.array(z.string()).nullable().optional()),
   sector: z.preprocess(makeString, z.string().nullable().optional()),
-  expectedSalary: z.preprocess(makeNumber, z.number().nullable().optional()),
+  currentSalary: z.preprocess(makeSalary, z.number().nullable().optional()),
+  currentSalaryCurrency: z.preprocess(makeString, z.string().nullable().optional()),
+  expectedSalary: z.preprocess(makeSalary, z.number().nullable().optional()),
+  expectedSalaryCurrency: z.preprocess(makeString, z.string().nullable().optional()),
   noticePeriod: z.preprocess(makeString, z.string().nullable().optional()),
   employmentStatus: z.preprocess(makeString, z.string().nullable().optional()),
   skills: z.preprocess(makeSkillArray, z.array(z.object({
@@ -926,6 +937,7 @@ CRITICAL INSTRUCTION: If the document is NOT a CV, Resume, or Candidate Profile 
 6. Extract any referees or professional references explicitly mentioned in the CV (including name, designation/title, company, contact number/phone, email, relationship to candidate, and any notes). Return as an array of objects under "referees".
 7. Return gender as "Male" or "Female" only when the CV states it, gives the candidate a title (Mr., Ms., Mrs., Miss), or refers to the candidate as he or she. Pronouns and titles for referees describe the referee, not the candidate. Never decide it from the name or a photo. Otherwise return null.
 8. email and phone are the CANDIDATE'S OWN only. Never return an agency's or recruiter's contact (a header or footer added by whoever sent the CV), a referee's, an employer's office line or switchboard, or a family member's. If the candidate's own is not given, return null — a wrong one joins this CV to someone else's record.
+9. currentSalary, expectedSalary and noticePeriod: fill them only when the CV states them, often in a labelled box or line ("Current salary", "Present salary", "Expected salary", "Notice period", "Availability"). Salaries are the figure as a plain number (no currency symbol or commas) with the currency code in currentSalaryCurrency / expectedSalaryCurrency when it names one; if it gives words instead of a figure ("negotiable"), return null. noticePeriod is the candidate's own words ("1 month", "Immediate"). Never work them out from a job title, a past job or the market; not stated means null.
 
 JSON Target Schema:
 {
@@ -939,6 +951,11 @@ JSON Target Schema:
   "seniorityLevel": null,
   "industries": null,
   "sector": null,
+  "currentSalary": null,
+  "currentSalaryCurrency": null,
+  "expectedSalary": null,
+  "expectedSalaryCurrency": null,
+  "noticePeriod": null,
   "skills": [{ "value": "string", "confidence": 0.0 }],
   "education": [{ "degree": null, "institution": null, "year": null, "field": null }],
   "languages": null,
@@ -1341,6 +1358,7 @@ async function runCvExtractionLocked(
         seniorityLevel: null,
         industries: null,
         sector: null,
+        currentSalary: null,
         expectedSalary: null,
         noticePeriod: null,
         employmentStatus: null,

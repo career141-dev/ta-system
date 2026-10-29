@@ -189,6 +189,7 @@ Two independent readers:
 2. Merge only on proof (`sameCandidate.ts`), never delete a candidate that has an application (1 Oct 59d0d0a); a TA-chosen replace never merges.
 3. Only the primary model's "not a CV" is trusted (17 Sep f04349a). Do not weaken.
 4. Gender only when certain; only fills blanks (29 Sep 8c5b7be). "Not disclosed" is an answer in the box and the Director-review gate (`tests/notdisclosed.test.ts`).
+4a. Salary and notice (29 Oct): the CV is asked for `currentSalary`, `expectedSalary` (+ currency) and `noticePeriod` from labelled boxes/lines; null when not stated, "negotiable" is no figure (`makeSalary`: blank never becomes 0). `updateCandidateFields` runs them through `cvDetailsPatch` (`lib/fillBlanks.ts`): a newer CV replaces what an earlier CV wrote (the `candidates.cvDetailsRead` snapshot still equals the stored value) and never a value a person set (follow-up, call, TA, note/TA text, availability); a CV that states nothing changes nothing. Replace CV (`fillBlanksOnly`) uses the same rule for these three only. Tests `tests/cvdetails.test.ts`.
 5. One reading per upload (`lockExtraction`, 2 Oct ba3902f) and at most 3 readings, 2 background (26 Oct 138de24/56768fa). Never reschedule a throttled reading in a loop; wait in `cvExtractionQueue`. Every new way to read a CV must schedule `processCvExtraction` (never call `runCvExtraction` directly) or use `enqueueExtraction`.
 6. Every external reader has a bound (`within`, 6 Oct ba21a64; `pdfLayout` must finish on any PDF, `tests/pdflayout.test.ts`).
 7. The recovery jobs must not take rows that sit in `cvExtractionQueue` (`inExtractionQueue` in `claimUploadedBatch`, `recoverStuckUploads`, `requeueAllStuckUploads`).
@@ -257,8 +258,8 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` or any 
 - 2026-10-28 DeepSeek reasoning off for CV tasks + cut-off JSON retried ("not readable JSON (323 characters)"); Try again / Remove on failed HH and Scoop cards.
 
 <!-- skill-meta
-verified-commit: 66aa2ca
-verified-hash: af784f9789687a777266bef9b6a1cc16e8a1b023
+verified-commit: 8bb1c68
+verified-hash: 673985b5eeee4fb00a7b47028251ebe7566d2c2d
 verified-date: 2026-10-29
 sources:
   convex/cvs/cvExtraction.ts
