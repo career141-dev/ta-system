@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { workdayErrorMessage } from "../src/lib/workdayErrors";
+import { workdayErrorMessage, workdayFailureCategory } from "../src/lib/workdayErrors";
 import { MAX_100_MESSAGE, count100 } from "../src/lib/workdayRequirements";
 
 assert.equal(
@@ -24,5 +24,11 @@ assert.equal(
   workdayErrorMessage(new Error("Convex refused ta/workdays:addPosition: HTTP 500"), "addPosition"),
   "Could not save. Try again. If this continues, ask an admin for help.",
 );
+assert.equal(
+  workdayErrorMessage(new Error("Convex refused ta/workdays:start: HTTP 500"), "start"),
+  "Could not start your workday. Try again. If it keeps happening, ask an admin to check the workday service.",
+);
+assert.equal(workdayFailureCategory(new Error("Too many bytes read")), "backend_limit");
+assert.equal(workdayFailureCategory({ unreachable: true }), "unreachable");
 
 console.log("  ok  workday forms show instructions without Convex request details");

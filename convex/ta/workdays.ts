@@ -153,7 +153,10 @@ async function suggestedMode(_ctx: Ctx, _userId: Id<"users">, _jobId: Id<"jobs">
 
 async function pendingJobs(ctx: Ctx, user: Doc<"users">) {
   const days = await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", user._id)).collect();
-  const ids = new Set(days.filter(d => d.finishedAt !== undefined).flatMap(d => d.jobs.map(j => j.jobId)));
+  // Start no longer closes yesterday's day first. Its unfinished positions
+  // still need the same carry-forward check (29 Oct).
+  const today = workdayDate(Date.now());
+  const ids = new Set(days.filter(d => d.date < today || d.finishedAt !== undefined).flatMap(d => d.jobs.map(j => j.jobId)));
   const jobs: Doc<"jobs">[] = [];
   for (const id of ids) {
     const job = await ctx.db.get(id);
@@ -900,16 +903,28 @@ async function closeWorkday(ctx: MutationCtx, day: Doc<"taWorkdays">, at: number
   }
 }
 
-async function recoverStaleDays(ctx: MutationCtx, userId: Id<"users">) {
-  const days = await ctx.db.query("taWorkdays").withIndex("by_user_finished", q => q.eq("userId", userId).eq("finishedAt", undefined)).collect();
-  for (const day of days.filter(d => d.date < workdayDate(Date.now()))) {
-    await autoCompleteWorkday(ctx, day._id);
-    if ((await ctx.db.get(day._id))?.finishedAt === undefined) {
-      const midnight = Date.parse(`${day.date}T00:00:00+05:30`) + 86400000;
-      await closeWorkday(ctx, day, midnight, "expired");
-    }
+async function recoverStaleDay(ctx: MutationCtx, day: Doc<"taWorkdays">) {
+  if (day.finishedAt !== undefined || day.date >= workdayDate(Date.now())) return;
+  await autoCompleteWorkday(ctx, day._id);
+  if ((await ctx.db.get(day._id))?.finishedAt === undefined) {
+    const midnight = Date.parse(`${day.date}T00:00:00+05:30`) + 86400000;
+    await closeWorkday(ctx, day, midnight, "expired");
   }
 }
+
+async function recoverStaleDays(ctx: MutationCtx, userId: Id<"users">) {
+  const days = await ctx.db.query("taWorkdays").withIndex("by_user_finished", q => q.eq("userId", userId).eq("finishedAt", undefined)).collect();
+  for (const day of days) await recoverStaleDay(ctx, day);
+}
+
+/** A prior day can need a large history snapshot. It must not block today's Start. */
+export const recoverStaleDayAfterStart = internalMutation({
+  args: { workdayId: v.id("taWorkdays") },
+  handler: async (ctx, args) => {
+    const day = await ctx.db.get(args.workdayId);
+    if (day) await recoverStaleDay(ctx, day);
+  },
+});
 
 /** Pipeline only: never turns missing mail into a successful completed day. */
 export const recoverOpenWorkdays = internalMutation({
@@ -932,23 +947,39 @@ export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, 
     if (day.date !== workdayDate(now)) continue;
     const entry = day.jobs.find(j => j.jobId === jobId);
     if (!entry) continue;
-    const result = await jobView(ctx, day, entry, now);
-    const old = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
-    for (const check of result.checks) {
-      const previous = old.filter(e => e.key === check.key).at(-1);
-      const status = check.waiting ? "waiting" : check.status ?? "incomplete";
-      const evidence = check.waiting ? JSON.stringify(check.waiting) : check.evidence;
-      if (previous?.status === status && previous.evidence === evidence) continue;
-      const completedAt = status === "complete" ? previous?.status === "complete" ? previous.completedAt ?? check.completedAt : check.completedAt ?? (previous?.status === "incomplete" && actorId ? now : undefined) : undefined;
-      const completedBy = status === "complete" ? previous?.status === "complete" ? previous.completedBy : completedAt ? check.completedBy ?? actorId : undefined : undefined;
-      await ctx.db.insert("taWorkdayTaskEvents", { workdayId: day._id, userId: day.userId, jobId,
-        key: check.key, label: check.label, href: check.href, kind: check.kind, status, at: now,
-        ...(actorId ? { by: actorId } : {}), ...(evidence ? { evidence } : {}),
-        ...(completedAt ? { completedAt } : {}), ...(completedBy ? { completedBy } : {}),
-        ...(status === "complete" && (!previous || !completedAt) ? { observed: true } : {}) });
-    }
+    await refreshDayJobChecks(ctx, day, entry, now, actorId);
   }
 }
+
+async function refreshDayJobChecks(ctx: MutationCtx, day: Doc<"taWorkdays">, entry: Doc<"taWorkdays">["jobs"][number], now: number, actorId?: Id<"users">) {
+  const jobId = entry.jobId;
+  const result = await jobView(ctx, day, entry, now);
+  const old = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
+  for (const check of result.checks) {
+    const previous = old.filter(e => e.key === check.key).at(-1);
+    const status = check.waiting ? "waiting" : check.status ?? "incomplete";
+    const evidence = check.waiting ? JSON.stringify(check.waiting) : check.evidence;
+    if (previous?.status === status && previous.evidence === evidence) continue;
+    const completedAt = status === "complete" ? previous?.status === "complete" ? previous.completedAt ?? check.completedAt : check.completedAt ?? (previous?.status === "incomplete" && actorId ? now : undefined) : undefined;
+    const completedBy = status === "complete" ? previous?.status === "complete" ? previous.completedBy : completedAt ? check.completedBy ?? actorId : undefined : undefined;
+    await ctx.db.insert("taWorkdayTaskEvents", { workdayId: day._id, userId: day.userId, jobId,
+      key: check.key, label: check.label, href: check.href, kind: check.kind, status, at: now,
+      ...(actorId ? { by: actorId } : {}), ...(evidence ? { evidence } : {}),
+      ...(completedAt ? { completedAt } : {}), ...(completedBy ? { completedBy } : {}),
+      ...(status === "complete" && (!previous || !completedAt) ? { observed: true } : {}) });
+  }
+}
+
+/** Check each new position in its own transaction after Start has committed. */
+export const refreshStartedDayChecks = internalMutation({
+  args: { workdayId: v.id("taWorkdays"), jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const day = await ctx.db.get(args.workdayId);
+    const entry = day?.jobs.find(j => j.jobId === args.jobId);
+    if (!day || !entry || day.date !== workdayDate(Date.now())) return;
+    await refreshDayJobChecks(ctx, day, entry, Date.now());
+  },
+});
 
 /** The Suggestions page uses the same scoped evidence as the sidebar and saveCheck. */
 export const suggestionsCheck = internalQuery({
@@ -1535,53 +1566,69 @@ export const reconcileMail = internalMutation({
 export const start = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), workType },
   handler: async (ctx, args) => {
-    const user = await requireActor(ctx, args.actorId);
-    requireWorker(user);
-    await recoverStaleDays(ctx, user._id);
-    const active = await activeFor(ctx, user._id);
-    if (active) return { id: active._id };
-    const prior = await ctx.db
-      .query("taWorkdays")
-      .withIndex("by_user", (q) => q.eq("userId", user._id))
-      .order("desc")
-      .first();
-    if (prior?.date === workdayDate(Date.now()))
-      throw new Error(
-        "Today's workday is already finished. Ask the lead to review its record.",
+    let stage = "actor";
+    try {
+      const user = await requireActor(ctx, args.actorId);
+      requireWorker(user);
+      stage = "active day";
+      const active = await activeFor(ctx, user._id);
+      if (active) return { id: active._id };
+      const prior = await ctx.db
+        .query("taWorkdays")
+        .withIndex("by_user", (q) => q.eq("userId", user._id))
+        .order("desc")
+        .first();
+      if (prior?.date === workdayDate(Date.now()))
+        throw new Error(
+          "Today's workday is already finished. Ask the lead to review its record.",
+        );
+      stage = "selected position";
+      const job = await assignedJob(ctx, user, args.jobId);
+      const mode = await suggestedMode(ctx, user._id, args.jobId, args.workType);
+      const now = Date.now();
+      stage = "carry-forward positions";
+      const carry = (await pendingJobs(ctx, user)).filter(j => j._id !== args.jobId);
+      const stale = await ctx.db.query("taWorkdays").withIndex("by_user_finished", q => q.eq("userId", user._id).eq("finishedAt", undefined)).collect();
+      stage = "save today";
+      const id = await ctx.db.insert("taWorkdays", {
+        userId: user._id,
+        date: workdayDate(now),
+        startedAt: now,
+        jobs: [
+          {
+            jobId: args.jobId,
+            workType: mode,
+            addedAt: now,
+            leadId: job.taLeadId,
+            workLocationIds: activeWorkLocationIds(job),
+            modeHistory: [{ at: now, workType: mode }],
+          },
+          ...carry.map(j => ({ jobId: j._id, workType: "Follow-up" as const, addedAt: now, leadId: j.taLeadId, workLocationIds: activeWorkLocationIds(j), carried: true, modeHistory: [{ at: now, workType: "Follow-up" }] })),
+        ],
+      });
+      await setMode(ctx, user._id, args.jobId, mode);
+      await attachLead(ctx, id, job.taLeadId);
+      await notify(
+        ctx,
+        job.taLeadId,
+        user,
+        args.jobId,
+        "workday_started",
+        "Started workday",
       );
-    const job = await assignedJob(ctx, user, args.jobId);
-    const mode = await suggestedMode(ctx, user._id, args.jobId, args.workType);
-    const now = Date.now();
-    const carry = (await pendingJobs(ctx, user)).filter(j => j._id !== args.jobId);
-    const id = await ctx.db.insert("taWorkdays", {
-      userId: user._id,
-      date: workdayDate(now),
-      startedAt: now,
-      jobs: [
-        {
-          jobId: args.jobId,
-          workType: mode,
-          addedAt: now,
-          leadId: job.taLeadId,
-          workLocationIds: activeWorkLocationIds(job),
-          modeHistory: [{ at: now, workType: mode }],
-        },
-        ...carry.map(j => ({ jobId: j._id, workType: "Follow-up" as const, addedAt: now, leadId: j.taLeadId, workLocationIds: activeWorkLocationIds(j), carried: true, modeHistory: [{ at: now, workType: "Follow-up" }] })),
-      ],
-    });
-    await setMode(ctx, user._id, args.jobId, mode);
-    await attachLead(ctx, id, job.taLeadId);
-    await notify(
-      ctx,
-      job.taLeadId,
-      user,
-      args.jobId,
-      "workday_started",
-      "Started workday",
-    );
-    for (const j of carry) { await setMode(ctx, user._id, j._id, "Follow-up"); await attachLead(ctx, id, j.taLeadId); }
-    for (const jobId of [args.jobId, ...carry.map(j => j._id)]) await refreshWorkdayChecks(ctx, jobId);
-    return { id };
+      for (const j of carry) { await setMode(ctx, user._id, j._id, "Follow-up"); await attachLead(ctx, id, j.taLeadId); }
+      stage = "schedule history and checks";
+      for (const day of stale.filter(d => d.date < workdayDate(now)))
+        await ctx.scheduler.runAfter(0, makeFunctionReference<"mutation">("ta/workdays:recoverStaleDayAfterStart"), { workdayId: day._id });
+      for (const jobId of [args.jobId, ...carry.map(j => j._id)])
+        await ctx.scheduler.runAfter(0, makeFunctionReference<"mutation">("ta/workdays:refreshStartedDayChecks"), { workdayId: id, jobId });
+      return { id };
+    } catch (error) {
+      // The server action logs the backend category; this stage tells us which
+      // part failed without logging candidate details or form contents.
+      console.error(`[workday start] failed at ${stage}: ${error instanceof Error ? error.name : "UnknownError"}`);
+      throw error;
+    }
   },
 });
 

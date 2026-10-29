@@ -103,7 +103,8 @@ const db = {
     return query;
   },
 };
-const ctx = { db, auth: { getUserIdentity: async () => null }, scheduler: { runAt: async () => null, runAfter: async () => null } } as any;
+const scheduled: { args: Row }[] = [];
+const ctx = { db, auth: { getUserIdentity: async () => null }, scheduler: { runAt: async () => null, runAfter: async (_ms: number, _name: unknown, args: Row) => { scheduled.push({ args }); return null; } } } as any;
 const run = (name: keyof typeof workdays, args: Row) =>
   (workdays[name] as any)._handler(ctx, args);
 const user = (id: string, taRole: string) =>
@@ -989,6 +990,13 @@ try {
   assert.equal((await db.get("staleDay"))?.finishedAt, undefined, "Dry run does not mutate records");
   const newDay = await run("start", { actorId: "staleTa", jobId: "staleJob", workType: "Follow-up" });
   assert.notEqual(newDay.id, "staleDay");
+  assert.equal((await db.get("staleDay"))?.finishedAt, undefined, "Old history is recovered after Start, not during it");
+  assert.equal((await assertWorkdayScope(ctx, (await db.get("staleTa")) as any, "staleJob" as any)), undefined, "Today's opening is usable immediately");
+  assert.equal((await run("start", { actorId: "staleTa", jobId: "staleJob", workType: "Follow-up" })).id, newDay.id, "Repeated Start returns the same day");
+  assert.equal(rows("taWorkdays").filter(d => d.userId === "staleTa" && d.date === workdayDate(clock)).length, 1);
+  assert.ok(scheduled.some(s => s.args.workdayId === "staleDay"));
+  await run("recoverStaleDayAfterStart", { workdayId: "staleDay" });
+  await run("recoverStaleDayAfterStart", { workdayId: "staleDay" });
   assert.equal((await db.get("staleDay"))?.closureReason, "expired");
   assert.equal((await db.get(newDay.id))?.date, workdayDate(clock));
   user("recoverTa", "ta");
@@ -999,8 +1007,35 @@ try {
   put("taWorkdayMail", { _id: "recoverReceipt", workdayId: "recoverDay", jobId: "recoverJob", userId: "recoverTa", workType: "100%",
     status: "accepted", startedAt: acceptedYesterday - 1000, acceptedAt: acceptedYesterday, finalizedAt: acceptedYesterday, applicationIds: [] });
   await run("start", { actorId: "recoverTa", jobId: "recoverJob", workType: "Follow-up" });
+  await run("recoverStaleDayAfterStart", { workdayId: "recoverDay" });
   assert.equal((await db.get("recoverDay"))?.finishedAt, acceptedYesterday, "Yesterday's accepted EOD recovers its original finish time");
   assert.equal((await db.get("recoverDay"))?.closureReason, "eod");
+  // A TA who sent one EOD but has several carried positions can still start
+  // today without building yesterday's snapshot or every check in that write.
+  user("busyTa", "ta");
+  const busyJobs = [];
+  for (let i = 0; i < 7; i++) {
+    const jobId = `busy:${i}`;
+    put("jobs", { _id: jobId, title: jobId, status: "active", taLeadId: "lead", assignedTaIds: ["busyTa"] });
+    put("applications", { _id: `busyApp:${i}`, jobId, ownerTaId: "busyTa", candidateId: `busyCandidate:${i}`, currentStage: "follow_up", lastStageChangedAt: clock - 86400000 });
+    busyJobs.push({ jobId, workType: "Follow-up", addedAt: clock - 86400000, leadId: "lead", modeHistory: [], workLocationIds: ["colombo"] });
+  }
+  put("jobs", { _id: "busy:today", title: "Today's position", status: "active", taLeadId: "lead", assignedTaIds: ["busyTa"] });
+  put("taWorkdays", { _id: "busyYesterday", userId: "busyTa", date: workdayDate(clock - 86400000), startedAt: clock - 86400000, jobs: busyJobs });
+  put("taWorkdayMail", { _id: "busyEod", workdayId: "busyYesterday", jobId: "busy:0", userId: "busyTa", workType: "Follow-up", status: "accepted", startedAt: clock - 86400000, acceptedAt: clock - 86400000, finalizedAt: clock - 86400000, applicationIds: [] });
+  const busyDay = await run("start", { actorId: "busyTa", jobId: "busy:today", workType: "100%" });
+  assert.equal((await db.get(busyDay.id))?.jobs.length, 8);
+  assert.equal((await db.get("busyYesterday"))?.finishedAt, undefined);
+  await assertWorkdayScope(ctx, (await db.get("busyTa")) as any, "busy:today" as any);
+  assert.equal(scheduled.filter(s => s.args.workdayId === busyDay.id && s.args.jobId).length, 8);
+  const beforeEvents = rows("taWorkdayTaskEvents").length;
+  await run("refreshStartedDayChecks", { workdayId: busyDay.id, jobId: "busy:today" });
+  const afterEvents = rows("taWorkdayTaskEvents").length;
+  assert.ok(afterEvents > beforeEvents);
+  await run("refreshStartedDayChecks", { workdayId: busyDay.id, jobId: "busy:today" });
+  assert.equal(rows("taWorkdayTaskEvents").length, afterEvents, "A repeated check refresh does not duplicate events");
+  await run("recoverStaleDayAfterStart", { workdayId: "busyYesterday" });
+  assert.equal((await db.get("busyYesterday"))?.closureReason, "expired");
   console.log(
     "  ok  workday times, direct assigned positions, shared CV review, late arrivals, carry-forward expiry, email receipts, scoped lead history and idempotent completion",
   );

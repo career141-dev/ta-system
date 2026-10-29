@@ -32,12 +32,12 @@ All dates are Asia/Colombo: `workdayDate(ms)` in `src/lib/workday.ts` (`toLocale
 
 ### Flow 1 - Start (`ta/workdays:start`, op `start`)
 Trigger: TA picks a position and work type in the drawer (JobPicker, no active day) -> `changeWorkday` (`src/app/workday/actions.ts`) -> `convexMutation("ta/workdays:start", {actorId, jobId, workType})`.
-1. `requireWorker`, then `recoverStaleDays(userId)` (see Flow 8).
+1. `requireWorker`, then check for an active day. Prior-day recovery is scheduled after the new day is saved (29 Oct); an old history snapshot no longer blocks Start.
 2. If an active day exists, returns `{id}` unchanged (idempotent).
 3. If the latest row is dated today (finished and not active) -> "Today's workday is already finished. Ask the lead to review its record."
 4. `assignedJob`: `assertJobAccess(..., ["primary_recruiter","supporting_recruiter"])`, job not `isGone` ("That job is no longer available."), and `job.taLeadId` must exist ("Ask the lead to assign a TA Lead to this job before starting work.").
-5. Inserts `taWorkdays` with the chosen job first (`workType`, `addedAt`, `leadId: job.taLeadId`, `workLocationIds: activeWorkLocationIds(job)`, `modeHistory:[{at,workType}]`) followed by every `pendingJobs()` job as `carried:true`, `workType:"Follow-up"` (the chosen job is excluded from carry).
-6. `setMode` writes the mode for each job (see Work modes), `attachLead` inserts `taWorkdayLeads {workdayId, leadId}` once per lead, `notify` inserts a `notifications` row type `workday_started` ("Started workday") for the chosen job's lead only, then `refreshWorkdayChecks(jobId)` for each job.
+5. Inserts `taWorkdays` with the chosen job first (`workType`, `addedAt`, `leadId: job.taLeadId`, `workLocationIds: activeWorkLocationIds(job)`, `modeHistory:[{at,workType}]`) followed by every `pendingJobs()` job as `carried:true`, `workType:"Follow-up"` (the chosen job is excluded from carry). `pendingJobs` includes prior unfinished days so delayed recovery does not lose returning positions.
+6. `setMode` writes the mode for each job (see Work modes), `attachLead` inserts `taWorkdayLeads {workdayId, leadId}` once per lead, and `notify` inserts a `notifications` row type `workday_started` ("Started workday") for the chosen job's lead only. It schedules one `recoverStaleDayAfterStart` mutation per old day and one `refreshStartedDayChecks` mutation per position; each runs in its own transaction after Start commits. Repeated Start returns the existing day and schedules nothing again.
 Sign-in never starts the clock. The first Start is the opt-in (see `assertWorkdayScope`).
 
 ### Flow 2 - Add position (`addPosition`)
@@ -134,7 +134,7 @@ Two send paths create a `taWorkdayMail` receipt in status `sending` before any p
 Midday, revised (`revised`/`parentId`), failed, uncertain and reopened sends never complete or retime the day. After the clock stops, Follow-up/Add-on and further 100% positions (up to 5 100% a day, `MAX_100_PER_DAY`) can still be added and sent; the clock stays at the first 100% EOD. Also called from `recordActiveMode` and `reconcileMail`.
 
 ### Flow 8 - Stale days and recovery
-- `recoverStaleDays(ctx, userId)` (called by `start`): every unfinished day with `date < today` is first passed to `autoCompleteWorkday`; if still open it is closed `expired` at `Date.parse(date + "T00:00:00+05:30") + 86400000` (next Colombo midnight), no notification. An expired day is "Incomplete (expired)" in the UI and never counts as success.
+- `recoverStaleDayAfterStart({workdayId})` (scheduled by `start`) closes one prior unfinished day: first `autoCompleteWorkday`; if still open it is closed `expired` at `Date.parse(date + "T00:00:00+05:30") + 86400000` (next Colombo midnight), no notification. Repeated calls leave a finished day untouched. An expired day is "Incomplete (expired)" in the UI and never counts as success. `recoverStaleDays` remains for the pipeline repair.
 - `ta/workdays:recoverOpenWorkdays({dryRun})` (internalMutation, pipeline `run_function` only): lists all unfinished days dated before today (`by_finished` index), returns `{dryRun, affected}`, applies `recoverStaleDays` per user when `dryRun:false`. Idempotent.
 - `ta/dailyEmails:enableRequirement({dryRun})`: seeds `dailyEmailPolicy {key:"midday", requiredFrom: next Colombo day}` once; later runs never move the date.
 - One-off incident repairs (do not re-run, both date/title-guarded): `convex/admin/repairSanduniMistimedEod.ts` (19 Oct) and `convex/admin/reopenShihabEarlyEod.ts` `run({dryRun})` (20 Oct, guard `workdayDate(Date.now()) === "2026-10-20"`, one user email, opening id, title check; runbook `docs/RECOVERY-SHIHAB-EOD-2026-10-20.md`). Both mark receipts `recoveryReopenedAt`, which every completion filter honours.
@@ -164,7 +164,7 @@ Applies only to `ta`/`ta_support`. Today's active day (open or `eod`-closed) mus
 | `EodJobChecks` | same, used by `EodComposer.tsx:~1178` | non-detail poll; lists `emailBlockers` above the composer and reports `blocked`, `excused`, saved link upward |
 | Exported forms | `ResearchConfirmation` (Research page), `EmptySuggestionsReason` (Suggestions page), `NoCandidateReason` (unused by pages today, unverified) | |
 | API route | `src/app/api/workday/route.ts` | 401 unauthenticated; 403 if `!canViewWorkday`; 503 "Could not load workday checks. Please retry." on any backend throw (logs `[api/workday] <step> role=... <query>` since 26 Oct); `Cache-Control: private, no-store`; with `detail=1` and `canWork` also fetches `sentEmails` |
-| Write action | `src/app/workday/actions.ts` `changeWorkday(FormData)` | builds args per `op`; unknown op -> "Unknown workday action."; mutation returning `ok:false` -> "Complete these steps first: ..."; errors via `workdayErrorMessage` (strips `Uncaught Error:` wrappers, 300 chars, else generic "Could not save. Try again..."); `revalidatePath("/workday")` (+ the Suggestions page on `saveCheck`) |
+| Write action | `src/app/workday/actions.ts` `changeWorkday(FormData)` | builds args per `op`; unknown op -> "Unknown workday action."; mutation returning `ok:false` -> "Complete these steps first: ..."; errors via `workdayErrorMessage` (strips `Uncaught Error:` wrappers, 300 chars; Start has separate service/connection wording). A failed Start logs a safe category, HTTP status and Convex request ID on the server, while the backend logs the failing stage; no candidate data or secrets. `revalidatePath("/workday")` (+ the Suggestions page on `saveCheck`) |
 Local-storage keys (UI memory only): `workday-date`, `workday-ta`, `workday-filter-job`, `workday-filter-status`, `workday-open:<dayId>:<jobId>`, `workday-job:<dayId|start>`. Notification deep links use `checkDay`, `checkJob`, `checkTask` to open/scroll the exact `Check`.
 
 ## Data
@@ -273,11 +273,12 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` against
 - 2026-10-21 `4dd30a8` work locations: per-location EODs, `workLocationIds` on entries, `lib/workLocationEmails.ts`, city submissions cannot close attendance early.
 - 2026-10-23 `f3d57d6` EOD can be sent with zero CVs and no reason in any mode (`director_cv` always complete); `b76374c` TA leads (and directors) review all TA activity (`deskWide`, `canReviewWorkdays`).
 - 2026-10-26 `d5497ab` `/api/workday` logs which call failed on 503 (reviewers' panel failed on every 20 s poll).
+- 2026-10-29 Start commits today's day before old-day recovery and per-job check refresh; prior unfinished jobs still carry. Safe failure categories and stage logging make generic Start errors diagnosable without exposing backend details to TAs.
 
 <!-- skill-meta
-verified-commit: 0ec0a0e5
-verified-hash: cdee3ca7db8eb04ea3977f2ecaf51e573fb5915a
-verified-date: 2026-10-28
+verified-commit: 7a0ae7a
+verified-hash: d454ec62e9584791ca8901c0c8cce66f760e6fe0
+verified-date: 2026-10-29
 sources:
   convex/ta/workdays.ts
   convex/lib/workdayChecks.ts
