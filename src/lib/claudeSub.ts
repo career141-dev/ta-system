@@ -22,8 +22,8 @@ import { readClaudeUsage, shadowCostUsd, totalTokens } from "./claudeUsage";
  *  - thinking: the tasks named in C141_CLAUDE_SUB_TASKS, answered with no
  *    tools at all (askSubscription). Only from SAFE: those prompts carry a
  *    client's name, public web pages and the desk's own notes. Tasks that read
- *    a candidate's CV or messages are refused here whatever the setting says,
- *    so a candidate's details never reach a personal account.
+ *    a candidate's CV or messages are refused here; the separately authenticated
+ *    CV vision bridge is the owner-approved exception for scanned CVs.
  *  - searching: Claude's own web search, as the first engine behind every
  *    search the desk makes, when C141_CLAUDE_SEARCH=on (claudeWebSearch).
  *
@@ -31,7 +31,7 @@ import { readClaudeUsage, shadowCostUsd, totalTokens } from "./claudeUsage";
  * database match (lib/claudeMatch, its own switch C141_CLAUDE_MATCH). That
  * prompt does carry candidates, so it sends a numbered summary of each — work,
  * years, skills, place — and never a name, phone, email, LinkedIn or CV text.
- * The gate below is unchanged: no other candidate task comes here.
+ * The gate below is unchanged; CV vision uses its own authenticated bridge.
  */
 const SAFE: ReadonlySet<Task> = new Set<Task>(["plan", "research", "jd"]);
 const TIMEOUT_MS = 120_000;
@@ -99,6 +99,8 @@ export async function runClaude(args: string[], prompt: string, timeoutMs: numbe
         clearTimeout(timer);
         resolve({ code, out, err, timedOut });
       });
+      // A large CV can still be streaming when a refused CLI exits; EPIPE must not crash the app.
+      child.stdin.on("error", () => {});
       child.stdin.end(prompt);
     });
   } finally {

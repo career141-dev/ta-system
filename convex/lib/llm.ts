@@ -2,7 +2,7 @@
 
 import OpenAI from "openai";
 import type { ActionCtx } from "../_generated/server";
-import { isCompleteJson } from "./jsonAnswer";
+import { isCompleteJson, hasCvDetailsJson } from "./jsonAnswer";
 
 
 export type TaskType = 
@@ -36,20 +36,12 @@ export const IS_CV_EXTRACTION_TASK = (taskType: string): boolean => {
 
 export const OPENROUTER_CV_EXTRACTION_MODEL = "deepseek/deepseek-v4-flash";
 export const OPENROUTER_PRIMARY_MODEL = OPENROUTER_CV_EXTRACTION_MODEL;
-export const OPENROUTER_VISION_MODEL = "google/gemini-2.0-flash-lite-001";
-export const OPENROUTER_SCANNED_CV_MODEL = OPENROUTER_VISION_MODEL;
 export const OPENROUTER_FALLBACK_MODELS = [OPENROUTER_CV_EXTRACTION_MODEL];
 export const OPENROUTER_CV_FALLBACK_MODELS = [OPENROUTER_CV_EXTRACTION_MODEL];
-export const OPENROUTER_VISION_FALLBACK_MODELS = [
-  OPENROUTER_VISION_MODEL,
-];
 export const NVIDIA_PRIMARY_MODEL = "meta/llama-3.3-70b-instruct";
 export const NVIDIA_FALLBACK_MODEL = "meta/llama-3.3-70b-instruct";
 
-export function getModelForTask(taskType: TaskType | string): string {
-  if (taskType === "cv_vision_ocr") {
-    return OPENROUTER_VISION_MODEL;
-  }
+export function getModelForTask(_taskType: TaskType | string): string {
   return OPENROUTER_CV_EXTRACTION_MODEL;
 }
 
@@ -185,9 +177,24 @@ export const NVIDIA_VISION_MODELS = [
   "meta/llama-3.2-11b-vision-instruct",
 ];
 
-export const OPENROUTER_VISION_MODELS = [
-  "google/gemini-2.0-flash-lite-001",
-];
+// The subscription CLI is in the app container, reached through its authenticated bridge.
+export async function callHaikuVisionOCR(file: { kind: "pdf" | "image"; mime: string; base64: string }): Promise<string> {
+  const base = (process.env.C141_APP_INTERNAL_URL ?? "").trim().replace(/\/+$/, "");
+  const secret = (process.env.C141_CLAUDE_BRIDGE_SECRET ?? "").trim();
+  if (!base || secret.length < 16) return "";
+  try {
+    const response = await fetch(`${base}/api/internal/claude-cv-vision`, {
+      method: "POST", headers: { "content-type": "application/json", "x-c141-secret": secret },
+      body: JSON.stringify(file), signal: AbortSignal.timeout(55_000),
+    });
+    if (!response.ok) return "";
+    const result = await response.json() as { ok?: boolean; text?: unknown };
+    return result.ok && typeof result.text === "string" ? result.text.trim() : "";
+  } catch (err: any) {
+    console.warn(`[callHaikuVisionOCR] Subscription bridge unavailable: ${err?.name || "error"}`);
+    return "";
+  }
+}
 
 export async function callNvidiaVisionOCR(
   ctx: ActionCtx,
@@ -258,38 +265,6 @@ export async function callNvidiaVisionOCR(
     }
   } catch (err: any) {
     console.warn("[callNvidiaVisionOCR] Failed to initialize NVIDIA client:", err);
-  }
-
-  // 2. OpenRouter fallback if NVIDIA fails
-  try {
-    const openRouter = getOpenAI("cv_vision_ocr");
-    for (const model of OPENROUTER_VISION_MODELS) {
-      try {
-        console.log(`[callNvidiaVisionOCR] Fallback: Invoking OpenRouter Vision OCR model: ${model}`);
-        const response = await openRouter.chat.completions.create({
-          model,
-          messages: [
-            {
-              role: "user",
-              content: contentItems as any,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 4096,
-        });
-
-        const extractedText = response.choices[0]?.message?.content?.trim() || "";
-        if (extractedText && extractedText.length > 10) {
-          console.log(`[callNvidiaVisionOCR] Successfully extracted ${extractedText.length} chars using OpenRouter ${model}`);
-          return extractedText;
-        }
-      } catch (err: any) {
-        lastError = err?.message || String(err);
-        console.warn(`[callNvidiaVisionOCR] OpenRouter Vision OCR failed with model ${model}: ${lastError}`);
-      }
-    }
-  } catch (err: any) {
-    lastError = err?.message || String(err);
   }
 
   await logLLMUsage(
@@ -383,6 +358,9 @@ export async function executeLLMWithNvidiaFallback(
             throw new Error(`${model} gave JSON that stops part-way (${content.length} characters, finish: ${response.choices[0]?.finish_reason ?? "unknown"})`);
           }
           if (content) {
+            if (taskType === "cv_structuring" && !hasCvDetailsJson(content)) {
+              throw new Error(`${model} found no candidate details`);
+            }
             return { content, provider: isNvidiaModel ? "nvidia" : "openrouter", model, ...(isNvidiaModel ? { primaryError } : {}) };
           }
           throw new Error(`${model} returned empty response`);

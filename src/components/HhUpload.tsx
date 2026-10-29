@@ -112,7 +112,7 @@ export function HhUpload({ openingId, workLocationId }: { openingId: string; wor
     if (!r.id) return;
     patch(r.key, { state: "reading", note: null, stage: "queued", label: "Waiting for a CV reader", progress: 8 });
     try {
-      const res = await fetch("C:/Program Files/Git/api/hh/upload", {
+      const res = await fetch("/api/hh/upload", {
         method: "PATCH",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ openingId, id: r.id }),
