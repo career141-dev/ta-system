@@ -338,7 +338,7 @@ export async function addCandidateToJob(formData: FormData) {
   }
   await afterBackendWrite(openingId);
   revalidatePath(`/openings/${destinationId}`, "layout");
-  await back(alreadyInFollowUp ? "This candidate is already in TA Follow-up on that job." : "Added to the other job’s TA Follow-up.");
+  await back(alreadyInFollowUp ? "This candidate is already in TA Follow-up on that job." : "Added to the other jobâ€™s TA Follow-up.");
 }
 
 export async function claimCandidate(formData: FormData) {

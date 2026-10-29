@@ -149,7 +149,9 @@ export function backoffMs(attempt: number, random: () => number = Math.random): 
 }
 
 // The backend's own refusals for a function that ran too long or read too much.
-const BUDGET = /function execution timed out|execution time limit|too many (bytes|documents) read|read too (much|many)|too many reads/i;
+// "too many system operations" is the same refusal in other words; it said
+// "timed out", so it was taken for a network blip and sent again (29 Oct).
+const BUDGET = /function execution timed out|execution time limit|too many (bytes|documents) read|read too (much|many)|too many reads|too many system operations/i;
 const TRANSIENT = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network|invalid json response|http 429|http 502|http 503|http 504/i;
 
 /**

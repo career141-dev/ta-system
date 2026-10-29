@@ -58,16 +58,26 @@ export const listForUser = internalQuery({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const rows = await ctx.db
+    // Newest first straight from the index. It read every notification the
+    // user ever had, every 10 s per open tab, and nothing deletes them (29 Oct).
+    const userId = args.userId as Id<"users">;
+    const limit = Math.min(args.limit ?? 30, 100);
+    const unread = await ctx.db
       .query("notifications")
-      .withIndex("by_user", (q) => q.eq("userId", args.userId as Id<"users">))
-      .collect();
-    const filtered = args.unreadOnly ? rows.filter((r) => !r.read) : rows;
-    filtered.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-    const unreadCount = rows.filter((r) => !r.read).length;
+      .withIndex("by_user_and_read", (q) => q.eq("userId", userId).eq("read", false))
+      .order("desc")
+      .take(100);
+    const latest = args.unreadOnly
+      ? unread.slice(0, limit)
+      : await ctx.db
+          .query("notifications")
+          .withIndex("by_user", (q) => q.eq("userId", userId))
+          .order("desc")
+          .take(limit);
     return {
-      unreadCount,
-      notifications: filtered.slice(0, args.limit ?? 30).map((n) => ({
+      // The bell shows "9+" past nine, so counting past 100 is never needed.
+      unreadCount: unread.length,
+      notifications: latest.map((n) => ({
         id: n._id as string,
         type: n.type,
         title: n.title,

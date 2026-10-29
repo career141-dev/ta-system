@@ -2289,6 +2289,8 @@ export default defineSchema({
     updatedBy: v.optional(v.id("users")),
     updatedAt: v.optional(v.string()),
     lastEmailFetchTimestamp: v.optional(v.string()), // Added for email polling memory
+    /** A webhook-triggered read of this mailbox is already scheduled for this time (29 Oct). */
+    webhookPollDueAt: v.optional(v.number()),
     /** When this mailbox began to be read by the mailboxLog instead of the read flag (5 Oct). */
     mailLogSince: v.optional(v.string()),
     /** The last run that read this mailbox in full and finished (23 Oct). */

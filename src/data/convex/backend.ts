@@ -353,9 +353,14 @@ export async function keywordSearchMany(
 ): Promise<{ candidateId: Id; score: number }[]> {
   const terms = [...new Set(queries.map((q) => q.trim()).filter((q) => q.length > 2))].slice(0, 6);
   if (terms.length === 0) return [];
-  const runs = await Promise.all(
-    terms.map((t) => keywordSearch(actor, t, limitEach).catch(() => [] as { candidateId: Id; score: number }[])),
-  );
+  // A failed term is reported, not turned into "no matches": the empty
+  // answer was shown as "nothing found" and cached for five minutes (29 Oct).
+  const settled = await Promise.allSettled(terms.map((t) => keywordSearch(actor, t, limitEach)));
+  const failed = settled.filter((r) => r.status === "rejected");
+  if (failed.length) {
+    throw new Error(`${failed.length} of ${terms.length} keyword searches failed: ${String((failed[0] as PromiseRejectedResult).reason?.message ?? failed[0])}`);
+  }
+  const runs = settled.map((r) => (r as PromiseFulfilledResult<{ candidateId: Id; score: number }[]>).value);
   const best = new Map<Id, number>();
   for (const run of runs) {
     for (const hit of run) best.set(hit.candidateId, Math.max(best.get(hit.candidateId) ?? 0, hit.score));

@@ -1041,6 +1041,31 @@ export const updateLastEmailFetchTimestamp = internalMutation({
   }
 });
 
+/**
+ * One webhook-triggered read per mailbox at a time (29 Oct).
+ *
+ * Graph sends one notification per message, and each scheduled a full read of
+ * the last 30 days: a burst of 50 emails was 50 overlapping reads of the same
+ * mailbox. Now the first notification schedules one read a little later, and
+ * the rest find it already due — that read picks up all of them.
+ */
+export const WEBHOOK_POLL_DELAY_MS = 20_000;
+
+export const scheduleWebhookPoll = internalMutation({
+  args: { inboxEmail: v.string() },
+  handler: async (ctx, { inboxEmail }): Promise<boolean> => {
+    const key = `email_fetch_${inboxEmail}`;
+    const now = Date.now();
+    const row = await ctx.db.query("appSettings").withIndex("by_key", (q) => q.eq("key", key)).first();
+    if (row?.webhookPollDueAt && row.webhookPollDueAt > now) return false;
+    const due = now + WEBHOOK_POLL_DELAY_MS;
+    if (row) await ctx.db.patch(row._id, { webhookPollDueAt: due });
+    else await ctx.db.insert("appSettings", { key, webhookPollDueAt: due });
+    await ctx.scheduler.runAfter(WEBHOOK_POLL_DELAY_MS, internal.communications.emailAgent.pollEmailInbox, { inboxEmail });
+    return true;
+  },
+});
+
 /** When this mailbox began to be read by the log; set on the first such run. */
 export const startMailLog = internalMutation({
   args: { inboxEmail: v.string() },
