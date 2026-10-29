@@ -38,6 +38,7 @@ import type * as admin_settings from "../admin/settings.js";
 import type * as admin_taFeedback2610 from "../admin/taFeedback2610.js";
 import type * as admin_taTables2610b from "../admin/taTables2610b.js";
 import type * as admin_taTables2610c from "../admin/taTables2610c.js";
+import type * as admin_taTables2610d from "../admin/taTables2610d.js";
 import type * as admin_unshortlist from "../admin/unshortlist.js";
 import type * as admin_updateJDs from "../admin/updateJDs.js";
 import type * as aiCalls_voiceCallGuards from "../aiCalls/voiceCallGuards.js";
@@ -289,6 +290,7 @@ declare const fullApi: ApiFromModules<{
   "admin/taFeedback2610": typeof admin_taFeedback2610;
   "admin/taTables2610b": typeof admin_taTables2610b;
   "admin/taTables2610c": typeof admin_taTables2610c;
+  "admin/taTables2610d": typeof admin_taTables2610d;
   "admin/unshortlist": typeof admin_unshortlist;
   "admin/updateJDs": typeof admin_updateJDs;
   "aiCalls/voiceCallGuards": typeof aiCalls_voiceCallGuards;
