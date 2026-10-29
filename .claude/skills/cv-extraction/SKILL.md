@@ -88,10 +88,10 @@ UI translation of stage -> label/percent/estimate is `convex/lib/cvUploadProgres
 3. Download (above), sha256 (`fileHash`).
 4. **Duplicate file shortcut**: `candidates:findCandidateByHash` (`by_fileHash`). If a holder exists and is NOT an unread profile (`isParsed===false && !mergedInto && !skipLLM`, a730c71 26 Oct) the run does not read: row -> `processed`, `candidateId`=holder, `cvReplace:reuseFile` (point this row at the already-held file and delete this copy), create application on `assignToJob` (`applications:createApplication`), schedule `processCvScoring`, `filePosts`, `hhUpload:fileHeadhunt` / `scoopUpload:fileScoop` when flagged, batch/log updates, stage `completed`. An unread holder is instead read into that same profile (keeps its application and stage).
 5. **Text** (`extractText`): PDF -> `extractTextFromPdf`: pdf.js (30 s `PDFJS_LIMIT_MS`, accepted at >=30 chars; layout via `src/lib/pdfLayout.ts`), else pdf2json (15 s), else raw stream scrape; accepted when >=50 chars (`method pdf_text`). Else stage `ocr`: `extractTextWithTesseract` is a stub that returns "" (tesseract cannot run in Convex), then Vision OCR: up to 5 rendered page images (`extractImagesFromPdfBuffer`, 60 s) -> `lib/llm.ts:callNvidiaVisionOCR` (NVIDIA `meta/llama-3.2-11b-vision-instruct`, then OpenRouter `google/gemini-2.0-flash-lite-001`, 60 s; accepts >10 chars; `method vision_ocr`). DOCX/zip-magic -> mammoth. Images -> `extractTextFromImage`, which depends on the Tesseract stub and therefore throws. RTF crude strip; txt/other decoded as UTF-8. `within()` (`convex/lib/within.ts`) bounds every reader. `textExtractionMethod` is stored on the row.
-6. `cleanRawText` (strips control/box chars, page numbers, lines repeated >=3 times). `<50` chars after cleaning -> `status:"needs_review"`, stage `needs_review`, "Low-confidence OCR text ..." and return. Cap 150,000 chars (`MAX_RAW_TEXT_LENGTH`) goes to R2.
-7. Candidate target: `readInto = cvUpload.candidateId ?? unreadHolder._id`; if set -> `updateCandidateFields` (file hash, rawTextKey, `cvUploadId`, `extractionModel`; `fillBlanksOnly` when `replaceKeepDetails`); else `createCandidate` stub (`createdStub=true`, `isParsed:!skipLLM`). Row now holds `candidateId`.
+6. `cleanRawText` (strips control/box chars, page numbers, lines repeated >=3 times). `<50` chars after cleaning throws into the common review handler, which preserves the applicant and job links and completes batch accounting. Cap 150,000 chars (`MAX_RAW_TEXT_LENGTH`) goes to R2.
+7. Candidate target: `readInto = cvUpload.candidateId ?? unreadHolder._id`; otherwise create a stub with `isParsed:false`. Raw text is stored in R2 but not linked to a candidate until structuring succeeds; a held person's verified text/hash remain unchanged on failure. Row now holds `candidateId`.
 8. **Structuring** (`callOpenRouterLLM`): stage `structuring`. Only the first **16,000 chars** (cut at last whitespace) go to the model through `lib/llm.ts:executeLLMWithNvidiaFallback("cv_structuring")`: OpenRouter `deepseek/deepseek-v4-flash` (`OPENROUTER_CV_EXTRACTION_MODEL`), 2 tries x 75 s, back-off 2 s, `temperature 0`, `max_tokens 8192`, `response_format json_object`, DeepSeek reasoning off (`reasoning:{enabled:false}`, OpenRouter only; its thinking used to eat `max_tokens` and cut the JSON, 28 Oct); a JSON-mode answer that does not parse (`lib/jsonAnswer.ts:isCompleteJson`) counts as a failed try, so the second try and the fallback run; then NVIDIA `meta/llama-3.3-70b-instruct` 1 try. Prompt rules (edit the system message in `callOpenRouterLLM`): not-a-CV -> `{}`; null for unknown, never guess; skills `{value,confidence}`; jobHistory with per-job confidence; current title/employer inferred from most recent job; referees listed; gender only if stated or titled/pronoun for the candidate (never from name/photo); email/phone are the candidate's own only (never agency, referee, office, family, 1 Oct 59d0d0a).
-   - Not-a-CV: empty/near-empty object (`!fullName && !email && !phone && !skills && !jobHistory`) from the primary provider throws `NOT_A_CV`. From the NVIDIA fallback it is only a failure ("found no candidate details") because the fallback answers `{}` for real CVs (17 Sep f04349a deleted 141 real applicants).
+   - Empty answer: `hasCvDetailsJson` in `lib/jsonAnswer.ts` checks identity, skills or job history for usable content; empty arrays/whitespace do not count. For `cv_structuring`, an empty object counts as a failed model attempt, allowing the existing second try and NVIDIA fallback. `hasCvDetails` checks again after schema validation. No model answer authorises deleting a candidate.
    - Validation: `cvExtractionSchema` (zod, loose preprocessors `makeString/makeNumber/makeArray/makeObjectArray/makeSkillArray`). A bad field is dropped and the rest kept (26 Oct ef9df4f); only if nothing fits does it fail.
    - Failure text is now specific (26 Oct 8942ad5): `failure.reason` carries "DeepSeek failed (...), then <model> ..." / "gave an empty answer" / "not readable JSON (N characters - likely cut off)" / "wrong shape (field: issue)" / "no AI model answered: ...". The thrown message is `LLM failed to extract candidate data: <reason>` and ends up in `errorMessage`, shown on the HH/Scoop card (`note` when failed). If extraction already used >90 s the message is "... (API timeout) - no time left for OCR retry".
 9. Stage `validating`, then `saving`: name fallback `guessNameFromCv` (first 8 lines, then file name) when fullName is blank (29 Sep); `lib/candidateAge.findBirth` -> `dateOfBirth*`; `candidates/derivations` -> `noticePeriodDays`, `seniorityLevel`, education fields, `totalExperienceYears` (years before 15 ignored), `deriveCurrentRole`; `resolveGender` (`cvs/genderFromCv.ts`: label "Gender/Sex: ..." -> `cv_stated`, Sri Lankan NIC day-of-year (+500 female) -> `nic`, model value -> `cv_llm`; stored only into a blank gender); `lib/locationResolver.resolveCandidateLocation`.
@@ -101,7 +101,7 @@ UI translation of stage -> label/percent/estimate is `convex/lib/cvUploadProgres
 13. Filing: `updateCvUpload {status:"processed", stage:"filing"}` returns `jobId`. With a job: `applications:createApplication` (stage `new_cvs`, or `matched_candidates` for manual/folder/database/directory sources; an existing application keeps its stage and gets `reappliedAt` + history note "Applied again"; a rejected one stays rejected), `processCvScoring` (unless `skipLLM`), `pipeline/postFiling:filePosts` (post tag + `alsoAssignTo` extra openings, each scored), `fileHeadhunt`, `fileScoop`. Without a job: if `C141_POST_ROUTING==="on"` and the channel is `linkedin/email/email_campaign` -> nothing (stays in database); `shortlistCopy` or `keepDetails` -> nothing; else `matchExtractedCandidateToActiveJobs` (LLM `email_routing`, "if in doubt null"; manual/directory/folder/database sources land in reverse-match results via `jobs:addCandidateToReverseMatchResults` instead of an application).
 14. Stage `completed`, `completedAt`; log stage `completed`; `updateBatchProgress` + `checkAndTriggerNextBatch`. `[CV_TIMING_METRICS]` is logged.
 
-**Failure handling** (catch block): `NOT_A_CV` -> status `processed`, stage `needs_review`, "Document rejected: Not recognized as a valid CV or Resume."; if this run made the stub it is deleted (`candidates:deleteCandidate preserveUpload`) and `clearCandidate`. Message containing "403"/"insufficient"/"balance"/"credits" -> status `processed` with "Processed raw text only (LLM extraction skipped due to insufficient credits)". Anything else: `attempts` = `extractionAttempts` read at the START of the run; `attempts>=1` -> `extraction_failed_permanent` ("Permanent extraction failure - limit reached ..."), else `failed`. `shouldRetry` is hard-coded false (no auto-retry loop). The candidate stub is never deleted: renamed to the file name (`fallbackName`), `isParsed:false`, and when `assignToJob` is set an application is still created in New CVs (+ `filePosts` score:false, HH/Scoop hooks). A replace-keep-details candidate is never renamed.
+**Failure handling** (29 Oct): all caught reading failures become `needs_review` (status and stage), with the actual error after "Could not finish reading this CV. The file and applicant have been kept for review." Even download/short-text failures create and link an unread stub when necessary. A filename fills only an unnamed unread profile; held/replacement/shortlist-copy profiles retain details. Assigned openings are filed through `createApplication(skipScoring:true)` and `filePosts(score:false)` (propagates `skipScoring` to additional openings), followed by HH/Scoop hooks. Existing application stages and activation state stay unchanged; new manual arrivals stay in New CVs. No score/embedding is scheduled by failure filing. Batch progress records failed and triggers the next batch. Needs-review rows are left for manual retry; there is no automatic retry loop. The outer action still marks uncaught infrastructure errors `failed`.
 
 ### 6. Dedup and merge
 
@@ -187,7 +187,7 @@ Two independent readers:
 
 1. Never delete a candidate or CV file on a guess: failed reads keep the stub; replaced CVs keep the old file; only identical hashes are removed (5 Oct e42ce08; 2,977 files already lost).
 2. Merge only on proof (`sameCandidate.ts`), never delete a candidate that has an application (1 Oct 59d0d0a); a TA-chosen replace never merges.
-3. Only the primary model's "not a CV" is trusted (17 Sep f04349a). Do not weaken.
+3. No model may reject/delete an applicant (owner correction, 29 Oct). Empty answers are failed readings; keep the CV and applicant for review.
 4. Gender only when certain; only fills blanks (29 Sep 8c5b7be). "Not disclosed" is an answer in the box and the Director-review gate (`tests/notdisclosed.test.ts`).
 5. One reading per upload (`lockExtraction`, 2 Oct ba3902f) and at most 3 readings, 2 background (26 Oct 138de24/56768fa). Never reschedule a throttled reading in a loop; wait in `cvExtractionQueue`. Every new way to read a CV must schedule `processCvExtraction` (never call `runCvExtraction` directly) or use `enqueueExtraction`.
 6. Every external reader has a bound (`within`, 6 Oct ba21a64; `pdfLayout` must finish on any PDF, `tests/pdflayout.test.ts`).
@@ -208,7 +208,7 @@ Two independent readers:
 - `ta/cv:attach` does not enqueue; its reading waits for the 2-minute cron and is background priority (a TA waiting on Replace CV can wait behind a backlog). `source:"Manual"` also triggers the "manual" branch in `createApplication`.
 - ZIP uses `skipLLM:true` but, without `preExtractedData`, extraction still calls the model (only scoring is skipped). Workable's `preExtractedData` is ignored (`skipLLM:false`).
 - Failed-read stubs carry a file-name `fullName`, so healer step 3 treats them as non-empty; their recovery path is `requeueAllStuckUploads` (<2 attempts) or a re-upload. `isHealAttempted` blocks requeue permanently once set.
-- "403" anywhere in an error message is treated as out-of-credits and the row becomes `processed` (no retry).
+- Reading failures, including provider errors, remain `needs_review`; the existing HH/Scoop Try again action requeues them. The dedicated review list and picture/manual-detail actions are still pending.
 - Duplicate-hash shortcut can attach a replacement file to a different candidate than the one being replaced when the same bytes belong to another profile (not guarded; unverified in practice).
 - `processUnextractedQueueCron` passes only `upload.source` as `sourceChannel`, so `shortlistCopy`/`headhuntedBy` rows rely on row flags, not args; `skipLLM` is lost on a cron-claimed row.
 - `candidateLocks`/`dedupLock.ts`, `lazyParsing.ts`, `folderIngestion.ts`, `batches.ts` have no in-repo callers.
@@ -236,6 +236,8 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` or any 
 
 ## History
 
+- 2026-10-29: preserve unread CVs/applicants, replace model rejection with fallback attempts and review, keep verified raw text until success, and suppress implicit scoring/advancement when filing unread uploads. Regression coverage: `tests/cvrecovery.test.ts`.
+
 - 2026-09-15 6b36b9e, f9f5d46: CV pipeline backend brought in; mail-in CV verified inbox to screen.
 - 2026-09-16 dc3574f: healer ported (recover stuck `healing`, 5 per tick, `healerState`) after 76 records stuck live.
 - 2026-09-17 f04349a: model timeout 75 s x2, 8,192 tokens, only the primary's "not a CV" trusted (141 real CVs had been rejected).
@@ -257,10 +259,16 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` or any 
 - 2026-10-28 DeepSeek reasoning off for CV tasks + cut-off JSON retried ("not readable JSON (323 characters)"); Try again / Remove on failed HH and Scoop cards.
 
 <!-- skill-meta
-verified-commit: 66aa2ca
-verified-hash: af784f9789687a777266bef9b6a1cc16e8a1b023
+verified-commit: 8bb1c684
+verified-hash: ca114d53f40de7e0d490c587a47c84ee24e3b2be
 verified-date: 2026-10-29
 sources:
+  src/components/HhUpload.tsx
+  src/components/ScoopUpload.tsx
+  convex/lib/jsonAnswer.ts
+  convex/applications/applications.ts
+  convex/pipeline/postFiling.ts
+  tests/cvrecovery.test.ts
   convex/cvs/cvExtraction.ts
   convex/cvs/cvUploads.ts
   convex/cvs/cvReplace.ts

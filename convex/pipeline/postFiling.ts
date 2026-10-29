@@ -88,6 +88,7 @@ export async function filePosts(
       jobId: extra.jobId as Id<"jobs">,
       cvFileId: args.cvUploadId,
       sourceChannel: args.sourceChannel,
+      skipScoring: !args.score,
       metaHeadline: upload.metaHeadline,
     });
     await ctx.runMutation(internal.mailIntake.model.setApplicationPost, {
