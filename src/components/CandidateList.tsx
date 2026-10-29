@@ -134,6 +134,11 @@ export function CandidateList({
   const canDecideClient = allows(currentUser, "decide.client", { openingId, assignment });
   const canManage = allows(currentUser, "opening.manage", { openingId, assignment, onStrategy });
   const apps = visibleToSeat(given, seat);
+  const destinationJobs = repo.openings().filter((o) => {
+    if (o.id === openingId || o.status !== "open") return false;
+    const assignment = repo.assignmentFor(o.id, currentUser.id);
+    return o.assignedTaIds.includes(currentUser.id) || (!!assignment && !assignment.id.startsWith("as_derived_") && ["primary_recruiter", "supporting_recruiter", "director"].includes(assignment.role));
+  }).map((o) => ({ id: o.id, title: o.title }));
 
   const active = Object.entries(filters).filter(([k, v]) => v && k !== "page" && k !== "msg");
   const keep = new URLSearchParams(keepQuery).toString();
@@ -429,6 +434,7 @@ export function CandidateList({
                 rank={scored.has(a.id) ? rankOf(a.id) : undefined}
                 canDecideDirector={canDecideDirector}
                 canDecideClient={canDecideClient}
+                destinationJobs={destinationJobs}
                 selectForm={BULK_FORM}
               />
               </Fragment>

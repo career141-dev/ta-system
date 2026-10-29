@@ -17,6 +17,10 @@ Neighbouring skills (do not duplicate; follow the link):
 - /email-intake: `mailIntake/*` reading linkedin@/cv@/job@ for CVs (separate from the reply path in `emailAgent.pollEmailInbox`).
 - /workday: workday checks that list "missing details" and "follow-up is due" (`convex/ta/workdays.ts`), the working-stage gate (`assertWorkdayScope`). /eod-email: the end-of-day email. /strategy-planner, /openings: the opening itself.
 
+## Adding a candidate to another job
+
+Adding a candidate to another assigned job enters its TA Follow-up through the state machine and the destination job’s automatic follow-up switch; existing TA Follow-up is left untouched, including its sequence.
+
 ## How it works now
 
 ### Stage vocabulary
@@ -307,6 +311,7 @@ verified-commit: 1194806b
 verified-hash: 989ed4aa29bc28bcb495c03dc6f72999a2c7edf8
 verified-date: 2026-10-29
 sources:
+  tests/addToAssignedJob.test.ts
   convex/ta/followUp.ts
   convex/ta/outreach.ts
   convex/ta/stages.ts

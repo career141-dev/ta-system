@@ -177,3 +177,9 @@ export function expectedSalaryOnFile(c: { expectedSalary?: unknown; taExpectedSa
 export function noticePeriodOnFile(c: { noticePeriodDays?: unknown; noticePeriod?: unknown }): boolean {
   return c.noticePeriodDays !== undefined || said(c.noticePeriod);
 }
+
+/** An existing application must not lose later progress when added from another job. */
+export function assignedJobDestination(stage: string): "already" | "move" | "protected" {
+  if (stage === "follow_up") return "already";
+  return ["new_cvs", "matched_candidates", "ta_shortlist", "ai_call"].includes(stage) ? "move" : "protected";
+}

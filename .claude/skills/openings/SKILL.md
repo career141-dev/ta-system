@@ -25,6 +25,10 @@ Neighbours (do not duplicate; follow the link):
 
 Naming trap: web vocabulary is "opening" (`Opening` in `src/data/types.ts`), Convex table is `jobs`, the old pipeline calls it "job"; `src/data/convex/map.ts` + `convex/ta/model/tables.ts` + `convex/ta/model/projections.ts` translate. "Position" in the UI = opening; "post" = an advert row in `jobPosts`.
 
+## Adding a candidate to another job
+
+Candidate rows can add a candidate to another active or draft job assigned to the actor. The original application stays in place; the destination is checked again by `ta/applications:addToAssignedJob`.
+
 ## How it works now
 
 ### 0. Data path (read this before touching any write)

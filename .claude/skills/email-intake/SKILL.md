@@ -32,6 +32,10 @@ Two readers coexist on purpose and read the same mailboxes against the same data
 | Registered | always (unless `C141_DISABLE_CRONS=true`) | only with `C141_MAIL_INTAKE=on`; each mailbox also switched on in Settings |
 | Files CVs through | `processSingleEmailAttachment` -> `processCvIngestion` | `ingestCvs` (process.ts) -> `processCvIngestion` |
 
+## Adding a candidate to another job
+
+The shared backend bridge also exposes `addToAssignedJob`, which adds an existing candidate to another assigned opening; it does not change email intake.
+
 ## How it works now
 
 ### 0. Microsoft Graph client and senders

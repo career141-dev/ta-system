@@ -17,6 +17,10 @@ Neighbouring skills (do not duplicate, link instead):
 
 Code is the source of truth. Anything marked "(unverified)" was not confirmed in code.
 
+## Adding a candidate to another job
+
+Candidate rows offer an action to add a person to another assigned job, leaving the source application intact; it does not alter Excel Table rows.
+
 ## How it works now
 
 ### Architecture in one paragraph
