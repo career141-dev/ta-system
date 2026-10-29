@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { primeStore } from "@/data/prime";
 import { getCurrentUser } from "@/lib/session";
-import { convexMutation } from "@/lib/convexServer";
+import { ConvexCallError, convexMutation } from "@/lib/convexServer";
 import { colomboLocalToInstant } from "@/lib/calendar";
 import { checkResearchSubmission } from "@/lib/eod-format";
-import { workdayErrorMessage } from "@/lib/workdayErrors";
+import { workdayErrorMessage, workdayFailureCategory } from "@/lib/workdayErrors";
 
 export async function changeWorkday(
   form: FormData,
@@ -95,6 +95,14 @@ export async function changeWorkday(
     return { ok: true, message };
   } catch (error) {
     unstable_rethrow(error);
+    if (op === "start") {
+      const requestId = error instanceof Error ? error.message.match(/\[Request ID:\s*([^\]]+)\]/)?.[1] : undefined;
+      console.error("[workday start] backend call failed", {
+        category: workdayFailureCategory(error),
+        status: error instanceof ConvexCallError ? error.status : undefined,
+        requestId,
+      });
+    }
     return {
       ok: false,
       message: workdayErrorMessage(error, op),

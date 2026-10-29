@@ -21,8 +21,10 @@ returning positions remain editable/sendable and more returning positions can
 be added without restarting it. Remaining emails are shown separately.
 
 All dates use Asia/Colombo. Yesterday's unfinished day is never today's active
-record. Starting today recovers prior accepted EOD evidence or expires the old
-record at its next-midnight boundary as incomplete. Expired records are not
+record. Starting today saves the new day first; separate backend jobs then
+recover prior accepted EOD evidence or expire the old record at its next-midnight
+boundary as incomplete. A large old checklist cannot stop today's start.
+Expired records are not
 successful completed workdays. Clock snapshots stay immutable; later returning
 submissions are recorded independently.
 
@@ -31,7 +33,8 @@ Follow-up or Add-on from its top bar before or during the first recorded
 workday; this is needed when an older position is entered into the system for
 the first time. That per-TA opening mode is the default in Today's Checks and
 changes to it are kept in the active workday's mode history. Pending assigned
-jobs carry into the next workday as Follow-up and do not consume the ten
+jobs from prior days, including a day awaiting recovery, carry into the next
+workday as Follow-up and do not consume the ten
 manually selected job slots. Changing a carried job to Add-on makes it a
 deliberately selected job.
 
