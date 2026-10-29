@@ -29,8 +29,8 @@ function useWorkday(detail: boolean, enabled = true, query = "") {
   const [data, setData] = useState<WorkdayPayload | null>(null);
   const [error, setError] = useState("");
   const request = useRef<AbortController | null>(null);
-  const load = useCallback(async () => {
-    if (!enabled) return;
+  const load = useCallback(async (): Promise<boolean> => {
+    if (!enabled) return true;
     // A poll started before Save must not overwrite the refreshed checks.
     request.current?.abort();
     const current = new AbortController();
@@ -45,30 +45,54 @@ function useWorkday(detail: boolean, enabled = true, query = "") {
           "Could not load workday checks. Please retry.",
         );
       const next: WorkdayPayload = await response.json();
-      if (current.signal.aborted || request.current !== current) return;
+      if (current.signal.aborted || request.current !== current) return true;
       setData(next);
       setError("");
+      return true;
     } catch (error) {
-      if (current.signal.aborted || request.current !== current) return;
+      if (current.signal.aborted || request.current !== current) return true;
       setError(safeErrorMessage(error, "The workday could not be loaded. Try again."));
+      return false;
+    } finally {
+      if (request.current === current) request.current = null;
     }
   }, [detail, enabled, query]);
   useEffect(() => {
     if (!enabled) return;
-    void load();
-    const poll = setInterval(() => {
-      if (document.visibilityState === "visible") void load();
-    }, 20000);
+    // One request at a time (29 Oct). The 20-second interval and window focus
+    // each aborted the request in flight and sent another, but aborting in the
+    // browser does not stop the work on the backend, so a slow load piled up.
+    // A poll or focus now waits for the answer; the next poll is timed from it,
+    // with jitter so a team's drawers do not ask together, and slows down while
+    // loads fail. A save still reloads at once (workday-changed).
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = 20000;
+    const schedule = () => {
+      if (!live) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => void poll(), delay + Math.random() * 5000);
+    };
+    const poll = async () => {
+      if (document.visibilityState === "visible" && !request.current)
+        delay = (await load()) ? 20000 : Math.min(delay * 2, 120000);
+      schedule();
+    };
+    const focused = () => {
+      if (!request.current) void load();
+    };
     const changed = () => {
       void load();
     };
+    void load().then(schedule);
     window.addEventListener("workday-changed", changed);
-    window.addEventListener("focus", changed);
+    window.addEventListener("focus", focused);
     return () => {
+      live = false;
       request.current?.abort();
-      clearInterval(poll);
+      clearTimeout(timer);
       window.removeEventListener("workday-changed", changed);
-      window.removeEventListener("focus", changed);
+      window.removeEventListener("focus", focused);
     };
   }, [load, enabled]);
   return { data, error, load };
@@ -159,6 +183,18 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
   );
   const chosen = available.find(o => o.id === selected);
   const completedByEod = day?.finishedAt != null && day.closureReason === "eod";
+  // Only the picked position's checklist is built (29 Oct); the dashboard used
+  // to build one for every assigned position on every poll.
+  const [preview, setPreview] = useState<{ jobId: string; checks: WorkdayCheck[] } | null>(null);
+  useEffect(() => {
+    if (day || !chosen?.id) return;
+    const ask = new AbortController();
+    fetch(`/api/workday?preview=${encodeURIComponent(chosen.id)}`, { cache: "no-store", signal: ask.signal })
+      .then(r => (r.ok ? r.json() : null))
+      .then(next => { if (next) setPreview(next); })
+      .catch(() => {});
+    return () => ask.abort();
+  }, [day, chosen?.id]);
   if (!available.length)
     return (
       <p className="text-sm text-ink-soft">
@@ -200,7 +236,7 @@ function JobPicker({ data, day }: { data: WorkdayPayload; day?: WorkdayView }) {
         </p>
       )}
       {!day && data.options.some(o => o.carry) && <p className="text-xs text-ink-soft">Follow-up jobs carried forward: {data.options.filter(o => o.carry && o.id !== chosen?.id).map(o => o.title).join(", ")}</p>}
-      {!day && (mode ?? chosen?.workType) === "100%" && chosen?.preview && <ul className="text-xs text-ink-soft">{chosen.preview.checks.map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
+      {!day && (mode ?? chosen?.workType) === "100%" && preview && preview.jobId === chosen?.id && <ul className="text-xs text-ink-soft">{preview.checks.map(c => <li key={c.key} className="py-1">{c.status === "complete" ? "✓" : "○"} {c.label}: {c.progress}</li>)}</ul>}
       <button className={buttonClass}>
         {!day
           ? "Start workday"

@@ -58,8 +58,10 @@ function requireWorker(user: Doc<"users">) {
 }
 
 async function activeFor(ctx: Ctx, userId: Id<"users">) {
-  const days = await ctx.db.query("taWorkdays").withIndex("by_user", q => q.eq("userId", userId)).collect();
-  return days.find(d => d.date === workdayDate(Date.now()) && (d.finishedAt === undefined || d.closureReason === "eod")) ?? null;
+  // Today's rows only. Reading the TA's whole history, each closed day with its
+  // completion snapshot, grew with tenure and ran on every check (29 Oct).
+  const days = await ctx.db.query("taWorkdays").withIndex("by_user_date", q => q.eq("userId", userId).eq("date", workdayDate(Date.now()))).collect();
+  return days.find(d => d.finishedAt === undefined || d.closureReason === "eod") ?? null;
 }
 
 async function ownedActive(ctx: Ctx, user: Doc<"users">, id: Id<"taWorkdays">) {
@@ -923,19 +925,24 @@ export const recoverOpenWorkdays = internalMutation({
 });
 
 /** Run in the write transaction, never in a dashboard query. */
-export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, actorId?: Id<"users">) {
-  const open = await ctx.db.query("taWorkdays").withIndex("by_finished", q => q.eq("finishedAt", undefined)).collect();
-  const today = await ctx.db.query("taWorkdays").withIndex("by_date", q => q.eq("date", workdayDate(Date.now()))).collect();
-  const days = [...new Map([...open, ...today.filter(d => d.closureReason === "eod")].map(d => [d._id, d])).values()];
+export async function refreshWorkdayChecks(ctx: MutationCtx, jobId: Id<"jobs">, actorId?: Id<"users">, onlyDay?: Id<"taWorkdays">) {
   const now = Date.now();
+  // Only today's days are refreshed, so only today's are read: every open day
+  // of every date was read too, then skipped (29 Oct).
+  const days = onlyDay
+    ? [await ctx.db.get(onlyDay)].filter((d): d is Doc<"taWorkdays"> => !!d && (d.finishedAt === undefined || d.closureReason === "eod"))
+    : (await ctx.db.query("taWorkdays").withIndex("by_date", q => q.eq("date", workdayDate(now))).collect())
+        .filter(d => d.finishedAt === undefined || d.closureReason === "eod");
   for (const day of days) {
     if (day.date !== workdayDate(now)) continue;
     const entry = day.jobs.find(j => j.jobId === jobId);
     if (!entry) continue;
     const result = await jobView(ctx, day, entry, now);
     const old = await ctx.db.query("taWorkdayTaskEvents").withIndex("by_workday_job", q => q.eq("workdayId", day._id).eq("jobId", jobId)).collect();
+    // The latest event per check, found once rather than a scan per check.
+    const latest = new Map(old.map(e => [e.key, e]));
     for (const check of result.checks) {
-      const previous = old.filter(e => e.key === check.key).at(-1);
+      const previous = latest.get(check.key);
       const status = check.waiting ? "waiting" : check.status ?? "incomplete";
       const evidence = check.waiting ? JSON.stringify(check.waiting) : check.evidence;
       if (previous?.status === status && previous.evidence === evidence) continue;
@@ -1021,6 +1028,37 @@ export const recordSourcingRun = internalMutation({
 export const refreshDueChecks = internalMutation({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => { await refreshWorkdayChecks(ctx, args.jobId); },
+});
+
+/**
+ * Start's carried positions, one per run (29 Oct). Refreshing all of them
+ * inside Start made attendance wait on, and fail with, every carried job's
+ * evidence: fifteen carried positions meant fifteen checklists in one
+ * mutation. The drawer works checks out live, so only the task history waits.
+ * Scoped to the one day: other TAs' days on the job are not this Start's work.
+ */
+export const refreshCarried = internalMutation({
+  args: { workdayId: v.id("taWorkdays"), jobIds: v.array(v.id("jobs")) },
+  handler: async (ctx, args) => {
+    const [jobId, ...rest] = args.jobIds;
+    if (!jobId) return;
+    await refreshWorkdayChecks(ctx, jobId, undefined, args.workdayId);
+    if (rest.length) await ctx.scheduler.runAfter(0, makeFunctionReference<"mutation">("ta/workdays:refreshCarried"), { workdayId: args.workdayId, jobIds: rest });
+  },
+});
+
+/** The 100% checklist preview for the one position picked before Start. */
+export const startPreview = internalQuery({
+  args: { actorId: v.string(), jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId); requireWorker(user);
+    await assignedJob(ctx, user, args.jobId);
+    const now = Date.now();
+    const previewDay = { _id: "preview" as Id<"taWorkdays">, userId: user._id, date: workdayDate(now), startedAt: now, jobs: [] } as unknown as Doc<"taWorkdays">;
+    // A preview uses only real saved evidence and cannot insert task events.
+    const evidence = await requiredChecks(ctx, previewDay, { jobId: args.jobId, workType: "100%", addedAt: now, modeHistory: [] });
+    return { jobId: args.jobId, checks: evidence.checks };
+  },
 });
 
 /** The server-authoritative mode and current session used by the EOD preview. */
@@ -1154,19 +1192,13 @@ export const dashboard = internalQuery({
             title: j.title,
             workType: assignmentModes.get(j._id) ?? (workedJobs.has(j._id) ? "Follow-up" as const : "100%" as const),
             carry: false,
-            preview: undefined as WorkdayJobView | undefined,
           }))
       : [];
     const carryIds = !active && worker ? new Set((await pendingJobs(ctx, user)).map(j => j._id)) : new Set<string>();
-    if (!active) for (const option of options) {
-      const previewDay = { _id: "preview" as Id<"taWorkdays">, userId: user._id, date: workdayDate(now), startedAt: now, jobs: [] } as unknown as Doc<"taWorkdays">;
-      const entry = { jobId: option.id, workType: option.workType, addedAt: now, modeHistory: [] };
-      // A preview uses only real saved evidence and cannot insert task events.
-      const evidence = await requiredChecks(ctx, previewDay, entry);
-      option.preview = { jobId: option.id, title: option.title, workType: option.workType, checks: evidence.checks, shortlist: [],
-        activity: { cvReviews: 0, profilesAdded: 0, profilesWorked: 0, researchAt: null, researchActions: 0, benchmarkActions: 0, benchmarks: 0, benchmarksAdded: 0, sent: 0, emailAt: null, jdApproved: false, postConnected: false } };
-      option.carry = carryIds.has(option.id);
-    }
+    // The checklist preview is fetched for the one position picked
+    // (startPreview); building one for every assigned option on every poll
+    // made the drawer itself slow before Start (29 Oct).
+    if (!active) for (const option of options) option.carry = carryIds.has(option.id);
     // The last two days come with every load; earlier ones only when the TA
     // presses "Load earlier workdays". Fifteen days were read on every
     // 20-second poll whether or not anyone opened them (28 Oct).
@@ -1537,9 +1569,12 @@ export const start = internalMutation({
   handler: async (ctx, args) => {
     const user = await requireActor(ctx, args.actorId);
     requireWorker(user);
-    await recoverStaleDays(ctx, user._id);
+    // A repeated Start (double click, a retry after a lost answer) returns
+    // today's day before any other work, so it can never create a second one
+    // or pay for old-day recovery again (29 Oct).
     const active = await activeFor(ctx, user._id);
     if (active) return { id: active._id };
+    await recoverStaleDays(ctx, user._id);
     const prior = await ctx.db
       .query("taWorkdays")
       .withIndex("by_user", (q) => q.eq("userId", user._id))
@@ -1580,7 +1615,9 @@ export const start = internalMutation({
       "Started workday",
     );
     for (const j of carry) { await setMode(ctx, user._id, j._id, "Follow-up"); await attachLead(ctx, id, j.taLeadId); }
-    for (const jobId of [args.jobId, ...carry.map(j => j._id)]) await refreshWorkdayChecks(ctx, jobId);
+    await refreshWorkdayChecks(ctx, args.jobId);
+    // Scheduled inside this mutation, so it commits or rolls back with the day.
+    if (carry.length) await ctx.scheduler.runAfter(0, makeFunctionReference<"mutation">("ta/workdays:refreshCarried"), { workdayId: id, jobIds: carry.map(j => j._id) });
     return { id };
   },
 });

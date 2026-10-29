@@ -455,32 +455,16 @@ export async function candidatesByIds(actor: Actor, ids: Id[]): Promise<Map<Id, 
   const out = new Map<Id, Candidate>();
   const docs = await candidateDocsByIds(actor, ids);
 
+  // One call per 50 rows, not one per row: see candidates/candidates:cvFileNames.
   const missingCvIds = docs.filter((d) => !d.cvFileName).map((d) => d._id);
   const cvNameMap = new Map<string, string>();
-  if (missingCvIds.length > 0) {
-    const chunkSize = 25;
-    for (let i = 0; i < missingCvIds.length; i += chunkSize) {
-      const chunk = missingCvIds.slice(i, i + chunkSize);
-      const results = await Promise.all(
-        chunk.map(async (id) => {
-          try {
-            const found = await convexQuery<{ url: string | null; fileName?: string } | null>(
-              "candidates/candidates:getCvUploadUrl",
-              { cvUploadId: id }
-            );
-            if (found && found.url) {
-              return { id, fileName: found.fileName || "CV.pdf" };
-            }
-          } catch {}
-          return null;
-        })
-      );
-      for (const r of results) {
-        if (r && r.fileName) {
-          cvNameMap.set(r.id, r.fileName);
-        }
-      }
-    }
+  for (let i = 0; i < missingCvIds.length; i += 50) {
+    try {
+      const names = await convexQuery<Record<string, string>>("candidates/candidates:cvFileNames", {
+        ids: missingCvIds.slice(i, i + 50),
+      });
+      for (const [id, fileName] of Object.entries(names)) cvNameMap.set(id, fileName);
+    } catch {}
   }
 
   for (const d of docs) {

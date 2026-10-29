@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalQuery, internalMutation } from "../_generated/server";
+import { cvFileNamesFor, findCvUpload } from "../lib/cvUploadLookup";
 import { paginationOptsValidator } from "convex/server";
 import type { Id } from "../_generated/dataModel";
 import { internal } from "../_generated/api";
@@ -1138,51 +1139,25 @@ export const deleteCvUploadRecord = internalMutation({
 
 
 
+/**
+ * File names for a list's rows, in one call (29 Oct).
+ *
+ * Lists asked getCvUploadUrl once per row that had no file name — 25 at a time,
+ * signing a storage link each time — only to decide whether to show the CV
+ * link; getCvUploadUrl hit its one-second limit three times that day. This answers
+ * the same question from the documents alone: a file name comes back only when
+ * getCvUploadUrl would have found a stored file. Opening the CV still signs
+ * its link through /api/cv and its access checks.
+ */
+export const cvFileNames = internalQuery({
+  args: { ids: v.array(v.string()) },
+  handler: (ctx, args) => cvFileNamesFor(ctx, args.ids),
+});
+
 export const getCvUploadUrl = internalQuery({
   args: { cvUploadId: v.string() },
   handler: async (ctx, args) => {
-    let validId = ctx.db.normalizeId("cvUploads", args.cvUploadId);
-    let upload: any = validId ? await ctx.db.get(validId) : null;
-    let candidate: any = null;
-
-    if (!upload) {
-      // 2. Try candidate ID lookup
-      const candidateId = ctx.db.normalizeId("candidates", args.cvUploadId);
-      if (candidateId) {
-        candidate = await ctx.db.get(candidateId);
-        if (candidate && candidate.cvUploadId) {
-          upload = await ctx.db.get(candidate.cvUploadId as Id<"cvUploads">);
-        }
-      }
-    }
-
-    if (!upload) {
-      // 3. Try application ID lookup
-      const appId = ctx.db.normalizeId("applications", args.cvUploadId);
-      if (appId) {
-        const app = await ctx.db.get(appId);
-        if (app) {
-          if (app.cvFileId) {
-            upload = await ctx.db.get(app.cvFileId as Id<"cvUploads">);
-          }
-          if (!upload && app.candidateId) {
-            candidate = await ctx.db.get(app.candidateId);
-            if (candidate && candidate.cvUploadId) {
-              upload = await ctx.db.get(candidate.cvUploadId as Id<"cvUploads">);
-            }
-          }
-        }
-      }
-    }
-
-    // 4. File hash fallback
-    if ((!upload || (!upload.storageId && !upload.s3Key)) && candidate?.fileHash) {
-      const hashUpload = await ctx.db.query("cvUploads")
-        .withIndex("by_fileHash", q => q.eq("fileHash", candidate.fileHash!))
-        .first();
-      if (hashUpload) upload = hashUpload;
-    }
-
+    const { upload, candidate } = await findCvUpload(ctx, args.cvUploadId);
     if (!upload) return null;
 
     let url: string | null = null;
