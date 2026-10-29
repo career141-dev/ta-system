@@ -7,6 +7,19 @@ export const candidateProfileBody = z
   })
   .strict();
 
+export const candidateCallBody = z.object({
+  kind: z.enum(["pre_interview", "post_interview", "post_offer", "ad_hoc"]),
+  outcome: z.enum(["reached", "no_answer", "rescheduled", "declined"]),
+  body: z.string().min(1),
+}).strict();
+
+export const candidateFollowUpBody = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("send"), channel: z.enum(["whatsapp", "email"]) }).strict(),
+  z.object({ action: z.literal("stop") }).strict(),
+]);
+
+export const candidateRefereeCheckBody = z.object({ refereeId: z.string().min(1).max(100) }).strict();
+
 const mode = z.enum(["in_person", "video", "phone"]);
 const rating = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4), z.literal(5), z.null()]);
 const interviewId = z.string().min(1).max(100);

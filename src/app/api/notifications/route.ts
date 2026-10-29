@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { currentUser } from "@/lib/session";
-import { primeStore } from "@/data/prime";
+import { primeStore, primed } from "@/data/prime";
 import { convexMutation, convexQuery } from "@/lib/convexServer";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +22,10 @@ interface NotificationsPayload {
 
 /** The bell's own feed — polled from the client, since nothing here pushes. */
 export async function GET() {
-  await primeStore({});
+  // Only the session roster is needed here, and only on a cold process. A full
+  // prime on every poll re-read 30 whole tables every 30 s for as long as any
+  // tab was open, and every page waited behind it (29 Oct freeze).
+  if (!primed()) await primeStore({});
   const user = await currentUser();
   // The bell polls in the background. A poll that lands while Clerk is renewing
   // its one-minute session token arrives without one — that is "try again next
@@ -44,7 +47,7 @@ export async function GET() {
 
 /** Mark one notification read (`{id}`), or all of them (`{all: true}`). */
 export async function POST(req: Request) {
-  await primeStore({});
+  if (!primed()) await primeStore({});
   const user = await currentUser();
   if (!user) return NextResponse.json({ error: "signed_out" }, { status: 401 });
 

@@ -150,13 +150,60 @@ export interface CandidatePayload {
     answers: { question: string; answer: string }[];
     notes: { id: string; note: string; byUserId: string; byName: string; byRole: string; at: number; canRemove: boolean }[];
   };
+  callAccess: {
+    canLog: boolean;
+    defaultKind: "pre_interview" | "post_offer" | "ad_hoc";
+  };
+  referenceAccess: {
+    canView: boolean;
+    canVerify: boolean;
+  };
+  aiCallResults: {
+    id: string;
+    status: string;
+    calledAt: number | null;
+    durationSeconds: number | null;
+    consent: string | null;
+    currentSalary: number | null;
+    currentSalaryCurrency: string | null;
+    expectedSalary: number | null;
+    expectedSalaryCurrency: string | null;
+    noticePeriodDays: number | null;
+    transcript: string;
+    endedReason: string | null;
+  }[];
   tabs: { key: CandidateTab; label: string; count: number | null }[];
   cv: { available: boolean; fileName: string | null };
   history: { id: string; label: string; detail: string | null; at: number; actorName: string | null }[];
   calls: { id: string; kind: string; outcome: string; body: string; source: string; at: number; byName: string | null }[];
-  messages: { id: string; channel: "whatsapp" | "email"; direction: "out" | "in"; body: string; subject: string | null; sentAt: number | null; createdAt: number }[];
+  followUp: {
+    delivery: { whatsapp: "live" | "test" | "off"; email: "live" | "test" | "off" };
+    attemptCount: number;
+    maxAttempts: number;
+    nextScheduledAt: number | null;
+    lastCandidateReplyAt: number | null;
+    autoFollowUp: boolean;
+    flaggedForTaReview: boolean;
+    taReviewReason: string | null;
+    collected: { cv: boolean | null; currentSalary: boolean | null; expectedSalary: boolean | null; noticePeriod: boolean | null };
+    customQuestions: string[];
+    customAnswers: Record<string, string>;
+    canAct: boolean;
+  } | null;
+  messages: {
+    id: string;
+    channel: "whatsapp" | "email";
+    direction: "out" | "in";
+    body: string;
+    subject: string | null;
+    deliveryStatus: string;
+    legacyStatus: string | null;
+    stoppedSequence: boolean;
+    errorMessage: string | null;
+    sentAt: number;
+  }[];
   referees: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; relationship: string | null }[];
-  companyReferences: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; kind: "candidate" | "referee" }[];
+  companyReferences: { id: string; name: string; title: string | null; company: string | null; phone: string | null; email: string | null; kind: "candidate" | "referee"; latestApplication: { applicationId: string; openingId: string; stage: CandidateStage } | null }[];
 }
 
 export interface CandidateCvUploadResult {
@@ -172,6 +219,36 @@ export interface CandidateProfileBody {
 export interface CandidateProfileResult {
   ok: boolean;
   message: string;
+}
+
+export interface CandidateCallBody {
+  kind: "pre_interview" | "post_interview" | "post_offer" | "ad_hoc";
+  outcome: "reached" | "no_answer" | "rescheduled" | "declined";
+  body: string;
+}
+
+export interface CandidateCallResult {
+  ok: boolean;
+  message: string;
+}
+
+export type CandidateFollowUpBody =
+  | { action: "send"; channel: "whatsapp" | "email" }
+  | { action: "stop" };
+
+export interface CandidateFollowUpResult {
+  ok: boolean;
+  message: string;
+}
+
+export interface CandidateRefereeCheckBody {
+  refereeId: string;
+}
+
+export interface CandidateRefereeCheckResult {
+  ok: boolean;
+  message: string;
+  profileUrl?: string;
 }
 
 export type CandidateInterviewBody =

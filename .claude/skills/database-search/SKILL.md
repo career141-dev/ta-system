@@ -37,7 +37,7 @@ Trigger: a TA types in `SearchBox` (on `/database`, on `/database/results`, or t
 4. Engine path: `cachedEngineSearch` first (answer held, no wait). Otherwise `engineSearch(q, criteria, ENGINE_LIMIT=400, edited, referenceProfile)` is started and `quickEngineSearch` (no model, about a second) is awaited and shown with a "First results, AI is still refining them" banner inside a Suspense whose child `EngineResults` awaits the full run and replaces the list. If the full run throws, `engineError` is set and the words-only fallback runs (`keywordRetrieve(terms, 150)`) with the banner "Ranked on words only - the matching engine could not run (...)".
 5. `runEngine` (`src/lib/engineSearch.ts`) is a hand copy of `convex/matching/search.ts aiSearch`, not a call to it. Steps:
    - `readSearchIntent(turns)` gives the memory object (flow 8); `intentToEngineHints` yields `mustHave`/`niceToHave`.
-   - In parallel: `vectorPool` (embedQuery, then `searchVectors(vec, 200, {minExperience})`; if a minExperience filter returns nothing it retries unfiltered) and `backend.keywordSearchMany([q, last two turns, title chips, first 3 skill chips], FETCH_LIMIT=100)`.
+   - In parallel: `vectorPool` (embedQuery, then `searchVectors(vec, 200, {minExperience})`; if a minExperience filter returns nothing it retries unfiltered) and `backend.keywordSearchMany([q, last two turns, title chips, first 3 skill chips], FETCH_LIMIT=100)`. `keywordSearchMany` throws when any term fails (29 Oct); it used to turn a failed term into `[]`, so a timed-out search read as "no matches".
    - With the model: `extractConversationRequirements(turns, {roleAware:true})` (cached 5 min per lower-cased turns). Without it (quick pass, or reading `usage.model === "regex-fallback"`) requirements come from the chips (`requirementsFromChips`, `quickRolePhrase`).
    - `readOccupation` builds `searchOccupation` (target occupation, equivalent titles, reporting context, explicit vs inferred skills). A reference profile overrides title, seniority, years, industry, education and skills.
    - If a company was asked for: `backend.employerSearch` (index `search_employers_all`, up to 5 companies, 200 rows, scope `current` or `any`), a second occupation keyword pass (up to 6 terms) and the pool merge `mergeSearchPool` (up to 200 keyword ids then up to 200 vector ids, deduped).
@@ -58,7 +58,7 @@ Years and what was typed (28 Oct):
 
 Shared reads (28 Oct): the quick pass and the full run start together, so the keyword searches, the Qdrant search and each person's search-shaped document are read once per 30 s (`share`/`searchDocs` in `engineSearch.ts`, up to 1,500 entries); a failed read is dropped at once and each caller still sees the failure. `DbCandidateDrawer` gets `cv` as a promise: the profile shows at once and the CV section waits for `backend.cvFile` behind its own Suspense.
 
-Caches: `engineCache` 5 min, 50 entries, keyed by the full args JSON, in-flight runs shared; failed runs removed. Sentence reading cache `intents` 5 min, 50. `embedQuery` cache 500 entries (process memory only; assumes one app container).
+Caches: `engineCache` 5 min, 50 entries, keyed by the full args JSON, in-flight runs shared; failed runs removed, and so are answers with `incomplete` set (a route was down; 29 Oct). The results page then says "Part of the search could not run just now, so some matching people may be missing" instead of "Nothing in the database matched". Sentence reading cache `intents` 5 min, 50. `embedQuery` cache 500 entries (process memory only; assumes one app container).
 
 Refusals and messages: no embedding key in `meaning` mode shows "No embedding key is set..."; Boolean syntax errors show `parseBoolean(q).error`; zero hits shows "Nothing in the database matched that search."; empty list shows "Nobody matches all of that" with "Without X" blocker chips (not when the engine ranked).
 
@@ -328,10 +328,11 @@ Repo hard rules that apply: never touch the live backend from a laptop (no `conv
 - 2026-10-29 filters beside the results: experience range, job title, location, notice period, availability, industry (strict, in memory, no reload).
 - 2026-10-28 the full "Searching" scene no longer replays on a chat reply, a profile, a page or a level tick (links keep the address; the boundary keys on the first message).
 - 2026-10-28 years band (a bare "2 years" no longer returns 5, 10, 23 years), a pasted JD read as one message, and keyword lists and names read as such (owner: TAs rarely paste a JD).
+- 2026-10-29 A failed keyword term is reported, not swallowed; an answer with a route down carries `incomplete`, is shown with a warning and never cached; "too many system operations" is no longer retried (`src/lib/convexResilience.ts`).
 
 <!-- skill-meta
-verified-commit: 2beedee
-verified-hash: 78a085b8341ff97ea59fb52db63b5650f070fcd6
+verified-commit: f8f4b53d
+verified-hash: 478bdec2ea9ac2132bb572ddd5261f668e8a438a
 verified-date: 2026-10-29
 sources:
   src/lib/engineSearch.ts

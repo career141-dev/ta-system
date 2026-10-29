@@ -17,11 +17,25 @@ import {
   type OpeningWriteDeps,
 } from "@/lib/openings/writes";
 import { decideAccess, requestAccess, writeOpeningDetails, writeOpeningTeam } from "@/lib/openings/admin";
+import {
+  amendJdText as amendJdShared,
+  approveJdText as approveJdShared,
+  generateJd as generateJdShared,
+  reextractJdDetails as reextractJdDetailsShared,
+  restoreJd as restoreJdShared,
+  reviseJd as reviseJdShared,
+  saveJdDetails as saveJdDetailsShared,
+  writeJdNotes,
+} from "@/lib/openings/jdWrites";
 import { movePipelineCandidate } from "@/lib/openings/pipelineWrites";
+import { acceptStrategies, removeStrategyPicture, strategyBellDue, submitStrategies } from "@/lib/openings/strategyWrites";
 import { writeCandidateProfile } from "@/lib/candidates/profileWrites";
 import { writeCandidateInterview } from "@/lib/candidates/interviewWrites";
 import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
 import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
+import { writeCandidateCall } from "@/lib/candidates/callWrites";
+import { checkCandidateReferee } from "@/lib/candidates/referenceChecks";
+import { sendCandidateFollowUp, stopCandidateFollowUp } from "@/lib/candidates/followUpWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, RefereeCall, RefereeCallEmailRow, User, WorkingStage } from "@/data/types";
@@ -32,10 +46,9 @@ import { BACK_TO_TABLES_REASON, movedBackToTables, awaitingShortlist } from "@/l
 import { BULK_STAGES } from "@/lib/bulkStages";
 import { linkedinPostUrl } from "@/lib/workdayRequirements";
 import { extractFromText, EMPTY_EXTRACT } from "@/lib/intake";
-import { chatHistory, detailsFollowNotes, JD_REQUEST_MAX } from "@/lib/jdChat";
 import { redirect as nextRedirect } from "next/navigation";
 import { invalidateCandidate, markTablesStale, resetStore, withRealIds } from "@/data/primeState";
-import { contextFor, draftJd, extractJobDetails, jdBriefsFor } from "@/lib/openings/jdDraft";
+import { contextFor } from "@/lib/openings/jdDraft";
 import { saveNewClient as sharedSaveNewClient, saveNewOpening as sharedSaveNewOpening } from "@/lib/openings/create";
 import { answer, inline, isInline, type ActionResult } from "@/lib/inlineResult";
 import type { EffortRow, ShortlistRow } from "@/lib/eod-format";
@@ -64,7 +77,6 @@ function redirect(url: string): never {
   return nextRedirect(withRealIds(url)) as never;
 }
 import { after } from "next/server";
-import { reviseJdText } from "@/lib/headhunt";
 import { FAILURE_MESSAGE, gemini, modelFor } from "@/lib/ai";
 import { DEFAULT_DEPS as WEB, researchViaSearch } from "@/lib/researchSearch";
 import { SENIORITY_LABEL, benchmarkByDefault, findIncumbents, seniorityOf, type IncumbentRow } from "@/lib/incumbents";
@@ -84,6 +96,11 @@ import { primeStore } from "@/data/prime";
 import { isConvex } from "@/data/mode";
 import { convexAction, convexActorForEmail, convexMutation, convexQuery, internalUploadUrl } from "@/lib/convexServer";
 import * as backend from "@/data/convex/backend";
+
+/** Keep the website's responsive 30-second assignment-bell debounce. */
+function bellDue(key: string, ms = 30_000): boolean {
+  return strategyBellDue(key, ms);
+}
 
 // ─── Authorization ───────────────────────────────────────────────────────────
 
@@ -315,6 +332,8 @@ const OPENING_DEPS: OpeningWriteDeps = {
   resetStore,
 };
 
+const JD_DEPS = { convexQuery, markTablesStale, resetStore };
+
 /** The primed copy is behind a backend write; drop it so the next read is fresh. */
 async function afterBackendWrite(openingId: string) {
   const { resetStore } = await import("@/data/prime");
@@ -338,7 +357,7 @@ export async function addCandidateToJob(formData: FormData) {
   }
   await afterBackendWrite(openingId);
   revalidatePath(`/openings/${destinationId}`, "layout");
-  await back(alreadyInFollowUp ? "This candidate is already in TA Follow-up on that job." : "Added to the other job�s TA Follow-up.");
+  await back(alreadyInFollowUp ? "This candidate is already in TA Follow-up on that job." : "Added to the other job’s TA Follow-up.");
 }
 
 export async function claimCandidate(formData: FormData) {
@@ -376,46 +395,25 @@ export async function claimCandidate(formData: FormData) {
  */
 export async function sendFollowUpNow(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
   const raw = String(formData.get("channel") ?? "");
   // The WhatsApp and Email buttons send one channel; the older button sends both.
   const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
-  if (!isConvex()) await fail("Sending needs the Convex store.");
-  let r: { sent: boolean; blocked?: boolean; reason?: string; kind?: string; attempt?: number; maxAttempts?: number; sameRound?: boolean } | null = null;
-  try {
-    r = await convexMutation("ta/followUp:send", { actorId: user.id, applicationId: appId, channel });
-  } catch (e) {
-    await fail(backendMessage(e, "The follow-up could not be sent."));
-  }
-  await afterBackendWrite(openingId);
-  const what =
-    channel === "whatsapp"
-      ? r?.kind === "initial" ? "WhatsApp follow-up sent (approved template)" : "WhatsApp reminder sent"
-      : channel === "email"
-        ? r?.kind === "initial" ? "Follow-up email sent" : "Reminder email sent"
-        : r?.kind === "initial" ? "Follow-up sent — WhatsApp template and email" : "Reminder sent";
-  if (!r?.sent) await (r?.blocked ? note : fail)(r?.reason ?? "Nothing was sent.");
-  await done(
-    r!.kind === "initial" || r!.sameRound
-      ? `${what}. Delivery shows in the conversation in a few seconds.`
-      : `${what} — follow-up ${r!.attempt} of ${r!.maxAttempts}.`,
-  );
+  const result = await sendCandidateFollowUp(user, openingId, appId, channel, OPENING_DEPS);
+  if (!result.ok) await (result.notice ? note : fail)(result.message);
+  await done(result.message);
 }
 
 export async function stopFollowUpNow(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
-  try {
-    await convexMutation("ta/followUp:stop", { actorId: user.id, applicationId: appId });
-  } catch (e) {
-    await fail(backendMessage(e, "Could not stop the follow-up."));
-  }
-  await afterBackendWrite(openingId);
-  await done("Follow-up stopped. Nothing further will be sent.");
+  const result = await stopCandidateFollowUp(user, openingId, appId, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
+  await done(result.message);
 }
 
 /**
@@ -467,20 +465,16 @@ export async function confirmShortlist(formData: FormData) {
 
 export async function logCall(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.act", { application: "appId", opening: "openingId" });
+  const user = await getCurrentUser();
   const appId = String(formData.get("appId"));
   const openingId = String(formData.get("openingId"));
-  repo.recordCall({
-    applicationId: appId,
+  const result = await writeCandidateCall(user, openingId, appId, {
     kind: String(formData.get("kind")) as CallKind,
     outcome: String(formData.get("outcome")) as CallOutcome,
     body: String(formData.get("body") ?? ""),
-    structured: null,
-    source: "manual",
-    recordedBy: user.id,
-  });
-  revalidatePath(`/openings/${openingId}`, "layout");
-  await back("Call logged.");
+  }, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
+  await back(result.message);
 }
 
 /** What the match found, as the start of the message after adding a profile. */
@@ -941,52 +935,11 @@ function saveNewOpening(formData: FormData, user: User): Promise<string | null> 
 export async function saveBriefNotes(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  await authorize(formData, "opening.manage", { opening: "openingId" });
   const user = await getCurrentUser();
-  // It used to return nothing either way, so a save that found no opening
-  // lost the notes without a word (testing, 21 Sep).
-  if (!saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""))) {
-    await fail("The opening could not be found, so the notes were not saved. Reload the page and try again.");
-  }
+  const result = await writeJdNotes(user, openingId, String(formData.get("notes") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
   revalidatePath(`/openings/${openingId}`, "layout");
-  await done("Notes saved.");
-}
-
-/**
- * A person's own notes on an opening, kept as their own brief.
- *
- * The TA's notes box used to write into the lead's brief, so saving it replaced
- * what the lead had left. Each person now has a brief of their own, and the JD
- * is written from all of them (see `jdBriefsFor`).
- */
-function saveOwnNotes(openingId: string, userId: string, notes: string): boolean {
-  const opening = repo.opening(openingId);
-  if (!opening) return false;
-  const extracted = notes.trim() ? { ...extractFromText(notes), title: opening.title } : { ...EMPTY_EXTRACT, title: opening.title };
-  const mine = repo.briefsForOpening(openingId).filter((b) => b.capturedBy === userId).pop();
-  if (mine) {
-    if (mine.notesMarkdown !== notes) repo.updateBrief(mine.id, { notesMarkdown: notes, extracted });
-    return true;
-  }
-  if (!notes.trim()) return true;
-  repo.createBrief({
-    clientId: opening.clientId,
-    openingId,
-    kind: "lead_to_ta",
-    capturedBy: userId,
-    capturedAt: Date.now(),
-    method: "notes",
-    notesMarkdown: notes,
-    transcriptStatus: "none",
-    transcript: null,
-    recordingKey: null,
-    recordingDurationMs: null,
-    consentAcknowledgedBy: null,
-    consentAcknowledgedAt: null,
-    consentText: null,
-    extracted,
-  });
-  return true;
+  await done(result.message);
 }
 
 /**
@@ -998,24 +951,18 @@ function saveOwnNotes(openingId: string, userId: string, notes: string): boolean
 export async function approveJd(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const user = await getCurrentUser();
   const jd = String(formData.get("jdMarkdown") ?? "");
-  if (jd.trim()) repo.updateJd(openingId, jd);
-  repo.approveJd(openingId, user.id);
+  const suggestionsBefore = repo.suggestions(openingId).length;
+  const owner = repo.opening(openingId)?.assignedTaIds[0];
+  const researched = !!repo.research(openingId);
+  const result = await approveJdShared(user, openingId, jd, JD_DEPS);
+  if (!result.ok) await fail(result.message);
 
   if (isConvex()) {
     // Approval in the backend also starts reading the JD's requirements
     // (skills, seniority, years, location, salary …) into the Job details.
     // Matching waits for that, so it scores against the real requirements.
-    const suggestionsBefore = repo.suggestions(openingId).length;
-    const owner = repo.opening(openingId)?.assignedTaIds[0];
-    const researched = !!repo.research(openingId);
-    const fromChat = !detailsFollowNotes(repo.jdChat(openingId));
-    try {
-      await backend.approveJd({ id: user.id }, openingId, jd.trim() ? jd : undefined, fromChat);
-    } catch (e) {
-      await fail(backendMessage(e, "The JD could not be approved."));
-    }
     markMatching(openingId);
     // Research and the first Suggestions round wait for the approved JD, so
     // they search with the words the TA agreed (25 Sep). Before that they ran
@@ -1032,11 +979,9 @@ export async function approveJd(formData: FormData) {
     if (String(formData.get("thenGo") ?? "") === "opening") {
       redirect(`/openings/${openingId}?msg=${encodeURIComponent("The job description is approved. The job is live.")}&tone=ok`);
     }
-    await done("The job description is approved. The job is live.");
+    await done(result.message);
     return;
   }
-  if (jd.trim()) repo.updateJd(openingId, jd);
-  repo.approveJd(openingId, user.id);
 
   // Spec §8A.2 — the first sourcing round starts here, without being asked. The
   // JD is the search vocabulary, so this is the first moment a good search is
@@ -1047,17 +992,16 @@ export async function approveJd(formData: FormData) {
     await findDatabaseMatches(openingId, "jd_approved").catch(() => undefined);
     revalidatePath(`/openings/${openingId}`, "layout");
   });
-  if (!repo.research(openingId)) {
+  if (!researched) {
     after(async () => {
       await researchOpening(openingId, user.id).catch(() => undefined);
       revalidatePath(`/openings/${openingId}`, "layout");
     });
   }
 
-  if (repo.suggestions(openingId).length === 0) {
+  if (suggestionsBefore === 0) {
     // The auto-run belongs to the TA the opening is on, not to whoever
     // approved the JD — a lead approving it must not end up owning the list.
-    const owner = repo.opening(openingId)?.assignedTaIds[0];
     // After the response: a round takes minutes, and approving a JD must not.
     after(async () => {
       await sourceFor(openingId, owner).catch(() => undefined);
@@ -1081,62 +1025,22 @@ export async function approveJd(formData: FormData) {
  */
 export async function amendJd(formData: FormData) {
   await primeStore({ allApplications: true });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
+  const user = await getCurrentUser();
   const openingId = String(formData.get("openingId"));
-  const o = repo.opening(openingId);
-  if (!o) return;
-  if (!o.assignedTaIds.includes(user.id) && isTa(user)) return;
   const jd = String(formData.get("jdMarkdown") ?? "");
-  if (isConvex()) {
-    let r: { reextracting: boolean } | null = null;
-    if (jd.trim()) {
-      try {
-        r = await convexMutation("ta/openings:saveJd", { actorId: user.id, openingId, jdMarkdown: jd });
-      } catch (e) {
-        await fail(backendMessage(e, "The JD could not be saved."));
-      }
-      if (r?.reextracting) {
-        markMatching(openingId);
-        after(() => rematchWhenRequirementsSettle(openingId, user.id));
-      }
-    }
-    await afterBackendWrite(openingId);
-    // It used to come back with no word at all, so a save looked like nothing
-    // had happened (25 Sep).
-    redirect(amendedJd(openingId, r?.reextracting ? "JD saved. The job details are read again, then matching re-runs." : "JD saved."));
+  const result = await amendJdShared(user, openingId, jd, JD_DEPS);
+  if (!result.ok) await fail(result.message);
+  if (result.ok && result.reextracting) {
+    markMatching(openingId);
+    after(() => rematchWhenRequirementsSettle(openingId, user.id));
   }
-  if (jd.trim()) repo.updateJd(openingId, jd);
+  if (isConvex()) await afterBackendWrite(openingId);
   revalidatePath(`/openings/${openingId}`, "layout");
-  redirect(amendedJd(openingId, "JD saved."));
+  redirect(amendedJd(openingId, result.message));
 }
 
 function amendedJd(openingId: string, message: string) {
   return `/openings/${openingId}/jd?msg=${encodeURIComponent(message)}&tone=ok`;
-}
-
-// ─── The JD chat (25 Sep) ────────────────────────────────────────────────────
-
-/**
- * Save a JD the chat produced. Before approval it is a draft like any other;
- * after approval it stays approved and the Job details follow it at once
- * (keeping what a person corrected), because the TA's request is the change.
- */
-async function saveChatJd(openingId: string, userId: string, jd: string): Promise<void> {
-  const o = repo.opening(openingId);
-  if (isConvex()) {
-    const r = await convexMutation<{ reextracting: boolean }>("ta/openings:saveJd", {
-      actorId: userId,
-      openingId,
-      jdMarkdown: jd,
-      ...(o?.jdStatus === "approved" ? { detailsFromJd: true } : {}),
-    });
-    if (r?.reextracting) {
-      markMatching(openingId);
-      after(() => rematchWhenRequirementsSettle(openingId, userId));
-    }
-    return;
-  }
-  repo.updateJd(openingId, jd);
 }
 
 /**
@@ -1147,63 +1051,32 @@ async function saveChatJd(openingId: string, userId: string, jd: string): Promis
 export async function reviseJd(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  const request = String(formData.get("request") ?? "").trim();
-  if (!request) await fail("Write what should change in the JD first.");
-  if (request.length > JD_REQUEST_MAX) await fail(`That is too long — keep it under ${JD_REQUEST_MAX} characters.`);
-  const opening = repo.opening(openingId);
-  const c = contextFor(openingId);
-  if (!opening || !c) await fail("The opening could not be found. Reload the page and try again.");
-  // The editor as it stands, so hand edits not yet saved are revised, not lost.
-  const currentJd = String(formData.get("currentJd") ?? "").trim() || opening!.jdMarkdown || "";
-  if (!currentJd.trim()) await fail("There is no JD to revise yet. Generate one first.");
-
-  const history = chatHistory(repo.jdChat(openingId));
-  repo.addJdChat({ openingId, role: "user", body: request, jdMarkdown: null, byUserId: user.id, at: Date.now() });
-
-  const res = await reviseJdText(c!, jdBriefsFor(openingId), currentJd, request, history);
-  if (!res.ok || !res.text.trim()) {
-    repo.addJdChat({
-      openingId, role: "assistant", jdMarkdown: null, byUserId: null, at: Date.now(), failed: true,
-      body: `Could not revise the JD — ${res.ok ? "the AI sent back nothing." : reasonInWords(res.reason)} The JD is as it was. Try again.`,
-    });
-    revalidatePath(`/openings/${openingId}/jd`);
-    await fail("Could not revise the JD. The JD is as it was — try again.");
-  }
-  const jd = res.ok ? res.text : currentJd;
-  const changes = (res.ok && res.changes) || "Revised the JD.";
-
-  repo.addJdChat({ openingId, role: "assistant", body: changes, jdMarkdown: jd, byUserId: null, at: Date.now() });
-  try {
-    await saveChatJd(openingId, user.id, jd);
-  } catch (e) {
-    await fail(backendMessage(e, "The revised JD could not be saved. Try again."));
+  const user = await getCurrentUser();
+  const result = await reviseJdShared(user, openingId, String(formData.get("request") ?? ""), String(formData.get("currentJd") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
+  if (result.ok && result.reextracting) {
+    markMatching(openingId);
+    after(() => rematchWhenRequirementsSettle(openingId, user.id));
   }
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Revised: ${changes}`);
+  await done(result.message);
 }
 
 /** Put back the JD an earlier answer in the JD chat produced. */
 export async function restoreJdVersion(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  const turn = repo.jdChat(openingId).find((m) => m.id === String(formData.get("messageId") ?? ""));
-  if (!turn?.jdMarkdown) await fail("That version could not be found. Reload the page and try again.");
-  const when = new Date(turn!.at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Colombo" });
-  repo.addJdChat({
-    openingId, role: "assistant", body: `Put back the version from ${when}.`,
-    jdMarkdown: turn!.jdMarkdown, byUserId: user.id, at: Date.now(),
-  });
-  try {
-    await saveChatJd(openingId, user.id, turn!.jdMarkdown!);
-  } catch (e) {
-    await fail(backendMessage(e, "That version could not be put back. Try again."));
+  const user = await getCurrentUser();
+  const result = await restoreJdShared(user, openingId, String(formData.get("messageId") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
+  if (result.ok && result.reextracting) {
+    markMatching(openingId);
+    after(() => rematchWhenRequirementsSettle(openingId, user.id));
   }
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
-  await done(`Put back the version from ${when}.`);
+  await done(result.message);
 }
 
 // ─── Job details: requirements extracted from the approved JD ────────────────
@@ -1265,8 +1138,6 @@ export async function saveJobDetails(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  if (!isConvex()) await fail("Job details need the Convex store.");
-
   const minYears = optionalNumber(formData, "experienceMinYears");
   const maxYears = optionalNumber(formData, "experienceMaxYears");
   const salaryMin = optionalNumber(formData, "salaryMin");
@@ -1274,34 +1145,29 @@ export async function saveJobDetails(formData: FormData) {
   if ([minYears, maxYears, salaryMin, salaryMax].some((n) => Number.isNaN(n))) {
     await fail("Years and salary must be numbers.");
   }
-  try {
-    await convexMutation("ta/requirements:save", {
-      actorId: user.id,
-      openingId,
-      title: String(formData.get("title") ?? ""),
-      clientIndustry: String(formData.get("clientIndustry") ?? "Other"),
-      recruitmentType: String(formData.get("recruitmentType") ?? "both"),
-      isConfidential: formData.get("isConfidential") === "on",
-      status: String(formData.get("status") ?? "active"),
-      location: String(formData.get("location") ?? ""),
-      seniorityLevel: String(formData.get("seniorityLevel") ?? "other"),
-      experienceMinYears: minYears ?? 0,
-      experienceMaxYears: maxYears,
-      educationLevel: String(formData.get("educationLevel") ?? ""),
-      salaryMin,
-      salaryMax,
-      salaryCurrency: String(formData.get("salaryCurrency") ?? ""),
-      requiredSkills: listField(formData, "requiredSkills"),
-      niceToHaveSkills: listField(formData, "niceToHaveSkills"),
-      languagesRequired: listField(formData, "languagesRequired"),
-    });
-  } catch (e) {
-    await fail(backendMessage(e, "The job details could not be saved."));
-  }
+  const result = await saveJdDetailsShared(user, openingId, {
+    title: String(formData.get("title") ?? ""),
+    clientIndustry: String(formData.get("clientIndustry") ?? "Other"),
+    recruitmentType: (String(formData.get("recruitmentType") ?? "both") as "both" | "headhunting" | "job_posting"),
+    isConfidential: formData.get("isConfidential") === "on",
+    jobStatus: (String(formData.get("status") ?? "active") as "active" | "draft" | "on_hold"),
+    location: String(formData.get("location") ?? ""),
+    seniorityLevel: String(formData.get("seniorityLevel") ?? "other"),
+    experienceMinYears: minYears ?? 0,
+    experienceMaxYears: maxYears,
+    educationLevel: String(formData.get("educationLevel") ?? ""),
+    salaryMin,
+    salaryMax,
+    salaryCurrency: String(formData.get("salaryCurrency") ?? ""),
+    requiredSkills: listField(formData, "requiredSkills"),
+    niceToHaveSkills: listField(formData, "niceToHaveSkills"),
+    languagesRequired: listField(formData, "languagesRequired"),
+  }, JD_DEPS);
+  if (!result.ok) await fail(result.message);
   markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await done("Job details saved. Matching is re-running against them.");
+  await done(result.message);
 }
 
 /** Read the approved JD again and replace the details — including hand corrections. */
@@ -1309,15 +1175,12 @@ export async function reextractJobDetails(formData: FormData) {
   await primeStore({ allApplications: true });
   const user = await authorize(formData, "opening.manage", { opening: "openingId" });
   const openingId = String(formData.get("openingId"));
-  try {
-    await convexMutation("ta/requirements:reextract", { actorId: user.id, openingId });
-  } catch (e) {
-    await fail(backendMessage(e, "Could not start the extraction."));
-  }
+  const result = await reextractJdDetailsShared(user, openingId, JD_DEPS);
+  if (!result.ok) await fail(result.message);
   markMatching(openingId);
   after(() => rematchWhenRequirementsSettle(openingId, user.id));
   await afterBackendWrite(openingId);
-  await done("Reading the JD again — the details update in a few seconds.");
+  await done(result.message);
 }
 
 export async function addJobPost(formData: FormData) {
@@ -3734,19 +3597,13 @@ function saveBenchmarks(openingId: string, rows: IncumbentRow[]) {
 export async function generateJdWithModel(formData: FormData) {
   const openingId = String(formData.get("openingId"));
   await primeStore({ openingId });
-  const user = await authorize(formData, "opening.manage", { opening: "openingId" });
-  // The notes box as it stands when Generate is pressed — typed but not yet
-  // saved notes are still the TA's notes, and the draft must include them.
-  if (formData.has("notes")) saveOwnNotes(openingId, user.id, String(formData.get("notes") ?? ""));
-  const res = await draftJd(openingId, user.id);
-  if (!res) await fail("The opening could not be found. Reload the page and try again.");
+  const user = await getCurrentUser();
+  const result = await generateJdShared(user, openingId, String(formData.get("notes") ?? ""), JD_DEPS);
+  if (!result.ok) await fail(result.message);
   if (isConvex()) await afterBackendWrite(openingId);
   else revalidatePath(`/openings/${openingId}`, "layout");
-  if (res!.ok) await done("Written by the AI. Read it through before approving.");
-  // Said plainly and beside the button: the fallback reads like a finished JD.
-  await note(
-    `The AI could not write it — ${reasonInWords(res!.reason)} A basic version built from your notes is in place: try again, or edit it by hand.`,
-  );
+  if (result.ok && result.tone === "note") await note(result.message);
+  await done(result.message);
 }
 
 /** A TA correcting a generated field. Marked, so regeneration leaves it alone. */
@@ -5785,40 +5642,19 @@ export async function stopFollowUpNowInline(_: ActionResult | null, formData: Fo
  */
 export async function verifyReferee(formData: FormData) {
   await primeStore({ allApplications: true });
-  await authorize(formData, "opening.sourcing", { opening: "openingId" });
+  const user = await getCurrentUser();
   const refereeId = String(formData.get("refereeId") ?? "");
   const openingId = String(formData.get("openingId") ?? "");
-  const r = repo.refereesForPipeline(openingId).flatMap((g) => g.referees).find((x) => x.id === refereeId);
-  if (!r) await fail("That referee is not on this opening's list any more. Reload the page.");
-  const { search, serperConfigured } = await import("@/lib/serper");
-  if (!serperConfigured()) await fail("Web search is not set up on this system, so LinkedIn cannot be checked.");
-  const first = r!.name.split(/\s+/).filter((w) => w.length > 1 && !/^(dr|mr|mrs|ms|prof)\.?$/i.test(w))[0]?.toLowerCase() ?? "";
-  // A name that is only titles or initials leaves nothing to match on, and
-  // "".includes matched the first result — a stranger (review of PR #2).
-  if (!first) await note(`${r!.name} is too short a name to match on LinkedIn. Check by hand, or call them.`);
-  const query = `"${r!.name}"${r!.company ? ` "${r!.company}"` : ""} site:linkedin.com/in`;
-  const res = await search(query, 5);
-  if (res.error) await fail(`The search did not run (${res.error}). Try again.`);
-  const hit = res.hits.find((h) => canonicalProfile(h.url) && h.title.toLowerCase().includes(first));
-  if (!hit) await note(`No LinkedIn profile found for ${r!.name}${r!.company ? ` at ${r!.company}` : ""}. Check by hand, or call them.`);
-  const { profileFacts } = await import("@/lib/sourcing");
-  const parts = hit!.title.replace(/\s*\|\s*LinkedIn.*$/i, "").split(/\s+[-–—]\s+/);
-  const title = (parts[1] ?? "").replace(/\s+(?:at|@)\s+.+$/i, "").trim() || null;
-  const company = profileFacts({ title: hit!.title, snippets: [hit!.snippet] }).company;
-  const now = [title, company && `at ${company}`].filter(Boolean).join(" ") || "role not shown in the search result";
-  const cv = [r!.title, r!.company && `at ${r!.company}`].filter(Boolean).join(" ");
-  const same = !!company && !!r!.company && employerMatches(company, r!.company);
-  await done(
-    `LinkedIn today: ${now}.${cv ? ` The CV says ${cv}${same ? " — same company." : " — this may be out of date."}` : ""} Profile: ${displayUrl(canonicalProfile(hit!.url)!)}`,
-  );
-}
-
-/** "Hayleys PLC" and "hayleys" are the same employer for this check. */
-function employerMatches(a: string, b: string): boolean {
-  const k = (x: string) => x.toLowerCase().replace(/(plc|pvt|ltd|limited|inc|llc|group|\(pvt\))/g, "").replace(/[^a-z0-9]+/g, " ").trim();
-  const x = k(a);
-  const y = k(b);
-  return !!x && !!y && (x.includes(y) || y.includes(x));
+  const result = await checkCandidateReferee(user, openingId, refereeId, null, {
+    convexQuery,
+    searchConfigured: serperConfigured,
+    search: (query, limit) => import("@/lib/serper").then(({ search }) => search(query, limit)),
+  });
+  if (!result.ok) {
+    if (result.notice) await note(result.message);
+    await fail(result.message);
+  }
+  await done(result.message);
 }
 
 export async function verifyRefereeInline(_: ActionResult | null, formData: FormData) {
@@ -5934,14 +5770,6 @@ function strategyRowOf(formData: FormData, field = "rowId") {
  * Debounces bells per key within 30 seconds. A lead clicking multiple strategies
  * rapidly generates one chime, while assignments made moments later are not silenced.
  */
-const lastBell = new Map<string, number>();
-function bellDue(key: string, ms = 30_000): boolean {
-  const now = Date.now();
-  if (now - (lastBell.get(key) ?? 0) < ms) return false;
-  lastBell.set(key, now);
-  return true;
-}
-
 /** Put a TA on a strategy for a job ("Done by"). The TA Lead's side of the table. */
 export async function addStrategyDoneBy(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
@@ -6004,11 +5832,12 @@ export async function removeStrategyDoneBy(formData: FormData) {
 export async function acceptStrategyAssignments(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
   await primeStore({ openingId });
-  const user = await authorizeOn(openingId, "strategy.work");
-  const accepted = repo.acceptStrategyAssignments({ openingId, taId: user.id });
+  const user = await getCurrentUser();
+  const result = acceptStrategies(user, openingId, { convexMutation, markTablesStale, notify: revalidatePath });
+  if (!result.ok) await fail(result.message);
   revalidateStrategies(openingId);
-  if (accepted === 0) await note("There are no new strategy assignments to accept.");
-  await done(`Accepted ${accepted} ${accepted === 1 ? "strategy" : "strategies"}. You can start working on ${accepted === 1 ? "it" : "them"} now.`);
+  if (result.ok && result.tone === "note") await note(result.message);
+  await done(result.message);
 }
 
 /** The day the lead assigned a strategy; empty clears it. */
@@ -6050,47 +5879,17 @@ export async function setStrategyNotApplicable(formData: FormData) {
 export async function submitStrategyUpdate(formData: FormData) {
   const openingId = String(formData.get("openingId") ?? "");
   await primeStore({ openingId });
-  const user = await authorizeOn(openingId, "strategy.work");
+  const user = await getCurrentUser();
   const ids = formData.getAll("rowId").map(String).filter(Boolean);
-  if (ids.length === 0) await fail("There is nothing to submit.");
-
-  const today = colomboDayStart(Date.now());
-  const rows: { rowId: string; doneAt: number | null; note: string | null }[] = [];
-  for (const id of ids) {
-    const row = repo.strategyAssignment(id);
-    if (!row || row.openingId !== openingId || row.notApplicable) continue;
-    const onIt = row.doneBy.includes(user.id);
-    if (!onIt && !isTicked(row)) continue;
-    const used = formData.get(`used_${id}`) === "on";
-    const typed = String(formData.get(`date_${id}`) ?? "").trim();
-    const day = colomboDayFromValue(typed);
-    if (used && typed && day === null) await fail(`That is not a date (${row.strategyName}).`);
-    const text = String(formData.get(`note_${id}`) ?? "").trim();
-    if (text.length > 500) await fail(`Keep the note under 500 characters (${row.strategyName}).`);
-    if (!onIt && !used && !text) continue;
-    // Ticked "used" with no date means today; not ticked means not used yet.
-    rows.push({ rowId: id, doneAt: used ? day ?? today : null, note: text || null });
-  }
-  if (rows.length === 0) await fail("None of those strategies are yours to update.");
-
-  const taken = repo.submitStrategyRows({ openingId, taId: user.id, rows });
-  if (taken === 0) await fail("Accept your new strategy assignments before submitting an update.");
+  const result = await submitStrategies(user, openingId, ids.map((id) => ({
+    rowId: id,
+    used: formData.get(`used_${id}`) === "on",
+    date: String(formData.get(`date_${id}`) ?? ""),
+    note: String(formData.get(`note_${id}`) ?? ""),
+  })), { convexMutation, markTablesStale, notify: revalidatePath });
+  if (!result.ok) await fail(result.message);
   revalidateStrategies(openingId);
-
-  // The TA Lead is told a submission arrived, not what is in it.
-  const opening = repo.opening(openingId)!;
-  const leadId = opening.taLeadId;
-  if (isConvex() && leadId && leadId !== user.id && bellDue(`submit:${user.id}:${openingId}`, 5 * 60_000)) {
-    await convexMutation("ta/notifications:create", {
-      userId: leadId,
-      type: "strategy_assigned",
-      title: "A TA submitted strategies",
-      body: `${user.name} submitted their strategies on ${opening.title}.`,
-      jobId: openingId,
-    }).catch((e) => console.error("[notifications] strategy submit failed:", e));
-    revalidatePath("/api/notifications");
-  }
-  await done(`Submitted ${taken} ${taken === 1 ? "strategy" : "strategies"}. Your TA Lead can now see ${taken === 1 ? "it" : "them"}.`);
+  await done(result.message);
 }
 
 /**
@@ -6137,15 +5936,12 @@ export async function removeStrategyProof(formData: FormData) {
   await primeStore();
   const row = strategyRowOf(formData);
   if (!row) await fail("That strategy is no longer on this job's table.");
-  const user = await authorizeOn(row!.openingId, "strategy.work");
+  const user = await getCurrentUser();
   const proofId = String(formData.get("proofId") ?? "");
-  const proof = row!.proofs.find((p) => p.id === proofId);
-  if (!proof) await fail("That picture is already gone.");
-  if (proof!.addedBy !== user.id) await fail("Only the person who attached a picture can remove it.");
-  const gone = repo.removeStrategyProof(row!.id, proofId);
-  if (gone && isConvex()) await convexMutation("ta/strategies:proofDelete", { storageId: gone }).catch(() => {});
+  const result = await removeStrategyPicture(user, row!.id, proofId, { convexMutation, markTablesStale, notify: revalidatePath });
+  if (!result.ok) await fail(result.message);
   revalidateStrategies(row!.openingId);
-  await done("Picture removed.");
+  await done(result.message);
 }
 
 /** Add a strategy to the list, or change one. */

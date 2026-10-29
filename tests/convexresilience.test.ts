@@ -94,6 +94,8 @@ test("backoff doubles to a ceiling and stays within a quarter either side", () =
 test("a function over its execution budget is not retried; a gateway hiccup is", () => {
   assert.equal(failureCategory("Convex refused candidates/candidates:getCvUploadUrl: [Request ID: x] Server Error\nFunction execution timed out (maximum duration: 1s)", false, 500), "budget");
   assert.equal(failureCategory("Convex refused x: Too many bytes read in a single function execution", false, 500), "budget");
+  // The exact wording from the 29 Oct freeze: it contains "timed out".
+  assert.equal(failureCategory("Convex refused matching/search:searchCandidates: Your request timed out performing too many system operations.", false, 500), "budget");
   assert.equal(failureCategory("Convex refused x: HTTP 503", false, 503), "transient");
   assert.equal(failureCategory("Could not reach the Convex backend (fetch failed).", true), "unreachable");
   assert.equal(failureCategory("Convex refused x: Uncaught Error: Start today's workday first.", false, 400), "refused");

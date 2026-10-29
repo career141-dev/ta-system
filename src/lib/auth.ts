@@ -26,6 +26,8 @@
 import type { Assignment, Id, Role, User } from "@/data/types";
 
 export type Capability =
+  /** TA Support reads Excel Tables across positions without a work assignment. */
+  | "tables.readAll"
   /** See the opening exists, and the stages this seat is allowed. */
   | "opening.read"
   /** Move candidates, log calls, chase, edit a candidate record on it. */
@@ -105,8 +107,9 @@ export function isDeskWide(user: User): boolean {
 
 /**
  * A TA working their own desk — a TA, or TA Support (9 Oct). TA Support has a
- * TA's access in every respect but one: on a job's Excel Tables they read the
- * rows of every TA on it (seesEveryTaRow). Every "is this a TA" check asks
+ * TA's working access. Excel Tables additionally lets support read every TA's
+ * rows (seesEveryTaRow), across positions through tables.readAll (23 Oct).
+ * Every "is this a TA" check asks
  * this, so the two seats cannot drift apart.
  */
 export function isTa(user: Pick<User, "role"> | null | undefined): boolean {
@@ -127,7 +130,7 @@ export function isReadOnly(user: User): boolean {
 }
 
 /** Every capability that only reads. Everything else is a write. */
-const READS: Capability[] = ["opening.read", "database.read", "report.read"];
+const READS: Capability[] = ["opening.read", "database.read", "report.read", "tables.readAll"];
 
 /**
  * The policy itself.
@@ -146,6 +149,9 @@ export function can(user: User, capability: Capability, ctx: AuthContext = {}): 
   }
 
   switch (capability) {
+    case "tables.readAll":
+      return user.role === "ta_support" ? ALLOW : deny("Only TA Support can use this table view.");
+
     case "user.manage":
       return user.role === "admin" ? ALLOW : deny("Only an admin can manage people.");
 

@@ -299,7 +299,10 @@ async function ResultsView({
     // scaled to its 0–1 scale. The floor is 0: the engine has already
     // decided who is worth showing and applies its own safety floor.
     similarity = new Map(engine.hits.map((h) => [h.candidateId, h.score / 100]));
-    if (engine.hits.length === 0) retrievalProblem = "Nothing in the database matched that search.";
+    if (engine.incomplete?.length) {
+      // Never "nothing matched" when part of the search did not run (29 Oct).
+      retrievalProblem = "Part of the search could not run just now, so some matching people may be missing. Search again in a moment.";
+    } else if (engine.hits.length === 0) retrievalProblem = "Nothing in the database matched that search.";
   } else if (engineError !== undefined) {
     // The engine needs a model. Where it cannot run, the words still can —
     // the backend's full-text indexes need no key at all, so the screen

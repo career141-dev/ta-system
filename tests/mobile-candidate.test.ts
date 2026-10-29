@@ -35,6 +35,10 @@ test("an authorised sheet contains the full profile and stage siblings", () => {
   assert.equal(result.payload.context.applicationId, app.id);
   assert.equal(result.payload.profile.candidateId, app.candidateId);
   assert(result.payload.tabs.some((tab) => tab.key === "history"));
+  assert.equal(result.payload.referenceAccess.canView, true);
+  assert.equal(result.payload.referenceAccess.canVerify, true);
+  assert.equal(result.payload.followUp, null);
+  assert(result.payload.messages.every((message) => typeof message.deliveryStatus === "string"));
   assert(result.payload.context.position >= 1);
   assert(result.payload.context.total >= 1);
 });
@@ -69,3 +73,23 @@ test("client contacts cannot open sourcing stages", () => {
   const result = mobileCandidate(client, app.openingId, app.id);
   assert.equal(result.kind, "forbidden");
 });
+
+test("client seats never receive reference contact lists", () => {
+  const client = synthetic("client");
+  const opening = repo.openings().find((row) => repo.applications(row.id).some((app) => ["client_shortlist", "interview", "offer", "placed"].includes(app.stage)))!;
+  const current = repo.assignments(opening.id).map(({ userId, role }) => ({ userId, role }));
+  repo.setAssignments(opening.id, [...current, { userId: client.id, role: "client_contact" }], adminUserId());
+  const app = repo.applications(opening.id).find((row) => ["client_shortlist", "interview", "offer", "placed"].includes(row.stage))!;
+  assert(opening && app);
+  const result = mobileCandidate(client, opening.id, app.id);
+  assert.equal(result.kind, "ok");
+  if (result.kind !== "ok") return;
+  assert.deepEqual(result.payload.referenceAccess, { canView: false, canVerify: false });
+  assert.deepEqual(result.payload.referees, []);
+  assert.deepEqual(result.payload.companyReferences, []);
+  assert.equal(result.payload.tabs.some((tab) => tab.key === "reference" || tab.key === "company_refs"), false);
+});
+
+function adminUserId() {
+  return repo.users().find((row) => row.role === "admin")?.id ?? "system";
+}
