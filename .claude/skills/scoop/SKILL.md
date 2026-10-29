@@ -52,7 +52,7 @@ Note the route's check is `opening.act` *without* `ownerTaId`, so the collision 
 
 1. `enqueueExtraction` (`convex/cvs/cvUploads.ts`): if the upload is not already in `cvExtractionQueue` (`inExtractionQueue`, index `by_cvUploadId`), insert `{cvUploadId, args, urgent:true}` - `isUrgentUpload` (`convex/lib/extractionQueue.ts`) is true when `headhuntedBy || scoopedBy` is set. Then `startNextTurns`.
 2. `startNextTurns`: held slots = rows with `startedAt` (index `by_startedAt`, `take(100)`); `planTurns` (pure, in `extractionQueue.ts`) computes lapsed slots (held longer than `EXTRACTION_LEASE_MS = 10 min`, deleted), `free = MAX_CONCURRENT_EXTRACTIONS (3) - live`, `backgroundFree = min(free, BACKGROUND_SLOTS (2) - liveBackground)`. Urgent waiting rows (index `by_startedAt_urgent`, `startedAt` undefined, `urgent` true) start first, from all `free`; background fills what is left. Each started row gets `startedAt: now` and `scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {...row.args, leaseId})`. A scoop therefore starts at once unless three TA uploads are already being read.
-3. `processCvExtraction` (`convex/cvs/cvExtraction.ts`, see /cv-extraction) reads the CV, finds or creates the candidate, runs `createApplication` against `cvUpload.assignToJob`. After the application exists it calls `internal.ta.scoopUpload.fileScoop` at three sites: (a) the candidate already existed (duplicate-candidate branch, ~line 1204), (b) the normal new-candidate branch (~1565), (c) the "preserved despite extraction error" fallback (~1684, `score: false`). The guard everywhere is `cvUpload?.scoopedBy`.
+3. `processCvExtraction` (`convex/cvs/cvExtraction.ts`, see /cv-extraction) reads the CV (thin PDF/image text tries Haiku then NVIDIA; see /cv-extraction), finds or creates the candidate, runs `createApplication` against `cvUpload.assignToJob`. After the application exists it calls `internal.ta.scoopUpload.fileScoop` at three sites: (a) the candidate already existed (duplicate-candidate branch, ~line 1204), (b) the normal new-candidate branch (~1565), (c) the "preserved despite extraction error" fallback (~1684, `score: false`). The guard everywhere is `cvUpload?.scoopedBy`.
 4. `fileScoop` (`convex/ta/scoopUpload.ts`, `internalMutation`, args `{cvUploadId, candidateId, jobId}`): returns `{handled:false}` if the upload has no `scoopedBy`, job id does not normalise, candidate (followed through `mergedInto`) or application (`by_candidateId` + `jobId` filter) is missing. Otherwise `scoopFlag(app, Date.now(), upload.scoopFromUserId ?? null)` (`convex/lib/scoopMail.ts`) and patch the application. It does NOT set `ownerTaId`, stage or set number - on purpose: if the owner were set, the TA's own Shortlist would see "already mine" and skip the move to Follow-up. If `app.ownerTaId` exists and differs from `upload.scoopedBy`, it writes `cvUploads.routeNote = "Already shortlisted on this opening by <name>."`; the application is still flagged.
 
 `scoopFlag` rules: set `scoopReceivedAt = now` only if empty; set `scoopFromUserId` only if the application has none and one is given; returns `null` (no patch) if nothing changes. So re-uploading a known scoop never moves the date or changes the sender, but fills a blank sender.
@@ -228,8 +228,8 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 - 2026-10-28 `d34d9a6` a scoop moved to Follow-up or Director Shortlist gets the opening's only active work location (`placeInOnlyLocation` in `ta/applications.ts`); Try again / Remove on failed scoop cards (`ta/hhUpload:retry`).
 
 <!-- skill-meta
-verified-commit: 8bb1c684
-verified-hash: 1e865f106e6c6e82ae4f00c86ec61c3da96cb318
+verified-commit: 0a25b7d
+verified-hash: 6761322c169882fb998bb4c555f7359cf02a1e89
 verified-date: 2026-10-29
 sources:
   convex/ta/scoopUpload.ts

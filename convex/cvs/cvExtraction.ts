@@ -121,7 +121,7 @@ import {
   deriveTotalExperienceYears,
   deriveCurrentRole,
 } from "../candidates/derivations";
-import { generateNvidiaEmbedding, logLLMUsage, callNvidiaVisionOCR, getOpenAI, getModelForTask, executeLLMWithNvidiaFallback, OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODELS, OPENROUTER_CV_EXTRACTION_MODEL, OPENROUTER_CV_FALLBACK_MODELS } from "../lib/llm";
+import { generateNvidiaEmbedding, logLLMUsage, callNvidiaVisionOCR, callHaikuVisionOCR, getOpenAI, getModelForTask, executeLLMWithNvidiaFallback, OPENROUTER_PRIMARY_MODEL, OPENROUTER_FALLBACK_MODELS, OPENROUTER_CV_EXTRACTION_MODEL, OPENROUTER_CV_FALLBACK_MODELS } from "../lib/llm";
 
 /** The shared-mailbox channels post routing decides for. */
 const isEmailChannel = (channel: string | undefined) =>
@@ -681,17 +681,32 @@ export async function extractTextWithTesseract(
   }
 }
 
-async function extractTextFromImage(
-  buffer: ArrayBuffer,
-  fileType: string,
-  ctx?: ActionCtx,
-  cvUploadId?: Id<"cvUploads">
-): Promise<string> {
-  const tesseractText = await extractTextWithTesseract(buffer, fileType);
-  if (!tesseractText || tesseractText.trim().length < 20) {
-    throw new Error("Insufficient text extracted from image (Tesseract OCR returned less than 20 characters).");
+// Bound the base64 request size; oversized files can still use NVIDIA's image fallback.
+const HAIKU_MAX_BYTES = 8 * 1024 * 1024;
+async function readThinCvWithVision(buffer: ArrayBuffer, ctx?: ActionCtx, cvUploadId?: Id<"cvUploads">): Promise<{ text: string; model: string }> {
+  if (!ctx) return { text: "", model: "" };
+  const bytes = Buffer.from(buffer);
+  const isPdf = bytes.subarray(0, 5).toString() === "%PDF-";
+  const imageMime = bytes[0] === 0xff && bytes[1] === 0xd8 ? "image/jpeg"
+    : bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png"
+    : bytes.subarray(0, 4).toString() === "RIFF" && bytes.subarray(8, 12).toString() === "WEBP" ? "image/webp" : "";
+  if (!isPdf && !imageMime) return { text: "", model: "" };
+  if (bytes.length <= HAIKU_MAX_BYTES) {
+    const text = await within(callHaikuVisionOCR({ kind: isPdf ? "pdf" : "image", mime: isPdf ? "application/pdf" : imageMime, base64: bytes.toString("base64") }), VISION_LIMIT_MS, "", "Haiku vision OCR");
+    if (cleanRawText(text).trim().length >= 50) return { text, model: "haiku-4.5" };
   }
-  return tesseractText;
+  try {
+    const images = isPdf
+      ? await within(extractImagesFromPdfBuffer(buffer, 5), VISION_LIMIT_MS, [] as string[], "PDF embedded images")
+      : [`data:${imageMime};base64,${bytes.toString("base64")}`];
+    if (images.length) {
+      const text = await within(callNvidiaVisionOCR(ctx, images, cvUploadId), VISION_LIMIT_MS, "", "NVIDIA vision OCR");
+      if (cleanRawText(text).trim().length >= 50) return { text, model: "vision-nvidia" };
+    }
+  } catch (err: any) {
+    console.warn("[CvExtraction] NVIDIA vision OCR failed:", err?.message || String(err));
+  }
+  return { text: "", model: "" };
 }
 
 export async function extractText(
@@ -703,8 +718,13 @@ export async function extractText(
 ): Promise<{ text: string; extractionModel: string; method: string; ocrAttempted: boolean }> {
   const type = fileType.toLowerCase();
 
+  const header = Buffer.from(buffer);
+  const isImage = (header[0] === 0xff && header[1] === 0xd8)
+    || header.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    || (header.subarray(0, 4).toString() === "RIFF" && header.subarray(8, 12).toString() === "WEBP");
+
   // 1. PDF Document Extraction
-  if (type === "pdf" || type === "application/pdf") {
+  if ((type === "pdf" || type === "application/pdf") && Buffer.from(buffer).subarray(0, 5).toString() === "%PDF-") {
     let pdfText = "";
     try {
       pdfText = await extractTextFromPdf(buffer);
@@ -712,48 +732,16 @@ export async function extractText(
       console.warn("[extractText] Standard PDF text extraction failed:", e);
     }
 
-    if (pdfText && pdfText.trim().length >= 50) {
+    if (pdfText && cleanRawText(pdfText).trim().length >= 50) {
       return { text: pdfText, extractionModel: "deepseek-v4-flash", method: "pdf_text", ocrAttempted: false };
     }
-
-    console.log(`[extractText] PDF text extraction yielded < 50 chars (${pdfText.trim().length} chars). Sending to Tesseract OCR...`);
 
     if (ctx && cvUploadId) {
       await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
     }
-    const tesseractText = await extractTextWithTesseract(buffer, fileType, ctx, cvUploadId);
-    if (tesseractText && tesseractText.trim().length >= 20) {
-      return { text: tesseractText, extractionModel: "ocr-tesseract", method: "tesseract", ocrAttempted: true };
-    }
-
-    // Tesseract also failed (e.g. custom font-encoded PDFs that aren't scanned images).
-    // Last resort: use the Vision OCR pipeline (NVIDIA + OpenRouter Gemini) which can read
-    // PDFs rendered as images. callNvidiaVisionOCR already handles multimodal content correctly.
-    if (ctx) {
-      try {
-        console.log("[extractText] Tesseract failed — attempting Vision OCR pipeline fallback...");
-        const { callNvidiaVisionOCR } = await import("../lib/llm");
-        // Extract page images from the PDF buffer for vision processing
-        const pageImages = await within(extractImagesFromPdfBuffer(buffer, 5), VISION_LIMIT_MS, [] as Awaited<ReturnType<typeof extractImagesFromPdfBuffer>>, "PDF page images");
-        if (pageImages && pageImages.length > 0) {
-          const visionText = await within(callNvidiaVisionOCR(ctx, pageImages, cvUploadId), VISION_LIMIT_MS, "", "vision OCR");
-          if (visionText && visionText.trim().length >= 20) {
-            console.log(`[extractText] Vision OCR pipeline fallback succeeded (${visionText.trim().length} chars).`);
-            return { text: visionText, extractionModel: "vision-nvidia-pdf", method: "vision_ocr", ocrAttempted: true };
-          }
-        } else {
-          console.warn("[extractText] Could not render page images for Vision OCR fallback.");
-        }
-      } catch (vErr: any) {
-        console.warn("[extractText] Vision OCR pipeline fallback failed:", vErr?.message || vErr);
-      }
-    }
-
-    if (pdfText && pdfText.trim().length > 0) {
-      return { text: pdfText, extractionModel: "deepseek-v4-flash", method: "pdf_text_thin", ocrAttempted: true };
-    }
-
-    return { text: tesseractText || pdfText || "", extractionModel: "ocr-tesseract", method: "ocr_failed", ocrAttempted: true };
+    const vision = await readThinCvWithVision(buffer, ctx, cvUploadId);
+    if (vision.text) return { text: vision.text, extractionModel: vision.model, method: "vision_ocr", ocrAttempted: true };
+    return { text: pdfText || "", extractionModel: "pdf_text_thin", method: "ocr_failed", ocrAttempted: true };
   }
 
 
@@ -767,12 +755,17 @@ export async function extractText(
   }
 
   // 3. Images (PNG, JPG, JPEG, WEBP, TIFF)
-  if (type.includes("image") || type === "png" || type === "jpeg" || type === "jpg" || type === "webp" || type === "tiff") {
+  if (isImage || type.includes("image") || type === "png" || type === "jpeg" || type === "jpg" || type === "webp" || type === "tiff") {
     if (ctx && cvUploadId) {
       await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
     }
-    const visionText = await extractTextFromImage(buffer, fileType, ctx, cvUploadId);
-    return { text: visionText, extractionModel: "vision-llama32", method: "image_ocr", ocrAttempted: true };
+    const vision = await readThinCvWithVision(buffer, ctx, cvUploadId);
+    return { text: vision.text, extractionModel: vision.model || "vision_failed", method: vision.text ? "vision_ocr" : "ocr_failed", ocrAttempted: true };
+  }
+
+  // Do not decode a broken or mislabeled binary PDF as plausible text.
+  if (type === "pdf" || type === "application/pdf") {
+    return { text: "", extractionModel: "unsupported_file", method: "ocr_failed", ocrAttempted: true };
   }
 
   // 4. RTF & TXT
@@ -1233,7 +1226,7 @@ async function runCvExtractionLocked(
     candidateId = cvUpload.candidateId ?? unreadHolder?._id ?? null;
     const tTextStart = Date.now();
     await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "extracting_text" });
-    const { text: rawText, extractionModel, method: textExtractionMethod, ocrAttempted } = await extractText(buffer, fileType, !!skipLLM, ctx, cvUploadId);
+    let { text: rawText, extractionModel, method: textExtractionMethod, ocrAttempted } = await extractText(buffer, fileType, !!skipLLM, ctx, cvUploadId);
     await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, textExtractionMethod });
     t_text = Date.now() - tTextStart;
     checkDeadline("post_text_extraction");
@@ -1242,17 +1235,13 @@ async function runCvExtractionLocked(
     let trimmed = cleanedText.trim();
 
     if (trimmed.length < 50 && !ocrAttempted) {
-      console.warn(`[CvExtraction] Initial text extraction returned short text (${trimmed.length} chars < 50). Attempting Tesseract OCR fallback...`);
-      try {
-        await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
-        const tesseractText = await extractTextWithTesseract(buffer, fileType);
-        const cleanedTesseract = cleanRawText(tesseractText).trim();
-        if (cleanedTesseract.length >= 50) {
-          trimmed = cleanedTesseract;
-          console.log(`[CvExtraction] Tesseract OCR successfully extracted ${trimmed.length} chars.`);
-        }
-      } catch (tesseractErr: any) {
-        console.warn("[CvExtraction] Pre-check Tesseract OCR fallback failed:", tesseractErr?.message || tesseractErr);
+      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "ocr" });
+      const vision = await readThinCvWithVision(buffer, ctx, cvUploadId);
+      if (vision.text) {
+        trimmed = cleanRawText(vision.text).trim();
+        extractionModel = vision.model;
+        textExtractionMethod = "vision_ocr";
+        await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, textExtractionMethod });
       }
     }
 

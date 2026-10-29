@@ -36,7 +36,7 @@ export const IS_CV_EXTRACTION_TASK = (taskType: string): boolean => {
 
 export const OPENROUTER_CV_EXTRACTION_MODEL = "deepseek/deepseek-v4-flash";
 export const OPENROUTER_PRIMARY_MODEL = OPENROUTER_CV_EXTRACTION_MODEL;
-export const OPENROUTER_VISION_MODEL = "google/gemini-2.0-flash-lite-001";
+export const OPENROUTER_VISION_MODEL = "anthropic/claude-haiku-4.5";
 export const OPENROUTER_SCANNED_CV_MODEL = OPENROUTER_VISION_MODEL;
 export const OPENROUTER_FALLBACK_MODELS = [OPENROUTER_CV_EXTRACTION_MODEL];
 export const OPENROUTER_CV_FALLBACK_MODELS = [OPENROUTER_CV_EXTRACTION_MODEL];
@@ -185,9 +185,30 @@ export const NVIDIA_VISION_MODELS = [
   "meta/llama-3.2-11b-vision-instruct",
 ];
 
-export const OPENROUTER_VISION_MODELS = [
-  "google/gemini-2.0-flash-lite-001",
-];
+// Send the whole PDF so vector and font-encoded pages reach the reader too.
+export async function callHaikuVisionOCR(
+  file: { kind: "pdf" | "image"; mime: string; base64: string },
+): Promise<string> {
+  try {
+    // getOpenAI otherwise silently falls back to NVIDIA, which cannot serve Haiku.
+    if (![process.env.OPENROUTER_API_KEY, process.env.OPENROUTER_API_KEY_1, process.env.OPENROUTER_API_KEY_2, process.env.OPENROUTER_API_KEY_3, process.env.OPENROUTER_API_KEY_4, process.env.OPENROUTER_API_KEYS].some(Boolean)) return "";
+    const dataUrl = `data:${file.mime};base64,${file.base64}`;
+    const content: any[] = [
+      { type: "text", text: "Transcribe all visible text from every page accurately and verbatim in reading order. Return only the document text, with no commentary or markdown. Do not guess unclear text." },
+      file.kind === "pdf"
+        ? { type: "file", file: { filename: "cv.pdf", file_data: dataUrl } }
+        : { type: "image_url", image_url: { url: dataUrl } },
+    ];
+    const response = await getOpenAI("cv_vision_ocr", 55_000).chat.completions.create({
+      model: OPENROUTER_VISION_MODEL, messages: [{ role: "user", content }], temperature: 0.1, max_tokens: 4096,
+    });
+    if (response.choices[0]?.finish_reason === "length") return "";
+    return response.choices[0]?.message?.content?.trim() || "";
+  } catch (err: any) {
+    console.warn("[callHaikuVisionOCR] Vision OCR failed:", err?.message || String(err));
+    return "";
+  }
+}
 
 export async function callNvidiaVisionOCR(
   ctx: ActionCtx,
@@ -258,38 +279,6 @@ export async function callNvidiaVisionOCR(
     }
   } catch (err: any) {
     console.warn("[callNvidiaVisionOCR] Failed to initialize NVIDIA client:", err);
-  }
-
-  // 2. OpenRouter fallback if NVIDIA fails
-  try {
-    const openRouter = getOpenAI("cv_vision_ocr");
-    for (const model of OPENROUTER_VISION_MODELS) {
-      try {
-        console.log(`[callNvidiaVisionOCR] Fallback: Invoking OpenRouter Vision OCR model: ${model}`);
-        const response = await openRouter.chat.completions.create({
-          model,
-          messages: [
-            {
-              role: "user",
-              content: contentItems as any,
-            },
-          ],
-          temperature: 0.1,
-          max_tokens: 4096,
-        });
-
-        const extractedText = response.choices[0]?.message?.content?.trim() || "";
-        if (extractedText && extractedText.length > 10) {
-          console.log(`[callNvidiaVisionOCR] Successfully extracted ${extractedText.length} chars using OpenRouter ${model}`);
-          return extractedText;
-        }
-      } catch (err: any) {
-        lastError = err?.message || String(err);
-        console.warn(`[callNvidiaVisionOCR] OpenRouter Vision OCR failed with model ${model}: ${lastError}`);
-      }
-    }
-  } catch (err: any) {
-    lastError = err?.message || String(err);
   }
 
   await logLLMUsage(
