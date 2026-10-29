@@ -520,6 +520,13 @@ export function criteriaToParams(c: SearchCriteria): URLSearchParams {
 }
 
 /**
+ * The filters beside the results (lib/facets): Level, the experience range and
+ * the tick lists. They narrow the list on screen, so they are not part of what
+ * makes a search a different search.
+ */
+export const FILTER_PARAMS = ["lvl", "xmin", "xmax", "jt", "loc", "np", "av", "ind"];
+
+/**
  * The page's own address as it is, less the named parameters (28 Oct).
  *
  * The results page's links (page, candidate, level) used to be rebuilt from the
@@ -550,7 +557,7 @@ export function searchParamsOf(sp: SearchParams, drop: string[] = []): URLSearch
 export function resultsKeyOf(sp: SearchParams): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
-    if (["page", "candidate", "msg", "below", "lvl"].includes(k) || typeof v !== "string") continue;
+    if (["page", "candidate", "msg", "below", ...FILTER_PARAMS].includes(k) || typeof v !== "string") continue;
     p.set(k, k === "q" ? (turnsOf(v)[0] ?? "") : v);
   }
   return p.toString();

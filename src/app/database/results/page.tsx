@@ -6,7 +6,7 @@ import { assess } from "@/lib/assessment";
 import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
-import { conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, resultsKeyOf, searchParamsOf, turnsOf, withoutChip, withValue } from "@/lib/query";
+import { FILTER_PARAMS, conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, resultsKeyOf, searchParamsOf, turnsOf, withoutChip, withValue } from "@/lib/query";
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
@@ -24,8 +24,11 @@ import { isConvex } from "@/data/mode";
 import * as backend from "@/data/convex/backend";
 import type { DrawerCv } from "@/components/db/DbCandidateDrawer";
 import { keywordRetrieve } from "@/lib/retrieve";
-import { inSelectedLevels, levelOptions } from "@/lib/levels";
+import { levelOptions } from "@/lib/levels";
 import { LevelFilter } from "@/components/db/LevelFilter";
+import { FacetFilter } from "@/components/db/FacetFilter";
+import { ExperienceRange } from "@/components/db/ExperienceRange";
+import { EXPERIENCE_MAX, FACETS, anyActive, facetOptions, hiddenForUnknownYears, pickedFrom, rowMatches } from "@/lib/facets";
 import {
   cachedEngineSearch,
   deskCriteria,
@@ -448,10 +451,15 @@ async function ResultsView({
   const pickedLevels = new Set(
     (Array.isArray(sp.lvl) ? sp.lvl : sp.lvl ? [sp.lvl] : []).filter((k) => levelChoices.some((o) => o.key === k)),
   );
-  if (pickedLevels.size) {
-    results.splice(0, results.length, ...results.filter((r) => inSelectedLevels(r.candidate, pickedLevels)));
+  // The filters beside the list (lib/facets): Level, the experience range and the
+  // tick lists narrow it together, strictly; clearing them returns all of it.
+  const everyone = [...results];
+  const picked = pickedFrom(sp, pickedLevels);
+  const filtering = anyActive(picked);
+  if (filtering) {
+    results.splice(0, results.length, ...results.filter((r) => rowMatches(r, picked)));
   }
-  const total = pickedLevels.size ? results.length : foundTotal;
+  const total = filtering ? results.length : foundTotal;
   const strongReferenceMatches = referenceProfile
     ? results.filter((r) => (engineHits.get(r.candidate.id)?.score ?? 0) >= FIT_BANDS.strong).length
     : 0;
@@ -520,7 +528,7 @@ async function ResultsView({
   // When nothing comes back, name the condition responsible rather than telling
   // the TA to guess at it.
   const blockers: { label: string; found: number; href: string }[] = [];
-  if (total === 0 && mode !== "boolean" && !engineRanked) {
+  if (total === 0 && mode !== "boolean" && !engineRanked && !filtering) {
     for (const chip of describe(criteria)) {
       const relaxed = criteriaFromParams(
         Object.fromEntries(new URLSearchParams(withoutChip(criteria, chip).slice(1))),
@@ -550,6 +558,23 @@ async function ResultsView({
     for (const k of next) p.append("lvl", k);
     return `${base}?${p.toString()}`;
   };
+  // A tick list's link: this option ticked or unticked, back on page one.
+  const facetHref = (param: string, key: string) => {
+    const p = searchParamsOf(sp, ["page", "candidate", "msg", param]);
+    const next = new Set(picked.ticks.get(param));
+    next.has(key) ? next.delete(key) : next.add(key);
+    for (const k of next) p.append(param, k);
+    return `${base}?${p.toString()}`;
+  };
+  const facetClearHref = (param: string) => `${base}?${searchParamsOf(sp, ["page", "candidate", "msg", param]).toString()}`;
+  const clearFiltersHref = `${base}?${searchParamsOf(sp, ["page", "candidate", "msg", ...FILTER_PARAMS]).toString()}`;
+  const rangeRest = searchParamsOf(sp, ["page", "candidate", "msg", "xmin", "xmax"]).toString();
+  const facetBlocks = FACETS.map((f) => ({
+    facet: f,
+    options: facetOptions(f, everyone, picked).map((o) => ({ ...o, href: facetHref(f.param, o.key) })),
+  })).filter((b) => b.options.length > 0);
+  const hasYears = everyone.some((r) => r.candidate.totalExperienceYears != null);
+  const showFilters = levelChoices.length >= 2 || hasYears || facetBlocks.length > 0;
   const broaderHref = (include: boolean) => {
     const p = searchParamsOf(sp, ["page", "candidate", "msg", "below"]);
     if (include) p.set("below", "1");
@@ -673,7 +698,7 @@ async function ResultsView({
   return (
     <>
       {/* Chat on the left, results in the middle, Level on the right (28 Oct). LevelFilter hides itself under two options, so the third column only exists when it has something to show. */}
-      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${levelChoices.length >= 2 ? "xl:grid-cols-[400px_1fr_220px]" : "xl:grid-cols-[400px_1fr]"}`}>
+      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${showFilters ? "xl:grid-cols-[400px_1fr_240px]" : "xl:grid-cols-[400px_1fr]"}`}>
         <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
           <AiPanel
             criteria={criteria}
@@ -832,7 +857,17 @@ async function ResultsView({
               </div>
             )}
 
-            {shown.length === 0 ? (
+            {shown.length === 0 && filtering ? (
+              <div className="px-8 py-16 text-center">
+                <p className="text-[14px] font-medium">No one matches these filters</p>
+                <p className="mt-2 text-[12.5px] text-ink-soft">
+                  <Link href={clearFiltersHref} scroll={false} className="font-medium text-accent hover:underline">
+                    Clear the filters
+                  </Link>{" "}
+                  to see all {everyone.length.toLocaleString()} again.
+                </p>
+              </div>
+            ) : shown.length === 0 ? (
               <div className="px-8 py-16 text-center">
                 <p className="text-[14px] font-medium">{mode === "meaning" ? "Nobody relevant found" : "Nobody matches all of that"}</p>
                 {mode === "meaning" && below > 0 && (
@@ -933,9 +968,28 @@ async function ResultsView({
           <Pager page={page} pageSize={PAGE} total={total} href={pageHref} />
         </div>
 
-        {levelChoices.length >= 2 && (
-          <aside className="order-1 xl:sticky xl:top-[80px] xl:order-none">
+        {showFilters && (
+          <aside className="order-1 flex flex-col gap-3 xl:sticky xl:top-[80px] xl:order-none xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
+            {filtering && (
+              <Link href={clearFiltersHref} scroll={false} className="rounded-xl border border-brand-line bg-brand-soft px-4 py-2 text-center text-[12.5px] font-medium text-brand hover:underline">
+                Clear all filters · {results.length.toLocaleString()} of {everyone.length.toLocaleString()} shown
+              </Link>
+            )}
+            {hasYears && (
+              <ExperienceRange
+                key={picked.range ? picked.range.join("-") : "any"}
+                lo={picked.range?.[0] ?? 0}
+                hi={picked.range?.[1] ?? EXPERIENCE_MAX}
+                max={EXPERIENCE_MAX}
+                base={base}
+                rest={rangeRest}
+                hidden={hiddenForUnknownYears(everyone, picked)}
+              />
+            )}
             <LevelFilter options={levelChoices} picked={pickedLevels} hrefFor={levelHref} jobTitle={target?.title ?? null} />
+            {facetBlocks.map((b, i) => (
+              <FacetFilter key={b.facet.param} label={b.facet.label} options={b.options} clearHref={facetClearHref(b.facet.param)} open={i === 0} />
+            ))}
           </aside>
         )}
       </div>

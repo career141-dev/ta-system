@@ -81,6 +81,12 @@ Refusals and messages: no embedding key in `meaning` mode shows "No embedding ke
 
 Spotlights counts (free to approach, already being worked, can move in 30 days, placed before), Widen-the-area chips (only when the engine did not rank), `AiPanel` (current filters as removable chips, "As boolean" copy string for LinkedIn Recruiter, clarifying-question links), bulk bar (`addManyToOpening` when `for` opening is open, `DownloadCvsButton`), `DbCandidateDrawer` for `?candidate=` with prev/next and the CV via `/api/cv/[id]` (Word shown as PDF with `?view=pdf`).
 
+### 5b. Filters beside the results (29 Oct)
+
+The right-hand column (sticky, scrolls inside) holds, top to bottom: "Clear all filters · N of M shown" (only while one is on), the Experience range slider, Level, then tick lists for Job title, Location, Notice period, Availability and Industry (`src/lib/facets.ts`, `FacetFilter.tsx`, `ExperienceRange.tsx`). Params: `xmin`/`xmax` (the range, 0 to 30 where 30 is "30+"; a full-width slider writes nothing), `lvl`, `jt`, `loc`, `np`, `av`, `ind` (repeated); `FILTER_PARAMS` in `query.ts` lists them and `resultsKeyOf` ignores them, so a filter never shows the loading scene (the old list stays, then swaps).
+
+Strict: a filter hides everyone it does not match, even if that leaves one or two people; clearing it returns the list. OR within one tick list, AND across lists, the range and Level (`rowMatches`). People with no `totalExperienceYears` are hidden while the range is narrowed (the box says how many). Counts on an option are what ticking it would give with every other filter applied (`facetOptions`); Level's own counts are still over the whole list. Job title is the current title lower-cased with punctuation dropped; location is the part of `location` before the first comma; notice bands are 0-14, 15-30, 31-60, over 60, not stated; availability reads the row's `signals`. All of it is in memory over the engine's held list (up to 400), so a change is a re-render, not a search; after the 5-minute engine cache expires a filter click re-runs the search behind the old list. Spotlight counts, pager, drawer previous/next and bulk bar follow the filters. A chat reply clears them and saved searches do not keep them.
+
 ### 6. Levels
 
 Ladder in `convex/lib/roleLevel.ts` (0 Intern, 1 Junior/Associate, 2 Mid, 3 Senior, 4 Lead/Asst Manager, 5 Manager, 6 Senior Manager/Head, 7 AGM/DGM, 8 GM/VP, 9 Director/C-suite). `jobLevelRank` maps a job's `seniorityLevel` onto it (unmapped or "other" returns null, gate skipped). `levelFromTitle` is the title fallback (no level word: 2, or 1 under 2 years). `src/lib/levels.ts`: `candidateLevel` = `currentLevel` else title; `openingLevel` = requirements seniority else title; `levelOptions` counts levels (nearest the job first); `inSelectedLevels`. `LevelFilter` hides itself when under two options. Ticks live in `?lvl=` (repeated), kept through paging and the drawer; total, pager and prev/next follow the ticks. On an opening's Database CVs list `levelSectionFor(opening, candidate)` still groups under headings (this job's level, then each below, above, "Level not known").
@@ -311,13 +317,14 @@ Repo hard rules that apply: never touch the live backend from a laptop (no `conv
 - 2026-10-15 `1690586` better reference CV matching; `9cd8c5e` CV attach built into the search chat bar (`SearchBox`, `cvFile`).
 - 2026-10-20 `c0a68c7` friendly error recovery (`safeErrorMessage`).
 - 2026-10-22 `cb821c3`, `7865d66`, `5d98c89` mobile endpoints; matching state moved to `matchingSnapshot` and `src/lib/openings/matching.ts` so web and mobile share one run.
+- 2026-10-29 filters beside the results: experience range, job title, location, notice period, availability, industry (strict, in memory, no reload).
 - 2026-10-28 the full "Searching" scene no longer replays on a chat reply, a profile, a page or a level tick (links keep the address; the boundary keys on the first message).
 - 2026-10-28 years band (a bare "2 years" no longer returns 5, 10, 23 years), a pasted JD read as one message, and keyword lists and names read as such (owner: TAs rarely paste a JD).
 
 <!-- skill-meta
-verified-commit: 1def08d
+verified-commit: 87e2f1a
 verified-hash: 78a085b8341ff97ea59fb52db63b5650f070fcd6
-verified-date: 2026-10-28
+verified-date: 2026-10-29
 sources:
   src/lib/engineSearch.ts
   src/lib/dbMatch.ts
