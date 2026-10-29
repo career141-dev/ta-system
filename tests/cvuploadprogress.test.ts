@@ -48,3 +48,15 @@ test("a missed worker waits in the queue and is started when a slot frees", () =
   assert.match(source, /enterExtractionQueue/);
 });
 
+
+test("thin CVs try Haiku before NVIDIA and preserve the normal PDF path", () => {
+  const source = readFileSync(new URL("../convex/cvs/cvExtraction.ts", import.meta.url), "utf8");
+  const llm = readFileSync(new URL("../convex/lib/llm.ts", import.meta.url), "utf8");
+  const vision = source.slice(source.indexOf("async function readThinCvWithVision"), source.indexOf("export async function extractText("));
+  assert.ok(vision.indexOf("callHaikuVisionOCR") < vision.indexOf("callNvidiaVisionOCR"));
+  assert.match(vision, /cleanRawText\(text\)\.trim\(\)\.length >= 50/);
+  assert.match(vision, /HAIKU_MAX_BYTES/);
+  assert.match(source, /cleanRawText\(pdfText\)\.trim\(\)\.length >= 50/);
+  assert.match(llm, /api\/internal\/claude-cv-vision/);
+  assert.doesNotMatch(llm, /anthropic\/claude-haiku-4\.5/);
+});

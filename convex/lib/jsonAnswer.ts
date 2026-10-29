@@ -14,3 +14,21 @@ export function isCompleteJson(content: string): boolean {
     return false;
   }
 }
+
+/** An empty array or whitespace is not evidence that a CV was read (29 Oct). */
+export function hasCvDetails(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const cv = value as Record<string, unknown>;
+  const text = (v: unknown): boolean => typeof v === "string" && v.trim().length > 0;
+  return [cv.fullName, cv.email, cv.phone].some(text)
+    || (Array.isArray(cv.skills) && cv.skills.some((s) => text(s) || text(s?.value)))
+    || (Array.isArray(cv.jobHistory) && cv.jobHistory.some((j) => text(j?.company) || text(j?.title)));
+}
+
+export function hasCvDetailsJson(content: string): boolean {
+  try {
+    return hasCvDetails(JSON.parse(content.slice(content.indexOf("{"), content.lastIndexOf("}") + 1)));
+  } catch {
+    return false;
+  }
+}

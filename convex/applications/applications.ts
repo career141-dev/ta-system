@@ -352,6 +352,7 @@ export const createApplication = internalMutation({
     jobId: v.id("jobs"),
     cvFileId: v.optional(v.id("cvUploads")),
     sourceChannel: v.string(),
+    skipScoring: v.optional(v.boolean()),
     stage: v.optional(v.string()),
     metaCampaignId: v.optional(v.string()),
     metaSourceUrl: v.optional(v.string()),
@@ -387,12 +388,20 @@ export const createApplication = internalMutation({
       .first();
 
     if (existing) {
+      // 29 Oct: filing an unread CV preserves the existing workflow exactly.
+      // In particular it must not reactivate a held application or advance it.
+      if (args.skipScoring) {
+        if (args.cvFileId && existing.cvFileId !== args.cvFileId) {
+          await ctx.db.patch(existing._id, { cvFileId: args.cvFileId });
+        }
+        return existing._id;
+      }
       let updates: any = {};
       
       if (args.stage) {
         updates.currentStage = args.stage as any;
         updates.lastStageChangedAt = Date.now();
-      } else if (existing.currentStage === "new_cvs") {
+      } else if (!args.skipScoring && existing.currentStage === "new_cvs") {
         updates.currentStage = "matched_candidates" as any;
         updates.lastStageChangedAt = Date.now();
       }
@@ -443,14 +452,14 @@ export const createApplication = internalMutation({
           }
         }
         
-        if (updates.cvFileId && candidate) {
+        if (updates.cvFileId && candidate && !args.skipScoring) {
           await updateFollowUpFlags(ctx, existing._id, candidate);
           await checkAndAdvanceFollowUp(ctx, targetCandidateId);
         }
       }
 
       // Trigger AI scoring if score is missing or when adding from database / manual directory
-      if (!existing.aiMatchScore && isDatabaseOrManual) {
+      if (!args.skipScoring && !existing.aiMatchScore && isDatabaseOrManual) {
         await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
           candidateId: targetCandidateId,
           jobId: args.jobId,
@@ -461,7 +470,7 @@ export const createApplication = internalMutation({
     }
 
     const now = Date.now();
-    const initialStage = args.stage || (isDatabaseOrManual ? "matched_candidates" : "new_cvs");
+    const initialStage = args.stage || (isDatabaseOrManual && !args.skipScoring ? "matched_candidates" : "new_cvs");
     
     const appId = await ctx.db.insert("applications", {
       candidateId: targetCandidateId,
@@ -487,7 +496,7 @@ export const createApplication = internalMutation({
       metaConversionSentFor: [],
     });
 
-    if (isDatabaseOrManual) {
+    if (isDatabaseOrManual && !args.skipScoring) {
       await ctx.scheduler.runAfter(0, internal.cvs.cvScoringActions.processCvScoring, {
         candidateId: args.candidateId,
         jobId: args.jobId,

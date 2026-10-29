@@ -160,7 +160,7 @@ Outcome values: no_contact, contacted, responded, cv_received, shortlisted, decl
 - One-off migrations (run only by the pipeline with `dryRun`): `convex/ta/levelsToday2909.ts:run` (rows of 29 Sep into L1), `convex/ta/unlevelledLinks1510.ts:run` (unlevelled rows to L1, 15 Oct; takes `openingId`).
 - Next API routes: `/api/extension/capture`, `/api/extension/openings`, `/api/openings/[id]/links/export`.
 - Crons: none for this feature (verified: no linkVault/research/suggestion jobs in `convex/crons.ts`). Research/Suggestions run inside the server action or `after()` in the Next server (in-process `runningNow` lock, so it is per server instance).
-- Search providers (src/lib/serper.ts `search`): Claude WebSearch first when `C141_CLAUDE_SEARCH=on` and `CLAUDE_CODE_OAUTH_TOKEN` set (page 1 only, 60 s timeout, 2-minute process-wide pause after a failure, `C141_CLAUDE_SEARCH_MODEL`, `C141_CLAUDE_SEARCH_CONCURRENCY`), then SearXNG (`SEARXNG_URL` one or several, `SEARXNG_ENGINES` default google,bing,yahoo,duckduckgo,brave, each engine its own request and merged; `SEARXNG_CONCURRENCY` 2, `SEARXNG_MIN_GAP_MS` 700, 12 s timeout, `SEARXNG_TIMEOUT_MS`), or Serper (`SERPER_API_KEY`). `searchProvider()` returns serper | openai | searxng | null. Models: `OPENROUTER_API_KEY`, per-task overrides `C141_MODEL_RESEARCH|RANK|JD|PARSE`; `C141_CLAUDE_SUB_TASKS` can route plan/research/jd through the subscription (`viaSubscription`), `C141_CLAUDE_BIN`. Claude DB-match is a different switch (`C141_CLAUDE_MATCH`, /database-search).
+- Search providers (src/lib/serper.ts `search`): Claude WebSearch first when `C141_CLAUDE_SEARCH=on` and `CLAUDE_CODE_OAUTH_TOKEN` set (page 1 only, 60 s timeout, 2-minute process-wide pause after a failure, `C141_CLAUDE_SEARCH_MODEL`, `C141_CLAUDE_SEARCH_CONCURRENCY`), then SearXNG (`SEARXNG_URL` one or several, `SEARXNG_ENGINES` default google,bing,yahoo,duckduckgo,brave, each engine its own request and merged; `SEARXNG_CONCURRENCY` 2, `SEARXNG_MIN_GAP_MS` 700, 12 s timeout, `SEARXNG_TIMEOUT_MS`), or Serper (`SERPER_API_KEY`). `searchProvider()` returns serper | openai | searxng | null. Models: `OPENROUTER_API_KEY`, per-task overrides `C141_MODEL_RESEARCH|RANK|JD|PARSE`; `C141_CLAUDE_SUB_TASKS` can route plan/research/jd through the subscription (`viaSubscription`), `C141_CLAUDE_BIN`. Claude DB-match is a different switch (`C141_CLAUDE_MATCH`, /database-search). The shared CLI runner tolerates closed stdin; the separate owner-approved CV vision bridge is documented in /cv-extraction.
 - Kill switches: unset `C141_CLAUDE_SEARCH` (falls back to SearXNG/Serper); no provider configured -> `Generate` shows "Not set up on this system yet" and runs fail with `no_serper`. `SUGGESTIONS_WORKDAY_REQUIRED` (src/lib/workdayRequirements.ts) is a code constant (true since 15 Oct), not an env flag. `MIN_OWN_EXCEL_PROFILES = 1` (14 Oct, "temporarily").
 
 ## Access and roles
@@ -247,9 +247,9 @@ Pre-merge checklist:
 - 2026-10-26 (ef61c9c, PR #291): paste many rows from a TA's sheet into an L (cap 100).
 
 <!-- skill-meta
-verified-commit: 1def08d4
-verified-hash: fbceac47c7b5291273673932bbdd469f8657117b
-verified-date: 2026-10-28
+verified-commit: 2a1209f
+verified-hash: 995b0ed67df0241c87af77332340383ef5b13f4a
+verified-date: 2026-10-29
 sources:
   src/app/openings/[id]/hh/**
   src/app/openings/[id]/sourcingGate.ts

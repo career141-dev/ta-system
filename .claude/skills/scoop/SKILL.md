@@ -52,7 +52,7 @@ Note the route's check is `opening.act` *without* `ownerTaId`, so the collision 
 
 1. `enqueueExtraction` (`convex/cvs/cvUploads.ts`): if the upload is not already in `cvExtractionQueue` (`inExtractionQueue`, index `by_cvUploadId`), insert `{cvUploadId, args, urgent:true}` - `isUrgentUpload` (`convex/lib/extractionQueue.ts`) is true when `headhuntedBy || scoopedBy` is set. Then `startNextTurns`.
 2. `startNextTurns`: held slots = rows with `startedAt` (index `by_startedAt`, `take(100)`); `planTurns` (pure, in `extractionQueue.ts`) computes lapsed slots (held longer than `EXTRACTION_LEASE_MS = 10 min`, deleted), `free = MAX_CONCURRENT_EXTRACTIONS (3) - live`, `backgroundFree = min(free, BACKGROUND_SLOTS (2) - liveBackground)`. Urgent waiting rows (index `by_startedAt_urgent`, `startedAt` undefined, `urgent` true) start first, from all `free`; background fills what is left. Each started row gets `startedAt: now` and `scheduler.runAfter(0, internal.cvs.cvExtraction.processCvExtraction, {...row.args, leaseId})`. A scoop therefore starts at once unless three TA uploads are already being read.
-3. `processCvExtraction` (`convex/cvs/cvExtraction.ts`, see /cv-extraction) reads the CV, finds or creates the candidate, runs `createApplication` against `cvUpload.assignToJob`. After the application exists it calls `internal.ta.scoopUpload.fileScoop` at three sites: (a) the candidate already existed (duplicate-candidate branch, ~line 1204), (b) the normal new-candidate branch (~1565), (c) the "preserved despite extraction error" fallback (~1684, `score: false`). The guard everywhere is `cvUpload?.scoopedBy`.
+3. `processCvExtraction` (`convex/cvs/cvExtraction.ts`, see /cv-extraction) reads the CV (thin PDF/image text tries Haiku then NVIDIA; see /cv-extraction), finds or creates the candidate, runs `createApplication` against `cvUpload.assignToJob`. After the application exists it calls `internal.ta.scoopUpload.fileScoop` at three sites: (a) the candidate already existed (duplicate-candidate branch, ~line 1204), (b) the normal new-candidate branch (~1565), (c) the "preserved despite extraction error" fallback (~1684, `score: false`). The guard everywhere is `cvUpload?.scoopedBy`.
 4. `fileScoop` (`convex/ta/scoopUpload.ts`, `internalMutation`, args `{cvUploadId, candidateId, jobId}`): returns `{handled:false}` if the upload has no `scoopedBy`, job id does not normalise, candidate (followed through `mergedInto`) or application (`by_candidateId` + `jobId` filter) is missing. Otherwise `scoopFlag(app, Date.now(), upload.scoopFromUserId ?? null)` (`convex/lib/scoopMail.ts`) and patch the application. It does NOT set `ownerTaId`, stage or set number - on purpose: if the owner were set, the TA's own Shortlist would see "already mine" and skip the move to Follow-up. If `app.ownerTaId` exists and differs from `upload.scoopedBy`, it writes `cvUploads.routeNote = "Already shortlisted on this opening by <name>."`; the application is still flagged.
 
 `scoopFlag` rules: set `scoopReceivedAt = now` only if empty; set `scoopFromUserId` only if the application has none and one is given; returns `null` (no patch) if nothing changes. So re-uploading a known scoop never moves the date or changes the sender, but fills a blank sender.
@@ -133,7 +133,7 @@ Crons: `process-unextracted-cv-queue` (every 2 min, `crons.ts`; also registered 
 
 Next API routes: `src/app/api/scoops/upload/route.ts` (POST upload, GET status), `src/app/api/cv/upload/route.ts` (support-TA credit, via `ta/cv:attach`). HH sibling: `src/app/api/hh/upload/route.ts`.
 
-Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only matters for shared mailboxes now). No scoop-specific flag or kill switch exists. Outreach flags (`OUTREACH_LIVE`) are not involved: a scoop sends nothing to the candidate. Providers: the CV reading model via OpenRouter (see /cv-extraction; only the model the deployment serves), Convex `_storage`.
+Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only matters for shared mailboxes now). No scoop-specific flag or kill switch exists. Outreach flags (`OUTREACH_LIVE`) are not involved: a scoop sends nothing to the candidate. Providers: Haiku vision via the Claude subscription bridge for thin files, NVIDIA fallback, DeepSeek via OpenRouter for structuring (see /cv-extraction), Convex `_storage`.
 
 ## Access and roles
 
@@ -162,7 +162,7 @@ Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only
 
 - `scoop_received` notification: declared, never emitted (grep of `convex` and `src`). The 27 Sep mailbox design emitted it; the 29 Sep removal dropped the emitter but kept the literal.
 - `scoopByUserId`/`scoopAt` (support-TA credit): written by `ta/cv:attach`, projected and mapped, read by nothing that computes counts. The EOD SCOOP column uses `scoopFrom`/`scoopReceivedAt` only. The 21 Sep commit message (690a125) says it is "counted in their SCOOP column" - that is no longer true.
-- A scoop whose reading fails (`failed`/`needs_review`) never gets `scoopReceivedAt` unless extraction reached the "preserved despite error" branch; it then does not appear in the Scoops list (list filter is the flag). The failure is visible only in the upload panel/localStorage queue, which is per browser and expires after 24 h.
+- Caught reading failures, including download/short-text failures, now preserve an applicant, file the opening without scoring and call `fileScoop`; the upload remains `needs_review`. An uncaught infrastructure failure can still leave filing incomplete. The upload panel remains per browser and expires after 24 h.
 - `held` ("Not added") is shown when another TA already owns the person, but the application *is* flagged and listed; the red label overstates a refusal.
 - The sender is optional and a scoop uploaded again later can only add a missing sender, never correct a wrong one.
 - Scoops list has no date window; EOD relies on the Director send, not the list.
@@ -211,6 +211,8 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 
 ## History
 
+- 2026-10-29: unread CVs remain linked and flagged for review without implicit scoring. Fixed Try again's accidental Windows filesystem URL to `/api/scoops/upload`. Workday scope now reads today's indexed rows; its rules are unchanged. Reviewed intervening source changes (mail reply routing, sourcing and schema additions do not change Scoops).
+
 - 2026-09-21 `690a125` EOD editable L-sheet; first "scoop" fields: `applications.scoopByUserId`/`scoopAt` for a CV uploaded on someone else's candidate (support-TA credit, plan 6.4).
 - 2026-09-21 `2676699` UI fixes, Database CVs without pipeline rows (neighbour of the `"SCOOP"` database-pick channel).
 - 2026-09-25 `e590da3` EOD: sets fill to five; scoop column typed by hand because scoops arrived outside the system; database picks (TBR) no longer counted as scoops.
@@ -226,9 +228,9 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 - 2026-10-28 `d34d9a6` a scoop moved to Follow-up or Director Shortlist gets the opening's only active work location (`placeInOnlyLocation` in `ta/applications.ts`); Try again / Remove on failed scoop cards (`ta/hhUpload:retry`).
 
 <!-- skill-meta
-verified-commit: 2bf544c1
-verified-hash: 6c78f2bdb7aebc956c4ffdfb0df84759b0d8226e
-verified-date: 2026-10-28
+verified-commit: c471ec77
+verified-hash: bc4d48925a4fb892b8d45c4ca9a7163363d55c31
+verified-date: 2026-10-29
 sources:
   convex/ta/scoopUpload.ts
   convex/lib/scoopMail.ts
