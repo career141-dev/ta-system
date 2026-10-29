@@ -6,6 +6,7 @@ import { resolveRecipient } from "../lib/outreachSafety";
 import { refuseIfDoNotContact } from "../lib/doNotContact";
 import { followUpCancelledReason } from "../lib/graphMail";
 import { dailyTemplateCap, startOfUtcDay, withinTemplateBudget } from "../lib/templateBudget";
+import { TEMPLATE_NAME, templatePayload } from "../lib/whatsappTemplates";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -18,7 +19,7 @@ import { dailyTemplateCap, startOfUtcDay, withinTemplateBudget } from "../lib/te
 // Primary Career141 WhatsApp Business Phone Number ID (+94 74 219 7476).
 // An identifier rather than a credential: it names the sending number and
 // grants nothing on its own, so it stays here as a default.
-const DEFAULT_META_PHONE_ID = "965783109962872";
+export const DEFAULT_META_PHONE_ID = "965783109962872";
 
 export const sendMetaTemplate = internalAction({
   args: {
@@ -203,7 +204,7 @@ export const sendMetaTemplate = internalAction({
     const jobTitle = sanitizeParam(job.title || "the role");
 
     if (args.templateType === "initial_outreach") {
-      templateName = "career141_initial_outreach";
+      templateName = TEMPLATE_NAME.initial_outreach;
 
       // Build missing fields list
       const missingList: string[] = [];
@@ -252,7 +253,7 @@ export const sendMetaTemplate = internalAction({
 
       loggedBody = `Hi ${candidateName}, Thank you for your interest in the *${jobTitle}* role.\n\nBefore we can proceed with your application, please review the role requirements below:\n${requirementsSnippet}\n\nTo complete your application, we still require the following information:\n${missingFormatted}\n\nPlease reply directly to this chat with the requested details. Once we receive them, we'll continue with the next step of the recruitment process. Thank you!`;
     } else {
-      templateName = "career141_followup_reminder";
+      templateName = TEMPLATE_NAME.reengagement;
 
       parameters = [
         { type: "text", text: candidateName },
@@ -271,23 +272,7 @@ export const sendMetaTemplate = internalAction({
     let errorMessage = "";
 
     for (const langCode of languagesToTry) {
-      const payload = {
-        messaging_product: "whatsapp",
-        to: cleanRecipientPhone,
-        type: "template",
-        template: {
-          name: templateName,
-          language: {
-            code: langCode,
-          },
-          components: [
-            {
-              type: "body",
-              parameters: parameters,
-            },
-          ],
-        },
-      };
+      const payload = templatePayload(args.templateType, cleanRecipientPhone, parameters.map((p) => p.text), langCode);
 
       if (!phoneAllowed(cleanRecipientPhone)) {
         throw new Error(suppressed("WhatsApp template", cleanRecipientPhone));
@@ -449,7 +434,17 @@ export const countBillableTemplatesToday = internalQuery({
       .query("communications")
       .withIndex("by_channel_time", (q) => q.eq("channel", "whatsapp").gte("sentAt", args.since))
       .collect();
-    return rows.filter((r) => r.billableTemplate === true && r.direction === "outbound").length;
+    const demos = await ctx.db.query("demoTemplateSends")
+      .withIndex("by_sentAt", (q) => q.gte("sentAt", args.since)).collect();
+    return rows.filter((r) => r.billableTemplate === true && r.direction === "outbound").length + demos.length;
+  },
+});
+
+/** Only a timestamp: demo sends count toward the cap without candidate data. */
+export const logDemoTemplateSent = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.db.insert("demoTemplateSends", { sentAt: Date.now() });
   },
 });
 

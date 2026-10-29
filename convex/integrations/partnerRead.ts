@@ -6,7 +6,8 @@ import { internal } from "../_generated/api";
 
 // Every schema table must be classified as partner-readable or private.
 // Browser activity is restricted to TA Track's admin/TA lead report boundary.
-export const PARTNER_PRIVATE_TABLES = ["taTrackingDevices", "taTrackingRows"] as const;
+// Demo budget events are internal accounting, not partner recruitment data.
+export const PARTNER_PRIVATE_TABLES = ["taTrackingDevices", "taTrackingRows", "demoTemplateSends"] as const;
 export const PARTNER_READ_TABLES = [
   "dailyEmailPolicy", "dailyEmails", "dailyEmailAttachments",
   "users", "teams", "teamMembers", "jobAssignments", "openingAccessRequests", "roleAuditLog",

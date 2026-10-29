@@ -38,6 +38,7 @@ Entry points: `ta/applications:shortlist` and `ta/applications:moveStage` -> `cl
 
 - `skipAutoOutreach` is `!followUpOn(job)`. Switch ON: the move calls `initiateFollowUpOutreach(ctx, appId)` (no options = automatic) and Day 0 goes at once. Switch OFF: nothing is sent; a TA presses Send (Flow B). "Off means off" (e61e421).
 - `claimForTa` only pulls `new_cv, matched, ai_follow_up, rejected, dropped_out` into Follow-up; a candidate already at Director Review..Placed is claimed in place (ba3902f, 2 Oct).
+- On claim or manual stage move, an application with no work location inherits the opening's only active location when exactly one exists (`placeInOnlyLocation`, 28 Oct); otherwise it remains unassigned.
 - `executeStageTransition` (`convex/pipeline/pipelineStateMachine.ts`) on entering `follow_up`/`ta_shortlist` sets `followUpEnteredAt = now`; on entering any other stage calls `stopFollowUpSequenceForApp`.
 - AI route: `cvs/cvScoringActions.ts` (score >= pass mark and stage `new_cvs`) patches `currentStage: ta_shortlist` + `followUpEnteredAt` directly and calls `initiateFollowUpOutreach` with no `skipAutoOutreach` concept: it still respects the job's `agent3Enabled`/channel flags inside the helper.
 
@@ -92,7 +93,7 @@ Reminder (nudge):
 
 - Free text: `whatsappOutbound:sendWhatsApp({communicationId, candidateId, jobId, body, isReplyToCandidate?})`. Guard `followUpCancelledReason(comm, app, isReply)` (`lib/graphMail.ts`): comm `stoppedSequence` or `failed` -> "Follow-up was stopped before this message went."; unless `isReplyToCandidate`, a stage other than `follow_up`/`ta_shortlist`/`matched_candidates` -> "Cancelled: the candidate is no longer in Follow-up (<stage>)." Failed rows are marked `failed` with the reason.
 - Window guess: `hasRecentInboundComm(candidateId, 24h)` reads our own inbound WhatsApp rows. Closed -> schedules `sendMetaTemplate` with `templateType:"reengagement"` (template `career141_followup_reminder`, params name + job title; the original text is replaced by the template wording). Open -> `metaDirectSender.sendMetaFreeText`. If Meta answers 131047/131026 (`isOutsideWindowError`) the sender falls back to the reengagement template (25 Sep, 83c3d66). Meta is the authority on its window.
-- `sendMetaTemplate` order: `META_ACCESS_TOKEN` present; job must resolve (no fallback to another job); `refuseIfDoNotContact`; `followUpCancelledReason`; sender phone-number id from the job's outbound number (`getJobOutboundWhatsAppNumber`/`getMetaPhoneNumberId`, default `META_PHONE_NUMBER_ID`); candidate phone digits; `resolveRecipient("whatsapp")`; **daily cap** `dailyTemplateCap(C141_WHATSAPP_TEMPLATE_DAILY_CAP)` counts `communications` rows with `billableTemplate:true` today (UTC day, index `by_channel_time`) - over the cap: row marked failed "Not sent - the daily WhatsApp template limit of N has been reached ...", and `retryTemplateTomorrow` sets `nextFollowUpScheduledAt` to the next UTC midnight; then `phoneAllowed` (outbound lock); POST to Meta Graph v19.0 trying language `en` then `en_US` (only a 132001 error moves to the second); `logTemplateCommunication` writes status and `billableTemplate:true` only when Meta accepted.
+- `sendMetaTemplate` order: `META_ACCESS_TOKEN` present; job must resolve (no fallback to another job); `refuseIfDoNotContact`; `followUpCancelledReason`; sender phone-number id from the job's outbound number (`getJobOutboundWhatsAppNumber`/`getMetaPhoneNumberId`, default `META_PHONE_NUMBER_ID`); candidate phone digits; `resolveRecipient("whatsapp")`; **daily cap** `dailyTemplateCap(C141_WHATSAPP_TEMPLATE_DAILY_CAP)` counts `communications` rows with `billableTemplate:true` today (UTC day, index `by_channel_time`) - over the cap: row marked failed "Not sent - the daily WhatsApp template limit of N has been reached ...", and `retryTemplateTomorrow` sets `nextFollowUpScheduledAt` to the next UTC midnight; then `phoneAllowed` (outbound lock); POST to Meta Graph v19.0 trying language `en` then `en_US` (only a 132001 error moves to the second); `logTemplateCommunication` writes status and `billableTemplate:true` only when Meta accepted. Approved names and the Cloud API request body live in `lib/whatsappTemplates.ts`, shared with the Settings demo so its templates cannot drift from candidate sends.
 - `initial_outreach` params: name (candidate name with a trailing "(+94...)" stripped), job title, requirements snippet (first four `requiredSkills`, else first sentence of the JD <=140 chars, else 130-char cut), missing list joined by " | " (Meta forbids newlines/tabs/4+ spaces, hence `sanitizeParam`).
 - Number formatting: `internationalPhone()` in `lib/outreachSafety.ts` turns `07xxxxxxxx` into `94...` (`OUTREACH_DEFAULT_COUNTRY_CODE`, default 94) and strips `00`.
 
@@ -183,6 +184,7 @@ TA System stores `opening.followUpQuestions: {id,label}[]` (max 12 in the local 
 | Candidate page chat tab (`/openings/[id]/candidate/[appId]?tab=chat`) | `LiveFollowUp` (server component): checklist, automatic-status line, "Needs you: ..." when flagged, `SendToDirectorReview`, Stop, test-mode banner from `ta/followUp:gateStatus` | queries above | seat on the opening |
 | Candidate page (call tab) | `AuraCallButton`, `WebCallResults` | /voice-agent | `opening.act` |
 | Candidate page | `ReviewDetailsForm` | `saveReviewDetails` | `opening.act` |
+| `/settings?tab=demo` | `FollowUpDemo`: sample name/title, two approved WhatsApp templates, first/reminder email | `sendFollowUpDemo` -> `communications/demoSend:sendDemoWhatsApp|sendDemoEmail` | `user.manage` (admin) |
 | Local mode only | `FollowUpPanel`, `ScreeningPanel` | repo actions | n/a |
 
 Dialog button text states: `mode` from `delivery` (`deliveryMode()`): "live" -> "Send the first WhatsApp/email" / "Send follow-up N of M" / "All M sent" (disabled at `sent >= max`); "test" -> "Send to the test number/address" + warn banner; "off" -> "Record WhatsApp (not sent)" + banner "messages are recorded here but not sent, and are not counted". Failed rows show "not sent (test mode)" for `/test mode: blocked/i` errors, else "not delivered".
@@ -194,6 +196,7 @@ Tables (`convex/schema.ts`):
 - `jobs`: `agent3Enabled`, `enableWhatsAppFollowUp`, `enableEmailFollowUp`, `followUpStartsOnSend`, `maxFollowUpAttempts`, `maxFollowUpDays`, `customFollowUpQuestions` (labels), `followUpQuestions` (id+label), `followUpInitialTemplate`, `followUpSampleTemplate`, `followUpEmailSubjectTemplate`, `followUpEmailBodyTemplate`, `enableEmailFollowUpTemplate`, `whatsappAfterEmailDays`, `conversationTone`, `minMatchScoreToShow`, `primaryRecruiterId`, `status`. The template fields exist only from the CV platform; there is no TA editor. Dead agent3 fields (`agent3Day2Message`, `agent3CustomSteps`, ...) are not read by the follow-up code (unverified for other modules).
 - `candidates`: `currentSalary`, `expectedSalary`, `currentSalaryNote`, `expectedSalaryNote`, `noticePeriodDays`, `noticePeriod`, `cvUploadId`, `doNotContact`/`doNotContactReason`/`doNotContactAt`, `phone`, `phoneClean` (indexes `by_phone`, `by_phoneClean`, `by_email`).
 - `communications`: `direction`, `channel`, `subject`, `body`, `deliveryStatus` (`pending|sent|failed|delivered|read`), legacy `status`, `errorMessage`, `sentAt` (number; some old rows string), `stoppedSequence`, `sequenceDay`, `billableTemplate`, `externalMessageId`, `applicationId`. Indexes: `by_applicationId`, `by_candidate_time`, `by_channel_time`, `by_externalMessageId`.
+- `demoTemplateSends`: `sentAt` only, indexed by `by_sentAt`; included in the shared daily template count and excluded from the partner read API. No candidate or receiver data.
 - `appSettings` (key `system`): `autopilotEnabled`, `channel_toggles.{whatsappFollowUp,emailFollowUp}`, `brandName`.
 - `pipelineEvents` (`flagged_for_ta_review`, `ai_followup_replied_to_ta`, `ai_followup_no_reply_to_ta`, `ai_followup_no_contact_to_ta`, `stage_change_<stage>`), `candidateInquiries` via `communications/inquiries.ts`, cron cursors via `lib/cronCursor.ts`.
 - Not used by the live flow: `followUpSequences` (the real state lives on the application).
@@ -206,10 +209,10 @@ Convex functions (all under `convex/ta/` are internal, called with the admin key
 - `ta/followUp:send|stop|setAuto` (mutations), `ta/followUp:gateStatus` (query), `ta/outreach:followUpState|messagesFor` (queries; `optionalActor`, so no job-access check on reads: `convex/ta/guard.ts`), `ta/applications:shortlist|moveStage`, `ta/stages.ts` (pure), `ta/openings` (create with auto).
 - `pipeline/followUpHelper.ts`: `initiateFollowUpOutreach`, `stopFollowUpSequenceForApp`, `updateFollowUpFlags`, `checkAndAdvanceFollowUp`, `assignedTa`, `assignedTaEmail` (plain functions on ctx).
 - `crons.ts`: `evaluateFollowUpStage` (sweep), `sweepMove`.
-- `communications/`: `whatchimp.handleWhatChimpWebhook` (http), `whatsappOutbound` (`sendWhatsApp`, `checkAndRecordFollowUpReply`, `findCandidateByPhone`, `candidatesWithPhone`, `hasRecentInboundComm`, `recordLocalWhatsappOutbound`, `updateStatus`), `metaTemplateSender` (`sendMetaTemplate`, `logTemplateCommunication`, `countBillableTemplatesToday`, `retryTemplateTomorrow`), `metaDirectSender.sendMetaFreeText`, `emailAgent` (`pollEmailInbox`, `checkAndRecordEmailReply`, `sendFollowUpEmail`, `createOutboundEmailRecord`), `graphEmail` (`sendGraphEmail`, `replyToMessage`), `inboundExtraction` (`extractDetailsFromText`), `followUpMutations` (`scheduleDynamicFollowUp`, `clearPendingFollowUp`, `flagForTaReview`, `clearTaReviewFlag`, `updateCandidateEta`, `transitionAiFollowUpToTaFollowUp`, `resetFollowUpApp`), `contactGuard.contactRefusal`, `emailHtml`.
-- `lib/`: `followUpScope.ts`, `followUpWindow.ts`, `answered.ts`, `templateBudget.ts`, `outreachSafety.ts`, `outboundGuard.ts`, `doNotContact.ts`, `graphMail.ts`, `cronCursor.ts`.
+- `communications/`: `whatchimp.handleWhatChimpWebhook` (http), `whatsappOutbound` (`sendWhatsApp`, `checkAndRecordFollowUpReply`, `findCandidateByPhone`, `candidatesWithPhone`, `hasRecentInboundComm`, `recordLocalWhatsappOutbound`, `updateStatus`), `metaTemplateSender` (`sendMetaTemplate`, `logTemplateCommunication`, `countBillableTemplatesToday`, `retryTemplateTomorrow`), `demoSend` (`sendDemoWhatsApp`, `sendDemoEmail`), `metaDirectSender.sendMetaFreeText`, `emailAgent` (`pollEmailInbox`, `checkAndRecordEmailReply`, `sendFollowUpEmail`, `createOutboundEmailRecord`), `graphEmail` (`sendGraphEmail`, `replyToMessage`), `inboundExtraction` (`extractDetailsFromText`), `followUpMutations` (`scheduleDynamicFollowUp`, `clearPendingFollowUp`, `flagForTaReview`, `clearTaReviewFlag`, `updateCandidateEta`, `transitionAiFollowUpToTaFollowUp`, `resetFollowUpApp`), `contactGuard.contactRefusal`, `emailHtml`.
+- `lib/`: `followUpScope.ts`, `followUpWindow.ts`, `answered.ts`, `templateBudget.ts`, `whatsappTemplates.ts`, `outreachSafety.ts`, `outboundGuard.ts`, `doNotContact.ts`, `graphMail.ts`, `cronCursor.ts`.
 - HTTP routes (`convex/http.ts`): `/whatsapp`, `/api/whatsapp`, `/whatsapp-whatchimp`, `/api/whatsapp-whatchimp` (GET verification via `handleMetaVerification`, POST webhook), `/api/graph-webhook`.
-- Next side: server actions in `src/app/actions.ts` (`sendFollowUpNow`, `stopFollowUpNow`, `setOpeningAutoFollowUp`, `setOpeningQuestions`, `addOpeningQuestion`, `saveReviewDetails`), `src/data/convex/backend.ts` (`setAutoFollowUp`), API route `src/app/api/conversation/[appId]/route.ts`. No `/api/mobile` write route for follow-up send (mobile only reads alerts/openings).
+- Next side: server actions in `src/app/actions.ts` (`sendFollowUpNow`, `stopFollowUpNow`, `setOpeningAutoFollowUp`, `setOpeningQuestions`, `addOpeningQuestion`, `saveReviewDetails`) and `src/app/demoSendActions.ts` (`sendFollowUpDemo`, re-checks `user.manage`), `src/data/convex/backend.ts` (`setAutoFollowUp`), API route `src/app/api/conversation/[appId]/route.ts`. No `/api/mobile` write route for follow-up send (mobile only reads alerts/openings).
 
 Env names (never values): `OUTREACH_LIVE`, `OUTREACH_TEST_EMAIL`, `OUTREACH_TEST_PHONE`, `OUTREACH_DEFAULT_COUNTRY_CODE`, `C141_OUTBOUND_LOCK`, `C141_OUTBOUND_ALLOW_PHONES`, `C141_OUTBOUND_ALLOW_EMAILS`, `C141_WHATSAPP_TEMPLATE_DAILY_CAP`, `C141_DISABLE_CRONS`, `C141_TA_FOLLOW_UP`, `META_ACCESS_TOKEN`, `META_PHONE_NUMBER_ID`, `META_APP_SECRET`, `WHATCHIMP_PHONE_NUMBER_ID`, `MS_SENDER_EMAIL`, `OUTBOUND_EMAIL_SENDER`, `MS_GRAPH_CLIENT_STATE`, `LINKEDIN_SHARED_INBOX`. Kill switches in data: `appSettings.autopilotEnabled`, `channel_toggles`, per-opening switch, `candidates.doNotContact`.
 
@@ -225,7 +228,7 @@ Providers: Meta WhatsApp Cloud API direct (WhatChimp is only a legacy webhook na
 
 ## Invariants and safety
 
-1. Every outbound goes through `lib/outreachSafety.ts` (`resolveRecipient`; fail closed unless `OUTREACH_LIVE=true`; env only, never the DB, 15 Sep eec5052/376c8a2) and then `lib/outboundGuard.ts` (`phoneAllowed`/`emailAllowed`). Senders: `sendMetaFreeText`, `sendMetaTemplate`, `lib/graphMail.ts`. Never set `OUTREACH_LIVE` in code/config; never add a second test mode.
+1. Every outbound goes through `lib/outreachSafety.ts` (`resolveRecipient`; fail closed unless `OUTREACH_LIVE=true`; env only, never the DB, 15 Sep eec5052/376c8a2) and then `lib/outboundGuard.ts` (`phoneAllowed`/`emailAllowed`). Senders: `sendMetaFreeText`, `sendMetaTemplate`, `communications/demoSend.ts`, `lib/graphMail.ts`. Never set `OUTREACH_LIVE` in code/config; never add a second test mode. The Settings demo also calls `refuseIfDoNotContact` and returns the redirect note visibly; it never writes candidate/application state.
 2. Do-not-contact is checked at every sender and early in `initiateFollowUpOutreach`, the sweep and `extractDetailsFromText` (`communications/contactGuard.ts`, 2 Oct, 3e7f73c).
 3. Stopped messages are not counted: with no deliverable channel a round is recorded, not counted, not rescheduled (`deliverable` in the helper, 21 Sep, cbd5c06). Do not re-add counting there.
 4. Off means off: `autoFollowUpPatch(false)` clears the channel flags, and shortlist/moveStage pass `skipAutoOutreach` when `!followUpOn(job)` (18 Sep, e61e421). Do not read channel flags with a default of true without the `agent3Enabled` check.
@@ -237,7 +240,7 @@ Providers: Meta WhatsApp Cloud API direct (WhatChimp is only a legacy webhook na
 10. A CV means a file (`cvUploadId`/`cvFileId`), never `isParsed` (23 Sep, 2cde268).
 11. WhatsApp nudges are scheduled <= 23 h out (`MAX_WHATSAPP_NUDGE_HOURS`) so they stay in the free window (23 Sep, 7a084b8); Meta's 131047 overrides our window guess (25 Sep, 83c3d66).
 12. The sweep's stage moves go through `executeStageTransition` with `skipAutoOutreach` (2 Oct, fdab754); the cursor window prevents starvation.
-13. Template spend: all billable templates pass `sendMetaTemplate`, which owns the daily cap and the retry-tomorrow reschedule (2 Oct, ff9ef71). Cap day is a UTC day, not a Colombo day.
+13. Template spend: candidate templates pass `sendMetaTemplate`, which owns the daily cap and the retry-tomorrow reschedule (2 Oct, ff9ef71). The Settings demo checks the same count and records accepted sends in `demoTemplateSends` (timestamp only, no candidate/contact data); `countBillableTemplatesToday` adds these to billable candidate communications. Cap day is a UTC day, not a Colombo day. Like the candidate sender, this is a count-before-send check, not an atomic reservation across concurrent sends.
 14. Webhook auth fails closed (no `META_APP_SECRET` -> 503) (23 Sep, 36d139d).
 15. The reminder template wording replaces the text when the window is closed; keep reminders short because the real text may never arrive.
 16. Migrations that fix data (e.g. `ta/fixes2609:resetBlockedFollowUpCounts`) are `dryRun`-default internal functions run by the pipeline.
@@ -259,18 +262,24 @@ Providers: Meta WhatsApp Cloud API direct (WhatChimp is only a legacy webhook na
 - Duplicate candidate records still swallow replies in rare cases (see the warning log "candidate records share the number"); merge the duplicates.
 - `isWithinCallingHours`, AI-call retry and Day 2 tier are dead code while voice outbound is suspended.
 - Calendar rule: the live flow runs on elapsed hours/UTC day, not Colombo days or 07:00-21:00 (that exists only in `src/lib/followup.ts`).
+- The Settings demo has no candidate communication row or delivery webhook tracking: success means the provider accepted the request, not confirmed handset/inbox delivery. If its budget log fails after acceptance, the UI says it was sent and warns not to resend.
 
 ## How to change it safely
 
 Where to edit:
-- Message wording: Day 0 email -> `initialReachOutEmail` (`communications/emailHtml.ts`); reminder default text -> `followUpHelper.ts` (nudge block) and the sweep (`crons.ts`, missing list + default text) - two copies; AI reply style -> prompt in `inboundExtraction.ts`; WhatsApp templates are approved at Meta, only their parameters are in `metaTemplateSender.ts`.
+- Message wording: Day 0 email -> `initialReachOutEmail` (`communications/emailHtml.ts`); reminder default text -> `followUpHelper.ts` (nudge block) and the sweep (`crons.ts`, missing list + default text) - two copies; AI reply style -> prompt in `inboundExtraction.ts`; WhatsApp templates are approved at Meta, with their names/request shape in `lib/whatsappTemplates.ts` and candidate-specific parameters in `metaTemplateSender.ts`.
+- Approved WhatsApp name or parameter order: update `lib/whatsappTemplates.ts`, keep both the candidate sender and Settings demo on `templatePayload`, and update `tests/whatsapptemplates.test.ts`.
 - Intervals/limits: 24 h `NUDGE_RESCHEDULE_MS` in both the helper and the sweep; 15 min/60 s in `lib/followUpScope.ts`; 23 h in `lib/followUpWindow.ts`; 72 h in `inboundExtraction.ts`; 60 rows in `crons.ts`; attempts default 3 appears in `ta/followUp.ts`, `crons.ts`, `ta/outreach.ts`, `admin/followUpBacklog.ts`.
 - New required detail: update `directorReviewBlockers` (`ta/stages.ts`), `pipelineStateMachine` check (uses `expectedSalaryOnFile`/`noticePeriodOnFile`), `followUpHelper` missing lists (3 places), `updateFollowUpFlags`, `metaTemplateSender` missing list, the AI prompt, `ta/workdays.ts` details check, `ta/outreach.followUpState.collected`, `FollowUpDialog`/`LiveFollowUp` checklists, `src/lib/pipeline.ts` `directorReviewBlockers` (UI chip), docs.
 - New field on the opening/application: schema (`convex/schema.ts`) -> mapping in `convex/ta/model/tables.ts` and `convex/ta/model/projections.ts` -> `src/data/convex/map.ts` -> `src/data/types.ts` -> seed/store -> UI.
 - New channel gate: add it to `outreachSafety`/`outboundGuard`, never only to a caller.
 - Stage rule: change `ta/stages.ts` and `ALLOWED_TRANSITIONS`/gates in `pipelineStateMachine.ts` together; keep `src/lib/pipeline.ts` transitions in step.
 
-Tests (run all with `npm test`; one with `node tests/run.mjs <substring>`): `tests/followupscope.test.ts` (switch, rounds, double press), `tests/followupsweep.test.ts` (cursor window, completeness, needsReviewDetails), `tests/followupwindow.test.ts`, `tests/answered.test.ts`, `tests/templatebudget.test.ts`, `tests/windowfallback.test.ts`, `tests/replyrouting.test.ts`, `tests/stagenames.test.ts`, `tests/followup.test.ts` (local engine only), `convex/communications/__tests__/dynamicEmailFollowUp.test.ts` (ETA ceiling logic, mirrors constants, not the function). There is no test for `sendFollowUp`/the sweep body or `checkAndRecordFollowUpReply`; extend pure helpers in `convex/lib/` first and test them there. Types: `npx tsc --noEmit -p .` and `npx tsc --noEmit -p convex`.
+Tests (run all with `npm test`; one with `node tests/run.mjs <substring>`): `tests/followupscope.test.ts` (switch, rounds, double press), `tests/followupsweep.test.ts` (cursor window, completeness, needsReviewDetails), `tests/followupwindow.test.ts`, `tests/answered.test.ts`, `tests/templatebudget.test.ts`, `tests/whatsapptemplates.test.ts`, `tests/windowfallback.test.ts`, `tests/replyrouting.test.ts`, `tests/stagenames.test.ts`, `tests/followup.test.ts` (local engine only), `convex/communications/__tests__/dynamicEmailFollowUp.test.ts` (ETA ceiling logic, mirrors constants, not the function). There is no test for `sendFollowUp`/the sweep body or `checkAndRecordFollowUpReply`; extend pure helpers in `convex/lib/` first and test them there. Types: `npx tsc --noEmit -p .` and `npx tsc --noEmit -p convex`.
+
+The Settings demo takes only receiver contact details (plus optional sample name/title). Email always uses the backend sender (`OUTBOUND_EMAIL_SENDER` or `MS_SENDER_EMAIL`), not the signed-in admin's email. WhatsApp uses the main configured Meta phone ID. The result shows the actual destination and email sender.
+
+`tests/demosend.test.ts` exercises both WhatsApp templates and both emails with intercepted provider requests: redirection, do-not-contact, outbound locks, shared budget accounting, language retries, provider failure, configured email sender selection and accepted-send logging failure. It does not establish real delivery.
 
 Pre-merge checklist: tests + both type-checks pass; no new sender bypasses `resolveRecipient` and `outboundGuard`; do-not-contact still asked; any new schedule write clears or sets `nextFollowUpScheduledAt` deliberately; stage moves use `executeStageTransition`; both reply channels covered; change reflected in this skill and in `docs/` if user-facing; wording or timing changes flagged for the owner (they change what users see and what is sent to candidates).
 
@@ -290,11 +299,13 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-09-30 `46be4d3` first email is the desk's approved reach-out sent as the TA (`assignedTa`).
 - 2026-10-02 `3e7f73c` do-not-contact everywhere, AI chases only Follow-up, one inbound email = one reply, reply not stored as the next reminder; `fdab754` sweep cursor window, system moves through the state machine, Director Review's own completeness rule; `3076005` skipping Director Review needs its details; `ba3902f` Shortlist no longer pulls Director+ back, 60 s double press and 15 min same-round rules; `ff9ef71` daily billable-template cap and email-first delay; `fc5f763`/`e5d6225` collision lock on the backend, open backend closed.
 - 2026-10-05 mobile/tablet UI pass touching `LiveFollowUp` and `FollowUpDialog` (`cd3cd8d`); no behaviour change to the sequence.
+- 2026-10-29 Settings Follow-up demo for admins; the live Meta sender and demo share the approved template names and Cloud API request builder (`lib/whatsappTemplates.ts`).
+- 2026-10-29 PR #320 verified the configured demo senders and shared budget accounting; also documented the existing one-location assignment on claim/stage move. The intervening tracking-purge cron does not alter follow-up scheduling.
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: 1585e7bc587467b1cc2e69b8de387c4194153c5c
-verified-date: 2026-10-27
+verified-commit: 1194806b
+verified-hash: 989ed4aa29bc28bcb495c03dc6f72999a2c7edf8
+verified-date: 2026-10-29
 sources:
   convex/ta/followUp.ts
   convex/ta/outreach.ts
@@ -309,12 +320,14 @@ sources:
   convex/lib/followUpWindow.ts
   convex/lib/answered.ts
   convex/lib/templateBudget.ts
+  convex/lib/whatsappTemplates.ts
   convex/lib/outreachSafety.ts
   convex/lib/outboundGuard.ts
   convex/lib/graphMail.ts
   convex/lib/cronCursor.ts
   convex/communications/whatsappOutbound.ts
   convex/communications/metaTemplateSender.ts
+  convex/communications/demoSend.ts
   convex/communications/whatchimp.ts
   convex/communications/inboundExtraction.ts
   convex/communications/followUpMutations.ts
@@ -325,11 +338,17 @@ sources:
   src/components/FollowUpDialog.tsx
   src/components/LiveFollowUp.tsx
   src/components/SendToDirectorReview.tsx
+  src/app/demoSendActions.ts
+  src/app/settings/FollowUpDemo.tsx
+  src/app/settings/page.tsx
+  docs/FOLLOW-UP-DEMO.md
   src/app/api/conversation/[appId]/route.ts
   src/app/openings/[id]/pipeline/[stage]/page.tsx
   tests/followup*.test.ts
   tests/answered.test.ts
   tests/templatebudget.test.ts
+  tests/whatsapptemplates.test.ts
+  tests/demosend.test.ts
   tests/windowfallback.test.ts
   tests/replyrouting.test.ts
 -->
