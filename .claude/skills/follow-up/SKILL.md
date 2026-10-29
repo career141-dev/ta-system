@@ -38,6 +38,7 @@ Entry points: `ta/applications:shortlist` and `ta/applications:moveStage` -> `cl
 
 - `skipAutoOutreach` is `!followUpOn(job)`. Switch ON: the move calls `initiateFollowUpOutreach(ctx, appId)` (no options = automatic) and Day 0 goes at once. Switch OFF: nothing is sent; a TA presses Send (Flow B). "Off means off" (e61e421).
 - `claimForTa` only pulls `new_cv, matched, ai_follow_up, rejected, dropped_out` into Follow-up; a candidate already at Director Review..Placed is claimed in place (ba3902f, 2 Oct).
+- On claim or manual stage move, an application with no work location inherits the opening's only active location when exactly one exists (`placeInOnlyLocation`, 28 Oct); otherwise it remains unassigned.
 - `executeStageTransition` (`convex/pipeline/pipelineStateMachine.ts`) on entering `follow_up`/`ta_shortlist` sets `followUpEnteredAt = now`; on entering any other stage calls `stopFollowUpSequenceForApp`.
 - AI route: `cvs/cvScoringActions.ts` (score >= pass mark and stage `new_cvs`) patches `currentStage: ta_shortlist` + `followUpEnteredAt` directly and calls `initiateFollowUpOutreach` with no `skipAutoOutreach` concept: it still respects the job's `agent3Enabled`/channel flags inside the helper.
 
@@ -195,6 +196,7 @@ Tables (`convex/schema.ts`):
 - `jobs`: `agent3Enabled`, `enableWhatsAppFollowUp`, `enableEmailFollowUp`, `followUpStartsOnSend`, `maxFollowUpAttempts`, `maxFollowUpDays`, `customFollowUpQuestions` (labels), `followUpQuestions` (id+label), `followUpInitialTemplate`, `followUpSampleTemplate`, `followUpEmailSubjectTemplate`, `followUpEmailBodyTemplate`, `enableEmailFollowUpTemplate`, `whatsappAfterEmailDays`, `conversationTone`, `minMatchScoreToShow`, `primaryRecruiterId`, `status`. The template fields exist only from the CV platform; there is no TA editor. Dead agent3 fields (`agent3Day2Message`, `agent3CustomSteps`, ...) are not read by the follow-up code (unverified for other modules).
 - `candidates`: `currentSalary`, `expectedSalary`, `currentSalaryNote`, `expectedSalaryNote`, `noticePeriodDays`, `noticePeriod`, `cvUploadId`, `doNotContact`/`doNotContactReason`/`doNotContactAt`, `phone`, `phoneClean` (indexes `by_phone`, `by_phoneClean`, `by_email`).
 - `communications`: `direction`, `channel`, `subject`, `body`, `deliveryStatus` (`pending|sent|failed|delivered|read`), legacy `status`, `errorMessage`, `sentAt` (number; some old rows string), `stoppedSequence`, `sequenceDay`, `billableTemplate`, `externalMessageId`, `applicationId`. Indexes: `by_applicationId`, `by_candidate_time`, `by_channel_time`, `by_externalMessageId`.
+- `demoTemplateSends`: `sentAt` only, indexed by `by_sentAt`; included in the shared daily template count and excluded from the partner read API. No candidate or receiver data.
 - `appSettings` (key `system`): `autopilotEnabled`, `channel_toggles.{whatsappFollowUp,emailFollowUp}`, `brandName`.
 - `pipelineEvents` (`flagged_for_ta_review`, `ai_followup_replied_to_ta`, `ai_followup_no_reply_to_ta`, `ai_followup_no_contact_to_ta`, `stage_change_<stage>`), `candidateInquiries` via `communications/inquiries.ts`, cron cursors via `lib/cronCursor.ts`.
 - Not used by the live flow: `followUpSequences` (the real state lives on the application).
@@ -298,11 +300,12 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-10-02 `3e7f73c` do-not-contact everywhere, AI chases only Follow-up, one inbound email = one reply, reply not stored as the next reminder; `fdab754` sweep cursor window, system moves through the state machine, Director Review's own completeness rule; `3076005` skipping Director Review needs its details; `ba3902f` Shortlist no longer pulls Director+ back, 60 s double press and 15 min same-round rules; `ff9ef71` daily billable-template cap and email-first delay; `fc5f763`/`e5d6225` collision lock on the backend, open backend closed.
 - 2026-10-05 mobile/tablet UI pass touching `LiveFollowUp` and `FollowUpDialog` (`cd3cd8d`); no behaviour change to the sequence.
 - 2026-10-29 Settings Follow-up demo for admins; the live Meta sender and demo share the approved template names and Cloud API request builder (`lib/whatsappTemplates.ts`).
+- 2026-10-29 PR #320 verified the configured demo senders and shared budget accounting; also documented the existing one-location assignment on claim/stage move. The intervening tracking-purge cron does not alter follow-up scheduling.
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: 1585e7bc587467b1cc2e69b8de387c4194153c5c
-verified-date: 2026-10-27
+verified-commit: 1194806b
+verified-hash: 989ed4aa29bc28bcb495c03dc6f72999a2c7edf8
+verified-date: 2026-10-29
 sources:
   convex/ta/followUp.ts
   convex/ta/outreach.ts
@@ -337,6 +340,8 @@ sources:
   src/components/SendToDirectorReview.tsx
   src/app/demoSendActions.ts
   src/app/settings/FollowUpDemo.tsx
+  src/app/settings/page.tsx
+  docs/FOLLOW-UP-DEMO.md
   src/app/api/conversation/[appId]/route.ts
   src/app/openings/[id]/pipeline/[stage]/page.tsx
   tests/followup*.test.ts
