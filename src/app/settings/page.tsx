@@ -7,15 +7,19 @@ import { inboxHealth, mailIntakeStatus, type InboxHealth, type MailIntakeStatus 
 import { setMailboxEnabled, syncMailboxNow } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { AutoRefresh } from "./AutoRefresh";
+import { FollowUpDemo } from "./FollowUpDemo";
 import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Settings — the admin panel's switches for the platform's background work.
  *
- * One tab so far: Mailboxes, the shared inboxes (linkedin@, cv@, job@) the TA
- * System reads CVs from, and each TA's own mailbox, read only for scoops. Admins only (user.manage), the same as People and roles.
+ * Mailboxes lists the inboxes the TA System reads; Follow-up demo sends sample
+ * messages. Admins only (user.manage), the same as People and roles.
  */
-const TABS = [{ id: "mailboxes", label: "Mailboxes" }] as const;
+const TABS = [
+  { id: "mailboxes", label: "Mailboxes" },
+  { id: "demo", label: "Follow-up demo" },
+] as const;
 
 const OUTCOME: Record<NonNullable<MailIntakeStatus["recent"][number]["outcome"]>, { label: string; tone: string }> = {
   filed: { label: "Filed to opening", tone: "bg-brand-soft text-brand" },
@@ -163,6 +167,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </Link>
         ))}
       </nav>
+
+      {active === "demo" && (
+        <section className="mt-6 max-w-[720px]">
+          <h2 className="text-[16px] font-semibold">Follow-up demo</h2>
+          <p className="mb-5 mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+            Sends each automatic follow-up message once, about a sample candidate, so you can see what candidates
+            receive. Nothing is saved to anyone&rsquo;s record. While real sending is off, it goes to the test number or
+            mailbox instead, and the answer says so.
+          </p>
+          <FollowUpDemo />
+        </section>
+      )}
 
       {active === "mailboxes" && (
         <section className="mt-6">

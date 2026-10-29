@@ -1596,6 +1596,9 @@ export default defineSchema({
     // Deleting an opening removes its reservations (ta/openingDelete.ts, 2 Oct).
     .index("by_jobId", ["jobId"]),
 
+  // Demo templates cost money too, but must never be attached to a candidate.
+  demoTemplateSends: defineTable({ sentAt: v.number() }).index("by_sentAt", ["sentAt"]),
+
   communications: defineTable({
     candidateId: v.id("candidates"),
     applicationId: v.optional(v.id("applications")),
