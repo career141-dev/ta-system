@@ -7,7 +7,7 @@ import { internal } from "../_generated/api";
 import { checkAndAdvanceFollowUp, updateFollowUpFlags } from "../pipeline/followUpHelper";
 import { requireFullAccess } from "../lib/permissions";
 import { answersById } from "../lib/followUpScope";
-import { CV_FILE_KEYS, fillBlanksOnly } from "../lib/fillBlanks";
+import { CV_DETAIL_FACTS, CV_FILE_KEYS, cvDetailsPatch, fillBlanksOnly } from "../lib/fillBlanks";
 import { findSameCandidate } from "../lib/sameCandidate";
 import { replaceHeldCv } from "../cvs/cvReplace";
 import { employersTextOf } from "../lib/employers";
@@ -409,7 +409,10 @@ export const updateCandidateFields = internalMutation({
     seniorityLevel: v.optional(v.string()),
     yearsOfExperience: v.optional(v.float64()),
     industries: v.optional(v.array(v.string())),
+    currentSalary: v.optional(v.number()),
+    currentSalaryCurrency: v.optional(v.string()),
     expectedSalary: v.optional(v.number()),
+    expectedSalaryCurrency: v.optional(v.string()),
     noticePeriod: v.optional(v.string()),
     employmentStatus: v.optional(v.string()),
     skills: v.optional(v.array(v.string())),
@@ -562,11 +565,23 @@ export const updateCandidateFields = internalMutation({
     let definedPatches = Object.fromEntries(
       Object.entries(patches).filter(([_, v]) => v !== undefined)
     );
+    // Salary and notice follow their own rule, kept or replaced by a newer CV
+    // even on a replaced CV (cvDetailsPatch, 29 Oct), so they leave the bulk
+    // patch here whatever it does with the rest.
+    const cvRead: Record<string, unknown> = {};
+    for (const k of CV_DETAIL_FACTS.flat()) {
+      cvRead[k] = definedPatches[k];
+      delete definedPatches[k];
+    }
+    const held = (await ctx.db.get(targetId)) as Record<string, any> | null;
     if (keepDetails) {
       // Only the file and what was empty; the status is not reset either.
       delete definedPatches.status;
-      definedPatches = fillBlanksOnly((await ctx.db.get(targetId)) as Record<string, unknown> | null, definedPatches, CV_FILE_KEYS);
+      definedPatches = fillBlanksOnly(held, definedPatches, CV_FILE_KEYS);
     }
+    const details = cvDetailsPatch(held, cvRead, held?.cvDetailsRead);
+    Object.assign(definedPatches, details.patch);
+    if (Object.keys(details.patch).length > 0) definedPatches.cvDetailsRead = details.held;
 
     await ctx.db.patch(targetId, definedPatches);
     // One CV file per person (2 Oct): a different file of someone we already hold

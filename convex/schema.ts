@@ -1022,6 +1022,19 @@ export default defineSchema({
     expectedSalaryNote: v.optional(v.string()),
     noticePeriodDays: v.optional(v.number()),
     availability: v.optional(v.string()),
+    // What the CV itself last wrote into the salary/notice fields (29 Oct): a
+    // newer CV may replace those values while they still equal this, never a
+    // value a person changed (lib/fillBlanks cvDetailsPatch).
+    cvDetailsRead: v.optional(
+      v.object({
+        currentSalary: v.optional(v.number()),
+        currentSalaryCurrency: v.optional(v.string()),
+        expectedSalary: v.optional(v.number()),
+        expectedSalaryCurrency: v.optional(v.string()),
+        noticePeriod: v.optional(v.string()),
+        noticePeriodDays: v.optional(v.number()),
+      })
+    ),
     firstSourceChannel: v.optional(
       v.union(
         v.literal("whatsapp"),
