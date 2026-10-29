@@ -71,6 +71,11 @@ export interface WorkdayJobView {
   };
 }
 export interface WorkdayView {
+  /**
+   * A reviewer's list row: positions and requests only, no checklist. The
+   * checklist is built when the row is opened (`?checkDay=<id>`), 29 Oct.
+   */
+  summaryOnly?: boolean;
   id: string;
   userId: string;
   name: string;

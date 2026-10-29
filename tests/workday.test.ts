@@ -368,7 +368,11 @@ try {
   assert.equal(approvedCheck.completedBy, "ta");
   assert.equal((await run("dashboard", { actorId: "support" })).active.jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:")).status, "incomplete", "Another TA's approval does not confirm this TA's review");
   await run("saveCheck", { actorId: "support", jobId: "job1", kind: "jd" });
-  const leadJd = (await run("dashboard", { actorId: "lead", detail: true })).team.find((d: Row) => d.userId === "ta").jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
+  // The lead's list is a summary; the checklist is built when the day is opened (29 Oct).
+  const leadRow = (await run("dashboard", { actorId: "lead", detail: true })).team.find((d: Row) => d.userId === "ta");
+  assert.equal(leadRow.summaryOnly, true);
+  assert.equal(leadRow.jobs[0].checks.length, 0);
+  const leadJd = (await run("dashboard", { actorId: "lead", detail: true, focusWorkday: leadRow.id })).team.find((d: Row) => d.userId === "ta").jobs[0].checks.find((c: Row) => c.key.startsWith("jd_review:"));
   assert.equal(leadJd.completedAt, clock);
   assert.equal(leadJd.completedBy, "ta");
   clock += 10;

@@ -59,7 +59,7 @@ export default defineSchema({
       workLocationIds: v.optional(v.array(v.string())),
     })),
     completion: v.optional(v.any()),
-  }).index("by_user", ["userId"]).index("by_user_date", ["userId", "date"]).index("by_user_finished", ["userId", "finishedAt"]).index("by_date", ["date"]).index("by_finished", ["finishedAt"]),
+  }).index("by_user", ["userId"]).index("by_user_date", ["userId", "date"]).index("by_user_finished", ["userId", "finishedAt"]).index("by_date", ["date"]).index("by_finished", ["finishedAt"]).index("by_finished_date", ["finishedAt", "date"]),
   taWorkdayLeads: defineTable({
     workdayId: v.id("taWorkdays"),
     leadId: v.id("users"),

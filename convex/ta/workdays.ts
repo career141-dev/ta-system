@@ -856,6 +856,52 @@ async function view(
   };
 }
 
+/**
+ * A reviewer's list row for a live day: who, when, which positions, and the
+ * approval requests — no checklist. Titles come from the openings the
+ * dashboard already read; a position not among them says so.
+ */
+async function summaryView(
+  ctx: Ctx,
+  day: Doc<"taWorkdays">,
+  titles: Map<string, string>,
+): Promise<WorkdayView> {
+  const user = await ctx.db.get(day.userId);
+  const requests = await ctx.db
+    .query("taWorkdayRequests")
+    .withIndex("by_workday", (q) => q.eq("workdayId", day._id))
+    .collect();
+  const title = async (jobId: Id<"jobs">) =>
+    titles.get(jobId) ?? (await ctx.db.get(jobId))?.title ?? "Unavailable job";
+  return {
+    summaryOnly: true,
+    id: day._id,
+    userId: day.userId,
+    name: user?.fullName ?? "Unavailable user",
+    date: day.date,
+    startedAt: day.startedAt,
+    finishedAt: day.finishedAt ?? null,
+    closureReason: day.closureReason,
+    jobs: await Promise.all(day.jobs.map(async (j) => ({
+      jobId: j.jobId,
+      title: await title(j.jobId),
+      workType: j.workType,
+      checks: [],
+      shortlist: [],
+      activity: { cvReviews: 0, profilesAdded: 0, profilesWorked: 0, researchAt: null, researchActions: 0, benchmarkActions: 0, benchmarks: 0, benchmarksAdded: 0, sent: 0, emailAt: null, jdApproved: false, postConnected: false },
+    }))),
+    requests: await Promise.all(
+      requests.map(async (r) => ({
+        id: r._id,
+        jobId: r.jobId,
+        title: await title(r.jobId),
+        status: r.status,
+        reason: r.reason,
+      })),
+    ),
+  };
+}
+
 function withoutReturningTasks(day: WorkdayView): WorkdayView {
   return day;
 }
@@ -1217,12 +1263,17 @@ export const dashboard = internalQuery({
       : [];
     let recent: Doc<"taWorkdays">[] = [];
     let nextCursor: string | null = null;
+    // Reviewers see today's open days by default, not every day never closed.
+    // Each open day was rebuilt live on every 20 s poll, and stale ones from
+    // earlier dates were part of what timed the panel out (29 Oct). Older
+    // days are still in the page below and under the Day filter.
+    const today = workdayDate(now);
     if (review && !args.date && !args.focusWorkday) {
       if (deskWide) {
         const [working, page] = await Promise.all([
           ctx.db
             .query("taWorkdays")
-            .withIndex("by_finished", (q) => q.eq("finishedAt", undefined))
+            .withIndex("by_finished_date", (q) => q.eq("finishedAt", undefined).eq("date", today))
             .take(100),
           ctx.db.query("taWorkdays").order("desc").paginate({ cursor: args.cursor ?? null, numItems: 20 }),
         ]);
@@ -1248,8 +1299,9 @@ export const dashboard = internalQuery({
           ...new Set([...working, ...page.page].map((d) => d.workdayId)),
         ];
         nextCursor = page.isDone ? null : page.continueCursor;
+        const paged = new Set(page.page.map((d) => d.workdayId as string));
         recent = (await Promise.all(ids.map((id) => ctx.db.get(id)))).filter(
-          (d): d is Doc<"taWorkdays"> => !!d,
+          (d): d is Doc<"taWorkdays"> => !!d && (d.date === today || paged.has(d._id)),
         );
       }
     }
@@ -1281,6 +1333,7 @@ export const dashboard = internalQuery({
         return users.filter((ta): ta is Doc<"users"> => !!ta && ta.isActive && ["ta", "ta_support"].includes(roleOf(ta)))
           .map(ta => ({ userId: ta._id, name: mapUser(ta).name, jobId: job._id, title: job.title }));
       })) : [];
+    const titles = new Map(reviewJobs.map((job) => [job._id as string, job.title]));
     const team: WorkdayView[] = [];
     // Notification links can target older workdays outside the current page.
     // The normal per-job visibility checks below still apply.
@@ -1306,15 +1359,22 @@ export const dashboard = internalQuery({
       if (!visibleJobs.length && !visibleRequests.length) continue;
       // Reviewers can inspect all teams; management rights remain per job.
       const scoped = { ...day, jobs: visibleJobs, completion: undefined };
+      const stored = day.finishedAt !== undefined && day.completion && !(day.closureReason === "eod" && day.date === workdayDate(now));
+      // A live day is listed as a summary; its checklist (about 45 reads per
+      // position) is built only when a reviewer opens it, through
+      // focusWorkday. Building every open day × position on every poll, for
+      // every lead and admin, was the heaviest read on the desk (29 Oct).
       const result =
-        day.finishedAt !== undefined && day.completion && !(day.closureReason === "eod" && day.date === workdayDate(now))
+        stored
           ? {
               ...(day.completion as WorkdayView),
               jobs: (day.completion as WorkdayView).jobs.filter((j) =>
                 visibleJobs.some((v) => v.jobId === j.jobId),
               ),
             }
-          : await view(ctx, scoped, now, true);
+          : args.focusWorkday
+            ? await view(ctx, scoped, now, true)
+            : await summaryView(ctx, scoped, titles);
       result.requests = result.requests.filter((r) =>
         visibleRequests.some((v) => v._id === r.id),
       );

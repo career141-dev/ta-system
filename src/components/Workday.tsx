@@ -110,7 +110,7 @@ function useSavedChoice(key: string, initial = "") {
   return [value, save] as const;
 }
 
-function SavedDetails({ id, title, children, initiallyOpen = true }: { id: string; title: React.ReactNode; children: React.ReactNode; initiallyOpen?: boolean }) {
+function SavedDetails({ id, title, children, initiallyOpen = true, whileOpen }: { id: string; title: React.ReactNode; children?: React.ReactNode; initiallyOpen?: boolean; whileOpen?: () => React.ReactNode }) {
   const [open, save] = useSavedChoice(`workday-open:${id}`, initiallyOpen ? "yes" : "no");
   const params = useSearchParams();
   const requestedJob = `${params.get("checkDay")}:${params.get("checkJob")}`;
@@ -121,7 +121,7 @@ function SavedDetails({ id, title, children, initiallyOpen = true }: { id: strin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, requestedJob, requestedTask]);
   return <details open={open === "yes"} onToggle={e => { const value = e.currentTarget.open ? "yes" : "no"; if (value !== open) save(value); }} className="min-w-0 rounded-lg border border-rule p-3">
-    <summary className="cursor-pointer text-sm font-semibold">{title}</summary><div className="mt-3 space-y-3">{children}</div>
+    <summary className="cursor-pointer text-sm font-semibold">{title}</summary><div className="mt-3 space-y-3">{open === "yes" && whileOpen?.()}{children}</div>
   </details>;
 }
 
@@ -610,6 +610,25 @@ function DailyReview({
  * every 20 s — the heaviest read on the desk (29 Oct freeze). Opening it
  * loads at once.
  */
+/**
+ * One team day's checklist, built when its row is opened (29 Oct). The list
+ * itself carries only names and positions; this asks for the one day, and
+ * keeps it fresh only while the row stays open.
+ */
+function TeamDayChecks({ day, canManage, jobFilter, status }: { day: WorkdayView; canManage: boolean; jobFilter: string; status: string }) {
+  const { data, error } = useWorkday(true, true, `&checkDay=${encodeURIComponent(day.id)}`);
+  const full = data?.team.find((d) => d.id === day.id);
+  if (error && !full) return <p className="text-sm text-danger">{error}</p>;
+  if (!full) return <p className="text-sm text-ink-soft">Loading {day.jobs.length === 1 ? "this position's" : "these positions'"} checks…</p>;
+  const shown = {
+    ...full,
+    jobs: full.jobs
+      .filter((job) => !jobFilter || job.jobId === jobFilter)
+      .map((job) => ({ ...job, checks: job.checks.filter((c) => !status || (c.exception ? "excused" : c.waiting ? "waiting" : c.status ?? "incomplete") === status) })),
+  };
+  return <DailyReview day={shown} reviewer canManage={canManage} />;
+}
+
 export function WorkdayDashboard({ active = true }: { active?: boolean }) {
   const [date, setDate] = useSavedChoice("workday-date", workdayDate(Date.now()));
   const [ta, setTa] = useSavedChoice("workday-ta");
@@ -735,8 +754,8 @@ export function WorkdayDashboard({ active = true }: { active?: boolean }) {
             </p>
           )}
           {team.map((day) => (
-            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={!!ta} title={<>{day.name} · {day.date} · {day.closureReason === "expired" ? "Incomplete (expired)" : day.finishedAt ? "Finished" : "Working"}</>}>
-              <DailyReview day={day} reviewer canManage={data.canLead} />
+            <SavedDetails key={day.id} id={`team:${day.id}`} initiallyOpen={!!ta} whileOpen={day.summaryOnly ? () => <TeamDayChecks day={day} canManage={data.canLead} jobFilter={focus?.job || jobFilter} status={focus ? "" : status} /> : undefined} title={<>{day.name} · {day.date} · {day.closureReason === "expired" ? "Incomplete (expired)" : day.finishedAt ? "Finished" : "Working"}{day.summaryOnly && day.jobs.length > 0 && <span className="font-normal text-ink-soft"> · {day.jobs.map((job) => job.title).join(", ")}</span>}</>}>
+              {!day.summaryOnly && <DailyReview day={day} reviewer canManage={data.canLead} />}
               {data.canLead && day.finishedAt === null &&
                 day.requests
                   .filter((r) => r.status === "pending" && r.canManage !== false)
