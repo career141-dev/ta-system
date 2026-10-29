@@ -36,20 +36,12 @@ export const IS_CV_EXTRACTION_TASK = (taskType: string): boolean => {
 
 export const OPENROUTER_CV_EXTRACTION_MODEL = "deepseek/deepseek-v4-flash";
 export const OPENROUTER_PRIMARY_MODEL = OPENROUTER_CV_EXTRACTION_MODEL;
-export const OPENROUTER_VISION_MODEL = "anthropic/claude-haiku-4.5";
-export const OPENROUTER_SCANNED_CV_MODEL = OPENROUTER_VISION_MODEL;
 export const OPENROUTER_FALLBACK_MODELS = [OPENROUTER_CV_EXTRACTION_MODEL];
 export const OPENROUTER_CV_FALLBACK_MODELS = [OPENROUTER_CV_EXTRACTION_MODEL];
-export const OPENROUTER_VISION_FALLBACK_MODELS = [
-  OPENROUTER_VISION_MODEL,
-];
 export const NVIDIA_PRIMARY_MODEL = "meta/llama-3.3-70b-instruct";
 export const NVIDIA_FALLBACK_MODEL = "meta/llama-3.3-70b-instruct";
 
-export function getModelForTask(taskType: TaskType | string): string {
-  if (taskType === "cv_vision_ocr") {
-    return OPENROUTER_VISION_MODEL;
-  }
+export function getModelForTask(_taskType: TaskType | string): string {
   return OPENROUTER_CV_EXTRACTION_MODEL;
 }
 
@@ -185,27 +177,21 @@ export const NVIDIA_VISION_MODELS = [
   "meta/llama-3.2-11b-vision-instruct",
 ];
 
-// Send the whole PDF so vector and font-encoded pages reach the reader too.
-export async function callHaikuVisionOCR(
-  file: { kind: "pdf" | "image"; mime: string; base64: string },
-): Promise<string> {
+// The subscription CLI is in the app container, reached through its authenticated bridge.
+export async function callHaikuVisionOCR(file: { kind: "pdf" | "image"; mime: string; base64: string }): Promise<string> {
+  const base = (process.env.C141_APP_INTERNAL_URL ?? "").trim().replace(/\/+$/, "");
+  const secret = (process.env.C141_CLAUDE_BRIDGE_SECRET ?? "").trim();
+  if (!base || secret.length < 16) return "";
   try {
-    // getOpenAI otherwise silently falls back to NVIDIA, which cannot serve Haiku.
-    if (![process.env.OPENROUTER_API_KEY, process.env.OPENROUTER_API_KEY_1, process.env.OPENROUTER_API_KEY_2, process.env.OPENROUTER_API_KEY_3, process.env.OPENROUTER_API_KEY_4, process.env.OPENROUTER_API_KEYS].some(Boolean)) return "";
-    const dataUrl = `data:${file.mime};base64,${file.base64}`;
-    const content: any[] = [
-      { type: "text", text: "Transcribe all visible text from every page accurately and verbatim in reading order. Return only the document text, with no commentary or markdown. Do not guess unclear text." },
-      file.kind === "pdf"
-        ? { type: "file", file: { filename: "cv.pdf", file_data: dataUrl } }
-        : { type: "image_url", image_url: { url: dataUrl } },
-    ];
-    const response = await getOpenAI("cv_vision_ocr", 55_000).chat.completions.create({
-      model: OPENROUTER_VISION_MODEL, messages: [{ role: "user", content }], temperature: 0.1, max_tokens: 4096,
+    const response = await fetch(`${base}/api/internal/claude-cv-vision`, {
+      method: "POST", headers: { "content-type": "application/json", "x-c141-secret": secret },
+      body: JSON.stringify(file), signal: AbortSignal.timeout(55_000),
     });
-    if (response.choices[0]?.finish_reason === "length") return "";
-    return response.choices[0]?.message?.content?.trim() || "";
+    if (!response.ok) return "";
+    const result = await response.json() as { ok?: boolean; text?: unknown };
+    return result.ok && typeof result.text === "string" ? result.text.trim() : "";
   } catch (err: any) {
-    console.warn("[callHaikuVisionOCR] Vision OCR failed:", err?.message || String(err));
+    console.warn(`[callHaikuVisionOCR] Subscription bridge unavailable: ${err?.name || "error"}`);
     return "";
   }
 }

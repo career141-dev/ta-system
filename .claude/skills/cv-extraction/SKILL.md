@@ -87,7 +87,7 @@ UI translation of stage -> label/percent/estimate is `convex/lib/cvUploadProgres
 2. `updateCvUpload {status:"processing", processingStage:"downloading", countAttempt:true}`; `ingestionLog` stage `parsing` when `logId`.
 3. Download (above), sha256 (`fileHash`).
 4. **Duplicate file shortcut**: `candidates:findCandidateByHash` (`by_fileHash`). If a holder exists and is NOT an unread profile (`isParsed===false && !mergedInto && !skipLLM`, a730c71 26 Oct) the run does not read: row -> `processed`, `candidateId`=holder, `cvReplace:reuseFile` (point this row at the already-held file and delete this copy), create application on `assignToJob` (`applications:createApplication`), schedule `processCvScoring`, `filePosts`, `hhUpload:fileHeadhunt` / `scoopUpload:fileScoop` when flagged, batch/log updates, stage `completed`. An unread holder is instead read into that same profile (keeps its application and stage).
-5. **Text** (`extractText`): PDF -> `extractTextFromPdf` (pdf.js, pdf2json, raw stream); if cleaned text is >=50 chars use `pdf_text`. Otherwise `ocr` sends the whole PDF (up to 8 MiB) to OpenRouter `anthropic/claude-haiku-4.5`; JPEG/PNG/WebP use an image part, detected even when mislabeled as PDF. If Haiku fails, is cut off or yields <50 cleaned chars, NVIDIA Llama 3.2 11B vision tries embedded PDF images (up to five pages) or the original image. This fallback does not render vector pages. Each reader is bounded by `within`. Successful vision uses `method vision_ocr`; DeepSeek structuring follows. Tesseract is an unused stub. DOCX uses mammoth; image-only DOCX has no vision conversion and goes to review. RTF and text use their existing readers. `textExtractionMethod` is stored on the row.
+5. **Text** (`extractText`): PDF -> `extractTextFromPdf` (pdf.js, pdf2json, raw stream); if cleaned text is >=50 chars use `pdf_text`. Otherwise `ocr` sends the whole PDF (up to 8 MiB) through the authenticated app bridge to the Claude Code subscription (`claude-haiku-4-5-20251001`); JPEG/PNG/WebP use an image part, detected even when mislabeled as PDF. If Haiku fails, is cut off or yields <50 cleaned chars, NVIDIA Llama 3.2 11B vision tries embedded PDF images (up to five pages) or the original image. This fallback does not render vector pages. Each reader is bounded by `within`. Successful vision uses `method vision_ocr`; DeepSeek structuring follows. Tesseract is an unused stub. DOCX uses mammoth; image-only DOCX has no vision conversion and goes to review. RTF and text use their existing readers. `textExtractionMethod` is stored on the row.
 6. `cleanRawText` (strips control/box chars, page numbers, lines repeated >=3 times). `<50` chars after cleaning throws into the common review handler, which preserves the applicant and job links and completes batch accounting. Cap 150,000 chars (`MAX_RAW_TEXT_LENGTH`) goes to R2.
 7. Candidate target: `readInto = cvUpload.candidateId ?? unreadHolder._id`; otherwise create a stub with `isParsed:false`. Raw text is stored in R2 but not linked to a candidate until structuring succeeds; a held person's verified text/hash remain unchanged on failure. Row now holds `candidateId`.
 8. **Structuring** (`callOpenRouterLLM`): stage `structuring`. Only the first **16,000 chars** (cut at last whitespace) go to the model through `lib/llm.ts:executeLLMWithNvidiaFallback("cv_structuring")`: OpenRouter `deepseek/deepseek-v4-flash` (`OPENROUTER_CV_EXTRACTION_MODEL`), 2 tries x 75 s, back-off 2 s, `temperature 0`, `max_tokens 8192`, `response_format json_object`, DeepSeek reasoning off (`reasoning:{enabled:false}`, OpenRouter only; its thinking used to eat `max_tokens` and cut the JSON, 28 Oct); a JSON-mode answer that does not parse (`lib/jsonAnswer.ts:isCompleteJson`) counts as a failed try, so the second try and the fallback run; then NVIDIA `meta/llama-3.3-70b-instruct` 1 try. Prompt rules (edit the system message in `callOpenRouterLLM`): not-a-CV -> `{}`; null for unknown, never guess; skills `{value,confidence}`; jobHistory with per-job confidence; current title/employer inferred from most recent job; referees listed; gender only if stated or titled/pronoun for the candidate (never from name/photo); email/phone are the candidate's own only (never agency, referee, office, family, 1 Oct 59d0d0a).
@@ -174,7 +174,7 @@ Two independent readers:
 - HTTP (`convex/http.ts`): WhatsApp webhooks `/api/whatsapp`, `/whatsapp`, `/api/whatsapp-whatchimp`, `/whatsapp-whatchimp` (media -> `processInboundCV`); partner `/integrations/v1/cv/uploads`, `/integrations/v1/cv/uploads/complete`, `/integrations/v1/cv/` GET. Next routes: `/api/cv/upload`, `/api/cv/[candidateId]`, `/api/cv/zip`, `/api/cv/reference`, `/api/hh/upload`, `/api/scoops/upload`, `/api/prepared-cv/[appId]`, mobile `.../pipeline/cv-upload`.
 - Crons: see section 7 and section 4.
 - Env names: `R2_BUCKET_NAME, R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY` (`ta/storage:r2Configured` reports them), `OPENROUTER_API_KEY, OPENROUTER_API_KEY_1..4, OPENROUTER_API_KEYS`, `NVIDIA_API_KEY`, `WHATSAPP_CLOUD_API_TOKEN`, `C141_OUTBOUND_LOCK` (bucket writes/deletes), `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_POST_ROUTING`, `C141_TA_INTAKE`, `C141_MAIL_INTAKE`, `SOFFICE_PATH`, `SOFFICE_SLOTS` (Next side), `NEXT_PUBLIC_CONVEX_URL/CONVEX_SELF_HOSTED_URL/CONVEX_URL` (storage URL rewrite in `getCvUploadUrl`). No dedicated kill switch for extraction itself: pause a channel with `appSettings.channel_toggles.whatsappIngestion|emailIngestion=false` (rows become `paused`).
-- Providers: OpenRouter (DeepSeek v4 flash, Gemini flash-lite vision), NVIDIA NIM (llama 3.3 70b fallback, llama 3.2 vision, embeddings in `generateNvidiaEmbedding`, which extraction no longer calls), Cloudflare R2, Qdrant (via /database-search), Meta Graph (media download), LibreOffice (`soffice`, in the app image) for Word to PDF.
+- Providers: Claude Code subscription (Haiku vision via the authenticated app bridge, explicitly approved for full CVs), OpenRouter (DeepSeek v4 flash), NVIDIA NIM (llama 3.3 70b fallback, llama 3.2 vision, embeddings in `generateNvidiaEmbedding`, which extraction no longer calls), Cloudflare R2, Qdrant (via /database-search), Meta Graph (media download), LibreOffice (`soffice`, in the app image) for Word to PDF.
 
 ## Access and roles
 
@@ -201,7 +201,7 @@ Two independent readers:
 
 ## Known quirks, gaps and unverified items
 
-- Tesseract is stubbed and not called. Haiku reads whole PDFs and JPEG/PNG/WebP images; model access and accuracy require local verification. NVIDIA sees only embedded PDF images. Unsupported or image-only DOCX files and vision failures go to review.
+- Tesseract is stubbed and not called. Haiku reads whole PDFs and JPEG/PNG/WebP images; the CLI document input, subscription access and accuracy require local verification. NVIDIA sees only embedded PDF images. Unsupported or image-only DOCX files and vision failures go to review.
 - Legacy binary `.doc` is sent to mammoth (docx only) when the type says doc: likely fails (unverified).
 - Referees come from the first 16,000 characters only; `refereeWindow.ts` is dead code outside its test. Referees are read twice for a replaced CV (backend `onlyIfNone` and Next `extractAndSaveReferees`).
 - `updateCandidateFields` sets `hasEmbedding:true` before the Qdrant upsert; an embedding failure leaves a flag that lies.
@@ -259,8 +259,8 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` or any 
 - 2026-10-28 DeepSeek reasoning off for CV tasks + cut-off JSON retried ("not readable JSON (323 characters)"); Try again / Remove on failed HH and Scoop cards.
 
 <!-- skill-meta
-verified-commit: 0a25b7d
-verified-hash: f4e36b35298dbbe7bcd715ff62ccfe546a9be25e
+verified-commit: 2a1209f
+verified-hash: a0e1aae9f0742ce4ef219d3e3e9fbdbdf4be4676
 verified-date: 2026-10-29
 sources:
   src/components/HhUpload.tsx
@@ -287,6 +287,10 @@ sources:
   convex/lib/fillBlanks.ts
   convex/lib/sameCandidate.ts
   convex/lib/llm.ts
+  src/lib/claudeCvVision.ts
+  src/lib/claudeSub.ts
+  src/app/api/internal/claude-cv-vision/route.ts
+  tests/cvvision.test.ts
   convex/lib/refereeCheck.ts
   convex/storage/r2.ts
   convex/ta/cv.ts

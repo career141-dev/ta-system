@@ -57,8 +57,6 @@ test("thin CVs try Haiku before NVIDIA and preserve the normal PDF path", () => 
   assert.match(vision, /cleanRawText\(text\)\.trim\(\)\.length >= 50/);
   assert.match(vision, /HAIKU_MAX_BYTES/);
   assert.match(source, /cleanRawText\(pdfText\)\.trim\(\)\.length >= 50/);
-  assert.match(llm, /anthropic\/claude-haiku-4\.5/);
-  assert.match(llm, /type: "file"/);
-  assert.match(llm, /finish_reason === "length"/);
-  assert.doesNotMatch(llm, /google\/gemini-2\.0-flash-lite-001/);
+  assert.match(llm, /api\/internal\/claude-cv-vision/);
+  assert.doesNotMatch(llm, /anthropic\/claude-haiku-4\.5/);
 });

@@ -133,7 +133,7 @@ Crons: `process-unextracted-cv-queue` (every 2 min, `crons.ts`; also registered 
 
 Next API routes: `src/app/api/scoops/upload/route.ts` (POST upload, GET status), `src/app/api/cv/upload/route.ts` (support-TA credit, via `ta/cv:attach`). HH sibling: `src/app/api/hh/upload/route.ts`.
 
-Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only matters for shared mailboxes now). No scoop-specific flag or kill switch exists. Outreach flags (`OUTREACH_LIVE`) are not involved: a scoop sends nothing to the candidate. Providers: the CV reading model via OpenRouter (see /cv-extraction; only the model the deployment serves), Convex `_storage`.
+Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only matters for shared mailboxes now). No scoop-specific flag or kill switch exists. Outreach flags (`OUTREACH_LIVE`) are not involved: a scoop sends nothing to the candidate. Providers: Haiku vision via the Claude subscription bridge for thin files, NVIDIA fallback, DeepSeek via OpenRouter for structuring (see /cv-extraction), Convex `_storage`.
 
 ## Access and roles
 
@@ -228,8 +228,8 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 - 2026-10-28 `d34d9a6` a scoop moved to Follow-up or Director Shortlist gets the opening's only active work location (`placeInOnlyLocation` in `ta/applications.ts`); Try again / Remove on failed scoop cards (`ta/hhUpload:retry`).
 
 <!-- skill-meta
-verified-commit: 0a25b7d
-verified-hash: 6761322c169882fb998bb4c555f7359cf02a1e89
+verified-commit: 2a1209f
+verified-hash: 19b2b81a3fb8d3dc4e0a9439ae36f35466834c65
 verified-date: 2026-10-29
 sources:
   convex/ta/scoopUpload.ts
