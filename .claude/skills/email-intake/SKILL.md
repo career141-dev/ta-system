@@ -277,6 +277,8 @@ Repo rules that apply: never run `convex deploy/run/import/env set` against live
 
 ## History
 
+- 2026-10-29: CV failure filing preserves applicants and uses `createApplication(skipScoring:true)`; `pipeline/postFiling.filePosts(score:false)` propagates that guard to every additional opening. No implicit scoring, reactivation or stage advancement for an unread upload; see /cv-extraction.
+
 - 2026-09-16 `084acca` read-only Graph mail intake for linkedin@, cv@, job@: delta sync every 5 min, 20-min grace, Settings > Mailboxes. `9df2be6`: follow-ups sent from the assigned TA's mailbox; EOD via Graph. Trial on staging read 11,207 messages.
 - 2026-09-17 `f04349a` file only new mail (`backfillFrom` = switch-on), titles match whole/start/head only (169 wrongly filed to "Sales Manager"). `ee9b983` leave existing applications where they are. `50d9039`, `88136b6` clean up the trial (`repair.ts`).
 - 2026-09-18 `184d2ef` a candidate's reply on job@ is read, not closed as "No CV"; `7ca148c` the assistant's answer is not cancelled by the advance it causes.
@@ -292,8 +294,8 @@ Repo rules that apply: never run `convex deploy/run/import/env set` against live
 - 2026-10-26 `5ed2893`, `f7aaab4`, `2b9c52f`, `5bd92af` `setCvs.ts`: CVs a TA put forward by email are filed onto their opening.
 
 <!-- skill-meta
-verified-commit: c2aa0274
-verified-hash: 7cbf1cfe1ec2e8c268f25f5b259d47fb2bdb20f6
+verified-commit: 8bb1c684
+verified-hash: b312bddb383565030f04c06fa2145ebcf6f1f04f
 verified-date: 2026-10-29
 sources:
   convex/mailIntake/**

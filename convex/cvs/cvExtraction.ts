@@ -1,5 +1,7 @@
 "use node";
 
+import { hasCvDetails } from "../lib/jsonAnswer";
+
 if (typeof process !== "undefined" && process.on) {
   process.on("uncaughtException", (err) => {
     console.warn("[CvExtraction] Trapped uncaught exception in Node worker process:", err?.message || err);
@@ -970,27 +972,23 @@ JSON Target Schema:
     const parsed = parseJsonRobustly(content);
     if (!parsed) return fail(`${after}gave an answer that is not readable JSON (${content.length} characters — likely cut off)`);
 
-    if (Object.keys(parsed).length === 0 || (!parsed.fullName && !parsed.email && !parsed.phone && !parsed.skills && !parsed.jobHistory)) {
-      // Only the primary model's "not a CV" is trusted. The fallback is reached
-      // when the primary failed, and it answers an empty object for real CVs;
-      // treating that as a verdict deleted real applicants (17 September).
-      if (provider === "nvidia") return fail(`${after}found no candidate details`);
-      throw new Error("NOT_A_CV");
+    if (!hasCvDetails(parsed)) {
+      // 29 Oct: an empty answer is a failed reading, never grounds to delete an applicant.
+      return fail(`${after}found no candidate details; the file needs review`);
     }
 
     const checked = cvExtractionSchema.safeParse(parsed);
-    if (checked.success) return checked.data;
+    if (checked.success) return hasCvDetails(checked.data) ? checked.data : fail(`${after}found no usable candidate details`);
     // One malformed field must not cost the whole CV — name, contact and the
     // rest are kept, and only the fields that do not fit are left empty.
     const bad = [...new Set(checked.error.issues.map((i) => String(i.path[0])))];
     console.warn(`[callOpenRouterLLM] Dropped malformed field(s) ${bad.join(", ")}:`, checked.error.issues.slice(0, 3));
     const kept = cvExtractionSchema.safeParse(Object.fromEntries(Object.entries(parsed).filter(([k]) => !bad.includes(k))));
-    if (kept.success) return kept.data;
+    if (kept.success) return hasCvDetails(kept.data) ? kept.data : fail(`${after}found no usable candidate details`);
     const issue = kept.error.issues[0];
     return fail(`${after}gave details in the wrong shape (${issue.path.join(".")}: ${issue.message})`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (message === "NOT_A_CV") throw error;
     console.error("[callOpenRouterLLM] CV extraction failed on primary and fallback LLM:", message);
     return fail(`no AI model answered: ${message.slice(0, 200)}`);
   }
@@ -1112,9 +1110,7 @@ async function runCvExtractionLocked(
     });
   }
 
-  let candidateId: any = null;
-  // Whether this run made the candidate row, so a rejected document can take it away again.
-  let createdStub = false;
+  let candidateId: any = cvUpload.candidateId ?? null;
 
   try {
     let url: string | null = null;
@@ -1233,6 +1229,8 @@ async function runCvExtractionLocked(
       return existingCandidate._id;
     }
 
+    // A re-read that fails before structuring still belongs to the same person.
+    candidateId = cvUpload.candidateId ?? unreadHolder?._id ?? null;
     const tTextStart = Date.now();
     await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, processingStage: "extracting_text" });
     const { text: rawText, extractionModel, method: textExtractionMethod, ocrAttempted } = await extractText(buffer, fileType, !!skipLLM, ctx, cvUploadId);
@@ -1259,22 +1257,7 @@ async function runCvExtractionLocked(
     }
 
     if (trimmed.length < 50) {
-      console.warn(`[CvExtraction] Extracted text is too short (${trimmed.length} chars < 50 threshold). Flagging upload ${cvUploadId} for human review (needs_review).`);
-      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
-        cvUploadId,
-        status: "needs_review",
-        processingStage: "needs_review",
-        completedAt: Date.now(),
-        errorMessage: `Low-confidence OCR text (${trimmed.length} chars < 50 threshold). Tesseract failed or produced thin text. Flagged for manual TA human review.`,
-      });
-      if (args.logId) {
-        await ctx.runMutation(internal.cvs.batches.updateLogStage, {
-          logId: args.logId,
-          stage: "needs_review",
-          errorMessage: "Low-confidence OCR text (< 50 chars). Flagged for TA review.",
-        });
-      }
-      return null;
+      throw new Error("The reader could not recover enough text from this file. The CV needs review.");
     }
     let cappedRawText = trimmed.length > MAX_RAW_TEXT_LENGTH
       ? trimmed.slice(0, MAX_RAW_TEXT_LENGTH)
@@ -1296,23 +1279,14 @@ async function runCvExtractionLocked(
     const readInto = cvUpload.candidateId ?? unreadHolder?._id;
     if (readInto) {
       candidateId = readInto;
-      await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
-        candidateId,
-        rawTextKey,
-        fileHash,
-        cvUploadId,
-        extractionModel,
-        ...(keepDetails ? { fillBlanksOnly: true } : {}),
-      });
+      // Keep the previously verified text/hash until this reading succeeds.
     } else {
-      createdStub = true;
       candidateId = await ctx.runMutation(internal.candidates.candidates.createCandidate, {
-        rawTextKey,
         sourceChannel: sourceChannel ?? undefined,
         fileHash,
         cvUploadId,
         workableCandidateId: workableCandidateId ?? undefined,
-        isParsed: !skipLLM,
+        isParsed: false,
         extractionModel,
       });
     }
@@ -1374,11 +1348,6 @@ async function runCvExtractionLocked(
       const tLlmStart = Date.now();
       const failure: { reason?: string } = {};
       let extractedData = await callOpenRouterLLM(ctx, cappedRawText, cvUploadId, sourceChannel, failure).catch((err) => {
-        // The model read the text and said it is not a CV (an invoice, a deck).
-        // That is an answer, not a failure: OCR will not change it, and falling
-        // through to OCR used to leave the document as "needs review" with an
-        // empty candidate attached.
-        if (String(err?.message ?? err).includes("NOT_A_CV")) throw err;
         console.warn("[CvExtraction] First call to OpenRouter LLM failed:", err.message || err);
         return null;
       });
@@ -1623,42 +1592,37 @@ async function runCvExtractionLocked(
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
 
-    const isInsufficientBalance =
-      message.includes("403") ||
-      message.toLowerCase().includes("insufficient") ||
-      message.toLowerCase().includes("balance") ||
-      message.toLowerCase().includes("credits");
-
-    const isRateLimit = message.includes("429") || message.toLowerCase().includes("too many requests");
-    const isTransientLLMError = message.includes("timeout") || message.includes("invalid response") || message.toLowerCase().includes("timed out");
-    const isNotACV = message.includes("NOT_A_CV");
-
-    const shouldRetry = false; // Do not auto-retry 5-6 times on failure; single pass only
-
-    // A document that is not a CV is not an applicant: remove the empty row this
-    // run created for it, and put nobody in New CVs.
-    if (isNotACV && candidateId && createdStub) {
-      await ctx.runMutation(internal.candidates.candidates.deleteCandidate, { candidateId, preserveUpload: true });
-      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, { cvUploadId, status: "processed", clearCandidate: true });
-      candidateId = null;
+    // Readers can fail before a stub exists (download, PDF, OCR). Keep every
+    // arrival visible, including those early failures; never let a model delete it.
+    if (!candidateId) {
+      candidateId = await ctx.runMutation(internal.candidates.candidates.createCandidate, {
+        sourceChannel: sourceChannel ?? undefined,
+        cvUploadId,
+        isParsed: false,
+      });
     }
 
     // Otherwise NEVER delete the candidate stub. Preserve the candidate and application in New CVs so no applicant is lost!
     // A replaced CV's candidate is a real, named person already on file: a
     // failed read must not rename them after the file (29 Sep).
-    if (candidateId && !keepDetails) {
+    if (candidateId) {
       // A person's name from the file name when it reads as one, else the file name.
       const fallbackName = guessNameFromCv("", cvUpload?.fileName)
         ?? (cvUpload?.fileName
           ? cvUpload.fileName.replace(/\.[^/.]+$/, "").replace(/[_\-]/g, " ")
           : "Applicant");
 
-      await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
-        candidateId,
-        fullName: fallbackName,
-        isParsed: false,
-        cvUploadId,
-      });
+      // createCandidate can return a held person through dedup. A failed read
+      // must never overwrite their name or mark a previously read profile unread.
+      const held = await ctx.runQuery(internal.candidates.candidates.getCandidateForParsing, { candidateId });
+      if (!keepDetails && !shortlistCopy && held?.isParsed === false && !held.fullName) {
+        await ctx.runMutation(internal.candidates.candidates.updateCandidateFields, {
+          candidateId,
+          fullName: fallbackName,
+          cvUploadId,
+          fillBlanksOnly: true,
+        });
+      }
 
       const assignedJobId = cvUpload?.assignToJob;
       if (assignedJobId) {
@@ -1667,6 +1631,7 @@ async function runCvExtractionLocked(
           jobId: assignedJobId as any,
           cvFileId: cvUploadId,
           sourceChannel: sourceChannel ?? "manual_upload",
+          skipScoring: true,
         });
         await filePosts(ctx, {
           candidateId,
@@ -1688,55 +1653,28 @@ async function runCvExtractionLocked(
       }
     }
 
-    if (shouldRetry) {
-      const nextRetryCount = ((args as any).retryCount ?? 0) + 1;
-      const baseDelayMs = nextRetryCount * 60 * 1000; // 1m, 2m, 3m...
-      const jitterMs = Math.floor(Math.random() * 30000); // up to 30s jitter
-      const delayMs = baseDelayMs + jitterMs;
-      const reason = isRateLimit ? "Nvidia API Rate Limit (429)" : "LLM API Timeout/Invalid Response";
-      console.log(`[CvExtraction] ${reason}. Retrying in ${(delayMs / 1000).toFixed(1)}s (Attempt ${nextRetryCount})`);
-
-      await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
-        cvUploadId,
-        status: "pending_retry",
-        errorMessage: `${reason}. Retrying automatically in ${(delayMs / 1000).toFixed(1)}s...`,
-      });
-
-      await ctx.scheduler.runAfter(delayMs, internal.cvs.cvExtraction.processCvExtraction, {
-        ...args,
-        isRetry: true,
-        retryCount: nextRetryCount
-      });
-      return null;
-    }
-    const attempts = cvUpload?.extractionAttempts ?? 0;
-    const finalStatus = (isInsufficientBalance || isNotACV)
-      ? "processed"
-      : (attempts >= 1 ? "extraction_failed_permanent" : "failed");
+    const finalStatus = "needs_review";
 
     await ctx.runMutation(internal.candidates.candidates.updateCvUpload, {
       cvUploadId,
       status: finalStatus,
-      processingStage: isNotACV ? "needs_review" : "failed",
+      candidateId,
+      processingStage: "needs_review",
       completedAt: Date.now(),
-      errorMessage: isInsufficientBalance
-        ? "Processed raw text only (LLM extraction skipped due to insufficient credits)"
-        : isNotACV
-          ? "Document rejected: Not recognized as a valid CV or Resume."
-          : (attempts >= 1 ? `Permanent extraction failure — limit reached (${attempts} attempt(s)): ${message}` : message),
+      errorMessage: `Could not finish reading this CV. The file and applicant have been kept for review. ${message}`,
     });
 
     if (args.logId) {
       await ctx.runMutation(internal.cvs.batches.updateLogStage, {
         logId: args.logId,
-        stage: isInsufficientBalance ? "completed" : finalStatus,
+        stage: finalStatus,
         errorMessage: message
       });
     }
     if (args.batchId) {
       await ctx.runMutation(internal.cvs.batches.updateBatchProgress, {
         batchId: args.batchId,
-        status: isInsufficientBalance ? "completed" : "failed"
+        status: "failed"
       });
       // Trigger the next batch automatically if this batch is complete
       await ctx.runMutation(internal.cvs.cvUploads.checkAndTriggerNextBatch, {

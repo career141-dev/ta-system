@@ -2,7 +2,7 @@
 
 import OpenAI from "openai";
 import type { ActionCtx } from "../_generated/server";
-import { isCompleteJson } from "./jsonAnswer";
+import { isCompleteJson, hasCvDetailsJson } from "./jsonAnswer";
 
 
 export type TaskType = 
@@ -383,6 +383,9 @@ export async function executeLLMWithNvidiaFallback(
             throw new Error(`${model} gave JSON that stops part-way (${content.length} characters, finish: ${response.choices[0]?.finish_reason ?? "unknown"})`);
           }
           if (content) {
+            if (taskType === "cv_structuring" && !hasCvDetailsJson(content)) {
+              throw new Error(`${model} found no candidate details`);
+            }
             return { content, provider: isNvidiaModel ? "nvidia" : "openrouter", model, ...(isNvidiaModel ? { primaryError } : {}) };
           }
           throw new Error(`${model} returned empty response`);

@@ -162,7 +162,7 @@ Env flags: `C141_DISABLE_CRONS`, `C141_TA_MAINTENANCE`, `C141_MAIL_INTAKE` (only
 
 - `scoop_received` notification: declared, never emitted (grep of `convex` and `src`). The 27 Sep mailbox design emitted it; the 29 Sep removal dropped the emitter but kept the literal.
 - `scoopByUserId`/`scoopAt` (support-TA credit): written by `ta/cv:attach`, projected and mapped, read by nothing that computes counts. The EOD SCOOP column uses `scoopFrom`/`scoopReceivedAt` only. The 21 Sep commit message (690a125) says it is "counted in their SCOOP column" - that is no longer true.
-- A scoop whose reading fails (`failed`/`needs_review`) never gets `scoopReceivedAt` unless extraction reached the "preserved despite error" branch; it then does not appear in the Scoops list (list filter is the flag). The failure is visible only in the upload panel/localStorage queue, which is per browser and expires after 24 h.
+- Caught reading failures, including download/short-text failures, now preserve an applicant, file the opening without scoring and call `fileScoop`; the upload remains `needs_review`. An uncaught infrastructure failure can still leave filing incomplete. The upload panel remains per browser and expires after 24 h.
 - `held` ("Not added") is shown when another TA already owns the person, but the application *is* flagged and listed; the red label overstates a refusal.
 - The sender is optional and a scoop uploaded again later can only add a missing sender, never correct a wrong one.
 - Scoops list has no date window; EOD relies on the Director send, not the list.
@@ -211,6 +211,8 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 
 ## History
 
+- 2026-10-29: unread CVs remain linked and flagged for review without implicit scoring. Fixed Try again's accidental Windows filesystem URL to `/api/scoops/upload`. Workday scope now reads today's indexed rows; its rules are unchanged. Reviewed intervening source changes (mail reply routing, sourcing and schema additions do not change Scoops).
+
 - 2026-09-21 `690a125` EOD editable L-sheet; first "scoop" fields: `applications.scoopByUserId`/`scoopAt` for a CV uploaded on someone else's candidate (support-TA credit, plan 6.4).
 - 2026-09-21 `2676699` UI fixes, Database CVs without pipeline rows (neighbour of the `"SCOOP"` database-pick channel).
 - 2026-09-25 `e590da3` EOD: sets fill to five; scoop column typed by hand because scoops arrived outside the system; database picks (TBR) no longer counted as scoops.
@@ -226,9 +228,9 @@ Repo hard rules that apply: never run `convex deploy`/`convex run`/`convex impor
 - 2026-10-28 `d34d9a6` a scoop moved to Follow-up or Director Shortlist gets the opening's only active work location (`placeInOnlyLocation` in `ta/applications.ts`); Try again / Remove on failed scoop cards (`ta/hhUpload:retry`).
 
 <!-- skill-meta
-verified-commit: 2bf544c1
-verified-hash: 6c78f2bdb7aebc956c4ffdfb0df84759b0d8226e
-verified-date: 2026-10-28
+verified-commit: 8bb1c684
+verified-hash: 1e865f106e6c6e82ae4f00c86ec61c3da96cb318
+verified-date: 2026-10-29
 sources:
   convex/ta/scoopUpload.ts
   convex/lib/scoopMail.ts
