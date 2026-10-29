@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { repo } from "@/data/store";
 import { getCurrentUser } from "@/lib/session";
-import { can, isDeskWide, isReadOnly, isTa, seesEveryTaRow, type Capability } from "@/lib/auth";
+import { allows, can, isDeskWide, isReadOnly, isTa, seesEveryTaRow, type Capability } from "@/lib/auth";
 import { otherHolders, rowCountsFor } from "@/lib/sharedLinks";
 import { readWorkCountry } from "@/lib/countries";
 import { BIN_DAYS, BIN_MS, purgeDateLabel } from "@/lib/bin";
@@ -3265,17 +3265,44 @@ export async function pickBenchmark(formData: FormData) {
  */
 type SourceRun = { found: number; scanned: number; queries: number; cost: number; rejected?: number; note?: string; error?: string };
 
-/** `extraRound`: past the round limit — the rounds before were about the wrong company (correctClientAndRerun). */
-async function sourceFor(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
-  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId, extraRound));
+/**
+ * `extraRound`: past the round limit — the rounds before were about the wrong company (correctClientAndRerun).
+ * `learnedFrom`: a run that learns from that many picked CVs (learnFromPicks). It is
+ * filed as round 0, so it never spends one of the TAs' three rounds.
+ */
+async function sourceFor(openingId: string, forUserId?: string, extraRound = false, learnedFrom?: number): Promise<SourceRun> {
+  return alone(`suggest:${openingId}`, { found: 0, scanned: 0, queries: 0, cost: 0, error: "running" }, () => sourceForNow(openingId, forUserId, extraRound, learnedFrom));
 }
 
-async function sourceForNow(openingId: string, forUserId?: string, extraRound = false): Promise<SourceRun> {
+/** The stages a TA has put someone in — TA Follow-up and on. AI Follow-up is the score's choice, not a TA's. */
+const PICKED_STAGES = new Set(["ta_follow_up", "director_review", "director_shortlist", "client_shortlist", "interview", "offer", "placed"]);
+
+/** The people the TAs picked for this opening, from their CVs (28 Oct). */
+function pickedFor(openingId: string) {
+  const ids = new Set(repo.applications(openingId).filter((a) => PICKED_STAGES.has(a.stage)).map((a) => a.candidateId));
+  return [...ids].map((id) => repo.candidate(id)).filter((c): c is NonNullable<typeof c> => Boolean(c));
+}
+
+/** One line per person, for the prompt (lib/claudeSourcing deskSignals). */
+function deskSignalsFor(openingId: string, existing: import("@/data/types").ProfileSuggestion[]) {
+  const line = (...xs: (string | number | false | null | undefined)[]) => xs.filter((x) => x !== false && x !== null && x !== undefined && String(x).trim()).join(", ");
+  return {
+    picked: pickedFor(openingId).slice(0, 10).map((c) =>
+      line(c.currentTitle, c.currentEmployer && `at ${c.currentEmployer}`, c.totalExperienceYears != null && `${c.totalExperienceYears} years`, c.industries.slice(0, 3).join("/"), c.skills.slice(0, 6).join("; ")),
+    ),
+    selected: existing.filter((s) => s.status === "kept").slice(0, 15).map((s) => line(s.headline, s.company)),
+    // "Not relevant" is a TA's Not selected (or the Assistant dropping someone);
+    // rows set aside after a wrong-company run carry no feedback and teach nothing.
+    notSelected: existing.filter((s) => s.status === "dismissed" && s.feedback === "not_relevant").slice(0, 15).map((s) => line(s.headline, s.company, s.concern)),
+  };
+}
+
+async function sourceForNow(openingId: string, forUserId?: string, extraRound = false, learnedFrom?: number): Promise<SourceRun> {
   const o = repo.opening(openingId);
   if (!o) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "no_opening" };
   const client = repo.client(o.clientId);
   const existing = repo.suggestions(openingId);
-  const round = existing.length ? Math.max(...existing.map((s) => s.round)) + 1 : 1;
+  const round = learnedFrom ? 0 : existing.length ? Math.max(...existing.map((s) => s.round)) + 1 : 1;
   if (round > MAX_ROUNDS && !extraRound) return { found: 0, scanned: 0, queries: 0, cost: 0, error: "rounds_spent" };
 
   const alreadyKnown = [
@@ -3296,6 +3323,7 @@ async function sourceForNow(openingId: string, forUserId?: string, extraRound = 
       salaryNote: o.packageNotes || salaryNoteOf(o),
       targetEmployers: repo.benchmarks(openingId).filter((b) => b.isSelected).map((b) => b.company),
       alreadyKnown,
+      ...deskSignalsFor(openingId, existing),
     },
     round,
   );
@@ -3303,14 +3331,44 @@ async function sourceForNow(openingId: string, forUserId?: string, extraRound = 
   // A run belongs to whoever asked for it — see lib/visibility.
   repo.addSuggestions(
     openingId,
-    run.suggestions.map((s) => ({ ...s, openingId, generatedFor: forUserId ?? null, keptBy: null })),
+    run.suggestions.map((s) => ({ ...s, openingId, generatedFor: forUserId ?? null, keptBy: null, ...(learnedFrom ? { learnedFrom } : {}) })),
   );
-  if (isConvex()) await freshAfter(convexMutation)("ta/workdays:recordSourcingRun", { jobId: openingId, ...(forUserId ? { userId: forUserId } : {}), round, count: run.suggestions.length });
+  // A learning run is nobody's sourcing work for the day.
+  if (isConvex() && !learnedFrom) await freshAfter(convexMutation)("ta/workdays:recordSourcingRun", { jobId: openingId, ...(forUserId ? { userId: forUserId } : {}), round, count: run.suggestions.length });
   return {
     found: run.suggestions.length, scanned: run.scanned,
     queries: run.queries.length, cost: run.cost,
     rejected: run.rejected ?? 0, note: run.note,
   };
+}
+
+/**
+ * Suggestions that learn from the desk (28 Oct, the owner's "unique feature").
+ * When 2 people are in TA Follow-up or later, and again at 5, 8, 11…, a run
+ * starts by itself to find more people like them — no button, no reasons asked
+ * of anyone. Called from the opening's layout, so it starts when someone works
+ * the job; the backend that moves people into TA Follow-up cannot run Claude.
+ * Its rows are round 0, so the TAs keep their three rounds.
+ */
+const learnTriedAt = new Map<string, number>();
+
+export async function learnFromPicks(openingId: string): Promise<void> {
+  const user = await getCurrentUser();
+  if (!allows(user, "opening.sourcing", { openingId, assignment: repo.assignmentFor(openingId, user.id) ?? null })) return;
+  const existing = repo.suggestions(openingId);
+  // Round 1 comes first, from the approved JD.
+  if (!existing.length) return;
+  const picked = pickedFor(openingId).length;
+  if (picked < 2) return;
+  const due = 2 + 3 * Math.floor((picked - 2) / 3);
+  if (due <= Math.max(0, ...existing.map((s) => s.learnedFrom ?? 0))) return;
+  // ponytail: per server and in memory — a run that finds nobody waits an hour
+  // before trying again, and a restart forgets. Store the attempt if that matters.
+  if (Date.now() - (learnTriedAt.get(openingId) ?? 0) < 60 * 60_000) return;
+  learnTriedAt.set(openingId, Date.now());
+  // Started from a layout's render, so no revalidatePath here: the next page
+  // view reads the new rows (the opening's pages are dynamic).
+  after(() => sourceFor(openingId, undefined, false, due).then(() => undefined, () => undefined));
 }
 
 export async function runSuggestions(formData: FormData) {

@@ -15,6 +15,7 @@ import type { DailyEmail } from "@/lib/dailyEmail";
 import { workdayDate } from "@/lib/workday";
 import { OpeningAccessNeeded, type AvailableOpening } from "@/components/OpeningAccessRequests";
 import { ProblemState } from "@/components/ProblemState";
+import { learnFromPicks } from "@/app/actions";
 
 export default async function OpeningLayout({
   children,
@@ -51,6 +52,9 @@ export default async function OpeningLayout({
   }
   // What this person is on this opening decides what the rail even offers.
   const seat = seatFor(user, assignment?.role ?? null, onStrategy);
+  // More people like the ones the TAs picked, once there are enough (28 Oct).
+  // Cheap when nothing is due; the run itself goes after the response.
+  await learnFromPicks(id);
   // Strategy-only access includes sourcing, but not the recruiter's Midday/EOD
   // workflow. Querying those records for a strategy assignee makes the backend
   // correctly refuse the request and leaves the opening on its loading screen.

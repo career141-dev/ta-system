@@ -4,7 +4,7 @@
  * never because Claude's answer named them — and never someone at the client
  * or someone the desk already has.
  */
-import { readHeadhunt } from "@/lib/claudeSourcing";
+import { deskSignals, headhuntPrompt, readHeadhunt } from "@/lib/claudeSourcing";
 import type { SourcingSpec } from "@/lib/sourcing";
 
 let pass = 0, fail = 0;
@@ -35,7 +35,7 @@ const stream = (answer: unknown, extra: Record<string, unknown> = {}) =>
     JSON.stringify({ type: "result", subtype: "success", is_error: false, result: typeof answer === "string" ? answer : JSON.stringify(answer), ...extra }),
   ].join("\n");
 
-const person = (link: string, company: string, fit = "strong", concern = "") => ({ name: "X", link, headline: "Documentation Executive", company, location: "Colombo", fit, why: "NVOCC documentation", concern });
+const person = (link: string, company: string, fit = "strong", concern = "", more: Record<string, unknown> = {}) => ({ name: "X", link, headline: "Documentation Executive", company, location: "Colombo", years: 5, level: "match", sameFunction: true, fit, why: "NVOCC documentation", concern, ...more });
 
 console.log("\nwho Claude may suggest");
 {
@@ -58,11 +58,40 @@ console.log("\nwho Claude may suggest");
   eq("an honest concern is kept, 'none' is not a concern", r.suggestions.map((s) => s.concern), ["years not shown", null]);
   eq("a person no search returned, and a company page, are not suggested", r.rejected, 2);
   eq("searches and profiles are counted", [r.credits, r.scanned], [2, 4]);
+  eq("the searches Claude ran are listed, so the page does not say 0", r.queries, ["a", "b"]);
   eq("fewer than six is said so", r.note, "only_2_fit");
 }
 {
   const r = readHeadhunt(stream([person("https://lk.linkedin.com/in/hashandemel", "Ceyline")]), { ...spec, clientCompanyNames: [] }, 2);
   eq("the round is recorded", r.suggestions[0].round, 2);
+}
+
+console.log("\nthe accuracy bar (28 Oct)");
+{
+  const r = readHeadhunt(
+    stream([
+      person("https://www.linkedin.com/in/kajan-thiyagamoorthy-a7b139179/", "SWEN Container Line"),
+      person("https://www.linkedin.com/in/hashandemel", "Ceyline", "strong", "", { level: "far_above", years: 28 }),
+      person("https://lk.linkedin.com/in/nimal-ocean", "Maersk", "strong", "", { sameFunction: false }),
+    ]),
+    { ...spec, clientCompanyNames: [] },
+    1,
+  );
+  eq("far too senior and a different function are dropped, not flagged", r.suggestions.map((s) => s.linkedinUrl), ["https://www.linkedin.com/in/kajan-thiyagamoorthy-a7b139179"]);
+  eq("and counted as ruled out", r.rejected, 2);
+  const unknown = readHeadhunt(stream([person("https://lk.linkedin.com/in/nimal-ocean", "", "possible", "", { headline: "" })]), { ...spec, clientCompanyNames: [] }, 1);
+  eq("no title and no company is nothing to judge", unknown.suggestions.length, 0);
+  const asText = readHeadhunt(stream([person("https://lk.linkedin.com/in/nimal-ocean", "Maersk", "strong", "", { sameFunction: "true" })]), { ...spec, clientCompanyNames: [] }, 1);
+  eq("\"true\" as text still counts", asText.suggestions.length, 1);
+}
+
+console.log("\nlearning from the desk (28 Oct)");
+{
+  eq("nothing chosen yet adds nothing", deskSignals({}), "");
+  const prompt = headhuntPrompt({ ...spec, picked: ["Shipping Executive, at Hirdaramani, 4 years"], notSelected: ["Supply Chain Manager, Garment Services, 28 years"] }, "Sri Lanka");
+  eq("picked CVs reach the prompt", prompt.includes("PEOPLE THE RECRUITERS PICKED") && prompt.includes("at Hirdaramani"), true);
+  eq("turned-down people reach the prompt", prompt.includes("TURNED DOWN") && prompt.includes("28 years"), true);
+  eq("the five must-haves are asked for", ["FUNCTION", "LEVEL", "YEARS", "INDUSTRY", "LOCATION"].every((w) => prompt.includes(w)), true);
 }
 
 console.log("\nwhen Claude could not do it");
