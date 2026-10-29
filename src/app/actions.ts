@@ -2968,10 +2968,19 @@ export async function runDatabaseSearch(formData: FormData) {
   // lines and was read as that many refinements, the last one winning (28 Oct).
   const oneLine = said.replace(/\s*\n+\s*/g, " ");
   const turns = prior ? [...prior.split(/\n+/).filter((t) => t.trim()), oneLine] : [oneLine];
+  // How many people each earlier message showed, for the chat's replies (lib/query
+  // turnCounts). One per earlier message or none; it only labels the chat.
+  const rawCounts = String(formData.get("n") ?? "").slice(0, 400);
+  const counts = prior && /^[\d,]*$/.test(rawCounts) ? rawCounts.split(",") : [];
+  if (counts.length !== turns.length - 1) counts.length = 0;
   // Over 4,000 characters, the oldest refinements go — never the first request.
-  while (turns.length > 2 && turns.join("\n").length > 4000) turns.splice(1, 1);
+  while (turns.length > 2 && turns.join("\n").length > 4000) {
+    turns.splice(1, 1);
+    if (counts.length) counts.splice(1, 1);
+  }
   const q = turns.join("\n").slice(0, 4000);
   const params = new URLSearchParams({ q });
+  if (counts.length) params.set("n", counts.join(","));
   if (referenceParam) params.set("ref", referenceParam);
   if (mode === "boolean" || mode === "meaning") params.set("mode", mode);
   if (openingId) params.set("for", openingId);

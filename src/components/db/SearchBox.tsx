@@ -27,6 +27,7 @@ export function SearchBox({
   compact = false,
   prior = "",
   referenceProfile = "",
+  history = "",
 }: {
   vocab: string[];
   initialQuery?: string;
@@ -38,6 +39,8 @@ export function SearchBox({
   prior?: string;
   /** Validated, PII-free reference profile carried through refinements. */
   referenceProfile?: string;
+  /** How many people each message so far showed ("142,38"), carried to the next reply for the chat. */
+  history?: string;
 }) {
   const [q, setQ] = useState(initialQuery);
   const [mode, setMode] = useState<"natural" | "boolean" | "meaning">(initialMode);
@@ -83,6 +86,7 @@ export function SearchBox({
       <input type="hidden" name="mode" value={mode} />
       {openingId && <input type="hidden" name="openingId" value={openingId} />}
       {replying && <input type="hidden" name="prior" value={prior} />}
+      {replying && history && <input type="hidden" name="n" value={history} />}
       {referenceProfile && <input type="hidden" name="ref" value={referenceProfile} />}
 
       <div

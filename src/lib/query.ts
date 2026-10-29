@@ -247,6 +247,20 @@ export function turnsOf(q: string): string[] {
   return q.split(/\n+/).map((t) => t.trim()).filter(Boolean);
 }
 
+/**
+ * How many people each message of the conversation showed (29 Oct), for the
+ * chat's replies ("142 candidates", then "38", then "12").
+ *
+ * The earlier counts are what the TA saw when they sent the next message, and
+ * ride in the address as `n` ("142,38"; an unknown one is empty), so nothing
+ * is searched again to show them. The last is today's. If `n` does not hold
+ * one per earlier message it is not trusted, and only the last is shown.
+ */
+export function turnCounts(n: string | undefined, turns: number, current: number): (number | null)[] {
+  const before = (n ?? "").split(",").map((x) => (/^\d+$/.test(x) ? Number(x) : null));
+  return before.length === turns - 1 ? [...before, current] : [...Array<null>(Math.max(0, turns - 1)).fill(null), current];
+}
+
 /** The conversation as one request — for the engine's model and the word and vector searches. */
 export function conversationText(q: string): string {
   return turnsOf(q)
@@ -557,7 +571,7 @@ export function searchParamsOf(sp: SearchParams, drop: string[] = []): URLSearch
 export function resultsKeyOf(sp: SearchParams): string {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(sp).sort(([a], [b]) => a.localeCompare(b))) {
-    if (["page", "candidate", "msg", "below", ...FILTER_PARAMS].includes(k) || typeof v !== "string") continue;
+    if (["page", "candidate", "msg", "below", "n", ...FILTER_PARAMS].includes(k) || typeof v !== "string") continue;
     p.set(k, k === "q" ? (turnsOf(v)[0] ?? "") : v);
   }
   return p.toString();

@@ -6,7 +6,7 @@ import { assess } from "@/lib/assessment";
 import { FIT_BANDS, type Score } from "@/lib/scoring";
 import { pageUser } from "@/lib/session";
 import { STAGE_LABEL } from "@/data/types";
-import { FILTER_PARAMS, conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, resultsKeyOf, searchParamsOf, turnsOf, withoutChip, withValue } from "@/lib/query";
+import { FILTER_PARAMS, conversationText, criteriaFromParams, criteriaToParams, describe, parseBoolean, parseConversation, resultsKeyOf, searchParamsOf, turnCounts, turnsOf, withoutChip, withValue } from "@/lib/query";
 import { SearchBox } from "@/components/db/SearchBox";
 import { AiPanel } from "@/components/db/AiPanel";
 import { ResultRow, type RowApp } from "@/components/db/ResultRow";
@@ -95,8 +95,8 @@ export default async function ResultsPage({ searchParams }: { searchParams: Prom
 function Searching({ q, mode, forOpening, referenceParam }: { q: string; mode: "natural" | "boolean" | "meaning"; forOpening: string | null; referenceParam: string }) {
   const vocab = repo.vocabulary();
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 xl:grid-cols-[400px_1fr]">
-      <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
+    <div className="grid grid-cols-[minmax(0,1fr)] items-start gap-6 lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]">
+      <aside className="flex flex-col gap-3 lg:sticky lg:top-[80px] lg:max-h-[calc(100vh-96px)] lg:overflow-y-auto lg:overscroll-contain lg:pb-2">
         <div className="rounded-xl border border-rule bg-surface p-4">
           <SearchBox
             vocab={[...vocab.titles, ...vocab.skills, ...vocab.industries, ...vocab.cities, ...vocab.employers]}
@@ -460,6 +460,9 @@ async function ResultsView({
     results.splice(0, results.length, ...results.filter((r) => rowMatches(r, picked)));
   }
   const total = filtering ? results.length : foundTotal;
+  // What each message of the chat showed. The count is the search's own, before
+  // any filter beside the list; the earlier ones are carried in `n`.
+  const counts = turnCounts(typeof sp.n === "string" ? sp.n : undefined, mode === "boolean" ? 1 : turnsOf(q).length, foundTotal);
   const strongReferenceMatches = referenceProfile
     ? results.filter((r) => (engineHits.get(r.candidate.id)?.score ?? 0) >= FIT_BANDS.strong).length
     : 0;
@@ -698,9 +701,12 @@ async function ResultsView({
   return (
     <>
       {/* Chat on the left, results in the middle, Level on the right (28 Oct). LevelFilter hides itself under two options, so the third column only exists when it has something to show. */}
-      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${showFilters ? "xl:grid-cols-[400px_1fr_240px]" : "xl:grid-cols-[400px_1fr]"}`}>
-        <aside className="flex flex-col gap-3 xl:sticky xl:top-[80px] xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
+      <div className={`grid grid-cols-[minmax(0,1fr)] items-start gap-6 ${showFilters ? "lg:grid-cols-[300px_minmax(0,1fr)_220px] xl:grid-cols-[400px_minmax(0,1fr)_240px]" : "lg:grid-cols-[300px_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]"}`}>
+        {/* The chat fills the rail's height: its messages scroll, the box to reply in stays at the foot. */}
+        <aside className="flex flex-col gap-3 lg:sticky lg:top-[80px] lg:h-[calc(100vh-96px)] lg:pb-2">
           <AiPanel
+            counts={counts}
+            edited={edited}
             criteria={criteria}
             ignored={ignored}
             query={q}
@@ -718,7 +724,7 @@ async function ResultsView({
             broaderMatches={broaderReferenceMatches}
           />
 
-          <div className="rounded-xl border border-rule bg-surface p-4">
+          <div className="shrink-0 rounded-xl border border-rule bg-surface p-4">
             {/* Keyed on the conversation: a reply's wait shows here while the old list stays, and the box starts clean when the new results land. */}
             <SearchBox
               key={q}
@@ -727,6 +733,7 @@ async function ResultsView({
               initialMode={mode}
               openingId={forOpening}
               referenceProfile={referenceProfile ? referenceParam : ""}
+              history={counts.map((c) => c ?? "").join(",")}
               compact
             />
             <form action={saveSearch} className="mt-3 flex items-center gap-2 border-t border-rule pt-3">
@@ -753,7 +760,7 @@ async function ResultsView({
           </div>
         </aside>
 
-        <div className="order-2 min-w-0 xl:order-none">
+        <div className="order-2 min-w-0 lg:order-none">
           {refining && (
             <div className="mb-4 flex items-start gap-3 rounded-xl border border-accent/20 bg-accent-soft px-4 py-3 text-[12.5px]">
               <span aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-accent/30 border-t-accent" />
@@ -969,7 +976,7 @@ async function ResultsView({
         </div>
 
         {showFilters && (
-          <aside className="order-1 flex flex-col gap-3 xl:sticky xl:top-[80px] xl:order-none xl:max-h-[calc(100vh-96px)] xl:overflow-y-auto xl:overscroll-contain xl:pb-2">
+          <aside className="order-1 flex flex-col gap-3 lg:sticky lg:top-[80px] lg:order-none lg:max-h-[calc(100vh-96px)] lg:overflow-y-auto lg:overscroll-contain lg:pb-2">
             {filtering && (
               <Link href={clearFiltersHref} scroll={false} className="rounded-xl border border-brand-line bg-brand-soft px-4 py-2 text-center text-[12.5px] font-medium text-brand hover:underline">
                 Clear all filters · {results.length.toLocaleString()} of {everyone.length.toLocaleString()} shown
