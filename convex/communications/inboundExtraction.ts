@@ -30,9 +30,11 @@ export const extractDetailsFromText = internalAction({
     applicationId: v.optional(v.id("applications")),
   },
   handler: async (ctx, args) => {
-    // Guard: skip extraction if text is empty or trivially short
-    if (!args.textBody || args.textBody.trim().length < 3) {
-      console.warn(`[Inbound Extraction] Skipping extraction — text body is empty or trivial: "${args.textBody}"`);
+    // Only an empty message is skipped. "No", "ok", "hi" and "0" are answers to
+    // the question just asked — a three-character floor dropped them unread and
+    // the candidate got nothing back (Astra review, 29 Oct).
+    if (!args.textBody || !args.textBody.trim()) {
+      console.warn(`[Inbound Extraction] Skipping extraction — text body is empty.`);
       return;
     }
 
@@ -139,17 +141,22 @@ export const extractDetailsFromText = internalAction({
     };
     const selectedTone = toneMap[job.conversationTone || "professional_formal"] || (job.conversationTone ? `Custom tone: ${job.conversationTone}` : toneMap.professional_formal);
 
-    const openai = getOpenAI("email_auto_reply");
+    // 20 s a try, two tries: three 30-second timeouts kept a candidate waiting
+    // a minute and a half for a WhatsApp reply (Astra review, 29 Oct).
+    const openai = getOpenAI("email_auto_reply", 20000);
     const model = getModelForTask("email_auto_reply");
 
+    // Location and workplace type say "Not specified" when the opening has
+    // none: they defaulted to Colombo and Hybrid, and the model told candidates
+    // so as fact (Astra review, 29 Oct).
     const systemPrompt = `You are an AI Talent Acquisition / Engagement Specialist for Career141 managing candidate follow-ups.
 You are interacting like a real human recruitment colleague — NOT a robotic form.
 
 JOB SPECIFICATION CONTEXT:
 - Job Title: ${job.title}
 - Company/Client: ${job.isConfidential ? `Confidential Search (Do NOT reveal client name; explain politely that this is a confidential hiring process conducted by Career141 for a premier ${job.clientIndustry || "organization"})` : (job.clientName || "Career141")}
-- Location: ${job.location || "Colombo, Sri Lanka"}
-- Workplace Type: ${(job as any).workplaceType || "Hybrid"}
+- Location: ${job.location || "Not specified"}
+- Workplace Type: ${(job as any).workplaceType || "Not specified"}
 - Key Requirements: ${requirementsText}
 - Application Stage: ${activeApp.currentStage}
 - Job Description Summary: ${(job.jobDescription || "").substring(0, 400)}
@@ -199,11 +206,19 @@ A DECLINE IS AN ANSWER. This is the rule that was missing:
 - If everything still missing has been declined or answered in words, thank
   them once and say a consultant will follow up. Ask nothing further.
 
+ONLY STATE WHAT IS IN THE JOB SPECIFICATION CONTEXT. Anything shown as "Not
+specified", or not shown at all, you do not know: say a consultant will confirm
+it, and never guess a location, workplace type, salary range or client.
+
+SHORT REPLIES ANSWER THE LAST QUESTION. "No", "yes", "ok", "0", "1 month" are
+read against the question in our most recent message in the history. A "no" to
+a question is an answer to that question — it is NOT 'not_interested'.
+
 Your job is to analyze the candidate's LATEST/CURRENT message and output a JSON object.
 Rules:
 1. Extract missing numeric/text details from the CURRENT message if provided (currentSalary, expectedSalary, noticePeriodDays, noticePeriod, customAnswers, candidateSummary).
    - CANDIDATE SUMMARY / BIO: If the candidate introduces themselves, describes their background, career history, skills summary, or experience in their message, extract a clean 1-3 sentence summary into 'candidateSummary'.
-   - STUDENTS/INTERNS/UNEMPLOYED SALARY: If a candidate states they are currently a student, undergraduate, intern, or currently unemployed with no work experience, automatically set 'currentSalary' to 0 (do not leave it as null).
+   - NO CURRENT SALARY: set 'currentSalary' to 0 ONLY when they say they earn nothing now ("no salary", "not working at the moment", "unpaid"). Being a student or intern is not itself a salary — interns are often paid; leave it null and ask.
    - NO NOTICE PERIOD: If a candidate states they do not have a notice period, are currently free, or can join immediately, set 'noticePeriodDays' to 0 and 'noticePeriod' to "0 Days".
    - SALARY GIVEN IN WORDS, NOT A FIGURE: when they answer a salary question
      without a number — "negotiable", "open to discuss", "rather not say",
@@ -221,11 +236,13 @@ Rules:
    - 'promised_eta': Use this ONLY IF the candidate's CURRENT message explicitly specifies a time/duration (e.g. "in 10 minutes", "tonight", "tomorrow at 3 PM", "in 2 hours"). Estimate 'candidateEtaMinutes' and write a polite acknowledgement matching CONVERSATION TONE confirming we will follow up after that time (e.g. "No problem! We'll follow up after tonight 😊").
    - 'interested_no_eta': Candidate expresses willingness or interest to send details (e.g. "Sure, I will send it", "I'm interested", "will share soon", "will do") WITHOUT specifying an exact time in their current message. Set candidateEtaMinutes: null, nextActionTimeHours: 24, and set nextActionMessage to a warm message asking by when they can share them. DO NOT copy or carry over any past ETA from conversation history!
    - 'asked_question': Candidate asked a question (e.g. company, salary, location, tech stack). Answer their question logically using the JOB SPECIFICATION CONTEXT above in the CONVERSATION TONE while pivoting back to ask for the remaining missing details. YOU MUST ALWAYS PROVIDE A REPLY MESSAGE.
-   - 'not_interested': Candidate declined or is not interested. Set nextActionMessage to null.
+   - 'not_interested': Candidate clearly declines THIS ROLE ("not interested in this one", "I've accepted another offer", "not looking right now"). Write one short, kind nextActionMessage thanking them and saying we will keep them in mind for other roles. Ask nothing.
+   - 'opt_out': Candidate asks us to stop contacting them at all ("stop messaging me", "remove my number", "don't contact me again", "unsubscribe"). Set nextActionMessage to null.
+   - 'wants_human': Candidate asks to speak to a person / call / a consultant. Write one short nextActionMessage saying a consultant will contact them. Ask nothing.
 3. 'nextActionTimeHours':
    - If 'promised_eta': A pure decimal number representing hours (e.g. 0.033 for 2 minutes, 0.083 for 5 minutes, 0.167 for 10 minutes, 1.0 for 1 hour, 24.0 for 24 hours). Output only a single valid JSON decimal number.
    - If 'interested_no_eta', 'provided_partial', or 'asked_question': Set to 24.
-   - If 'provided_all' or 'not_interested': Set to null.
+   - If 'provided_all', 'not_interested', 'opt_out' or 'wants_human': Set to null.
 4. 'detectedQuestion': If candidate asked any question/inquiry in their message, analyze and categorize it into category ('salary_compensation' | 'visa_sponsorship' | 'location_remote' | 'notice_start_date' | 'tech_stack' | 'client_details' | 'general_inquiry') and importanceLevel ('high' | 'medium' | 'low').
 
 Return ONLY a valid JSON object matching this schema. Do not add markdown formatting or backticks.
@@ -239,7 +256,7 @@ Schema:
   "noticePeriod": string | null,
   "candidateSummary": string | null,
   "customAnswers": { [question: string]: string } | null,
-  "intent": "provided_all" | "provided_partial" | "interested_no_eta" | "promised_eta" | "asked_question" | "not_interested",
+  "intent": "provided_all" | "provided_partial" | "interested_no_eta" | "promised_eta" | "asked_question" | "not_interested" | "opt_out" | "wants_human",
   "candidateEtaMinutes": number | null,
   "nextActionTimeHours": number | null,
   "nextActionMessage": string | null,
@@ -254,7 +271,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
 
     let completion = null;
     let attempts = 0;
-    while (attempts < 3) {
+    while (attempts < 2) {
       try {
         attempts++;
         completion = await openai.chat.completions.create({
@@ -272,8 +289,9 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           console.error(`[Inbound Extraction ALERT] OpenRouter API Key spending limit reached on OpenRouter Dashboard!`);
           break;
         }
-        if (attempts >= 3) throw llmErr;
-        await new Promise(r => setTimeout(r, 1000));
+        // No rethrow on the last try: it escaped the fail-open block below, so
+        // nothing was scheduled and the candidate's message went unanswered.
+        if (attempts < 2) await new Promise(r => setTimeout(r, 1000));
       }
     }
 
@@ -300,14 +318,11 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
       const etaMins = typeof extracted.candidateEtaMinutes === "number" && extracted.candidateEtaMinutes > 0 ? extracted.candidateEtaMinutes : null;
       const MAX_ETA_MINS = 72 * 60; // 72 hours ceiling
 
-      if (etaMins && etaMins > MAX_ETA_MINS) {
-        console.log(`[Inbound Extraction] Candidate ${args.candidateId} promised ETA of ${etaMins} mins (>72h). Flagging for TA review and pausing automated nudges.`);
-        await ctx.runMutation(internal.communications.followUpMutations.flagForTaReview, {
-          applicationId: activeApp._id,
-          reason: `Candidate promised long ETA (${Math.round(etaMins / 60)} hours > 72h max ceiling)`,
-        });
-        return;
-      }
+      // Past 72 hours a TA takes it over — but only after the answers in the
+      // same message are saved and the candidate is told we heard. It returned
+      // here first, so "current 150k, CV next week" lost the 150k and got no
+      // reply (Astra review, 29 Oct). Handled with the other stops below.
+      const longEta = !!etaMins && etaMins > MAX_ETA_MINS;
 
       const updates: Record<string, any> = {};
       if (typeof extracted.currentSalary === "number") updates.currentSalary = extracted.currentSalary;
@@ -438,24 +453,61 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           });
         }
 
-        // Re-fetch updated application and candidate data post-update
+        // Re-read THIS application after the save. It re-guessed with
+        // getActiveFollowUpApplication, which can return the candidate's other
+        // opening — and the reply then listed that one's missing details
+        // (Astra review, 29 Oct).
         const updatedCandidate = await ctx.runQuery(internal.candidates.candidates.getCandidate, { id: args.candidateId });
-        const updatedApp = await ctx.runQuery(internal.candidates.candidates.getActiveFollowUpApplication, { candidateId: args.candidateId });
+        const updatedApp = await ctx.runQuery(internal.communications.inboundExtraction.getApplicationForCandidate, {
+          applicationId: activeApp._id,
+          candidateId: args.candidateId,
+        });
 
-        // Fields still missing after this reply (plain names, used in prompt and reply messages)
+        // Fields still missing after this reply — by the same rules as the
+        // list above (lib/answered.ts). This one ignored the salary notes, so
+        // after "negotiable" the reply still asked for a salary.
         const appRecord = updatedApp || activeApp;
         const remainingMissing: string[] = [];
         if (!appRecord.followUpCvReceived && !updatedCandidate?.cvUploadId) remainingMissing.push("CV Document");
-        if (!appRecord.followUpCurrentSalary && updatedCandidate?.currentSalary === undefined) remainingMissing.push("Current Salary");
-        if (!appRecord.followUpExpectedSalary && updatedCandidate?.expectedSalary === undefined) remainingMissing.push("Expected Salary");
-        if (!appRecord.followUpNoticePeriod && updatedCandidate?.noticePeriodDays === undefined && (!updatedCandidate?.noticePeriod || updatedCandidate?.noticePeriod === "")) remainingMissing.push("Notice Period");
+        if (!appRecord.followUpCurrentSalary && !hasCurrentSalary(updatedCandidate)) remainingMissing.push("Current Salary");
+        if (!appRecord.followUpExpectedSalary && !hasExpectedSalary(updatedCandidate)) remainingMissing.push("Expected Salary");
+        if (!appRecord.followUpNoticePeriod && !hasNoticePeriod(updatedCandidate)) remainingMissing.push("Notice Period");
         for (const q of customQuestions) {
           const ans = appRecord.customFollowUpAnswers || {};
           if (!ans[q]) remainingMissing.push(q);
         }
 
         // Strictly verify that ALL fields AND all custom questions are provided before declaring 100% complete
-        const isCompleted = (updatedApp?.currentStage === "second_shortlist") || (remainingMissing.length === 0);
+        const advanced = updatedApp?.currentStage === "second_shortlist";
+        const isCompleted = advanced || (remainingMissing.length === 0);
+
+        /*
+         * Replies that end the chase (Astra review, 29 Oct). 'not_interested'
+         * was in the prompt with no branch of its own, so a candidate who said
+         * no fell through to "we are still waiting on your CV" and another
+         * reminder a day later. None of these moves the stage: the application
+         * is flagged and a TA decides — drop out, call, or wait.
+         */
+        const stop =
+          extracted.intent === "opt_out" ? "Candidate asked not to be contacted again"
+          : extracted.intent === "not_interested" ? "Candidate said they are not interested in this role"
+          : extracted.intent === "wants_human" ? "Candidate asked to speak to a consultant"
+          : longEta ? `Candidate promised the details in about ${Math.round((etaMins as number) / 60)} hours (over the 72-hour limit)`
+          : null;
+        const etaPromised = !stop && !isCompleted && (extracted.intent === "promised_eta" || extracted.intent === "provided_eta");
+        const firstName = updatedCandidate?.fullName?.split(" ")[0] || "there";
+        // The NEXT nudge, not this reply. It stored replyMessage — the answer
+        // being sent below — and the follow-up cron later sent it again word
+        // for word, on WhatsApp and by email (2 Oct). The reminder only names
+        // what is still missing.
+        const reminderBody = `Hi ${firstName}, a quick reminder about your application for *${job.title}*. To move it forward we still need:\n${remainingMissing.map((m) => `• ${m}`).join("\n")}\n\nPlease reply when you can. Thank you!`;
+
+        if (extracted.intent === "opt_out") {
+          await ctx.runMutation(internal.candidates.candidates.setDoNotContact, {
+            candidateId: args.candidateId,
+            reason: `Asked on ${args.channel === "email" ? "email" : "WhatsApp"}: "${args.textBody.trim().slice(0, 200)}"`,
+          });
+        }
 
         let replyMessage: string | null = null;
         let aiAnswer: string | null = null;
@@ -469,56 +521,82 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
         if (updates.noticePeriod) recordedDetails.push(`Notice Period: ${updates.noticePeriod}`);
         else if (typeof updates.noticePeriodDays === "number") recordedDetails.push(`Notice Period: ${updates.noticePeriodDays} days`);
 
+        // Only claim the move that actually happened: the save advances the
+        // application when the checklist closes, and the reply said "advanced
+        // to Second Shortlist" whether or not it had been.
+        const completedLine = advanced
+          ? `Your profile is now 100% complete and has been advanced to the next stage.`
+          : `Your profile is now complete — a consultant will review it and be in touch.`;
         const preludeText =
           isCompleted
-            ? `Great news! We have received all your application details for *${job.title}* and your profile is now 100% complete. Your application has been advanced to Second Shortlist.`
+            ? `Great news! We have received all your application details for *${job.title}*. ${completedLine}`
             : isQuestion
               ? `Thank you for your message regarding your application for *${job.title}*.`
               : `Thank you! We have recorded your update for *${job.title}*:`;
 
-        if (isCompleted) {
-          replyMessage = `Thank you ${updatedCandidate?.fullName || "there"}! We have received all your application details for *${job.title}*. Your profile is now 100% complete and has been advanced to Second Shortlist!`;
-        } else if (extracted.intent === "promised_eta" || extracted.intent === "provided_eta") {
+        if (extracted.intent === "opt_out") {
+          replyMessage = null; // Do-not-contact is set above; the senders would refuse it anyway.
+        } else if (stop) {
+          replyMessage =
+            extracted.nextActionMessage ||
+            (extracted.intent === "not_interested"
+              ? `Thank you for letting us know, ${firstName}. We'll keep you in mind for other roles.`
+              : `Thank you, ${firstName}. A consultant will get in touch with you.`);
+        } else if (isCompleted) {
+          replyMessage = `Thank you ${updatedCandidate?.fullName || "there"}! We have received all your application details for *${job.title}*. ${completedLine}`;
+        } else if (etaPromised) {
           replyMessage = extracted.nextActionMessage || `Got it! We'll follow up with you later.`;
-          const hours = typeof extracted.nextActionTimeHours === "number" && extracted.nextActionTimeHours > 0 ? extracted.nextActionTimeHours : 6;
-          await ctx.runMutation(internal.communications.followUpMutations.updateCandidateEta, {
-            applicationId: activeApp._id,
-            candidateEtaMs: Date.now() + (hours * 60 * 60 * 1000),
-            candidateEtaText: extracted.nextActionMessage || "later",
-            waitingForCandidateEta: true,
-          });
         } else if (extracted.intent === "interested_no_eta") {
           replyMessage = extracted.nextActionMessage || `Great! Could you please let us know by what time you could provide these details?`;
         } else if (isQuestion) {
-          const wpType = (job as any).workplaceType || "hybrid";
-          aiAnswer = extracted.nextActionMessage || `This role is a ${wpType} position based in ${job.location || "Colombo, Sri Lanka"}.`;
-          replyMessage = extracted.nextActionMessage || `This role is a ${wpType} position based in ${job.location || "Colombo, Sri Lanka"}.\n\nTo progress your application, please share:\n${remainingMissing.map(m => `• ${m}`).join("\n")}`;
+          // No invented facts: the fallback said "a hybrid position based in
+          // Colombo" for any opening missing those fields.
+          aiAnswer = extracted.nextActionMessage || `Thank you for asking — a consultant will confirm that for you.`;
+          replyMessage = extracted.nextActionMessage || `Thank you for asking — a consultant will confirm that for you.\n\nIn the meantime, to progress your application, please share:\n${remainingMissing.map(m => `• ${m}`).join("\n")}`;
         } else if (remainingMissing.length > 0) {
           replyMessage = extracted.nextActionMessage || `Hi ${updatedCandidate?.fullName?.split(" ")[0] || "there"},\n\n${preludeText}\n\nWe are still waiting on your ${remainingMissing.join(", ")} to progress your application. Please share these at your convenience. Thank you!`;
+        }
+
+        // A stop pauses the chase whether or not a reply goes out (an opt-out
+        // sends none). flagForTaReview clears the pending reminder itself.
+        if (stop) {
+          await ctx.runMutation(internal.communications.followUpMutations.flagForTaReview, {
+            applicationId: activeApp._id,
+            reason: `${stop}: "${args.textBody.trim().slice(0, 200)}"`,
+          });
         }
 
         if (replyMessage) {
           const hours = nudgeHoursWithinWindow(extracted.nextActionTimeHours, args.channel);
 
-          // IMPORTANT: Cancel any previously-pending follow-up BEFORE scheduling the new one.
-          // Without this, the cron can still fire the old nextFollowUpScheduledAt timestamp
-          // (which may be only minutes away) and send a duplicate message.
-          await ctx.runMutation(internal.communications.followUpMutations.clearPendingFollowUp, {
-            applicationId: activeApp._id,
-          });
-
-          if (!isCompleted && extracted.intent !== "provided_eta" && extracted.intent !== "promised_eta") {
-            // The NEXT nudge, not this reply. It stored replyMessage — the
-            // answer being sent a few lines below — and the follow-up cron
-            // later sent it again word for word, on WhatsApp and by email
-            // (2 Oct). The reminder only names what is still missing.
-            const firstName = updatedCandidate?.fullName?.split(" ")[0] || "there";
-            await ctx.runMutation(internal.communications.followUpMutations.scheduleDynamicFollowUp, {
+          if (etaPromised) {
+            // Replaces the pending reminder with the promised time in one
+            // write. It used to be set first and then wiped by the clear below,
+            // so the candidate who said "tonight" heard nothing at all
+            // (Astra review, 29 Oct).
+            const etaHours = typeof extracted.nextActionTimeHours === "number" && extracted.nextActionTimeHours > 0 ? extracted.nextActionTimeHours : 6;
+            await ctx.runMutation(internal.communications.followUpMutations.updateCandidateEta, {
               applicationId: activeApp._id,
-              nextActionTimeHours: hours,
-              messageBody: `Hi ${firstName}, a quick reminder about your application for *${job.title}*. To move it forward we still need:\n${remainingMissing.map((m) => `• ${m}`).join("\n")}\n\nPlease reply when you can. Thank you!`,
-              replyChannel: args.channel === "email" ? "email" : "whatsapp",
+              candidateEtaMs: Date.now() + (etaHours * 60 * 60 * 1000),
+              candidateEtaText: extracted.nextActionMessage || "later",
+              waitingForCandidateEta: true,
+              nextFollowUpMessage: reminderBody,
             });
+          } else if (!stop) {
+            // IMPORTANT: Cancel any previously-pending follow-up BEFORE scheduling the new one.
+            // Without this, the cron can still fire the old nextFollowUpScheduledAt timestamp
+            // (which may be only minutes away) and send a duplicate message.
+            await ctx.runMutation(internal.communications.followUpMutations.clearPendingFollowUp, {
+              applicationId: activeApp._id,
+            });
+            if (!isCompleted) {
+              await ctx.runMutation(internal.communications.followUpMutations.scheduleDynamicFollowUp, {
+                applicationId: activeApp._id,
+                nextActionTimeHours: hours,
+                messageBody: reminderBody,
+                replyChannel: args.channel === "email" ? "email" : "whatsapp",
+              });
+            }
           }
 
           // Build the structured rich HTML rendering for the email channel

@@ -262,6 +262,12 @@ export const updateCandidateEta = internalMutation({
     candidateEtaMs: v.number(),
     candidateEtaText: v.string(),
     waitingForCandidateEta: v.boolean(),
+    /**
+     * What goes at the promised time. Without it the old reminder's text was
+     * kept — or, with none, the sweep took attempt 0 for a first contact and
+     * re-sent the initial template (29 Oct).
+     */
+    nextFollowUpMessage: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.applicationId, {
@@ -269,6 +275,7 @@ export const updateCandidateEta = internalMutation({
       candidateEtaText: args.candidateEtaText,
       waitingForCandidateEta: args.waitingForCandidateEta,
       nextFollowUpScheduledAt: args.candidateEtaMs, // align schedule with ETA
+      nextFollowUpMessage: args.nextFollowUpMessage,
     });
     console.log(`[Follow-Up] Set ETA for application ${args.applicationId} to ${args.candidateEtaText} (at ${args.candidateEtaMs})`);
   },

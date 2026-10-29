@@ -136,19 +136,19 @@ WhatsApp: Meta POST to `convex/http.ts` routes `/whatsapp`, `/api/whatsapp`, `/w
 3. Echo guard: body starting "Hi " and containing "We've recorded your update" or "still waiting on the following" is ignored.
 4. 30-second duplicate guard: identical inbound body within 30 s -> `{isFollowUpReply:true}` without recording again.
 5. Inserts inbound `communications` (`deliveryStatus:"read"`), patches `lastCandidateReplyAt`.
-6. Not in Follow-up -> recorded, no AI reply (2 Oct). Body > 2 chars -> schedules `inboundExtraction:extractDetailsFromText({candidateId,textBody,channel:"whatsapp",applicationId})`.
+6. Not in Follow-up -> recorded, no AI reply (2 Oct). Any non-empty body (since 29 Oct; it skipped 2 chars and under, so "no" went unread) -> schedules `inboundExtraction:extractDetailsFromText({candidateId,textBody,channel:"whatsapp",applicationId})`.
 
 Email: `emailAgent:pollEmailInbox` (crons `poll-linkedin-inbox` 13 min, `poll-cv-inbox` 11 min, `poll-jobs-sender-inbox` job@ 3 min, `poll-per-job-email-inboxes` 17 min via `scheduleEmailPolling`, plus Graph webhook `POST /api/graph-webhook` which schedules a poll of the mailbox in the notification; `clientState` checked, none set = nothing accepted) -> `emailAgent:checkAndRecordEmailReply`: test-mode sender mapping (reply from `OUTREACH_TEST_EMAIL` maps to the last emailed candidate when outreach is not live), matches candidate by `by_email`, once per Graph message id (`communications.externalMessageId`, index `by_externalMessageId`), newest application in Follow-up wins, inserts the inbound row, and if in Follow-up schedules `extractDetailsFromText({channel:"email", inboxEmail, messageId, senderEmail, applicationId})`. The older `generateAndSendAiEmailReply` action is no longer scheduled (dead code; it caused double replies).
 
 `inboundExtraction:extractDetailsFromText` (the AI):
-1. Uses `args.applicationId` (checked to belong to the candidate); must be in Follow-up; skips do-not-contact.
+1. Uses `args.applicationId` (checked to belong to the candidate); must be in Follow-up; skips do-not-contact and empty text only.
 2. Builds known facts + missing list (`lib/answered.ts` rules: a figure or words count), history scoped to this application only (`getRecentHistoryQuery`), job context, `conversationTone`, the job's `followUpInitialTemplate`/`followUpSampleTemplate` as style references.
-3. Model `getModelForTask("email_auto_reply")` (`convex/lib/llm.ts`), temperature 0.1, up to 3 attempts, JSON out: `currentSalary`, `expectedSalary`, `currentSalaryNote`, `expectedSalaryNote`, `noticePeriodDays`, `noticePeriod`, `candidateSummary`, `customAnswers`, `intent` (`provided_all|provided_partial|interested_no_eta|promised_eta|asked_question|not_interested`), `candidateEtaMinutes`, `nextActionTimeHours`, `nextActionMessage`, `detectedQuestion`.
-4. ETA > 72 h (`MAX_ETA_MINS` = 4320) -> `followUpMutations:flagForTaReview` (sets `flaggedForTaReview`, `taReviewReason`, clears schedule, writes pipeline event `flagged_for_ta_review`) and stops; the sweep then skips that row until a TA acts.
+3. Model `getModelForTask("email_auto_reply")` (`convex/lib/llm.ts`), temperature 0.1, 2 attempts of 20 s each (29 Oct; was 3 x 30 s and the last error escaped the fail-open), JSON out: `currentSalary`, `expectedSalary`, `currentSalaryNote`, `expectedSalaryNote`, `noticePeriodDays`, `noticePeriod`, `candidateSummary`, `customAnswers`, `intent` (`provided_all|provided_partial|interested_no_eta|promised_eta|asked_question|not_interested|opt_out|wants_human`), `candidateEtaMinutes`, `nextActionTimeHours`, `nextActionMessage`, `detectedQuestion`.
+4. ETA > 72 h (`MAX_ETA_MINS` = 4320) marks the turn `longEta`; it no longer returns early, so answers in the same message are saved first (29 Oct). Prompt facts: job location / workplace type show "Not specified" when unset (they defaulted to Colombo / Hybrid and were told to candidates); `currentSalary: 0` only when they say they earn nothing, not for being a student/intern.
 5. Writes `updateCandidateDetails` (candidate fields, `customFollowUpAnswers` merged by fuzzy question match and mirrored into `answers` by question id), which runs `updateFollowUpFlags` on all the candidate's applications and `checkAndAdvanceFollowUp`. A decline in words is saved in the `*Note` / `noticePeriod` fields and counts as answered (23 Sep, 732f323).
 6. Candidate in AI Follow-up that replied -> `transitionAiFollowUpToTaFollowUp` (stage `follow_up`, event `ai_followup_replied_to_ta`).
 7. Question detected -> `communications/inquiries:createInquiry` (status `answered_by_ai` or `unresolved`).
-8. Reply composition: complete -> "profile is now 100% complete ... advanced to Second Shortlist"; `promised_eta` -> `updateCandidateEta` (schedule = ETA); otherwise `nextActionMessage` or a fallback. Then `clearPendingFollowUp`, and for non-complete non-ETA replies `scheduleDynamicFollowUp` with a reminder naming what is still missing, in `nudgeHoursWithinWindow(hours, channel)` hours (`lib/followUpWindow.ts`: WhatsApp max 23 h = 24 h window minus 1 h sweep headroom; email 24 h).
+8. After the save it re-reads THIS application (`getApplicationForCandidate`, not `getActiveFollowUpApplication`) and builds the still-missing list with the same `lib/answered.ts` rules. Stops (29 Oct): `opt_out` -> `candidates:setDoNotContact` + `flagForTaReview`, no reply; `not_interested` (this role only, not an opt-out), `wants_human`, long ETA -> one short acknowledgement + `flagForTaReview` (clears schedule, event `flagged_for_ta_review`; the sweep skips the row until a TA acts). No stop moves the stage - a TA decides. Otherwise: complete -> "profile is now 100% complete", saying "advanced to the next stage" only if the stage really is `second_shortlist`; `promised_eta` -> `updateCandidateEta` with `nextFollowUpMessage` = the reminder (schedule = ETA; it was set and then wiped by the clear); question with no model answer -> "a consultant will confirm that", never invented facts; otherwise `nextActionMessage` or a fallback. For other replies `clearPendingFollowUp`, then for non-complete ones `scheduleDynamicFollowUp` with a reminder naming what is still missing, in `nudgeHoursWithinWindow(hours, channel)` hours (`lib/followUpWindow.ts`: WhatsApp max 23 h = 24 h window minus 1 h sweep headroom; email 24 h).
 9. Reply sent on the arrival channel: email -> `emailAgent:createOutboundEmailRecord` + `graphEmail:replyToMessage` (thread reply) or `sendGraphEmail` with `isReplyToCandidate:true`; WhatsApp -> `whatsappOutbound:recordLocalWhatsappOutbound` (30 s outbound dedupe) + `sendWhatsApp` with `isReplyToCandidate:true`.
 10. Any extraction exception: fail-open fallback schedules a generic reminder (`scheduleDynamicFollowUp`) within the window.
 
@@ -275,7 +275,7 @@ Where to edit:
 - New channel gate: add it to `outreachSafety`/`outboundGuard`, never only to a caller.
 - Stage rule: change `ta/stages.ts` and `ALLOWED_TRANSITIONS`/gates in `pipelineStateMachine.ts` together; keep `src/lib/pipeline.ts` transitions in step.
 
-Tests (run all with `npm test`; one with `node tests/run.mjs <substring>`): `tests/followupscope.test.ts` (switch, rounds, double press), `tests/followupsweep.test.ts` (cursor window, completeness, needsReviewDetails), `tests/followupwindow.test.ts`, `tests/answered.test.ts`, `tests/templatebudget.test.ts`, `tests/whatsapptemplates.test.ts`, `tests/windowfallback.test.ts`, `tests/replyrouting.test.ts`, `tests/stagenames.test.ts`, `tests/followup.test.ts` (local engine only), `convex/communications/__tests__/dynamicEmailFollowUp.test.ts` (ETA ceiling logic, mirrors constants, not the function). There is no test for `sendFollowUp`/the sweep body or `checkAndRecordFollowUpReply`; extend pure helpers in `convex/lib/` first and test them there. Types: `npx tsc --noEmit -p .` and `npx tsc --noEmit -p convex`.
+Tests (run all with `npm test`; one with `node tests/run.mjs <substring>`): `tests/followupscope.test.ts` (switch, rounds, double press), `tests/followupsweep.test.ts` (cursor window, completeness, needsReviewDetails), `tests/followupwindow.test.ts`, `tests/answered.test.ts`, `tests/templatebudget.test.ts`, `tests/whatsapptemplates.test.ts`, `tests/windowfallback.test.ts`, `tests/replyrouting.test.ts`, `tests/replyturn.test.ts` (runs `extractDetailsFromText` itself with a faked model and database: promised time kept, long ETA saves answers, decline / opt-out stop the chase, short replies read, own application re-read, no invented job facts, model failure fails open), `tests/stagenames.test.ts`, `tests/followup.test.ts` (local engine only), `convex/communications/__tests__/dynamicEmailFollowUp.test.ts` (ETA ceiling logic, mirrors constants, not the function). There is no test for `sendFollowUp`/the sweep body or `checkAndRecordFollowUpReply`; extend pure helpers in `convex/lib/` first and test them there. Types: `npx tsc --noEmit -p .` and `npx tsc --noEmit -p convex`.
 
 The Settings demo takes only receiver contact details (plus optional sample name/title). Email always uses the backend sender (`OUTBOUND_EMAIL_SENDER` or `MS_SENDER_EMAIL`), not the signed-in admin's email. WhatsApp uses the main configured Meta phone ID. The result shows the actual destination and email sender.
 
@@ -303,8 +303,8 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-10-29 PR #320 verified the configured demo senders and shared budget accounting; also documented the existing one-location assignment on claim/stage move. The intervening tracking-purge cron does not alter follow-up scheduling.
 
 <!-- skill-meta
-verified-commit: 1194806b
-verified-hash: 989ed4aa29bc28bcb495c03dc6f72999a2c7edf8
+verified-commit: 66aa2cac
+verified-hash: 8e00f69e62d8bd29925aec2670fa6c6889e8c299
 verified-date: 2026-10-29
 sources:
   convex/ta/followUp.ts
@@ -351,4 +351,5 @@ sources:
   tests/demosend.test.ts
   tests/windowfallback.test.ts
   tests/replyrouting.test.ts
+  tests/replyturn.test.ts
 -->
