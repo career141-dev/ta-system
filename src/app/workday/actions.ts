@@ -12,10 +12,20 @@ import { workdayErrorMessage } from "@/lib/workdayErrors";
 export async function changeWorkday(
   form: FormData,
 ): Promise<{ ok: boolean; message: string }> {
-  await primeStore({});
-  const user = await getCurrentUser();
   const value = (key: string) => String(form.get(key) ?? "").trim();
   const op = value("op");
+  // Loading the desk and finding who is signed in used to sit outside the
+  // catch: a failure there reached the TA as a broken page and left nothing in
+  // the log (29 Oct). Sign-in redirects still pass through unstable_rethrow.
+  let user: Awaited<ReturnType<typeof getCurrentUser>>;
+  try {
+    await primeStore({});
+    user = await getCurrentUser();
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[workday] could not load the session", `op=${op}`, error instanceof Error ? error.message.slice(0, 300) : "");
+    return { ok: false, message: "Could not reach the server. Your workday was not changed. Try again in a moment." };
+  }
   const args: Record<string, unknown> = { actorId: user.id };
   if (op === "start")
     Object.assign(args, { jobId: value("jobId"), workType: value("workType") });
@@ -95,6 +105,9 @@ export async function changeWorkday(
     return { ok: true, message };
   } catch (error) {
     unstable_rethrow(error);
+    // The message only: no form values. Start is safe to press again — it
+    // returns today's existing workday instead of creating a second one.
+    console.error("[workday] action failed", `op=${op}`, error instanceof Error ? error.message.slice(0, 300) : "");
     return {
       ok: false,
       message: workdayErrorMessage(error, op),

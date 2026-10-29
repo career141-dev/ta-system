@@ -18,7 +18,7 @@ import "server-only";
  */
 
 import { backendHostAllowed } from "./convexHost";
-import { Breaker, Gate, ReadCache, backoffMs } from "./convexResilience";
+import { Breaker, Gate, ReadCache, backoffMs, failureCategory } from "./convexResilience";
 
 const TIMING = !!process.env.C141_TIMING;
 
@@ -82,11 +82,17 @@ const reads = new ReadCache();
 const gate = new Gate(BACKEND_CONCURRENCY);
 const breaker = new Breaker();
 
+const categoryOf = (e: unknown) =>
+  e instanceof ConvexCallError ? failureCategory(e.message, e.unreachable, e.status) : "other";
+
 async function call<T>(kind: Kind, path: string, args: Record<string, unknown>): Promise<T> {
   const wait = breaker.blockedFor();
   if (wait) throw new ConvexCallError(`The backend is not answering, so calls are paused for ${wait} more seconds.`, 503);
+  const queued = performance.now();
+  let sent = queued;
+  const timed = () => { sent = performance.now(); return send<T>(kind, path, args); };
   try {
-    const out = await (kind === "action" ? send<T>(kind, path, args) : gate.run(() => send<T>(kind, path, args)));
+    const out = await (kind === "action" ? timed() : gate.run(timed));
     // The backend answered, even if with a refusal.
     breaker.success();
     return out;
@@ -97,6 +103,11 @@ async function call<T>(kind: Kind, path: string, args: Record<string, unknown>):
     if (e instanceof ConvexCallError) {
       if (e.unreachable || e.status === 502 || e.status === 503 || e.status === 504) breaker.failure();
       else if (e.status !== undefined) breaker.success();
+      // Path, kind and timings only — never arguments, which carry candidate
+      // details (29 Oct). Queue wait is time behind this process's gate;
+      // elapsed is the backend round trip. Together they say whether the app or
+      // the backend was slow.
+      console.error(`[convex] failed ${kind} ${path} category=${categoryOf(e)} queueMs=${Math.round(sent - queued)} elapsedMs=${Math.round(performance.now() - sent)}`);
     }
     throw e;
   } finally {
@@ -130,7 +141,7 @@ async function send<T>(kind: Kind, path: string, args: Record<string, unknown>):
     // page that loads data. Control-flow errors pass through untouched.
     if (e && typeof e === "object" && "digest" in e) throw e;
     const err = e as Error;
-    // Worded so RETRYABLE below does not match it: four more waits of the same
+    // Worded so failureCategory (convexResilience) does not class it as retryable: four more waits of the same
     // length would be two minutes of a frozen desk.
     if (err.name === "TimeoutError") {
       throw new ConvexCallError(`The backend did not answer ${path} within ${Math.round(QUERY_TIMEOUT_MS / 1000)} seconds.`);
@@ -165,8 +176,6 @@ async function send<T>(kind: Kind, path: string, args: Record<string, unknown>):
   return body.value as T;
 }
 
-const RETRYABLE = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network|invalid json response|http 429|http 502|http 503|http 504/i;
-
 /**
  * `cacheMs`: how stale this answer may be. Left out, the read is fresh (though
  * identical reads at the same moment still share one request). Any write this
@@ -178,7 +187,7 @@ export async function convexQuery<T>(path: string, args: Record<string, unknown>
       try {
         return await call<T>("query", path, args);
       } catch (e) {
-        if (attempt >= 4 || !(e instanceof ConvexCallError) || !RETRYABLE.test(e.message)) throw e;
+        if (attempt >= 4 || !["transient", "unreachable"].includes(categoryOf(e))) throw e;
         await new Promise((r) => setTimeout(r, backoffMs(attempt)));
       }
     }

@@ -764,9 +764,26 @@ try {
   }
   put("taWorkdays", { _id: "pastCarryDay", userId: "carryTa", date: workdayDate(clock - 86400000), startedAt: clock - 86400000, finishedAt: clock - 1, jobs: pastJobs });
   put("jobs", { _id: "newPrimary", title: "New primary", status: "active", taLeadId: "lead", assignedTaIds: ["carryTa"] });
+  // 29 Oct: the 100% preview is built for the one position picked, on request.
+  assert.ok((await run("startPreview", { actorId: "carryTa", jobId: "newPrimary" })).checks.length > 0);
+  const scheduled: Row[] = [];
+  ctx.scheduler.runAfter = async (_ms: number, _fn: unknown, args: Row) => { scheduled.push(args); return null; };
   const carryDay = await run("start", { actorId: "carryTa", jobId: "newPrimary", workType: "Follow-up" });
   const carried = await db.get(carryDay.id);
   assert.equal(carried?.jobs.length, 13);
+  // Start evaluates only the picked position; the carried ones follow in the
+  // background, one per run, so a long carry list cannot fail attendance.
+  const carriedEvents = (jobId: string) => rows("taWorkdayTaskEvents").filter(e => e.workdayId === carryDay.id && e.jobId === jobId);
+  assert.equal(scheduled.filter(a => a.jobIds).length, 1);
+  assert.equal(scheduled.find(a => a.jobIds)?.jobIds.length, 12);
+  assert.ok(carriedEvents("newPrimary").length > 0);
+  assert.equal(carriedEvents("carry:0").length, 0, "Carried checks are not evaluated inside Start");
+  await run("refreshCarried", { workdayId: carryDay.id, jobIds: ["carry:0", "carry:1"] });
+  assert.ok(carriedEvents("carry:0").length > 0);
+  assert.equal(carriedEvents("carry:1").length, 0);
+  assert.deepEqual(scheduled.at(-1)?.jobIds, ["carry:1"], "The rest follow one per run");
+  ctx.scheduler.runAfter = async () => null;
+  assert.deepEqual(await run("start", { actorId: "carryTa", jobId: "newPrimary", workType: "Follow-up" }), carryDay, "A second Start returns the same day");
   assert.equal(carried?.jobs[0].workType, "Follow-up", "A historical job entered today can start directly in Follow-up");
   assert.equal(carried?.jobs.filter((j: Row) => j.carried && j.workType === "Follow-up").length, 12);
   for (let i = 0; i < 9; i++) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Breaker, Gate, ReadCache, backoffMs } from "../src/lib/convexResilience";
+import { Breaker, Gate, ReadCache, backoffMs, failureCategory } from "../src/lib/convexResilience";
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -89,4 +89,13 @@ test("backoff doubles to a ceiling and stays within a quarter either side", () =
   assert.equal(backoffMs(9, () => 0.5), 2000);
   assert.equal(backoffMs(1, () => 0), 225);
   assert.equal(backoffMs(1, () => 1), 375);
+});
+
+test("a function over its execution budget is not retried; a gateway hiccup is", () => {
+  assert.equal(failureCategory("Convex refused candidates/candidates:getCvUploadUrl: [Request ID: x] Server Error\nFunction execution timed out (maximum duration: 1s)", false, 500), "budget");
+  assert.equal(failureCategory("Convex refused x: Too many bytes read in a single function execution", false, 500), "budget");
+  assert.equal(failureCategory("Convex refused x: HTTP 503", false, 503), "transient");
+  assert.equal(failureCategory("Could not reach the Convex backend (fetch failed).", true), "unreachable");
+  assert.equal(failureCategory("Convex refused x: Uncaught Error: Start today's workday first.", false, 400), "refused");
+  assert.equal(failureCategory("The backend did not answer x within 30 seconds."), "other");
 });

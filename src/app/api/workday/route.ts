@@ -6,8 +6,19 @@ import type { WorkdayPayload } from "@/lib/workday";
 import { canViewWorkday } from "@/lib/workdayRoles";
 
 export async function GET(request: Request) {
-  await primeStore({});
-  const user = await currentUser();
+  // Inside a catch, like the backend calls below: a failed desk load left no
+  // trace in the log (29 Oct).
+  let user: Awaited<ReturnType<typeof currentUser>>;
+  try {
+    await primeStore({});
+    user = await currentUser();
+  } catch (err) {
+    console.error("[api/workday] session", err instanceof Error ? err.message.slice(0, 300) : "");
+    return NextResponse.json(
+      { error: "Could not load workday checks. Please retry." },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
   if (!user)
     return NextResponse.json({ error: "Please sign in." }, { status: 401 });
   if (!canViewWorkday(user.role))
@@ -18,6 +29,14 @@ export async function GET(request: Request) {
   // Which backend call was running, for the log below.
   let step = "ta/workdays:dashboard";
   try {
+    const preview = new URL(request.url).searchParams.get("preview");
+    if (preview) {
+      step = "ta/workdays:startPreview";
+      return NextResponse.json(
+        await convexQuery("ta/workdays:startPreview", { actorId: user.id, jobId: preview }),
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
     const payload = await convexQuery<WorkdayPayload>("ta/workdays:dashboard", {
       actorId: user.id,
       detail: new URL(request.url).searchParams.get("detail") === "1",

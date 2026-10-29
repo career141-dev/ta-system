@@ -10,11 +10,13 @@ export async function assertWorkdayScope(
   jobId: Id<"jobs">,
 ) {
   if (!["ta", "ta_support"].includes(mapUser(user).role)) return;
+  // Today's rows only, not the TA's whole history (29 Oct): this runs on every
+  // upload, stage change and CV view.
   const active = await ctx.db
     .query("taWorkdays")
-    .withIndex("by_user", q => q.eq("userId", user._id))
+    .withIndex("by_user_date", q => q.eq("userId", user._id).eq("date", workdayDate(Date.now())))
     .collect();
-  const today = active.find(d => d.date === workdayDate(Date.now()) && (d.finishedAt === undefined || d.closureReason === "eod"));
+  const today = active.find(d => d.finishedAt === undefined || d.closureReason === "eod");
   if (today) {
     if (!today.jobs.some((j) => j.jobId === jobId))
       throw new Error(

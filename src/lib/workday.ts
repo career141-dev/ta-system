@@ -100,7 +100,7 @@ export interface WorkdayPayload {
   team: WorkdayView[];
   teamMembers?: { userId: string; name: string }[];
   teamAssignments?: { userId: string; name: string; jobId: string; title: string }[];
-  options: { id: string; title: string; workType?: WorkType; carry?: boolean; preview?: WorkdayJobView }[];
+  options: { id: string; title: string; workType?: WorkType; carry?: boolean }[];
   nextCursor?: string | null;
   sentEmails?: { id: string; rootId: string; jobId: string; title: string; date: string; sentAt: number; workType?: WorkType; subject: string; to: string[]; cc: string[]; revised: boolean; legacy?: boolean }[];
 }

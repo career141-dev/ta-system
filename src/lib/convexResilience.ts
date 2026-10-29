@@ -147,3 +147,29 @@ export function backoffMs(attempt: number, random: () => number = Math.random): 
   const base = Math.min(300 * Math.pow(2, attempt - 1), 2000);
   return Math.round(base * (0.75 + random() * 0.5));
 }
+
+// The backend's own refusals for a function that ran too long or read too much.
+const BUDGET = /function execution timed out|execution time limit|too many (bytes|documents) read|read too (much|many)|too many reads/i;
+const TRANSIENT = /timed out|fetch failed|econnreset|etimedout|eai_again|socket hang up|network|invalid json response|http 429|http 502|http 503|http 504/i;
+
+/**
+ * What kind of failure a backend call was, for the log and for whether to
+ * retry it (29 Oct).
+ *
+ * "budget" is the backend refusing the function itself: it ran past its
+ * one-second execution limit or read too much. Asking again runs the same
+ * function over the same data and fails the same way — the old retry rule
+ * matched "timed out" and sent each such read four times, adding load at the
+ * morning peak. "transient" and "unreachable" are the network or a gateway
+ * (429/502/503/504), which a second try can get past.
+ */
+export function failureCategory(
+  message: string,
+  unreachable = false,
+  status?: number,
+): "budget" | "transient" | "unreachable" | "refused" | "other" {
+  if (BUDGET.test(message)) return "budget";
+  if (unreachable) return "unreachable";
+  if (TRANSIENT.test(message)) return "transient";
+  return status !== undefined ? "refused" : "other";
+}

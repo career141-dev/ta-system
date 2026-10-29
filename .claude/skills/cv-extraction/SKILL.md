@@ -53,6 +53,7 @@ HH and Scoop uploads share limits: 10 files per click (`MAX_FILES` in `HhUpload.
 - Mail, WhatsApp, ZIP, Workable, folder files go to Cloudflare R2 through `storage/r2.ts:uploadBufferToR2` (key `cvs/YYYY-MM/<ms>-<safe name>`; 3 attempts, 1 s/2 s back-off). Row gets `s3Key`, `storageProvider:"r2"`.
 - Non-production deployments (`C141_OUTBOUND_LOCK==="true"`, `outboundLocked()`) never write to the production bucket: `uploadBufferToR2` and `uploadCvRawTextToR2` store in Convex storage and return `s3Key = "convex:<storageId>"`; `generateDownloadUrl`/`getResumeRawText`/`deleteCvFile` resolve that prefix; `deleteCvFile` skips R2 deletes when locked. Remember this when reading a staging row: an `s3Key` starting `convex:` is not an R2 object.
 - Download resolution in extraction: `args.s3Key||row.s3Key` + provider r2 -> `storage/r2:generateDownloadUrl` (1 h signed URL), else `ctx.storage.getUrl(storageId)`; fetch has a 30 s timeout; zero bytes throws "The file retrieved from storage is empty (zero bytes)."
+- List rows with no `cvFileName`: `candidatesByIds` (`src/data/convex/backend.ts`) asks `candidates/candidates:cvFileNames({ids})`, at most 50 ids per call, which answers from the documents alone (R2 key, or a Convex storage file present in `_storage`) without signing a link (29 Oct: lists used to call `getCvUploadUrl` once per row, and it hit its one-second limit). Both use `findCvUpload` in `convex/lib/cvUploadLookup.ts`.
 - Viewing: `candidates/candidates:getCvUploadUrl` (accepts a cvUpload id, candidate id or application id; falls back to `by_fileHash`) returns a `/api/r2-file?key=` marker (route no longer exists, 2 Oct) or a Convex storage URL; `src/data/convex/backend.ts:cvLink/findCvFile` signs R2 server-side (falls back to a direct S3 presign using the four `R2_*` vars when the Convex action is rate-limited) and says "was lost when the system moved to its new server and is being recovered..." for migration-missing files.
 - Raw text goes to R2 `cv-rawtext/<cvUploadId>/<cvUploadId>.txt` (`uploadCvRawTextToR2`, `candidateId` arg is the upload id) and `rawTextKey` is stored on the candidate and `candidateResumes`; read back with `storage/r2:getResumeRawText`.
 
@@ -256,9 +257,9 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` or any 
 - 2026-10-28 DeepSeek reasoning off for CV tasks + cut-off JSON retried ("not readable JSON (323 characters)"); Try again / Remove on failed HH and Scoop cards.
 
 <!-- skill-meta
-verified-commit: 2bf544c1
-verified-hash: 20d107fefca16797adaf5aa814a23455a02109fa
-verified-date: 2026-10-28
+verified-commit: 66aa2ca
+verified-hash: af784f9789687a777266bef9b6a1cc16e8a1b023
+verified-date: 2026-10-29
 sources:
   convex/cvs/cvExtraction.ts
   convex/cvs/cvUploads.ts
@@ -274,6 +275,7 @@ sources:
   convex/cvs/sept5Reextractor*.ts
   convex/lib/extractionQueue.ts
   convex/lib/cvUploadProgress.ts
+  convex/lib/cvUploadLookup.ts
   convex/lib/fillBlanks.ts
   convex/lib/sameCandidate.ts
   convex/lib/llm.ts
