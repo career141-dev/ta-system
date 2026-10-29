@@ -153,8 +153,8 @@ Applies only to `ta`/`ta_support`. Reads today's rows via `by_user_date`, not th
 | Piece | File | Notes |
 |---|---|---|
 | Mount | `src/app/layout.tsx` (two branches: Clerk and UI-only) | `canViewWorkday(role)` wraps `children` in `WorkdayWorkspace role` (`src/components/Workday.tsx`) |
-| TA / TA Support | `WorkdayRail` | always visible at `xl`, `xl:pr-96` page padding; below xl a fixed "Today's checks" button; width `max-w-96` |
-| Lead / admin / director | `WorkdayRailLeadAdmin` | closed by default, edge pull-tab "Today's Checks" at 45% height, `aside#workday-rail-lead` `inert` when closed |
+| TA / TA Support | `WorkdayRail` | polls only while shown (`active={open || wide}`, `wide` = `(min-width: 1280px)`); always visible at `xl`, `xl:pr-96` page padding; below xl a fixed "Today's checks" button; width `max-w-96` |
+| Lead / admin / director | `WorkdayRailLeadAdmin` | closed by default, edge pull-tab "Today's Checks" at 45% height, `aside#workday-rail-lead` `inert` when closed; `WorkdayDashboard active={open}`, so a closed drawer does not poll (29 Oct) |
 | Redirect | `src/app/workday/page.tsx` | `redirect("/openings?checks=open")`; `?checks=open` opens either rail |
 | Data hook | `useWorkday(detail, enabled, query)` | `GET /api/workday?detail=0|1&date=&cursor=&ta=&checkDay=`; one request at a time (29 Oct): the next poll is timed 20-25 s (jitter) after the last answer, only while `document.visibilityState === "visible"`, doubling up to 2 min while loads fail; window `focus` loads only if nothing is in flight; the custom event `workday-changed` (every `WorkForm` dispatches it) aborts and reloads at once |
 | `WorkdayDashboard` | same file | TA section: "Sent EOD emails - last 31 days" (`data.sentEmails` from `ta/dailyEmails:sent`, links `/openings/<id>/eod?mail=<id>` or `?resend=` for legacy, "Edit and resend"), active day or Start picker, "Add another position", "Previous workdays" (date filter client-side). Reviewer section: "Team checks" with Day / TA / Position / Task status filters (status values incomplete, complete, waiting, excused) and "Older records"/"Latest records" cursor buttons |
@@ -273,10 +273,11 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` against
 - 2026-10-21 `4dd30a8` work locations: per-location EODs, `workLocationIds` on entries, `lib/workLocationEmails.ts`, city submissions cannot close attendance early.
 - 2026-10-23 `f3d57d6` EOD can be sent with zero CVs and no reason in any mode (`director_cv` always complete); `b76374c` TA leads (and directors) review all TA activity (`deskWide`, `canReviewWorkdays`).
 - 2026-10-26 `d5497ab` `/api/workday` logs which call failed on 503 (reviewers' panel failed on every 20 s poll).
+- 2026-10-29 Closed lead drawer and hidden TA rail stop polling (`WorkdayDashboard active`); every closed drawer still asked for the whole team's checks every 20 s during the 29 Oct freeze.
 
 <!-- skill-meta
-verified-commit: 8bb1c68
-verified-hash: 662fb12f638a72cd3dcbc6ac7e7218e78b344c08
+verified-commit: f8f4b53d
+verified-hash: 8bbc70467a042e30e66aa7ae7715a2775ad37f22
 verified-date: 2026-10-29
 sources:
   convex/ta/workdays.ts

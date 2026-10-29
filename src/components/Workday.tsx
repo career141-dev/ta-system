@@ -604,7 +604,13 @@ function DailyReview({
   );
 }
 
-export function WorkdayDashboard() {
+/**
+ * `active` false stops the polling, not the panel. Both drawers stay mounted
+ * when closed, and every closed one still asked for the whole team's checks
+ * every 20 s — the heaviest read on the desk (29 Oct freeze). Opening it
+ * loads at once.
+ */
+export function WorkdayDashboard({ active = true }: { active?: boolean }) {
   const [date, setDate] = useSavedChoice("workday-date", workdayDate(Date.now()));
   const [ta, setTa] = useSavedChoice("workday-ta");
   const [jobFilter, setJobFilter] = useSavedChoice("workday-filter-job");
@@ -619,7 +625,7 @@ export function WorkdayDashboard() {
   const requestedFocus = `${requestedDay}:${requestedJob}:${params.get("checkTask")}`;
   const [dismissedFocus, setDismissedFocus] = useState<string | null>(null);
   const focus = requestedDay && dismissedFocus !== requestedFocus ? { day: requestedDay, job: requestedJob } : null;
-  const { data, error, load } = useWorkday(true, true, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}&ta=${encodeURIComponent(ta)}${allHistory ? "&history=all" : ""}`);
+  const { data, error, load } = useWorkday(true, active, focus ? `&checkDay=${encodeURIComponent(focus.day)}` : `&date=${encodeURIComponent(date)}&cursor=${encodeURIComponent(cursor)}&ta=${encodeURIComponent(ta)}${allHistory ? "&history=all" : ""}`);
   useEffect(() => setHistoryLoading(false), [data, error]);
   const teamChoices = [...(data?.teamAssignments ?? []), ...(data?.team ?? []).flatMap(day => day.jobs.map(job => ({ userId: day.userId, name: day.name, jobId: job.jobId, title: job.title })))];
   const taChoices = [...new Map([...(data?.teamMembers ?? []), ...teamChoices].map(choice => [choice.userId, choice.name])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
@@ -784,6 +790,15 @@ export function WorkdayDashboard() {
  */
 export function WorkdayRail() {
   const [open, setOpen] = useState(false);
+  // The rail is always shown on xl screens; below that only when opened.
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(min-width: 1280px)");
+    const update = () => setWide(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
   const params = useSearchParams();
   const requestedOpen = params.get("checks") === "open";
   useEffect(() => { if (requestedOpen) setOpen(true); }, [requestedOpen]);
@@ -808,7 +823,7 @@ export function WorkdayRail() {
         <h2 className="font-semibold">Today&apos;s Checks</h2>
         <button onClick={() => setOpen(false)} className="text-sm text-brand xl:hidden">Close</button>
       </div>
-      <WorkdayDashboard />
+      <WorkdayDashboard active={open || wide} />
     </aside>
   </>;
 }
@@ -860,7 +875,7 @@ export function WorkdayRailLeadAdmin() {
           ✕ Close
         </button>
       </div>
-      <WorkdayDashboard />
+      <WorkdayDashboard active={open} />
     </aside>
   </>;
 }

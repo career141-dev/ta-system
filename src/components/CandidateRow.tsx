@@ -205,7 +205,7 @@ export function CandidateRow({
                 <option value="" disabled>Choose a job</option>
                 {destinationJobs.map(job => <option key={job.id} value={job.id}>{job.title}</option>)}
               </select>
-              <SubmitButton pendingLabel="Adding…" className="rounded bg-brand px-3 py-2 text-white">Add to TA Follow-up</SubmitButton>
+              <SubmitButton pendingLabel="Addingâ€¦" className="rounded bg-brand px-3 py-2 text-white">Add to TA Follow-up</SubmitButton>
             </form>
           </details>
         )}

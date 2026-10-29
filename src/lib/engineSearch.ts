@@ -76,6 +76,8 @@ export interface EngineSearch {
    *  candidate contact data or CV text; it is only the recruiter's intent. */
   intent: SearchIntent;
   hits: EngineHit[];
+  /** Routes that failed. The hits are real but may be missing people; such an answer is never cached. */
+  incomplete?: string[];
 }
 
 /**
@@ -137,7 +139,12 @@ export function engineSearch(
   }
 
   const entry: CacheEntry = { at: now, value: runEngine(args, true), done: null };
-  entry.value.then((r) => (entry.done = r)).catch(() => {
+  entry.value.then((r) => {
+    // Part of the search failed: show it, but do not keep it as the answer.
+    if (r.incomplete?.length) {
+      if (engineCache.get(key) === entry) engineCache.delete(key);
+    } else entry.done = r;
+  }).catch(() => {
     // A failed run is not an answer to keep: the next request tries again.
     if (engineCache.get(key) === entry) engineCache.delete(key);
   });
@@ -449,7 +456,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   });
   const nameFirst = await named;
   if (pool.length === 0) {
-    return { interpretation: interpretationOf(req, modelIntent !== null, kind), intent: searchIntent, hits: nameFirst };
+    return { interpretation: interpretationOf(req, modelIntent !== null, kind), intent: searchIntent, hits: nameFirst, ...(down.length ? { incomplete: down } : {}) };
   }
 
   // Explicit constraints remain enforced even when nobody satisfies them.
@@ -487,6 +494,7 @@ async function runEngine(args: EngineArgs, withModel: boolean): Promise<EngineSe
   return {
     interpretation: interpretationOf(req, modelIntent !== null, kind),
     intent: searchIntent,
+    ...(down.length ? { incomplete: down } : {}),
     hits: [...nameFirst, ...final
       .filter((f) => !onName.has(f.c.cv._id) && (f.score > 0 || !!f.c.roleEvidence))
       .slice(0, args.limit)

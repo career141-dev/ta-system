@@ -158,7 +158,7 @@ Pipeline-only catch-ups (dryRun required, run through the release pipeline `run_
 
 ### 8. Webhook, subscriptions, health
 
-- `convex/http.ts` `/api/graph-webhook` (a **Convex** HTTP route, not a Next route): GET echoes `validationToken`; POST drops every notification whose `clientState` differs from `MS_GRAPH_CLIENT_STATE` (all if unset), parses the mailbox from `users/<email>/mailFolders...`, skips "sanjeev", schedules `pollEmailInbox({inboxEmail})`, answers 202.
+- `convex/http.ts` `/api/graph-webhook` (a **Convex** HTTP route, not a Next route): GET echoes `validationToken`; POST drops every notification whose `clientState` differs from `MS_GRAPH_CLIENT_STATE` (all if unset), parses the mailbox from `users/<email>/mailFolders...`, skips "sanjeev", calls `emailAgent.scheduleWebhookPoll({inboxEmail})`, answers 202. That schedules one `pollEmailInbox` 20 s later (`WEBHOOK_POLL_DELAY_MS`) and stamps `appSettings[email_fetch_<inbox>].webhookPollDueAt`; notifications before that time schedule nothing, since the one read picks them all up (29 Oct; a burst of 50 emails had started 50 overlapping 30-day reads).
 - `graphSubscriptions` table, `createMailSubscription({taEmail})` (3-day expiry), cron `renew-graph-subscriptions` daily 03:00 UTC -> `renewExpiringSubscriptions` (renews rows expiring within 24 h to now+3 days). Nothing in the repo calls `createMailSubscription` (unverified whether live rows exist); crons cover everything if it does not.
 - Health: `pollEmailInbox` stamps `appSettings.mailPollOkAt/mailWaiting`; cron `check-mailboxes-read` (30 min) -> `checkMailboxesRead`: for linkedin@, cv@, job@, if the last OK run is >= `STALLED_AFTER_MS` (1 h) and not yet reported for this stall (`stalledUnreported`, `mailStallReportedAt`), inserts a `mailbox_stalled` notification "Problem: <inbox> has stopped" for each active admin/TA lead (`taRole` admin or ta_lead, or `role` admin); bell href `/settings?tab=mailboxes` (`ta/notifications.ts`). `inboxHealth` (query) feeds the panel with today's counts from `mailboxLog` since Colombo midnight (`now+5.5h`): outcome `reply`->replies, `no_cv`, `failed`, note matching /database/ -> toDatabase, else toJob.
 - `emailBackfill*.ts` + cron `watchdog-mailbox-scan-healer` (5 min, `recoverStalledMailboxScans`) are historical bulk mailbox scans/recoveries (`recoverMailboxCVs`, `recoverCvFullInbox`); not part of daily intake.
@@ -296,10 +296,11 @@ Repo rules that apply: never run `convex deploy/run/import/env set` against live
 - 2026-10-23 `1e6fdb7` (PR #261 `548aef6`) linkedin@ unread 5-23 Oct: listing with bodies exceeded the 64 MB action limit; fix lists ids only, 40 per run, cursor to oldest waiting, adds `check-mailboxes-read`. `4755ef8` half-emoji (lone surrogate) stopped the same message every run (`wellFormed`). `dac2fd1` application-inbox health panel. `0362628`, `7efccba` catch-up of 115 unread Director replies in shortlists@ (385 emails 6-23 Oct). `86d1414` AI reader; `ac8dd86` client replies to Client shortlist.
 - 2026-10-24 `a6118cc` interviews@ invitations move candidates to Interview; `7af4748`, `9e81d78` found by own address, furthest application, DeltaSpike; `16f977e`, `ba4ef75`, `b53590c`, `5103067` catch-up pacing (4-minute deadline, continue in fresh run).
 - 2026-10-26 `5ed2893`, `f7aaab4`, `2b9c52f`, `5bd92af` `setCvs.ts`: CVs a TA put forward by email are filed onto their opening.
+- 2026-10-29 Graph webhook: one scheduled read per mailbox (`scheduleWebhookPoll`, 20 s), not one per message.
 
 <!-- skill-meta
-verified-commit: 8bb1c684
-verified-hash: b312bddb383565030f04c06fa2145ebcf6f1f04f
+verified-commit: f8f4b53d
+verified-hash: 3807302e2482f7fd058c69d085c84abfb1ed365f
 verified-date: 2026-10-29
 sources:
   convex/mailIntake/**

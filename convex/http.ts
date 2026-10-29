@@ -523,14 +523,9 @@ http.route({
           continue;
         }
 
-        // Schedule the inbox read action to retrieve the new messages
-        await ctx.scheduler.runAfter(
-          0,
-          internal.communications.emailAgent.pollEmailInbox,
-          { inboxEmail: taEmail }
-        );
-
-        console.log(`[Graph Webhook] Scheduled inbox read for ${taEmail}`);
+        // One read per mailbox, shortly after — not one per message (29 Oct).
+        const scheduled = await ctx.runMutation(internal.communications.emailAgent.scheduleWebhookPoll, { inboxEmail: taEmail });
+        if (scheduled) console.log(`[Graph Webhook] Scheduled inbox read for ${taEmail}`);
       }
 
       // Microsoft expects a 202 Accepted
