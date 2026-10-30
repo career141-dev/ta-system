@@ -127,8 +127,6 @@ export function setsCell(sets: number | string | null | undefined, total: number
   return typed ? `${typed} · ${cvs}` : cvs;
 }
 
-/** Who is copied on every end-of-day email, until it is changed on the People page. */
-export const DEFAULT_EOD_CC = "azim@career141.com";
 
 /**
  * Who the Director's end-of-day email goes to, as the desk set it on 29 Sep:

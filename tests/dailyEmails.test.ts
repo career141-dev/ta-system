@@ -203,7 +203,10 @@ try {
   await assert.rejects(() => begin(["m-eod"], undefined, { workLocationId: "mumbai" }), /reconciliation|still sending/);
   // A send whose result never came back is flagged for the Lead instead of blocking silently (29 Oct).
   now += 16 * 60000;
+  put("taWorkdayMail", { _id: "legacy-receipt", userId: "ta", jobId: "job", workdayId: "day", status: "sending", startedAt: now - 20 * 60000 });
   await (flagStuckSends as any)._handler(ctx, {});
+  assert.equal((await db.get("legacy-receipt"))!.status, "uncertain", "A stuck receipt of the older send path is flagged too");
+  await db.delete("legacy-receipt");
   assert.equal((await db.get(mEod.id))!.status, "uncertain", "A send stuck in sending is flagged uncertain");
   assert.equal((await db.get((await db.get(mEod.id))!.receiptId))!.status, "uncertain", "Its receipt follows");
   now -= 16 * 60000;
@@ -227,13 +230,12 @@ try {
   put("taWorkdays", { _id: "next-day", userId: "ta", date: workdayDate(now), startedAt: now, jobs: [{ jobId: "job", workType: "100%", addedAt: now, modeHistory: [], workLocationIds: ["mumbai", "delhi"] }] });
   await db.delete("policy");
   put("dailyEmails", { _id: "legacy-pending", jobId: "job", userId: "ta", date: "2020-01-01", submissionType: "eod", status: "uncertain", applicationIds: [] });
-  await assert.rejects(() => begin([], undefined, { workLocationId: "mumbai" }), /reconciliation/);
-  await db.delete("legacy-pending");
   checks = await requiredChecks(ctx, await db.get("next-day") as any, (await db.get("next-day"))!.jobs[0]);
   for (const check of checks.eodChecks.filter(c => c.exceptionVersion)) put("taWorkdayExceptions", { _id: `next-exception:${check.key}`, workdayId: "next-day", jobId: "job", key: check.key,
     version: check.exceptionVersion, action: "submit", at: now, by: "ta", reason: "Synthetic next-day setup exception" });
   const activity = await begin([], undefined, { workLocationId: "mumbai" });
   await run("result", { id: activity.id, status: "accepted" });
+  await db.delete("legacy-pending");
   assert.equal((await db.get("next-day"))!.finishedAt, undefined);
   const preflight = await (emailPreflight as any)._handler(ctx, { actorId: "ta", jobId: "job", workLocationId: "delhi", link, confirmed: true });
   assert.equal(preflight.ok, true, "The real EOD preflight leaves Delhi sendable after Mumbai's activity-only report");

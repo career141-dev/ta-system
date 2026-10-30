@@ -4510,7 +4510,7 @@ export async function sendDailyEmail(formData: FormData) {
     // Midday always carries fresh research. EOD keeps the server-authoritative
     // work type and exception rules already used by the live send path.
     const research = type === "midday" || parent
-      ? checkResearchSubmission({ role: "ta", kind: "director", link: String(formData.get("chatgptLink") ?? ""), confirmed })
+      ? checkResearchSubmission({ role: user.role, kind: "director", link: String(formData.get("chatgptLink") ?? ""), confirmed })
       : await eodResearchSubmission(user, openingId, "director", formData, !!parentId);
     if (!research.ok) throw new Error(research.reason);
     const rawSubject = String(formData.get("subject") ?? "").trim();
@@ -5116,18 +5116,6 @@ async function emailEod(input: {
     dailyEmailId,
     note: `Sent from ${result.from} to ${sentTo}${result.cc.length ? `, cc ${result.cc.join(", ")}` : ", no cc"}, with ${attachments.length} attachment${attachments.length === 1 ? "" : "s"}${attachmentSummaryParts.length ? ` (${attachmentSummaryParts.join(", ")})` : ""}.${result.note ? ` ${result.note.trim()}` : ""}`,
   };
-}
-
-/** Who every end-of-day email is copied to (azim@career141.com to start with). */
-export async function setEodCopy(formData: FormData) {
-  await primeStore({ allApplications: true });
-  await authorize(formData, "user.manage");
-  const v = String(formData.get("eodCc") ?? "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(v)) await fail("That is not an email address.");
-  repo.setSetting("eodCc", v);
-  revalidatePath("/people");
-  revalidatePath("/openings", "layout");
-  await back(`End-of-day emails are now copied to ${v}.`);
 }
 
 /**

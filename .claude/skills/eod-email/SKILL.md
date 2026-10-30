@@ -96,7 +96,7 @@ Order of work in `emailEod` matters: CV PDFs and the workbook are built **before
 - Graph failure classification (`ta/eodMail:send`): result `ok:false` -> `uncertain` when the error matches `/could not be reached|returned 5\d\d/i`, else `failed`. A thrown error in the action -> `uncertain` and rethrown. **Uncertain is never retried automatically**; `dailySendProblem` and `begin` block every later send on that location until reconciled. `failed` drafts (midday) can be retried; a failed EOD shows "Return to the composer to retry".
 - `ta/dailyEmails:reconcile` (UI: `DailyEmailView` form -> `reconcileDailyEmail` action): only `admin` or the job's `taLeadId` lead; status must be `sending`/`uncertain`/`accepted` with no `finalizedAt`; reason 1-1000 chars ("Record how you verified the sending mailbox and its message reference."); `sending` needs >=5 min old ("Wait five minutes and check the sending mailbox before reconciling."); `accepted` cannot be turned into failed. "Verified sent" -> `accepted` + `acceptedAt` + `finalizeDailyEmail` (no resend); "Verified not sent" -> `failed`. Patches `reconciledBy`, `reconciliationReason` on email and receipt, then `refreshWorkdayChecks`.
 - Today's Checks also surfaces reconcile (Workday UI; see /workday).
-- Stuck sends (30 Oct): cron `ta-flag-stuck-sends` (every 5 min, `flagStuckSends`, index `dailyEmails.by_status`) turns any `sending` email older than 15 minutes into `uncertain` (and its receipt) so the Lead sees it; before this a dead action left `sending` for days (Sameera 29 Oct, Priya 23 Oct) and blocked that sender. It never resends.
+- Stuck sends (30 Oct): cron `ta-flag-stuck-sends` (every 5 min, `flagStuckSends`, index `dailyEmails.by_status`) turns any `sending` email older than 15 minutes into `uncertain` (and its receipt) so the Lead sees it; before this a dead action left `sending` for days (Sameera 29 Oct, Priya 23 Oct) and blocked that sender. It never resends. It also flips receipts of the older send path (`taWorkdayMail.by_status`, no daily email). An email with no location holds only a job without locations; midday and corrections now check the research link with the sender's real role.
 
 ### Flow E - Retention and purge
 
@@ -117,7 +117,6 @@ Order of work in `emailEod` matters: CV PDFs and the workbook are built **before
 - `validateResearchLink`: <=300 chars, no whitespace, host exactly `chatgpt.com`/`www.chatgpt.com`/`chat.openai.com`, path `/share/<id>` or `/share/e/<id>` (>=8 chars), private `/c|g|gpts|chat` paths refused, normalised to `https://host/path` (query/hash dropped). `needsResearchLink(role, kind)` is true only for `ta`/`ta_support` + director kind (the workType argument is ignored). `checkResearchSubmission` also accepts `excused` (trusted backend evidence only; blank link allowed).
 - Recipients: `EOD_TO = "joborders@career141.com"`; `EOD_CC_DEFAULTS = shamra@, asma@, opsteam@, cv@ (career141.com)`; `parseAddressList` (split on `,;` whitespace, lower-case, de-dupe, bad ones returned separately); `eodRecipients({removed, extraTo, extraCc, shortlistInbox})`: To = EOD_TO (unless removed) + extraTo; Cc = defaults + `repo.shortlistInbox()` (the reply-watching inbox, setting `shortlistInbox`, default `DEFAULT_SHORTLIST_INBOX`) minus removed + extraCc, nobody on both lines. Replies go to `replyTo: [user.email, shortlistInbox]`. On a correction the page rebuilds To/Cc from the parent snapshot (see Flow C).
 - `eodDetailChanges(base, edited)` / `boxOverrides(change)`: diff of what the TA changed against the record -> `patch` (`currentTitle`, `currentEmployer`, `currentSalary`, `expectedSalary`, `noticePeriod` + `noticePeriodDays` via `noticePeriodToDays`) and `notes` (house lines `Total Experience - `/`Currently at ` and formatting marks stripped). Name and age edits stay email-only. `saveEodEdits` applies them after the send; `boxOverrides` feeds the prepared CV box so the PDF says what the email says.
-- Dead setting: `DEFAULT_EOD_CC` (`azim@career141.com`), `repo.eodCopyTo()`, `setEodCopy` action and the composer `eodCc` prop (page passes `eodCc={null}`) are no longer used by the send path; the Cc comes from `EOD_CC_DEFAULTS`.
 
 `src/lib/eod.ts`:
 - `shortlistRowFor`: notice = `noticePeriod` text, else "Immediate" for 0 days, else "<n> days"; current remuneration default "Not disclosed"; expected default "Open to discuss"; notes via `HOUSE_NOTE`: `>Total Experience - <n>yr`, `>Currently at <employer>`, then every application note (de-duped).
@@ -179,7 +178,7 @@ Browser draft behaviour (src/lib/eodDraft.ts): an edit is stored with the record
 
 - Convex (all internal; called from Next via `convexQuery`/`convexMutation`/`convexAction` in src/lib/convexServer): `ta/dailyEmails:` `list`, `sent`, `createDraft`, `saveDraft`, `begin`, `result`, `reconcile`, `saveAttachment`, `attachment`, `enableRequirement`; `ta/eodMail:send` (action, Node); `ta/eodCopies:` `purgeExpired`, `normalizeRetention`; `ta/workdays:` `eodContext`, `emailPreflight`, `researchExceptionAllowed`, `mailResult`, `beginMail` (legacy), `refreshWorkdayChecks`, `autoCompleteWorkday`; `ta/cv:uploadUrl`; helpers `convex/lib/dailyEmail.ts` (`finalizeDailyEmail`, `dailyEmailsFor`, `middayRequired`), `convex/lib/workLocationEmails.ts`, `convex/lib/workdayChecks.ts` (`requiredChecks`), `convex/lib/graphMail.ts`, `convex/lib/graphClient.ts` (`getGraphToken`), `convex/lib/outreachSafety.ts`, `convex/lib/outboundGuard.ts`.
 - Cron: `ta-purge-eod-copies`, every 41 minutes, no gate (convex/crons.ts).
-- Next: server actions in src/app/actions.ts (`sendDailyEmail`, `sendEod`, `resendEod`, `addMiddayEmail`, `saveMiddayDraft`, `reconcileDailyEmail`, `emailEod`, `eodResearchSubmission`, `eodWorkContext`, `currentRefereeCalls`, `saveEodEdits`, `setEodCopy` (unused)); API route `GET /api/eod/attachment`; `GET /api/prepared-cv/[applicationId]` (preview only). `eodInFlight` (a per-process `Set`) guards the legacy path only; the durable guard for the new path is `begin`.
+- Next: server actions in src/app/actions.ts (`sendDailyEmail`, `sendEod`, `resendEod`, `addMiddayEmail`, `saveMiddayDraft`, `reconcileDailyEmail`, `emailEod`, `eodResearchSubmission`, `eodWorkContext`, `currentRefereeCalls`, `saveEodEdits`); API route `GET /api/eod/attachment`; `GET /api/prepared-cv/[applicationId]` (preview only). `eodInFlight` (a per-process `Set`) guards the legacy path only; the durable guard for the new path is `begin`.
 - Env names: `EOD_TEST_EMAIL`, `OUTREACH_LIVE`, `OUTREACH_TEST_EMAIL`, `C141_OUTBOUND_ALLOW_EMAILS`, `MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_SENDER_EMAIL`, `OUTBOUND_EMAIL_SENDER`. Setting `shortlistInbox` (taSettings, via `repo.setting`). No feature kill switch exists for daily emails; the outbound lock and `OUTREACH_LIVE` are the brakes.
 - External: Microsoft Graph (`https://graph.microsoft.com`, via `GRAPH_BASE` in graphMail.ts). Never call it from a laptop-pointed-at-live setup.
 
@@ -213,8 +212,7 @@ Browser draft behaviour (src/lib/eodDraft.ts): an edit is stored with the record
 ## Known quirks, gaps and unverified items
 
 - The skill brief's `isEodCandidateEligible` and `workSessionStart` live in `src/lib/eodEligibility.ts` and `src/lib/workdayRequirements.ts`, not `src/lib/dailyEmail.ts` (which holds `dailySendProblem`, `sameCandidateList`, types, `EMAIL_RETENTION_MS`).
-- Dead code: `setEodCopy`, `DEFAULT_EOD_CC`, `repo.eodCopyTo()`, composer `eodCc` prop; no UI calls `setEodCopy` (grep). `MANUAL_EFFORT` is an empty set kept deliberately.
-- Midday and correction research checks hardcode role `"ta"` in `sendDailyEmail`, so an admin/lead must also supply and confirm a link there, while on an original EOD it is optional for them.
+
 - `emailPreflight` runs only for original EODs of workers; it writes the confirmed link into `taWorkdayCheckNotes` as a side effect even if the send later fails.
 - `sendEod` legacy path: kept for the client copy and non-Convex mode; it still writes `eodEmailCopies`. Whether the client-copy flow is still used in production is unverified.
 - Legacy `?resend=`/`?view=` URLs map through `legacyCopyId` only for adopted copies; un-adopted ones show the SentHistory list when no location is selected.
@@ -282,8 +280,8 @@ Short hashes from `git log`; dates are commit dates.
 - 2026-10-23 f3d57d6 - EOD can be sent without CVs (activity-only); c28e1b1 - referee calls section in the email (`refereeCalls` on snapshot, `eodEmailHtml`).
 
 <!-- skill-meta
-verified-commit: 822cd28
-verified-hash: a02fc3d3f423fca908bb1f6115cc38dba4efa9a2
+verified-commit: 2b66528
+verified-hash: 64e018bc8e5278171ba1646d24246a4d0e227ce9
 verified-date: 2026-10-30
 sources:
   src/app/openings/[id]/eod/page.tsx

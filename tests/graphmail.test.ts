@@ -1,5 +1,5 @@
 import { addressList, followUpCancelledReason, GRAPH_BASE, sendFollowUpMail, sendMailPayload } from "../convex/lib/graphMail";
-import { eodEmailHtml, eodRecipients, DEFAULT_EOD_CC, EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "../src/lib/eod-format";
+import { eodEmailHtml, eodRecipients, EOD_CC_DEFAULTS, EOD_TO, parseAddressList } from "../src/lib/eod-format";
 
 let pass = 0, fail = 0;
 const eq = (l: string, got: unknown, want: unknown) => {
@@ -112,14 +112,13 @@ async function main() {
   const eod = {
     from: "nimali@career141.com",
     to: "director@career141.com",
-    cc: ["lead@career141.com", DEFAULT_EOD_CC, "shortlists@career141.com", "Director@career141.com", "not an address"],
+    cc: ["lead@career141.com", "azim@career141.com", "shortlists@career141.com", "Director@career141.com", "not an address"],
     subject: "HAYLEYS - CFO - 16 SEPTEMBER 2026",
     html: "<p>x</p>",
     attachments: [{ name: "Nimal Perera - Career141.pdf", contentType: "application/pdf", base64: "JVBERi0=" }],
   };
   g = fakeGraph();
   r = await sendFollowUpMail(eod, token, g.fetchImpl);
-  eq("azim@career141.com is the default end-of-day copy", DEFAULT_EOD_CC, "azim@career141.com");
   eq("live: copies kept, the recipient and junk removed", g.calls[0].payload.message.ccRecipients.map((x: any) => x.emailAddress.address), ["lead@career141.com", "azim@career141.com", "shortlists@career141.com"]);
   eq("CV attached as a file", g.calls[0].payload.message.attachments[0], { "@odata.type": "#microsoft.graph.fileAttachment", name: "Nimal Perera - Career141.pdf", contentType: "application/pdf", contentBytes: "JVBERi0=" });
 
