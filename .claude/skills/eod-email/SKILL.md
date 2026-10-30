@@ -91,6 +91,13 @@ Order of work in `emailEod` matters: CV PDFs and the workbook are built **before
 - `begin` with `parentId`: skips the workday requirement and day-bound guards (`day = null`), `dailySendProblem(..., revised=true)` only blocks while another send is sending/uncertain; the new row has `parentId = parent.parentId ?? parent._id` (always the root), `number:1`, own `expiresAt`; `finalizeDailyEmail` appends to the round's `revisedAt` and gives that version its own 31 days. Corrections work after the workday ended and do not need another midday or checks. No receipt/`autoCompleteWorkday` for corrections (`!email.parentId` condition; a correction also has no `receiptId` because `day` is null).
 - `revisedSubject`: strips any leading "REVISED -" / "REVISED:" repeats, prefixes `REVISED - ` once. Reply matching ignores it (`lib/routing strippedSubject`).
 
+### Flow F - Missed end of day (30 Oct)
+
+- Each candidate belongs to the Colombo day they reached Director Review (`lastStageChangedAt`; `day` in `EodEligibility`, src/lib/eodEligibility.ts). Today's EOD roster (`shortlistRows`, `begin`, `workdayChecks`) is today's candidates only. Earlier unsent days (up to `MISSED_EOD_DAYS` = 7) are sent late.
+- Page: `/openings/<id>/eod?for=YYYY-MM-DD`. Tabs "Today" / "Missed · 29 Oct · 4 CVs" come from `ta/dailyEmails:missedDays`, read only when the page loads, never on a send. Composer gets `forDate` (hidden field, button "Send 29 Oct end of day", no Today's Checks panel, link + tick still required).
+- `sendDailyEmail` reads `forDate`, builds that day's roster and effort (`effortRow(..., onlyIds)`: that day only, no workbook, no referee calls) and passes it to `begin`. `begin` with `forDate`: no workday, no receipt, no `autoCompleteWorkday`, no midday rule, no Today's Checks (like a correction); refuses a day today or older than 7 days or an empty list; recomputes the roster for that day. The subject and body are the normal ones — the Director sees nothing about the date. Row stores `dailyEmails.forDate`; those rows are ignored when deciding whether today's EOD was already sent. Work type is "100%" (shortcut: the day's real mode is not looked up).
+- A day's own already-sent candidates are excluded (rounds + accepted emails), so a day can be sent again only for candidates that arrived after its first email. The stuck-send guard still applies to late emails.
+
 ### Flow D - Failure, uncertainty, reconcile
 
 - Graph failure classification (`ta/eodMail:send`): result `ok:false` -> `uncertain` when the error matches `/could not be reached|returned 5\d\d/i`, else `failed`. A thrown error in the action -> `uncertain` and rethrown. **Uncertain is never retried automatically**; `dailySendProblem` and `begin` block every later send on that location until reconciled. `failed` drafts (midday) can be retried; a failed EOD shows "Return to the composer to retry".
@@ -282,8 +289,8 @@ Short hashes from `git log`; dates are commit dates.
 - 2026-10-23 f3d57d6 - EOD can be sent without CVs (activity-only); c28e1b1 - referee calls section in the email (`refereeCalls` on snapshot, `eodEmailHtml`).
 
 <!-- skill-meta
-verified-commit: 83c80ee
-verified-hash: ca82dc9e46d25731f5938f9950ab840447849c73
+verified-commit: c9ecb09
+verified-hash: 16d41762230ab7c99c82df8b97a0143ba5bae339
 verified-date: 2026-10-30
 sources:
   src/app/openings/[id]/eod/page.tsx

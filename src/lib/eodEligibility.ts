@@ -1,4 +1,4 @@
-import type { WorkType } from "./workday";
+import { workdayDate, type WorkType } from "./workday";
 
 /** The fields needed to decide whether a candidate belongs in today's EOD. */
 export interface EodCandidateFacts {
@@ -14,6 +14,10 @@ export interface EodEligibility {
   /** Start of the current work session; Add-on candidates must have reached
    * Director Review on or after this instant. */
   sessionStart?: number | null;
+  /** Colombo day (YYYY-MM-DD) the candidate reached Director Review. Each day's
+   * email carries that day's candidates only; earlier unsent days are sent as
+   * a missed end of day (30 Oct). */
+  day?: string | null;
 }
 
 /**
@@ -27,6 +31,7 @@ export function isEodCandidateEligible(
 ): boolean {
   if (!["director_review", "second_shortlist"].includes(candidate.stage)) return false;
   if (context.taId && candidate.ownerTaId !== context.taId) return false;
+  if (context.day && workdayDate(candidate.lastStageChangedAt) !== context.day) return false;
   if (context.workType !== "Add-on") return true;
   return !!candidate.isAddOn && candidate.lastStageChangedAt >= (context.sessionStart ?? Number.POSITIVE_INFINITY);
 }

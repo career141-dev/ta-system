@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import * as mail from "../convex/ta/dailyEmails";
 import { finalizeDailyEmail } from "../convex/lib/dailyEmail";
 import { dailySendProblem, sameCandidateList } from "../src/lib/dailyEmail";
+import { isEodCandidateEligible } from "../src/lib/eodEligibility";
 import { workdayDate } from "../src/lib/workday";
 import { requiredChecks } from "../convex/lib/workdayChecks";
 import { matchReviewReply } from "../src/lib/routing";
@@ -267,5 +268,21 @@ try {
   assert.equal((await db.get("activity-100-day"))!.finishedAt, now, "100% activity-only EOD completes attendance");
   assert.equal(rows("reviewRounds").length, roundCount, "No candidate round is created without CVs");
   await assert.rejects(() => begin([]), /already been sent/);
+  // 30 Oct: a past day's unsent candidates go out in their own late email; today's end of day stays separate.
+  const yesterday = workdayDate(now - 86400000);
+  put("applications", { _id: "late-a", candidateId: "c:late-a", jobId: "job", ownerTaId: "ta", currentStage: "second_shortlist", lastStageChangedAt: now - 86400000, setNumber: 1 });
+  put("applications", { _id: "late-old", candidateId: "c:late-old", jobId: "job", ownerTaId: "ta", currentStage: "second_shortlist", lastStageChangedAt: now - 9 * 86400000, setNumber: 1 });
+  assert.equal(isEodCandidateEligible({ stage: "second_shortlist", ownerTaId: "ta", lastStageChangedAt: now - 86400000 }, { taId: "ta", workType: "100%", day: workdayDate(now) }), false, "Today's roster excludes yesterday's candidates");
+  assert.deepEqual(await run("missedDays", { actorId: "ta", jobId: "job" }), [{ date: yesterday, count: 1 }], "Only the last seven days are listed");
+  const lateRounds = rows("reviewRounds").length;
+  await assert.rejects(() => begin(["late-old"], undefined, { forDate: workdayDate(now - 9 * 86400000) }), /no longer be sent late/);
+  await assert.rejects(() => begin(["late-a"], undefined, { forDate: workdayDate(now) }), /no longer be sent late/);
+  const late = await begin(["late-a"], undefined, { forDate: yesterday });
+  await run("result", { id: late.id, status: "accepted" });
+  assert.equal(rows("dailyEmails").find(e => e._id === late.id)!.forDate, yesterday);
+  assert.equal(rows("reviewRounds").length, lateRounds + 1, "The late email opens its own Director round");
+  await assert.rejects(() => begin(["late-a"], undefined, { forDate: yesterday }), /candidate list changed/);
+  assert.deepEqual(await run("missedDays", { actorId: "ta", jobId: "job" }), [], "A sent day leaves the backlog");
+  await assert.rejects(() => begin([]), /already been sent/, "A late email never counts as today's end of day");
   console.log("Location rosters, independent drafts/send guards, uncertainty, corrections and activity-only EOD passed.");
 } finally { Date.now = originalNow; }

@@ -63,6 +63,8 @@ Pure rule: `checksForWorkType(workType, checks)` in `src/lib/workday.ts` keeps e
 | 100% | `jd_review`, `linkedin_post`, `suggestions` (while `SUGGESTIONS_WORKDAY_REQUIRED`), `excel_profiles` (>= `MIN_OWN_EXCEL_PROFILES` = 1), `director_cv` (always complete), `chatgpt`, `daily_email`, `midday_email` (once policy on), plus `mail:`/`capacity`/`job_access`; candidate checks (`review:`, `details:`, `handoff:`, `followup:`, `email:`, `profile:`, `upload:`, `director_wait:`, `candidate:`) exist in the data but `sidebarChecks` (`src/lib/workdaySidebar.ts`) hides them from the drawer (leads see them under "Candidate task details") | the `isEodSendCheck` set: jd_review, linkedin_post, suggestions, excel_profiles, director_cv, chatgpt, mail, midday_email, all complete or excused |
 | Follow-up | `director_cv`, `chatgpt`, `daily_email`, `mail:` | confirmed ChatGPT link (+ `mail:` blockers) |
 | Add-on | same as Follow-up; EOD roster limited to this TA's `isAddOn` candidates that reached Director Review since the current Add-on session (`workSessionStart`, `isEodCandidateEligible` in `src/lib/eodEligibility.ts`) | same as Follow-up |
+
+Every mode: the "Eligible Director Review candidates" check (`convex/lib/workdayChecks.ts`) and today's EOD roster count only candidates who reached Director Review today (`day` in `EodEligibility`, 30 Oct). Earlier unsent days are sent as a missed end of day (see /eod-email, Flow F).
 Every mode may send an activity-only EOD with zero candidates (`director_cv` is created with `complete=true`; progress text "No eligible candidates today - a link-only activity email is allowed"). The eight research fields (`RESEARCH_FIELDS`) are optional and no longer produce a check; `saveCheck kind:"research"` and `ResearchConfirmation` (only rendered on the Research page when `repo.workingStage === "100%"`) remain but nothing gates on them.
 `midday_email` is not in `RETURNING_CHECKS`, so it never shows as a Follow-up/Add-on drawer check, yet `ta/dailyEmails.ts` still enforces midday via `dailySendProblem(..., middayRequired)`.
 
@@ -277,9 +279,9 @@ Repo hard rules that apply: never run `convex deploy/run/import/env set` against
 - 2026-10-29 Reviewers' panel: today's open days only, listed as summaries; a day's checklist is built when its row is opened (`summaryView`, `TeamDayChecks`, index `by_finished_date`).
 
 <!-- skill-meta
-verified-commit: 1825c09b
-verified-hash: e3e16d59daaf46cca2f9885d04dc9b78c3246b46
-verified-date: 2026-10-29
+verified-commit: c9ecb09
+verified-hash: 60c0013b8f83c2018ad92f597cf3597f61e27a4c
+verified-date: 2026-10-30
 sources:
   convex/ta/workdays.ts
   convex/lib/workdayChecks.ts

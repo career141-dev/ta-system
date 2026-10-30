@@ -11,6 +11,7 @@ import { readEodReply, readInboundReply, addMiddayEmail } from "@/app/actions";
 import { DailyEmailHistory, DailyEmailView } from "@/components/DailyEmailHistory";
 import type { DailyEmail } from "@/lib/dailyEmail";
 import { workdayDate } from "@/lib/workday";
+import { MISSED_EOD_DAYS } from "@/lib/dailyEmail";
 import { convexQuery } from "@/lib/convexServer";
 import { SubmitButton } from "@/components/Submit";
 import { timeAt } from "@/lib/format";
@@ -53,7 +54,7 @@ export default async function EodPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ location?: string; kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string; sent?: string }>;
+  searchParams: Promise<{ location?: string; kind?: string; msg?: string; q?: string; page?: string; resend?: string; view?: string; mode?: string; mail?: string; revise?: string; sent?: string; for?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -64,7 +65,11 @@ export default async function EodPage({
   const user = await getCurrentUser();
   let workType: WorkingStage = repo.workingStage(id, user.id);
   let sessionStart: number | null = null;
-  if (isConvex() && isTa(user)) {
+  // A missed end of day (?for=YYYY-MM-DD): a past day's candidates, sent late. Checked again on send.
+  const today = workdayDate(Date.now());
+  const forDate = !midday && sp.for && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(sp.for) && sp.for < today && sp.for >= workdayDate(Date.now() - MISSED_EOD_DAYS * 86400000) && isConvex() && isTa(user)
+    && !sp.mail && !sp.resend && !sp.view ? sp.for : undefined;
+  if (isConvex() && isTa(user) && !forDate) {
     const context = await convexQuery<{ workType: WorkingStage; sessionStart: number | null }>("ta/workdays:eodContext", {
       actorId: user.id,
       jobId: id,
@@ -88,7 +93,11 @@ export default async function EodPage({
   const selectedDaily = dailyHistory.find(e => e._id === sp.mail || (!!e.legacyCopyId && (e.legacyCopyId === sp.resend || e.legacyCopyId === sp.view)));
   const draft = midday && selectedDaily && selectedDaily.userId === user.id && selectedDaily.date === workdayDate(Date.now()) && ["draft", "failed"].includes(selectedDaily.status) ? selectedDaily : undefined;
   const correction = !midday && (sp.revise === "yes" || !!sp.resend) && selectedDaily?.userId === user.id && selectedDaily.status === "accepted" && selectedDaily.snapshot ? selectedDaily : undefined;
-  const eodClosed = dailyEmails.some(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt);
+  // Only on this page's load — a send never reads the backlog.
+  const missed = !midday && kind === "director" && isConvex() && isTa(user)
+    ? await convexQuery<{ date: string; count: number }[]>("ta/dailyEmails:missedDays", { actorId: user.id, jobId: id, workLocationId }).catch(() => [])
+    : [];
+  const eodClosed = dailyEmails.some(e => !e.forDate && e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === "eod" && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt);
   await primeEyeMarked(id, user);
 
   const client = repo.client(o.clientId);
@@ -101,11 +110,11 @@ export default async function EodPage({
     id,
     isTa(user) ? user.id : null,
     kind,
-    kind === "director" ? { workType, sessionStart } : undefined,
+    kind === "director" ? { workType, sessionStart, day: forDate } : undefined,
     workLocationId,
   );
   const eyeMarked = kind === "director" ? eyeMarkedForEmail(id, user, workLocationId) : [];
-  const effort = effortRow(id, user, new Date(), workLocationId);
+  const effort = effortRow(id, user, forDate ? new Date(`${forDate}T12:00:00+05:30`) : new Date(), workLocationId, forDate ? rows.map(r => r.applicationId) : undefined);
   const excelLinksCount = getScopedLinkVaultEntries(id, user, workLocationId).entries.length;
 
   // This TA's own sets — each recruiter numbers their own.
@@ -162,7 +171,7 @@ export default async function EodPage({
       : null;
 
   const savedRefereeCalls = correction?.snapshot?.refereeCalls ?? resendCopy?.refereeCalls;
-  const refereeCalls = !midday && kind === "director"
+  const refereeCalls = !midday && !forDate && kind === "director"
     ? (savedRefereeCalls ?? repo.refereeCalls(id, { userId: user.id, date: workdayDate(Date.now()), workLocationId }))
         .map((call) => ({
           id: call.id,
@@ -238,7 +247,7 @@ export default async function EodPage({
           Replies are tracked and candidate stages advance automatically.
         </p>
       </header>
-      <WorkLocationTabs locations={o.workLocations} selected={workLocationId} basePath={`/openings/${id}/${midday ? "midday" : "eod"}`} params={{ kind }} sent={allDailyEmails.filter(e => e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === (midday ? "midday" : "eod") && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt).flatMap(e => e.workLocationId ? [e.workLocationId] : [])} />
+      <WorkLocationTabs locations={o.workLocations} selected={workLocationId} basePath={`/openings/${id}/${midday ? "midday" : "eod"}`} params={{ kind }} sent={allDailyEmails.filter(e => !e.forDate && e.userId === user.id && e.date === workdayDate(Date.now()) && e.submissionType === (midday ? "midday" : "eod") && e.status === "accepted" && !e.parentId && !e.recoveryReopenedAt).flatMap(e => e.workLocationId ? [e.workLocationId] : [])} />
       {workLocationId === "" && <p className="mb-5 text-[13px] text-ink-soft">Select a location to prepare its email. Assign candidates without a location in Excel Tables or the pipeline first.</p>}
 
 
@@ -391,15 +400,31 @@ export default async function EodPage({
 
       {/* ── Email Composer (for sending next set, or correcting one sent) ── */}
       {(workLocationId !== "" || !!correction || !!resendCopy) && (!location?.archived || !!correction) && (!midday || !!draft) && (!selectedDaily || !!draft || !!correction) && (!eodClosed || !!correction || !!resendCopy) && <>
+      {missed.length > 0 && !correction && (
+        <nav aria-label="End of day for" className="mb-5 flex flex-wrap items-center gap-2 text-[13px]">
+          {[{ date: "", label: "Today" }, ...missed.map(m => ({ date: m.date, label: `Missed · ${dayLabel(m.date)} · ${m.count} ${m.count === 1 ? "CV" : "CVs"}` }))].map(t => (
+            <Link key={t.date} href={`/openings/${id}/eod?${workLocationId ? `location=${encodeURIComponent(workLocationId)}&` : ""}${t.date ? `for=${t.date}` : ""}`}
+              className={`rounded-full border px-3.5 py-1.5 font-medium ${(forDate ?? "") === t.date ? "border-brand bg-brand text-white" : t.date ? "border-amber-400 bg-amber-50 text-amber-900" : "border-rule text-ink-soft"}`}>
+              {t.label}
+            </Link>
+          ))}
+        </nav>
+      )}
+      {forDate && (
+        <p className="mb-5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-[13px] text-amber-900">
+          This is your end of day for {dayLabel(forDate)}, sent late. It carries only the candidates you shortlisted that day. Today's end of day is a separate email — open the Today tab.
+        </p>
+      )}
       {!midday && <LiveTableRefresh />}
-      {!midday && !correction && workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
+      {!midday && !correction && !forDate && workType === "100%" && <EyeMarkedChecks openingId={id} items={eyeMarked} />}
       <EodComposer
-        key={`${workdayDate(Date.now())}:${workLocationId ?? "legacy"}:${draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}`}
+        key={`${workdayDate(Date.now())}:${forDate ?? ""}:${workLocationId ?? "legacy"}:${draft?._id ?? correction?._id ?? resendCopy?.id ?? "new"}`}
         draftDate={correction?.date}
         workLocationId={correction ? correction.workLocationId : workLocationId || undefined}
         actorId={user.id}
         allowActivityOnly={!!location}
         submissionType={midday ? "midday" : "eod"}
+        forDate={forDate}
         excelLinksCount={excelLinksCount}
         openingTitle={o.title}
         clientName={client.name}
@@ -687,3 +712,5 @@ function ResearchLine({ link, className }: { link?: string | null; className?: s
     </p>
   );
 }
+
+const dayLabel = (d: string) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });

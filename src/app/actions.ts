@@ -4480,6 +4480,8 @@ export async function sendDailyEmail(formData: FormData) {
   const type: SubmissionType = formData.get("submissionType") === "midday" ? "midday" : "eod";
   const draftId = String(formData.get("dailyDraftId") ?? "");
   const parentId = String(formData.get("dailyParentId") ?? "");
+  // Set only when sending a past day's end of day late; the server re-checks the day and the list.
+  const forDate = String(formData.get("forDate") ?? "") || undefined;
   let workLocationId = String(formData.get("workLocationId") ?? "") || undefined;
   await primeStore({ openingId, allApplications: true });
   const user = await authorize(formData, parentId ? "opening.read" : "opening.act", { opening: "openingId" });
@@ -4497,12 +4499,12 @@ export async function sendDailyEmail(formData: FormData) {
     if (parent) workLocationId = parent.workLocationId;
     else workLocationId = requireWorkLocation(repo.opening(openingId)!, workLocationId)?.id;
     if (parent && formData.get("previewConfirmed") !== "on") throw new Error("Review and confirm the revised email preview before sending.");
-    const context = parent ? null : await eodWorkContext(user, openingId);
-    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ?? undefined, workLocationId);
+    const context = parent ? null : forDate ? { workType: "100%" as WorkingStage, sessionStart: null } : await eodWorkContext(user, openingId);
+    const baseRows = parent?.snapshot?.rows ?? shortlistRows(openingId, isTa(user) ? user.id : null, "director", context ? { ...context, day: forDate } : undefined, workLocationId);
     const ids = parent ? parent.applicationIds : String(formData.get("applicationIds") ?? "").split(",").filter(Boolean);
     const rows = shortlistRowsFromForm(formData, baseRows);
-    const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user, new Date(), workLocationId));
-    const refereeCalls = type === "eod"
+    const effort = effortFromForm(formData, parent?.snapshot?.effort ?? effortRow(openingId, user, forDate ? new Date(`${forDate}T12:00:00+05:30`) : new Date(), workLocationId, forDate ? baseRows.map(r => r.applicationId) : undefined));
+    const refereeCalls = type === "eod" && !forDate
       ? await currentRefereeCalls(formData, openingId, user.id, workLocationId, parent?.snapshot?.refereeCalls)
       : [];
     const submittedMode = parent?.workType ?? parent?.snapshot?.workType ?? context?.workType;
@@ -4521,7 +4523,7 @@ export async function sendDailyEmail(formData: FormData) {
     const confirmed = formData.get("researchConfirmed") === "on";
     // Midday always carries fresh research. EOD keeps the server-authoritative
     // work type and exception rules already used by the live send path.
-    const research = type === "midday" || parent
+    const research = type === "midday" || parent || forDate
       ? checkResearchSubmission({ role: "ta", kind: "director", link: String(formData.get("chatgptLink") ?? ""), confirmed })
       : await eodResearchSubmission(user, openingId, "director", formData, !!parentId);
     if (!research.ok) throw new Error(research.reason);
@@ -4533,7 +4535,7 @@ export async function sendDailyEmail(formData: FormData) {
       refereeCalls,
       introText: String(formData.get("introText") ?? ""), outroText: String(formData.get("outroText") ?? ""),
       activityOnly: ids.length === 0, skipAttachments: type === "midday" && skipAttachments, daily: { submissionType: type, draftId: draftId || undefined,
-        revision: draftId ? Number(formData.get("dailyDraftRevision")) : undefined, parentId: parentId || undefined,
+        revision: draftId ? Number(formData.get("dailyDraftRevision")) : undefined, parentId: parentId || undefined, forDate,
         extraTo: extraTo.ok, extraCc: extraCc.ok, removed, confirmed },
       savedAttachments: parent?.snapshot?.attachments,
       regenerateAttachments: formData.get("regenerateAttachments") === "yes",
@@ -4955,7 +4957,7 @@ async function emailEod(input: {
   savedAttachments?: import("@/lib/dailyEmail").SavedEmailAttachment[];
   regenerateAttachments?: boolean;
   workType?: WorkingStage;
-  daily?: { submissionType: SubmissionType; draftId?: string; revision?: number; parentId?: string; extraTo: string[]; extraCc: string[]; removed: string[]; confirmed: boolean };
+  daily?: { submissionType: SubmissionType; draftId?: string; revision?: number; parentId?: string; forDate?: string; extraTo: string[]; extraCc: string[]; removed: string[]; confirmed: boolean };
 }): Promise<{ ok: true; note: string; workdayMailId?: string | null; dailyEmailId?: string } | { ok: false; error: string }> {
   const { openingId, user } = input;
   if (!input.applicationIds.length && !input.activityOnly) return { ok: false, error: "Include at least one CV or send an activity summary." };
@@ -5049,7 +5051,8 @@ async function emailEod(input: {
   if (!rows.length && !input.activityOnly && !isMidday) return { ok: false, error: "No CV could be attached. Prepare at least one Director Review CV before sending the email." };
 
   let excelAttachment: import("@/lib/linkExport").ExcelExportAttachment | null = null;
-  if (!isMidday && !input.skipAttachments) {
+  // Today's workbook is not a past day's; a late end of day goes without it.
+  if (!isMidday && !input.daily?.forDate && !input.skipAttachments) {
     const { buildOpeningExcelAttachment } = await import("@/lib/linkExport");
     excelAttachment = buildOpeningExcelAttachment(openingId, user, opening.title, opening.workLocations?.length ? input.workLocationId ?? "" : undefined);
     if (excelAttachment && excelAttachment.rowCount > 0) {
@@ -5090,7 +5093,7 @@ async function emailEod(input: {
       const reservation = await convexMutation<{ id: string }>("ta/dailyEmails:begin", { actorId: user.id, jobId: openingId,
         workLocationId: input.workLocationId,
         submissionType: input.daily.submissionType, draftId: input.daily.draftId, revision: input.daily.revision,
-        parentId: input.daily.parentId, applicationIds: input.applicationIds, snapshot, confirmed: input.daily.confirmed, previewConfirmed: !!input.daily.parentId, trackedAt: repo.shortlistInbox() ?? undefined });
+        parentId: input.daily.parentId, forDate: input.daily.forDate, applicationIds: input.applicationIds, snapshot, confirmed: input.daily.confirmed, previewConfirmed: !!input.daily.parentId, trackedAt: repo.shortlistInbox() ?? undefined });
       dailyEmailId = reservation.id;
     } else if (!input.revised) {
       const receipt = await convexMutation<{ id: string | null }>("ta/workdays:beginMail", { actorId: user.id, jobId: openingId, applicationIds: input.applicationIds, subject: input.subject, sentTo: to, researchLink: input.researchLink ?? undefined });
