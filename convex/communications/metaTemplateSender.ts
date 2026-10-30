@@ -7,6 +7,7 @@ import { refuseIfDoNotContact } from "../lib/doNotContact";
 import { followUpCancelledReason } from "../lib/graphMail";
 import { dailyTemplateCap, startOfUtcDay, withinTemplateBudget } from "../lib/templateBudget";
 import { TEMPLATE_NAME, initialOutreachText, roleLink, templatePayload } from "../lib/whatsappTemplates";
+import { isNumberLevelError } from "../lib/senderRouting";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -111,21 +112,14 @@ export const sendMetaTemplate = internalAction({
       return;
     }
 
-    // 2. Resolve sender phone number and phone_number_id
-    let phoneId = process.env.META_PHONE_NUMBER_ID || DEFAULT_META_PHONE_ID;
-    if (resolvedJobId) {
-      const outboundNumber = await ctx.runQuery(internal.communications.whatsappOutbound.getJobOutboundWhatsAppNumber, {
-        jobId: resolvedJobId,
-      });
-      if (outboundNumber) {
-        const fetchedId = await ctx.runQuery(internal.communications.whatsappOutbound.getMetaPhoneNumberId, {
-          targetWhatsAppNumber: outboundNumber,
-        });
-        if (fetchedId) {
-          phoneId = fetchedId;
-        }
-      }
-    }
+    // 2. The sending number: the candidate's TA's own number once it is
+    // ready, else the main line (lib/senderRouting, 30 Oct).
+    const mainPhoneId = process.env.META_PHONE_NUMBER_ID || DEFAULT_META_PHONE_ID;
+    let phoneId =
+      (await ctx.runQuery(internal.communications.whatsappOutbound.senderPhoneId, {
+        jobId: job._id,
+        applicationId: app?._id,
+      })) ?? mainPhoneId;
 
     // Clean destination phone number digits
     if (!candidate.phone || !candidate.phone.replace(/\D/g, "")) {
@@ -259,48 +253,61 @@ export const sendMetaTemplate = internalAction({
     let sentSuccess = false;
     let errorMessage = "";
 
-    for (const langCode of languagesToTry) {
-      const payload = templatePayload(args.templateType, cleanRecipientPhone, parameters.map((p) => p.text), langCode);
-
-      if (!phoneAllowed(cleanRecipientPhone)) {
-        throw new Error(suppressed("WhatsApp template", cleanRecipientPhone));
-      }
-
-      try {
-        console.log(`[Meta Template Sender] Dispatching template "${templateName}" (${langCode}) to target phone +${cleanRecipientPhone} using phone_number_id ${phoneId}`);
-        const metaUrl = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
-
-        const response = await fetch(metaUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${metaAccessToken}`,
-          },
-          body: JSON.stringify(payload),
+    // A TA number Meta will not send from is switched off and the template goes
+    // once more from the main line, where both templates are approved — the
+    // candidate still gets their message, the TA lead sees why in Settings.
+    for (let attempt = 0; attempt < 2 && !sentSuccess; attempt++) {
+      if (attempt === 1) {
+        if (phoneId === mainPhoneId || !isNumberLevelError(errorMessage)) break;
+        await ctx.runMutation(internal.communications.whatsappOutbound.markNumberNotReady, {
+          phoneId,
+          reason: errorMessage.slice(0, 300),
         });
+        phoneId = mainPhoneId;
+      }
+      for (const langCode of languagesToTry) {
+        const payload = templatePayload(args.templateType, cleanRecipientPhone, parameters.map((p) => p.text), langCode);
 
-        const responseText = await response.text();
-        if (response.ok) {
-          const responseData = JSON.parse(responseText);
-          if (responseData.messages && responseData.messages.length > 0) {
-            sentSuccess = true;
-            console.log(`[Meta Template Sender] Successfully sent template message with language ${langCode}. Meta Msg ID: ${responseData.messages[0].id}`);
-            break;
-          } else {
-            errorMessage = `Response payload missing message ID: ${responseText}`;
-          }
-        } else {
-          errorMessage = `HTTP ${response.status}: ${responseText}`;
-          console.error(`[Meta Template Sender] Meta API returned failure for lang ${langCode}: ${errorMessage}`);
-          // If error is not a translation/locale error (132001), break early
-          if (!responseText.includes("132001")) {
-            break;
-          }
+        if (!phoneAllowed(cleanRecipientPhone)) {
+          throw new Error(suppressed("WhatsApp template", cleanRecipientPhone));
         }
-      } catch (err: any) {
-        errorMessage = err.message || String(err);
-        console.error(`[Meta Template Sender] HTTP request exception for phoneId ${phoneId}: ${errorMessage}`);
-        break;
+
+        try {
+          console.log(`[Meta Template Sender] Dispatching template "${templateName}" (${langCode}) to target phone +${cleanRecipientPhone} using phone_number_id ${phoneId}`);
+          const metaUrl = `https://graph.facebook.com/v19.0/${phoneId}/messages`;
+
+          const response = await fetch(metaUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${metaAccessToken}`,
+            },
+            body: JSON.stringify(payload),
+          });
+
+          const responseText = await response.text();
+          if (response.ok) {
+            const responseData = JSON.parse(responseText);
+            if (responseData.messages && responseData.messages.length > 0) {
+              sentSuccess = true;
+              console.log(`[Meta Template Sender] Successfully sent template message with language ${langCode}. Meta Msg ID: ${responseData.messages[0].id}`);
+              break;
+            } else {
+              errorMessage = `Response payload missing message ID: ${responseText}`;
+            }
+          } else {
+            errorMessage = `HTTP ${response.status}: ${responseText}`;
+            console.error(`[Meta Template Sender] Meta API returned failure for lang ${langCode}: ${errorMessage}`);
+            // If error is not a translation/locale error (132001), break early
+            if (!responseText.includes("132001")) {
+              break;
+            }
+          }
+        } catch (err: any) {
+          errorMessage = err.message || String(err);
+          console.error(`[Meta Template Sender] HTTP request exception for phoneId ${phoneId}: ${errorMessage}`);
+          break;
+        }
       }
     }
 

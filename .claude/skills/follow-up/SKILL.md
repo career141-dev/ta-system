@@ -97,7 +97,7 @@ Reminder (nudge):
 
 - Free text: `whatsappOutbound:sendWhatsApp({communicationId, candidateId, jobId, body, isReplyToCandidate?})`. Guard `followUpCancelledReason(comm, app, isReply)` (`lib/graphMail.ts`): comm `stoppedSequence` or `failed` -> "Follow-up was stopped before this message went."; unless `isReplyToCandidate`, a stage other than `follow_up`/`ta_shortlist`/`matched_candidates` -> "Cancelled: the candidate is no longer in Follow-up (<stage>)." Failed rows are marked `failed` with the reason.
 - Window guess: `hasRecentInboundComm(candidateId, 24h)` reads our own inbound WhatsApp rows. Closed -> schedules `sendMetaTemplate` with `templateType:"reengagement"` (template `career141_followup_reminder`, params name + job title; the original text is replaced by the template wording). Open -> `metaDirectSender.sendMetaFreeText`. If Meta answers 131047/131026 (`isOutsideWindowError`) the sender falls back to the reengagement template (25 Sep, 83c3d66). Meta is the authority on its window.
-- `sendMetaTemplate` order: `META_ACCESS_TOKEN` present; job must resolve (no fallback to another job); `refuseIfDoNotContact`; `followUpCancelledReason`; sender phone-number id from the job's outbound number (`getJobOutboundWhatsAppNumber`/`getMetaPhoneNumberId`, default `META_PHONE_NUMBER_ID`); candidate phone digits; `resolveRecipient("whatsapp")`; **daily cap** `dailyTemplateCap(C141_WHATSAPP_TEMPLATE_DAILY_CAP)` counts `communications` rows with `billableTemplate:true` today (UTC day, index `by_channel_time`) - over the cap: row marked failed "Not sent - the daily WhatsApp template limit of N has been reached ...", and `retryTemplateTomorrow` sets `nextFollowUpScheduledAt` to the next UTC midnight; then `phoneAllowed` (outbound lock); POST to Meta Graph v19.0 trying language `en` then `en_US` (only a 132001 error moves to the second); `logTemplateCommunication` writes status and `billableTemplate:true` only when Meta accepted. Approved names and the Cloud API request body live in `lib/whatsappTemplates.ts`, shared with the Settings demo so its templates cannot drift from candidate sends.
+- `sendMetaTemplate` order: `META_ACCESS_TOKEN` present; job must resolve (no fallback to another job); `refuseIfDoNotContact`; `followUpCancelledReason`; sender phone-number id from `whatsappOutbound:senderPhoneId` (rules in `lib/senderRouting.ts` `pickSender`: the opening's `outreachWhatsAppNumber`, then the application's `ownerTaId`'s or the opening's first `assignedTaIds` TA's `whatsappNumbers` row only when `ready === true`, then the opening's WhatsApp channel number; null = `META_PHONE_NUMBER_ID`); if a TA number fails with a number-level Meta error (`isNumberLevelError`: 131042, 131031, 132001, 133010, codes 10/190/200) `markNumberNotReady` switches it off and the template is sent once more from the main line; candidate phone digits; `resolveRecipient("whatsapp")`; **daily cap** `dailyTemplateCap(C141_WHATSAPP_TEMPLATE_DAILY_CAP)` counts `communications` rows with `billableTemplate:true` today (UTC day, index `by_channel_time`) - over the cap: row marked failed "Not sent - the daily WhatsApp template limit of N has been reached ...", and `retryTemplateTomorrow` sets `nextFollowUpScheduledAt` to the next UTC midnight; then `phoneAllowed` (outbound lock); POST to Meta Graph v19.0 trying language `en` then `en_US` (only a 132001 error moves to the second); `logTemplateCommunication` writes status and `billableTemplate:true` only when Meta accepted. Approved names and the Cloud API request body live in `lib/whatsappTemplates.ts`, shared with the Settings demo so its templates cannot drift from candidate sends.
 - `initial_outreach` params: name (candidate name with a trailing "(+94...)" stripped), job title, role link `{{3}}` from `lib/whatsappTemplates.ts` `roleLink` (30 Oct, the owner): the opening's `channel:"linkedin"` JobPost (live before draft) whose `externalUrl` has a LinkedIn **job** number, sent as `https://www.linkedin.com/jobs/view/<id>`; a Recruiter project link (`talent/hire`) is skipped because candidates cannot open it; else `job_assets.shortApplyLink` (https:// added); else `NO_ROLE_LINK` "Our team will share the role details with you shortly." (`getOpeningLinks` reads posts + assets). Then the missing list joined by " | " (Meta forbids newlines/tabs/4+ spaces, hence `sanitizeParam`). The stored conversation text is `initialOutreachText`, the owner's approved wording with the four values filled in; change both together if the template is re-approved.
 - Number formatting: `internationalPhone()` in `lib/outreachSafety.ts` turns `07xxxxxxxx` into `94...` (`OUTREACH_DEFAULT_COUNTRY_CODE`, default 94) and strips `00`.
 
@@ -322,10 +322,11 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-10-30 Take over / hand back (`ta/followUp:takeOver`, `handBack`, `taTookOverAt`): the assistant stays quiet but keeps saving details and notifies the TA; a TA's reply from the WhatsApp app takes over automatically (`message_echoes`); history labels the TA's words; `upset` intent; voice notes answered with a request to type.
 - 2026-10-30 Any TA lead (desk-wide roles) can switch automatic follow-up on for any opening, as the page already offered; panel text now says Day 0 goes at shortlist when on.
 - 2026-10-30 `career141_initial_outreach` `{{3}}` is the opening's LinkedIn job link (else short apply link, else a sentence), and the stored text is the owner's approved wording (`roleLink`, `initialOutreachText`).
+- 2026-10-30 Each TA's own WhatsApp number (coexistence): `whatsappNumbers` gains `userId`, `ready`, `readyNote`, `checkedAt`; every outbound sender (template, free text, pre-application chat) asks `senderPhoneId`; Settings → WhatsApp numbers → "Check with Meta" (`settings/whatsappNumbers:checkWithMeta`) sets `ready` when the number is on the Cloud API, both templates are approved in its account and an app is subscribed; TA rows are added by the dry-run migration `admin/addTaWhatsAppNumbers:run`. Free text is still sent from the TA's number even when the candidate's open 24-hour window is on the main line; Meta's 131047 then falls back to the template (known limit).
 
 <!-- skill-meta
-verified-commit: c9ecb09b
-verified-hash: e0cff4a5b8e9fd1ef7a904975dafc9a5bba205d2
+verified-commit: ad13fee2
+verified-hash: dad2b88e8370a068d52ed4fda11708ac0d3881b0
 verified-date: 2026-10-30
 sources:
   tests/addToAssignedJob.test.ts
@@ -362,6 +363,11 @@ sources:
   src/components/SendToDirectorReview.tsx
   src/app/demoSendActions.ts
   src/app/settings/FollowUpDemo.tsx
+  src/app/settings/WhatsAppNumbers.tsx
+  convex/lib/senderRouting.ts
+  convex/settings/whatsappNumbers.ts
+  convex/admin/addTaWhatsAppNumbers.ts
+  tests/senderrouting.test.ts
   src/app/settings/page.tsx
   docs/FOLLOW-UP-DEMO.md
   src/app/api/conversation/[appId]/route.ts

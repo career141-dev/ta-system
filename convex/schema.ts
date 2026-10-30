@@ -2495,6 +2495,12 @@ export default defineSchema({
     whatchimpPhoneId: v.string(), // e.g. "965783109962872"
     wabaId: v.optional(v.string()), // e.g. "900377459288998"
     createdAt: v.string(),
+    /** The TA whose candidates this number messages (30 Oct, lib/senderRouting). */
+    userId: v.optional(v.id("users")),
+    /** false until "Check with Meta" passes; missing on rows from before 30 Oct, which send as they always did. */
+    ready: v.optional(v.boolean()),
+    readyNote: v.optional(v.string()),
+    checkedAt: v.optional(v.number()),
   }).index("by_phone", ["phone"]),
 
   // ■■ QUICK CV SCANS (Ad-Hoc Keyword & Criteria Scanning) ■■■■■■■■■■■■■■■■■■■

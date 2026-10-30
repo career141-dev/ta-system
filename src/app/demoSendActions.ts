@@ -68,3 +68,24 @@ export async function sendFollowUpDemo(_: ActionResult | null, formData: FormDat
     return answer({ ok: false, message: safeErrorMessage(e, "The message could not be sent. Try again.") });
   }
 }
+
+/**
+ * Settings → WhatsApp numbers: ask Meta whether one TA's number is ready to
+ * send (convex/settings/whatsappNumbers.ts checkWithMeta). Reads only.
+ */
+export async function checkWhatsAppNumber(_: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  await primeStore();
+  const user = await getCurrentUser();
+  const allowed = can(user, "user.manage");
+  if (!allowed.ok) return answer({ ok: false, message: allowed.message });
+  if (!isConvex()) return answer({ ok: false, message: "Checking needs the Convex backend; this build is running on the file store." });
+  const id = String(formData.get("check") ?? "");
+  if (!id) return answer({ ok: false, message: "Choose a number to check." });
+  try {
+    const r = await convexAction<{ ok: boolean; message: string }>("settings/whatsappNumbers:checkWithMeta", { id });
+    // A check that ran is a success even when the number is not ready: the row refreshes, the note is amber.
+    return { ok: true, message: r.message, tone: r.ok ? "ok" : "warn", at: Date.now() };
+  } catch (e) {
+    return answer({ ok: false, message: safeErrorMessage(e, "Meta could not be asked. Try again.") });
+  }
+}
