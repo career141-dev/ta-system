@@ -6,7 +6,7 @@ import { resolveRecipient } from "../lib/outreachSafety";
 import { refuseIfDoNotContact } from "../lib/doNotContact";
 import { followUpCancelledReason } from "../lib/graphMail";
 import { dailyTemplateCap, startOfUtcDay, withinTemplateBudget } from "../lib/templateBudget";
-import { TEMPLATE_NAME, templatePayload } from "../lib/whatsappTemplates";
+import { TEMPLATE_NAME, initialOutreachText, roleLink, templatePayload } from "../lib/whatsappTemplates";
 
 // The access token is a live credential and is read from the deployment's
 // environment only. It used to sit here as a literal fallback, which meant a
@@ -226,32 +226,20 @@ export const sendMetaTemplate = internalAction({
 
       const missingFormatted = sanitizeParam(missingList.map((m) => `• ${m}`).join(" | ") || "• None (all submitted)");
 
-      // Clean, concise role requirements snippet (short & no awkward cutoffs)
-      let requirementsSnippet = "";
-      if (Array.isArray(job?.requiredSkills) && job.requiredSkills.length > 0) {
-        requirementsSnippet = `Key Skills: ${job.requiredSkills.slice(0, 4).join(", ")}`;
-      } else if (job?.jobDescription) {
-        const cleanDesc = sanitizeParam(job.jobDescription);
-        const firstSentenceMatch = cleanDesc.match(/^([^.!?]+[.!?])/);
-        if (firstSentenceMatch && firstSentenceMatch[1].length <= 140) {
-          requirementsSnippet = firstSentenceMatch[1].trim();
-        } else {
-          const trimmed = cleanDesc.slice(0, 130);
-          const lastSpace = trimmed.lastIndexOf(" ");
-          requirementsSnippet = lastSpace > 30 ? trimmed.slice(0, lastSpace) : trimmed;
-        }
-      } else {
-        requirementsSnippet = `Key requirements for the ${jobTitle} role.`;
-      }
+      // {{3}} is where the candidate reads the role — the LinkedIn job, else
+      // the short apply link, else a sentence (the owner, 30 Oct). It used to
+      // be a skills list or a cut of the job description.
+      const links = await ctx.runQuery(internal.communications.metaTemplateSender.getOpeningLinks, { jobId: job._id });
+      const link = roleLink(links.posts, links.shortApplyLink);
 
       parameters = [
         { type: "text", text: candidateName },
         { type: "text", text: jobTitle },
-        { type: "text", text: requirementsSnippet },
+        { type: "text", text: link },
         { type: "text", text: missingFormatted },
       ];
 
-      loggedBody = `Hi ${candidateName}, Thank you for your interest in the *${jobTitle}* role.\n\nBefore we can proceed with your application, please review the role requirements below:\n${requirementsSnippet}\n\nTo complete your application, we still require the following information:\n${missingFormatted}\n\nPlease reply directly to this chat with the requested details. Once we receive them, we'll continue with the next step of the recruitment process. Thank you!`;
+      loggedBody = initialOutreachText(candidateName, jobTitle, link, missingFormatted);
     } else {
       templateName = TEMPLATE_NAME.reengagement;
 
@@ -398,6 +386,25 @@ export const getJobById = internalQuery({
   args: { jobId: v.id("jobs") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.jobId);
+  },
+});
+
+/** The opening's adverts and short apply link, for `roleLink`. */
+export const getOpeningLinks = internalQuery({
+  args: { jobId: v.id("jobs") },
+  handler: async (ctx, args) => {
+    const posts = await ctx.db
+      .query("jobPosts")
+      .withIndex("by_opening", (q) => q.eq("openingId", args.jobId))
+      .collect();
+    const assets = await ctx.db
+      .query("job_assets")
+      .withIndex("by_jobId", (q) => q.eq("jobId", args.jobId))
+      .first();
+    return {
+      posts: posts.map((p) => ({ channel: p.channel, status: p.status, externalUrl: p.externalUrl })),
+      shortApplyLink: assets?.shortApplyLink ?? null,
+    };
   },
 });
 

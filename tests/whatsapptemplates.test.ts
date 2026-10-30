@@ -4,6 +4,9 @@ import {
   STANDARD_ASKS,
   TEMPLATE_NAME,
   TEMPLATE_PARAMS,
+  NO_ROLE_LINK,
+  initialOutreachText,
+  roleLink,
   demoTemplateParams,
   templatePayload,
 } from "../convex/lib/whatsappTemplates";
@@ -19,6 +22,7 @@ test("the demo uses the two approved Career141 templates with their approved par
   assert.equal(reminder.length, TEMPLATE_PARAMS.reengagement);
   assert.deepEqual(initial.slice(0, 2), [sample.candidateName, sample.jobTitle]);
   assert.deepEqual(reminder, [sample.candidateName, sample.jobTitle]);
+  assert.match(initial[2], /^https:\/\/www\.linkedin\.com\/jobs\/view\/\d+$/);
   for (const ask of STANDARD_ASKS) assert.match(initial[3], new RegExp(ask.replace("/", "\\/")));
 });
 
@@ -50,4 +54,31 @@ test("the shared request builder preserves order and removes whitespace Meta rej
       ],
     },
   });
+});
+
+test("{{3}} is the opening's LinkedIn job, on its public address, live before draft", () => {
+  const link = roleLink(
+    [
+      { channel: "linkedin", status: "closed", externalUrl: "https://www.linkedin.com/jobs/view/1111111111" },
+      { channel: "linkedin", status: "draft", externalUrl: "https://www.linkedin.com/jobs/view/2222222222" },
+      { channel: "facebook", status: "live", externalUrl: "https://www.linkedin.com/jobs/view/3333333333" },
+      { channel: "linkedin", status: "live", externalUrl: "https://www.linkedin.com/hiring/jobs/4444444444/detail" },
+    ],
+    "career141.com/apply/acct",
+  );
+  assert.equal(link, "https://www.linkedin.com/jobs/view/4444444444");
+});
+
+test("{{3}} falls back to the short apply link — a Recruiter project link is not for candidates", () => {
+  const posts = [{ channel: "linkedin", status: "live", externalUrl: "https://www.linkedin.com/talent/hire/1528413625/discover" }];
+  assert.equal(roleLink(posts, "career141.com/apply/acct"), "https://career141.com/apply/acct");
+  assert.equal(roleLink([], "https://career141.com/apply/acct"), "https://career141.com/apply/acct");
+});
+
+test("{{3}} with neither link is the owner's sentence, and the stored text matches the template", () => {
+  assert.equal(roleLink([{ channel: "linkedin", status: "live", externalUrl: null }], null), NO_ROLE_LINK);
+  const text = initialOutreachText("Kamal", "Accountant", NO_ROLE_LINK, "• CV / Resume");
+  assert.match(text, /^Hi Kamal,\n\nBased on your profile, we would like to connect with you regarding a Accountant opportunity/);
+  assert.match(text, /using the link below:\n\nOur team will share the role details with you shortly\.\n\nTo proceed/);
+  assert.match(text, /following details:\n\n• CV \/ Resume\n\nWe would appreciate/);
 });
