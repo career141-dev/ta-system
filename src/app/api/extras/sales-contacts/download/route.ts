@@ -23,6 +23,8 @@ export async function GET(req: Request) {
   if (user.role !== "admin") return new Response("Only an admin can download this list.", { status: 403 });
   const p = new URL(req.url).searchParams;
   const level = p.get("level") || undefined;
+  const auto = p.get("segment") === "automobile";
+  const mod = auto ? "extras/automobileContacts" : "extras/salesContacts";
   try {
     const actor = await convexActorForEmail(user.email);
     if (!actor) return new Response("Your account is not connected to the backend.", { status: 503 });
@@ -31,7 +33,7 @@ export async function GET(req: Request) {
     const noEmail: Row[] = [];
     let cursor: string | null = null;
     for (let guard = 0; guard < 400; guard++) {
-      const page: Page = await convexQuery<Page>("extras/salesContacts:list", {
+      const page: Page = await convexQuery<Page>(`${mod}:list`, {
         actorId: actor._id, level, hasEmail: p.get("hasEmail") === "1", search: p.get("q") || undefined, cursor, limit: 500,
       });
       for (const r of page.rows) {
@@ -45,15 +47,15 @@ export async function GET(req: Request) {
     const rows = [...byEmail.values(), ...noEmail].sort((a, b) => a.name.localeCompare(b.name));
     const label = level && LABEL[level] ? LABEL[level] : "All";
     const file = buildXlsx({
-      name: `${label} salespeople`,
+      name: `${label} ${auto ? "automobile people" : "salespeople"}`,
       headers: HEADERS,
       rows: rows.map((r) => [
         r.name, r.email ?? "", r.title, LABEL[r.level] ?? r.level, r.employer ?? "", r.phone ?? "", r.linkedinUrl ?? "",
         r.experienceYears == null ? "" : String(r.experienceYears), r.skills ?? "", r.previousRole ?? "", r.sector ?? "", r.matchedBy,
       ]),
     });
-    await convexMutation("extras/salesContacts:logExport", { actorId: actor._id, level, rows: rows.length });
-    const filename = `Sales contacts - ${label} - ${new Date().toISOString().slice(0, 10)}.xlsx`;
+    await convexMutation(`${mod}:logExport`, { actorId: actor._id, level, rows: rows.length });
+    const filename = `${auto ? "Automobile" : "Sales"} contacts - ${label} - ${new Date().toISOString().slice(0, 10)}.xlsx`;
     return new Response(new Uint8Array(file), {
       headers: {
         "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -3493,6 +3493,42 @@ export default defineSchema({
     dryRun: v.boolean(),
   }).index("by_runId", ["runId"]),
 
+  // Automobile people found in `candidates`, for the Extras tab and its Excel
+  // downloads (30 Oct). Rebuilt by extras/automobileContacts:refresh; one row per
+  // candidate, stamped with the run that last saw it.
+  automobileContacts: defineTable({
+    candidateId: v.id("candidates"),
+    runId: v.string(),
+    name: v.string(),
+    email: v.optional(v.string()),
+    title: v.string(),
+    titleSource: v.string(),
+    level: v.union(v.literal("intern"), v.literal("manager"), v.literal("executive"), v.literal("other")),
+    employer: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    linkedinUrl: v.optional(v.string()),
+    experienceYears: v.optional(v.number()),
+    skills: v.optional(v.string()),
+    previousRole: v.optional(v.string()),
+    sector: v.optional(v.string()),
+    matchedBy: v.string(),
+    updatedAt: v.number(),
+  })
+    .index("by_candidate", ["candidateId"])
+    .index("by_level", ["level"])
+    .index("by_run", ["runId"]),
+
+  // One row per refresh of automobileContacts: when, and how many were scanned and kept.
+  automobileContactRuns: defineTable({
+    runId: v.string(),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+    scanned: v.number(),
+    kept: v.number(),
+    counts: v.optional(v.any()),
+    dryRun: v.boolean(),
+  }).index("by_runId", ["runId"]),
+
 }, { schemaValidation: false });
 
 
