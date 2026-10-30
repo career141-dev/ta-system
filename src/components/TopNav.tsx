@@ -42,6 +42,8 @@ const NAV = [
   { href: "/feedback", label: "Feedback" },
   // Deleted clients and openings, restorable for seven days (28 Sep).
   { href: "/bin", label: "Bin" },
+  // Sales contact list and its Excel downloads, admins only (30 Oct).
+  { href: "/extras", label: "Extras" },
 ];
 
 
@@ -77,7 +79,8 @@ export function TopNav({
       (n.href !== "/strategy" || allows(user, "strategy.assign")) &&
       (n.href !== "/ta-track" || user.role === "admin" || user.role === "ta_lead") &&
       (n.href !== "/support-tables" || allows(user, "tables.readAll")) &&
-      (n.href !== "/feedback" || !isTa(user)),
+      (n.href !== "/feedback" || !isTa(user)) &&
+      (n.href !== "/extras" || user.role === "admin"),
   );
   const badge = alertCount > 0 && (
     <span className="tabular grid h-[18px] min-w-[18px] place-items-center rounded-full bg-danger px-1 text-[10.5px] font-semibold text-white">
