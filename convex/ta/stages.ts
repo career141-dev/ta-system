@@ -146,6 +146,27 @@ export function directorReviewBlockers(
   return blockers;
 }
 
+/**
+ * What Follow-up is still waiting for: Director Review's details plus the
+ * opening's own questions. Empty means complete.
+ *
+ * One rule for the reply bot, the sweep, the stage helper, Day 0 and a TA's
+ * logged call. They disagreed about current salary, so the bot said "complete"
+ * while the helper kept the candidate in Follow-up. Current salary is still
+ * asked for, but never holds anybody back (owner, 29 Oct).
+ */
+export function followUpBlockers(
+  app: Parameters<typeof directorReviewBlockers>[0] & { customFollowUpAnswers?: Record<string, string> },
+  candidate: Parameters<typeof directorReviewBlockers>[1],
+  job: { customFollowUpQuestions?: string[] } | null,
+): string[] {
+  const answers = app.customFollowUpAnswers ?? {};
+  return [
+    ...directorReviewBlockers(app, candidate),
+    ...(job?.customFollowUpQuestions ?? []).filter((q) => !answers[q]),
+  ];
+}
+
 /** Stages before Director Review (second_shortlist), and the ones after it. */
 const BEFORE_REVIEW = ["new_cvs", "matched_candidates", "ta_shortlist", "ai_call", "follow_up"];
 const AFTER_REVIEW = ["director_shortlist", "client_review", "interview", "offer", "placed"];

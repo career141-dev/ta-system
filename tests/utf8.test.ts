@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const roots = ["src", "convex", "tests"];
+const roots = ["src", "convex", "tests", ".claude/skills", "docs"];
 const bad: string[] = [];
 const walk = (dir: string) => {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {

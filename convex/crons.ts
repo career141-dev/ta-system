@@ -8,7 +8,8 @@ import { sweepCovers } from "./lib/followUpScope";
 import { assignedTaEmail } from "./pipeline/followUpHelper";
 import { readCursor, writeCursor, readWindow, parseWindowCursor } from "./lib/cronCursor";
 import { executeStageTransition } from "./pipeline/pipelineStateMachine";
-import { directorReviewBlockers } from "./ta/stages";
+import { directorReviewBlockers, followUpBlockers } from "./ta/stages";
+import { inSendingHours } from "./lib/followUpWindow";
 import type { MutationCtx } from "./_generated/server";
 
 /**
@@ -235,17 +236,9 @@ export const evaluateFollowUpStage = internalMutation({
         app.followUpCurrentSalary === true ||
         (app.followUpCurrentSalary === undefined && candidate.currentSalary !== undefined);
 
-      let customQuestionsComplete = true;
       const customQuestions = job.customFollowUpQuestions || [];
       const customAnswers = app.customFollowUpAnswers || {};
-      for (const q of customQuestions) {
-        if (!customAnswers[q]) {
-          customQuestionsComplete = false;
-          break;
-        }
-      }
-
-      const allComplete = blockers.length === 0 && customQuestionsComplete;
+      const allComplete = followUpBlockers(app, candidate, job).length === 0;
 
       if (allComplete) {
         // All data collected — auto-advance to Second Shortlist immediately.
@@ -297,6 +290,10 @@ export const evaluateFollowUpStage = internalMutation({
        * goes quiet. A person is pulled in when the AI cannot help
        * (`flaggedForTaReview`), not on every reply.
        */
+      // Nothing below is sent at night: a due reminder waits for 08:00
+      // Colombo time, and the next sweep after that sends it (30 Oct).
+      if (!inSendingHours(now)) continue;
+
       // 2. Check if a dynamic message is scheduled and it's time to send
       if (app.nextFollowUpScheduledAt && now >= app.nextFollowUpScheduledAt) {
         // ANTI-DUPLICATE LOCK: Clear nextFollowUpScheduledAt immediately so that

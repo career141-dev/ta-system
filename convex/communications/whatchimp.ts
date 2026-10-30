@@ -184,6 +184,7 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
         const checkResult = await ctx.runMutation(internal.communications.whatsappOutbound.checkAndRecordFollowUpReply, {
           senderPhone: cleanSender,
           textBody,
+          messageId: typeof message.id === "string" ? message.id : undefined,
         });
 
         if (checkResult?.isFollowUpReply) {
