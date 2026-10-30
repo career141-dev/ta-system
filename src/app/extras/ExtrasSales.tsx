@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Row = { id: string; name: string; email?: string; title: string; level: string; employer?: string; phone?: string; linkedinUrl?: string; experienceYears?: number };
+type Row = { id: string; name: string; email?: string; title: string; level: string; matchedBy?: string; employer?: string; phone?: string; linkedinUrl?: string; experienceYears?: number };
 type Summary = { counts: Record<string, number>; kept: number; finishedAt: number | null; running: { scanned: number } | null };
 
 const LEVELS = [
@@ -15,6 +15,7 @@ const LEVELS = [
 const control = "rounded-lg border border-rule bg-surface px-4 py-2 text-sm font-medium disabled:opacity-50";
 
 export function ExtrasSales() {
+  const [segment, setSegment] = useState("");
   const [level, setLevel] = useState("");
   const [hasEmail, setHasEmail] = useState(true);
   const [search, setSearch] = useState("");
@@ -28,13 +29,13 @@ export function ExtrasSales() {
   const request = useRef(0);
 
   const filters = useCallback(
-    (extra: Record<string, string> = {}) => new URLSearchParams({ ...(level ? { level } : {}), ...(hasEmail ? { hasEmail: "1" } : {}), ...(query ? { q: query } : {}), ...extra }),
-    [level, hasEmail, query],
+    (extra: Record<string, string> = {}) => new URLSearchParams({ ...(segment ? { segment } : {}), ...(level ? { level } : {}), ...(hasEmail ? { hasEmail: "1" } : {}), ...(query ? { q: query } : {}), ...extra }),
+    [segment, level, hasEmail, query],
   );
 
   const loadSummary = useCallback(async () => {
     try {
-      const r = await fetch("/api/extras/sales-contacts?summary=1", { cache: "no-store" });
+      const r = await fetch(`/api/extras/sales-contacts?summary=1${segment ? `&segment=${segment}` : ""}`, { cache: "no-store" });
       const d = await r.json();
       if (r.ok) setSummary(d);
     } catch { /* the table still works without the counts */ }
@@ -70,7 +71,7 @@ export function ExtrasSales() {
 
   const refresh = async () => {
     setError("");
-    const r = await fetch("/api/extras/sales-contacts", { method: "POST" });
+    const r = await fetch(`/api/extras/sales-contacts${segment ? `?segment=${segment}` : ""}`, { method: "POST" });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) setError(d.error || "Could not start the refresh.");
     await loadSummary();
@@ -84,9 +85,9 @@ export function ExtrasSales() {
     <main className="mx-auto max-w-[1400px] px-4 py-8 sm:px-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Extras · Sales contacts</h1>
+          <h1 className="text-2xl font-semibold">Extras · {segment ? "Automobile" : "Sales"} contacts</h1>
           <p className="mt-1 text-sm text-ink-soft">
-            Salespeople found in the candidate database, by the level in their title. Do-not-contact and merged duplicates are left out.
+            {segment ? "People who have worked for an automobile employer, at any level (current or past)." : "Salespeople found in the candidate database, by the level in their title."} Do-not-contact and merged duplicates are left out.
             {summary?.finishedAt ? ` Last refreshed ${new Date(summary.finishedAt).toLocaleString()}.` : " Not refreshed yet — press Refresh."}
           </p>
         </div>
@@ -117,9 +118,9 @@ export function ExtrasSales() {
       {error && <p role="alert" className="mb-4 rounded-lg border border-danger p-4 text-sm text-danger">{error}</p>}
 
       <div className="overflow-x-auto rounded-xl border border-rule bg-surface">
-        <table className="w-full min-w-[900px] text-left text-sm">
+        <table className="w-full min-w-[1100px] text-left text-sm">
           <thead className="border-b border-rule text-ink-soft">
-            <tr>{["Name", "Email", "Title", "Level", "Employer", "Phone", "LinkedIn", "Years"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr>
+            <tr>{["Name", "Email", "Title", "Level", "Employer", "Phone", "LinkedIn", "Years", "Matched by"].map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr>
           </thead>
           <tbody>
             {rows.map((r) => (
@@ -132,10 +133,11 @@ export function ExtrasSales() {
                 <td className="px-3 py-2">{r.phone ?? "—"}</td>
                 <td className="px-3 py-2">{r.linkedinUrl ? <a className="underline" href={r.linkedinUrl} target="_blank" rel="noreferrer noopener">Profile</a> : "—"}</td>
                 <td className="tabular px-3 py-2">{r.experienceYears ?? "—"}</td>
+                <td className="px-3 py-2 text-ink-soft">{r.matchedBy ?? "—"}</td>
               </tr>
             ))}
             {!rows.length && !loading && (
-              <tr><td colSpan={8} className="px-3 py-8 text-center text-ink-soft">
+              <tr><td colSpan={9} className="px-3 py-8 text-center text-ink-soft">
                 {summary?.finishedAt ? "No one matches these filters." : "The list is empty. Press Refresh list to build it."}
               </td></tr>
             )}

@@ -48,6 +48,20 @@ export const saveAttachment = internalMutation({
   },
 });
 
+/** The send action reads the saved CV files itself: a 5 MB set passed as action arguments never got a result (30 Oct). */
+export const storedFiles = internalQuery({
+  args: { ids: v.array(v.id("dailyEmailAttachments")) },
+  handler: async (ctx, args) => {
+    const files = [];
+    for (const id of args.ids) {
+      const f = await ctx.db.get(id);
+      if (!f) throw new Error("A saved CV attachment is missing.");
+      files.push({ name: f.name, storageId: f.storageId });
+    }
+    return files;
+  },
+});
+
 export const attachment = internalQuery({
   args: { actorId: v.string(), emailId: v.id("dailyEmails"), attachmentId: v.id("dailyEmailAttachments") },
   handler: async (ctx, args) => {
@@ -270,14 +284,15 @@ export const reconcile = internalMutation({
 
 export const result = internalMutation({
   args: { id: v.id("dailyEmails"), status: v.union(v.literal("accepted"), v.literal("failed"), v.literal("uncertain")),
-    delivered: v.optional(v.object({ from: v.string(), to: v.array(v.string()), cc: v.array(v.string()) })) },
+    delivered: v.optional(v.object({ from: v.string(), to: v.array(v.string()), cc: v.array(v.string()) })),
+    error: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const email = await ctx.db.get(args.id);
     // A sweep may have moved a slow send to "uncertain"; the action's real answer still wins.
     if (!email || (email.status !== "sending" && email.status !== "uncertain")) return;
     const acceptedAt = args.status === "accepted" ? Date.now() : undefined;
     const snapshot = { ...email.snapshot, ...(args.delivered ?? {}) };
-    await ctx.db.patch(email._id, { status: args.status, ...(acceptedAt ? { acceptedAt } : {}), snapshot });
+    await ctx.db.patch(email._id, { status: args.status, ...(acceptedAt ? { acceptedAt } : {}), ...(args.error ? { sendError: args.error.slice(0, 500) } : {}), snapshot });
     if (email.receiptId) await ctx.db.patch(email.receiptId, { status: args.status, ...(acceptedAt ? { acceptedAt } : {}) });
     if (args.status === "accepted") await finalizeDailyEmail(ctx, { ...email, status: "accepted", acceptedAt, snapshot });
     await refreshWorkdayChecks(ctx, email.jobId, email.userId);

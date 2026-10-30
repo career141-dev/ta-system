@@ -5109,7 +5109,9 @@ async function emailEod(input: {
       replyTo: [user.email, repo.shortlistInbox()].filter(Boolean),
       subject: input.subject.trim(),
       html,
-      attachments,
+      // The saved CVs travel by id and are read from storage by the sender; only the workbook goes inline.
+      attachments: input.daily ? attachments.filter(a => a.contentType !== "application/pdf") : attachments,
+      savedIds: input.daily ? savedAttachments.map(a => a.id) : undefined,
       workdayMailId: workdayMailId ?? undefined,
       dailyEmailId,
     });

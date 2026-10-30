@@ -79,7 +79,12 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
   text(): Promise<string>;
 }>;
 
-const SIMPLE_ATTACHMENT_LIMIT = 3 * 1024 * 1024;
+// A Graph request that never answered left an end of day in "sending" with no result and blocked the TA (30 Oct).
+const GRAPH_REQUEST_TIMEOUT_MS = 90_000;
+const graphFetch: FetchLike = (url, init) =>
+  (fetch as unknown as (u: string, i: object) => ReturnType<FetchLike>)(url, { ...init, signal: AbortSignal.timeout(GRAPH_REQUEST_TIMEOUT_MS) });
+
+const SIMPLE_ATTACHMENT_LIMIT =3 * 1024 * 1024;
 // Microsoft recommends byte ranges below 4 MB. Three MiB also keeps the
 // request comfortably below intermediary limits and makes every range except
 // the last the same size.
@@ -210,7 +215,7 @@ export function sendMailPayload(mail: FollowUpMail, to: string, cc: string[] = [
 export async function sendFollowUpMail(
   mail: FollowUpMail,
   getToken: () => Promise<string | null>,
-  fetchImpl: FetchLike = fetch as unknown as FetchLike,
+  fetchImpl: FetchLike = graphFetch,
 ): Promise<MailResult> {
   const decision = resolveRecipient("email", mail.to, mail.testInbox);
   if (!decision.ok) return { ok: false, error: decision.reason, blocked: true };

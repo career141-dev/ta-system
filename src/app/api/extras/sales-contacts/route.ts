@@ -19,6 +19,9 @@ async function adminActor() {
   return { actor };
 }
 
+/** ?segment=automobile switches every call to the automobile list. */
+const moduleOf = (p: URLSearchParams) => (p.get("segment") === "automobile" ? "extras/automobileContacts" : "extras/salesContacts");
+
 const failed = (e: unknown) =>
   Response.json({ error: e instanceof Error ? e.message.replace(/^.*Uncaught Error: /s, "").slice(0, 200) : "Could not load." }, { status: 503 });
 
@@ -27,11 +30,12 @@ export async function GET(req: Request) {
   const { actor, error } = await adminActor();
   if (error) return error;
   const p = new URL(req.url).searchParams;
+  const mod = moduleOf(p);
   try {
     if (p.get("summary")) {
-      return Response.json(await convexQuery<Summary>("extras/salesContacts:summary", { actorId: actor._id }), { headers: { "Cache-Control": "no-store" } });
+      return Response.json(await convexQuery<Summary>(`${mod}:summary`, { actorId: actor._id }), { headers: { "Cache-Control": "no-store" } });
     }
-    const page = await convexQuery<Page>("extras/salesContacts:list", {
+    const page = await convexQuery<Page>(`${mod}:list`, {
       actorId: actor._id,
       level: p.get("level") || undefined,
       hasEmail: p.get("hasEmail") === "1",
@@ -49,7 +53,7 @@ export async function POST(req: Request) {
   const { actor, error } = await adminActor();
   if (error) return error;
   try {
-    await convexMutation("extras/salesContacts:start", { actorId: actor._id });
+    await convexMutation(`${moduleOf(new URL(req.url).searchParams)}:start`, { actorId: actor._id });
     return Response.json({ ok: true });
   } catch (e) { return failed(e); }
 }

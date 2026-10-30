@@ -1,19 +1,18 @@
 /**
  * The flag-stuck cron may already have moved them to uncertain; both states are accepted.
- * Two EOD emails stayed in "sending" for days (Priya 23 Oct, Sameera 29 Oct) and blocked their own
- * senders on those openings. The owner confirmed on 30 Oct that neither reached the Director, so each
- * is recorded as failed and its receipt too; the candidates return to the senders' rosters. Nothing is
- * sent. Run only through the release pipeline, dryRun=true first.
+ * Sameera's 30 Oct end of day for PGP (4 CVs, one over 3 MB) never reported back and went to uncertain,
+ * which blocks every later email on that opening. The owner confirmed it never reached the Director, so it
+ * is recorded as failed and its receipt too; the candidates return to her roster. (Her 29 Oct and Priya's
+ * 23 Oct rows were reconciled by a Lead.) Nothing is sent. Run only through the release pipeline, dryRun=true first.
  */
 import { v } from "convex/values";
 import { internalMutation } from "../_generated/server";
 import { refreshWorkdayChecks } from "../ta/workdays";
 
 const STUCK = [
-  { emailId: "p17gts5z1e37zd0y37vp8kdyd98h6qkc", userId: "n179ssr2bhb24gc6anv64zb7rx8e68f0", jobId: "m178exn6qt75zhvej59a6pc5fh8gda38" },
-  { emailId: "p17pj53s53wfa14ma6gg66nvd98gtd70", userId: "n176kws1qdtv08yyzyp06ph40d8fskr5", jobId: "m17cw4va2wvhvc80bm9md3mbj98gc3c0" },
+  { emailId: "p17wq3jtvqcz35k8eygvq3t4w58h8gw6", userId: "n179ssr2bhb24gc6anv64zb7rx8e68f0", jobId: "m178exn6qt75zhvej59a6pc5fh8gda38" },
 ];
-const REASON = "Verified not sent: the owner confirmed on 30 Oct 2026 that this email never reached the Director desk; it was stuck in sending.";
+const REASON = "Verified not sent: the owner confirmed on 30 Oct 2026 that this email never reached the Director desk; the send never reported back.";
 
 export const run = internalMutation({
   args: { dryRun: v.boolean() },

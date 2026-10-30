@@ -216,7 +216,8 @@ try {
   assert.equal((await db.get("day"))!.finishedAt, undefined, "Delhi sent; attendance remains open for Mumbai");
   checks = await requiredChecks(ctx, await db.get("day") as any, (await db.get("day"))!.jobs[0]);
   assert.equal(checks.checks.find(c => c.key.startsWith("daily_email:"))?.status, "incomplete");
-  await run("result", { id: mEod.id, status: "uncertain" });
+  await run("result", { id: mEod.id, status: "uncertain", error: "Microsoft Graph could not be reached: timed out" });
+  assert.match((await db.get(mEod.id))!.sendError, /timed out/, "The reason a send failed is kept for diagnosis");
   await assert.rejects(() => begin([], undefined, { workLocationId: "delhi" }), /already been sent/);
   now += 600000;
   await run("reconcile", { actorId: "lead", id: mEod.id, accepted: true, reason: "Verified synthetic Mumbai message" });
