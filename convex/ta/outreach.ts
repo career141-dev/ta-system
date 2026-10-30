@@ -101,6 +101,14 @@ export const followUpState = internalQuery({
       etaMs: app.candidateEtaMs ?? null,
       flaggedForTaReview: app.flaggedForTaReview ?? false,
       taReviewReason: app.taReviewReason ?? null,
+      // Who has the conversation: null = the assistant (30 Oct).
+      takenOver: typeof app.taTookOverAt === "number"
+        ? {
+            at: app.taTookOverAt,
+            by: app.taTookOverBy ? ((await ctx.db.get(app.taTookOverBy))?.fullName ?? null) : null,
+            via: app.taTookOverVia ?? null,
+          }
+        : null,
       // The four the sequence is chasing, and the job's own questions.
       collected: {
         cv: app.followUpCvReceived ?? null,

@@ -1281,6 +1281,11 @@ export default defineSchema({
     promisedEtaTimestamp: v.optional(v.number()),
     lastCandidateEmailMessageId: v.optional(v.string()),
     flaggedForTaReview: v.optional(v.boolean()),
+    /** A person has this conversation; the assistant stays quiet (lib/assistantControl.ts, 30 Oct). */
+    taTookOverAt: v.optional(v.number()),
+    taTookOverBy: v.optional(v.id("users")),
+    /** "button" (Take over) or "phone" (the TA replied from the WhatsApp Business app). */
+    taTookOverVia: v.optional(v.string()),
     taReviewReason: v.optional(v.string()),
     // Per-application follow-up completion flags (scoped per-job to avoid cross-job contamination)
     followUpCvReceived: v.optional(v.boolean()),
@@ -1629,7 +1634,7 @@ export default defineSchema({
     subject: v.optional(v.string()),
     body: v.string(),
     senderId: v.optional(v.id("users")),
-    senderAgent: v.optional(v.union(v.literal("agent3"), v.literal("agent5"), v.literal("system"))),
+    senderAgent: v.optional(v.union(v.literal("agent3"), v.literal("agent5"), v.literal("system"), v.literal("ta"))),
     sequenceDay: v.optional(v.number()),
     deliveryStatus: v.union(
       v.literal("pending"),

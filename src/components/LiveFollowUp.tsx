@@ -1,6 +1,6 @@
 import { convexQuery } from "@/lib/convexServer";
 import { timeAt } from "@/lib/format";
-import { stopFollowUpNow } from "@/app/actions";
+import { setConversationOwner, stopFollowUpNow } from "@/app/actions";
 import { SubmitButton } from "./Submit";
 import { FollowUpActions } from "./FollowUpActions";
 import { SendToDirectorReview } from "./SendToDirectorReview";
@@ -23,6 +23,8 @@ interface State {
   lastCandidateReplyAt: number | null;
   flaggedForTaReview: boolean;
   taReviewReason: string | null;
+  /** Null while the assistant has the conversation (30 Oct). */
+  takenOver?: { at: number; by: string | null; via: string | null } | null;
   collected: { cv: boolean | null; currentSalary: boolean | null; expectedSalary: boolean | null; noticePeriod: boolean | null };
   customQuestions: string[];
   customAnswers: Record<string, string>;
@@ -128,11 +130,33 @@ export async function LiveFollowUp({
           </p>
         )}
 
-        {state.flaggedForTaReview && (
-          <p className="mt-3 text-[12px] text-warn">Needs you: {state.taReviewReason ?? "flagged for review"}</p>
+        {state.takenOver ? (
+          <p className="mt-3 text-[12px] text-ink">
+            {state.takenOver.via === "phone"
+              ? `A TA replied from the WhatsApp app ${timeAt(state.takenOver.at)}, so the assistant stepped back.`
+              : `${state.takenOver.by ?? "A TA"} took over ${timeAt(state.takenOver.at)}.`}{" "}
+            The assistant is quiet: it saves what the candidate sends and tells you, but does not reply or send reminders.
+          </p>
+        ) : state.flaggedForTaReview ? (
+          <p className="mt-3 text-[12px] text-warn">Needs you: {state.taReviewReason ?? "flagged for review"}. The assistant is waiting for you.</p>
+        ) : null}
+
+        {!locked && (
+          <form action={setConversationOwner} className="mt-3">
+            <input type="hidden" name="appId" value={applicationId} />
+            <input type="hidden" name="openingId" value={openingId} />
+            <input type="hidden" name="owner" value={state.takenOver || state.flaggedForTaReview ? "assistant" : "ta"} />
+            <SubmitButton
+              tone="dark"
+              pendingLabel={state.takenOver || state.flaggedForTaReview ? "Handing back…" : "Taking over…"}
+              className="rounded-lg border border-rule px-3 py-1.5 text-[12.5px] text-ink hover:bg-tag disabled:opacity-60"
+            >
+              {state.takenOver || state.flaggedForTaReview ? "Hand back to the assistant" : "Take over the conversation"}
+            </SubmitButton>
+          </form>
         )}
 
-        {state.lastCandidateReplyAt && missing > 0 && (
+        {state.lastCandidateReplyAt && missing > 0 && !state.takenOver && !state.flaggedForTaReview && (
           <p className="mt-3 text-[12px] leading-relaxed text-ink-soft">
             They replied {timeAt(state.lastCandidateReplyAt)}. The assistant answered with what is still missing and
             will carry on — step in below if it needs you.

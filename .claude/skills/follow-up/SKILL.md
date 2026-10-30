@@ -159,6 +159,16 @@ Email: `emailAgent:pollEmailInbox` (crons `poll-linkedin-inbox` 13 min, `poll-cv
 
 A reply does not pause the sweep by design (18 Sep, cf5b78d reversed ad60c7d the same day); the sweep carries on when the conversation goes quiet.
 
+### Flow G2: a person takes the conversation (30 Oct)
+
+Who talks to the candidate: the assistant, or a TA. `convex/lib/assistantControl.ts assistantQuietReason(app)` is the rule: quiet when `applications.taTookOverAt` is set, or `flaggedForTaReview` (a stop case, a long promise, the daily reply ceiling).
+- **Take over**: `ta/followUp:takeOver` (button "Take over the conversation" in `LiveFollowUp`, `actions.ts setConversationOwner`, `followUpWrites.setCandidateConversationOwner`) runs `stopFollowUpSequenceForApp` then sets `taTookOverAt/By/Via:"button"`. Also automatic when a TA replies from the WhatsApp Business app: Meta `smb_message_echoes` -> `value.message_echoes` in `whatchimp.ts` (handled before `value.messages`, so an echo is never read as the candidate) -> `whatsappOutbound:recordTaPhoneMessage`: outbound row with `senderAgent:"ta"`, deduped by `externalMessageId`, and `taTookOverVia:"phone"` + schedule cleared. **Meta side:** the `smb_message_echoes` webhook field must be subscribed for this to arrive (owner's step).
+- **While quiet**: `extractDetailsFromText` still reads and saves the details, sets do-not-contact on an opt-out, then stops before any reply or schedule and sends the TA a bell notification (`followUpMutations:notifyFollowUpTa` -> `lib/notifyTa.ts`, type `candidate_replied`, to `taTookOverBy ?? ownerTaId ?? job.primaryRecruiterId`). The sweep skips the row (query filter and a `continue`). `flagForTaReview` notifies the same way.
+- **Hand back**: `ta/followUp:handBack` ("Hand back to the assistant"; also clears a "Needs you" flag). If the application's newest message is an inbound WhatsApp it schedules `answerWhatsAppTurn` at once; otherwise `nextFollowUpScheduledAt = now + 23 h`. The assistant then reads the last 10 messages of this opening labelled `[Candidate]`, `[Assistant]`, `[TA (a person on our team)]` (`historyLine`), and the prompt tells it to carry on from the TA, not repeat or contradict them.
+- **Upset**: intent `upset` (angry, rude, complaining, distressed) is a stop case: one calm line ("a consultant will contact you personally"), flagged "Candidate sounds upset or unhappy - please reply or call them yourself".
+- **Voice notes**: `message.type === "audio"` -> `whatsappOutbound:recordVoiceNote`: inbound row "[Voice note]", `lastCandidateReplyAt`, TA notified; unless quiet, or already asked within the hour, one reply `VOICE_NOTE_REPLY` ("could you type your answer, please?"). Not flagged, so the typed answer that follows is read as usual.
+- Not covered: there is no auto hand-back (a taken-over chat stays with the TA until someone presses Hand back); a TA's phone reply is seen only on the main number's account with echoes subscribed; the TA System has no box to type a free message.
+
 ### Flow H: complete, advance, close, reinstate
 
 - Complete rule (UI/backend gate): `directorReviewBlockers` (`convex/ta/stages.ts`): CV, expected salary, notice period; current salary not required. `needsReviewDetails(from,to,decidedByReviewer)`: entering `second_shortlist` always, and, since 2 Oct, any jump from before Director Review straight to `director_shortlist`..`placed` unless the reviewer decided. Enforced in `executeStageTransition` with "Cannot move to Director Review: still missing ..." / "Cannot skip Director Review: still missing ...".
@@ -186,7 +196,7 @@ TA System stores `opening.followUpQuestions: {id,label}[]` (max 12 in the local 
 | TA Follow-up page | `HhUpload` | /scoop skill | `opening.act` |
 | Candidate row (`CandidateRow.tsx`), Convex mode, stage in follow-up, not `locked` | `FollowUpActions`: Aura Call, WhatsApp, Email; "Needs ..." chip from `directorReviewBlockers` | dialogs below | `opening.act` |
 | `FollowUpDialog` | conversation + Send + Stop follow-up | `GET /api/conversation/[appId]` (`ta/outreach:followUpState`, `messagesFor` limit 100); `sendFollowUpNowInline`, `stopFollowUpNowInline` | `opening.act` |
-| Candidate page chat tab (`/openings/[id]/candidate/[appId]?tab=chat`) | `LiveFollowUp` (server component): checklist, automatic-status line, "Needs you: ..." when flagged, `SendToDirectorReview`, Stop, test-mode banner from `ta/followUp:gateStatus` | queries above | seat on the opening |
+| Candidate page chat tab (`/openings/[id]/candidate/[appId]?tab=chat`) | `LiveFollowUp` (server component): checklist, automatic-status line, who has the conversation (taken over / "Needs you: ...") with "Take over the conversation" / "Hand back to the assistant" (30 Oct), `SendToDirectorReview`, Stop, test-mode banner from `ta/followUp:gateStatus` | queries above | seat on the opening |
 | Candidate page (call tab) | `AuraCallButton`, `WebCallResults` | /voice-agent | `opening.act` |
 | Candidate page | `ReviewDetailsForm` | `saveReviewDetails` | `opening.act` |
 | `/settings?tab=demo` | `FollowUpDemo`: sample name/title, two approved WhatsApp templates, first/reminder email | `sendFollowUpDemo` -> `communications/demoSend:sendDemoWhatsApp|sendDemoEmail` | `user.manage` (admin) |
@@ -309,10 +319,11 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-10-29 PR #320 verified the configured demo senders and shared budget accounting; also documented the existing one-location assignment on claim/stage move. The intervening tracking-purge cron does not alter follow-up scheduling.
 - 2026-10-29 One complete rule (`followUpBlockers`, `ta/stages.ts`) for the bot, sweep, stage helper, Day 0 and logged call; current salary not required (owner). The helper moves through the state machine, so the move is logged and the sequence stops.
 - 2026-10-30 WhatsApp assistant paced like a person: 30 s pause and one reply per burst (`answerWhatsAppTurn`), duplicates by Meta message id, echo of our own last message ignored, 8 replies per candidate per day then a TA flag, no reminders 20:00-08:00 Colombo. One complete rule (`followUpBlockers`) moved here from the 29 Oct branch.
+- 2026-10-30 Take over / hand back (`ta/followUp:takeOver`, `handBack`, `taTookOverAt`): the assistant stays quiet but keeps saving details and notifies the TA; a TA's reply from the WhatsApp app takes over automatically (`message_echoes`); history labels the TA's words; `upset` intent; voice notes answered with a request to type.
 
 <!-- skill-meta
-verified-commit: cfe63488
-verified-hash: 8cabdc414a12967b85aeb73a953427179d89226a
+verified-commit: 83c80ee4
+verified-hash: c01c1276ad0ccc4dcd413a424b67a6682f5bf3a8
 verified-date: 2026-10-30
 sources:
   tests/addToAssignedJob.test.ts

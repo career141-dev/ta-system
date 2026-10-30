@@ -8,6 +8,7 @@ import { buildStructuredEmailHtml } from "./emailHtml";
 import { isAutomaticReply, latestReplyText } from "../lib/mailParse";
 import { followUpBlockers, isFollowUpStage } from "../ta/stages";
 import { burstToAnswer } from "../lib/followUpWindow";
+import { assistantQuietReason, historyLine } from "../lib/assistantControl";
 
 /**
  * One WhatsApp turn, after the candidate's pause (30 Oct). Each message
@@ -222,7 +223,9 @@ MISSING DETAILS BEFORE THIS MESSAGE: ${missingFields.join(", ") || "None — eve
 CONVERSATION HISTORY for THIS opening only (most recent first).
 Every line below is about "${job.title}". The candidate may have applied to
 other openings; those conversations are deliberately not shown and must not be
-referred to:
+referred to. Lines marked "TA" were written by a person on our team: carry on
+from them, never repeat a question they asked or contradict what they said or
+promised:
 ${historyText || "No previous messages."}
 
 To understand the TA's communication style, reference their templates:
@@ -288,10 +291,11 @@ Rules:
    - 'not_interested': Candidate clearly declines THIS ROLE ("not interested in this one", "I've accepted another offer", "not looking right now"). Write one short, kind nextActionMessage thanking them and saying we will keep them in mind for other roles. Ask nothing.
    - 'opt_out': Candidate asks us to stop contacting them at all ("stop messaging me", "remove my number", "don't contact me again", "unsubscribe"). Set nextActionMessage to null.
    - 'wants_human': Candidate asks to speak to a person / call / a consultant. Write one short nextActionMessage saying a consultant will contact them. Ask nothing.
+   - 'upset': Candidate is angry, rude, frustrated, complaining, or distressed (e.g. "why do you keep messaging me", "this is ridiculous", "you people never call back", insults). Write one short, calm nextActionMessage that apologises and says a consultant will contact them personally. Ask nothing.
 3. 'nextActionTimeHours':
    - If 'promised_eta': A pure decimal number representing hours (e.g. 0.033 for 2 minutes, 0.083 for 5 minutes, 0.167 for 10 minutes, 1.0 for 1 hour, 24.0 for 24 hours). Output only a single valid JSON decimal number.
    - If 'interested_no_eta', 'provided_partial', or 'asked_question': Set to 24.
-   - If 'provided_all', 'not_interested', 'opt_out' or 'wants_human': Set to null.
+   - If 'provided_all', 'not_interested', 'opt_out', 'wants_human' or 'upset': Set to null.
 4. 'detectedQuestion': If candidate asked any question/inquiry in their message, analyze and categorize it into category ('salary_compensation' | 'visa_sponsorship' | 'location_remote' | 'notice_start_date' | 'tech_stack' | 'client_details' | 'general_inquiry') and importanceLevel ('high' | 'medium' | 'low').
 
 Return ONLY a valid JSON object matching this schema. Do not add markdown formatting or backticks.
@@ -305,7 +309,7 @@ Schema:
   "noticePeriod": string | null,
   "candidateSummary": string | null,
   "customAnswers": { [question: string]: string } | null,
-  "intent": "provided_all" | "provided_partial" | "interested_no_eta" | "promised_eta" | "asked_question" | "not_interested" | "opt_out" | "wants_human",
+  "intent": "provided_all" | "provided_partial" | "interested_no_eta" | "promised_eta" | "asked_question" | "not_interested" | "opt_out" | "wants_human" | "upset",
   "candidateEtaMinutes": number | null,
   "nextActionTimeHours": number | null,
   "nextActionMessage": string | null,
@@ -544,6 +548,7 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           extracted.intent === "opt_out" ? "Candidate asked not to be contacted again"
           : extracted.intent === "not_interested" ? "Candidate said they are not interested in this role"
           : extracted.intent === "wants_human" ? "Candidate asked to speak to a consultant"
+          : extracted.intent === "upset" ? "Candidate sounds upset or unhappy - please reply or call them yourself"
           : longEta ? `Candidate promised the details in about ${Math.round((etaMins as number) / 60)} hours (over the 72-hour limit)`
           : null;
         const etaPromised = !stop && !isCompleted && (extracted.intent === "promised_eta" || extracted.intent === "provided_eta");
@@ -559,6 +564,20 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
             candidateId: args.candidateId,
             reason: `Asked on ${args.channel === "email" ? "email" : "WhatsApp"}: "${textBody.trim().slice(0, 200)}"`,
           });
+        }
+
+        // A person has this conversation (lib/assistantControl.ts, 30 Oct):
+        // the details above are saved and a do-not-contact is honoured, but the
+        // assistant says nothing and schedules nothing. The TA hears they wrote.
+        const quiet = assistantQuietReason(activeApp);
+        if (quiet) {
+          await ctx.runMutation(internal.communications.followUpMutations.notifyFollowUpTa, {
+            applicationId: activeApp._id,
+            title: `${updatedCandidate?.fullName || "A candidate"} replied (${job.title})`,
+            body: `${quiet} They wrote on ${args.channel === "email" ? "email" : "WhatsApp"}: "${textBody.trim().slice(0, 300)}"`,
+          });
+          console.log(`[Inbound Extraction] ${quiet} Details saved; no reply for candidate ${args.candidateId}.`);
+          return;
         }
 
         let replyMessage: string | null = null;
@@ -810,9 +829,11 @@ export const getRecentHistoryQuery = internalQuery({
       ? messages.filter((m) => m.applicationId === args.applicationId)
       : messages;
 
+    // Ten, labelled by who wrote them: after a TA has talked to the candidate
+    // the assistant must see their words as theirs (30 Oct).
     return scoped
-      .slice(0, 5)
-      .map((m) => `[${m.direction}] ${m.subject || "Message"}: ${m.body}`)
+      .slice(0, 10)
+      .map((m) => historyLine(m))
       .join("\n");
   },
 });

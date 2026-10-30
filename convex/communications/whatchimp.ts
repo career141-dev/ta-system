@@ -130,6 +130,24 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
   const cleanConfigured = configuredPhone.replace(/[^0-9]/g, "");
   const businessPhone = cleanConfigured;
 
+  // A TA's reply from the WhatsApp Business app on their phone (Meta's
+  // smb_message_echoes, 30 Oct): recorded as theirs, and the assistant stops.
+  // Kept apart from value.messages, so an echo is never read as the candidate.
+  const echoes = body.entry?.[0]?.changes?.[0]?.value?.message_echoes;
+  if (Array.isArray(echoes)) {
+    for (const echo of echoes) {
+      const text = echo?.text?.body ?? "";
+      if (echo?.type === "text" && echo?.to && text) {
+        await ctx.runMutation(internal.communications.whatsappOutbound.recordTaPhoneMessage, {
+          toPhone: String(echo.to),
+          text: String(text),
+          messageId: typeof echo.id === "string" ? echo.id : undefined,
+        });
+      }
+    }
+    return new Response("OK", { status: 200 });
+  }
+
   // 0. Early return for Meta status-only webhooks (delivery receipts, read receipts)
   // These have entry[0].changes[0].value.statuses but NO .messages — they contain zero text
   if (body.entry && body.entry[0]?.changes && body.entry[0].changes[0]?.value?.statuses && !body.entry[0].changes[0]?.value?.messages) {
@@ -175,6 +193,13 @@ export const handleWhatChimpWebhook = httpAction(async (ctx, request) => {
           fileName: mediaItem.filename ?? null,
           captionText,
         });
+      } else if (message.type === "audio") {
+        // A voice note: recorded, the TA told, the candidate asked to type (30 Oct).
+        const voice = await ctx.runMutation(internal.communications.whatsappOutbound.recordVoiceNote, {
+          senderPhone: cleanFromNumber,
+          messageId: typeof message.id === "string" ? message.id : undefined,
+        });
+        if (voice?.handled) continue;
       } else if (message.type === "text") {
         const textBody = message.text?.body || message.body || message.text || "";
         const cleanSender = cleanFromNumber;

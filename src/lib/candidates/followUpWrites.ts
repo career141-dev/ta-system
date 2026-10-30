@@ -87,6 +87,42 @@ export async function sendCandidateFollowUp(
   };
 }
 
+/**
+ * Take the conversation from the assistant, or give it back (30 Oct). The
+ * same access checks as Stop; the rules are in convex/lib/assistantControl.ts.
+ */
+export async function setCandidateConversationOwner(
+  user: User,
+  openingId: string,
+  applicationId: string,
+  owner: "ta" | "assistant",
+  deps: Pick<OpeningWriteDeps, "convexQuery" | "convexMutation" | "resetStore" | "revalidatePath">,
+): Promise<CandidateFollowUpWriteResult> {
+  const decision = await allowed(user, openingId, applicationId, deps);
+  if (!decision.ok) return decision;
+  if (!isConvex()) return { ok: false, status: 409, message: "This needs the Convex store." };
+  let answering = false;
+  try {
+    const result = await deps.convexMutation<{ ok: boolean; answering?: boolean }>(
+      owner === "ta" ? "ta/followUp:takeOver" : "ta/followUp:handBack",
+      { actorId: user.id, applicationId },
+    );
+    answering = result?.answering === true;
+  } catch (error) {
+    return { ok: false, status: 400, message: safeErrorMessage(error, owner === "ta" ? "Could not take over the conversation." : "Could not hand the conversation back.") };
+  } finally {
+    refreshed(openingId, deps);
+  }
+  return {
+    ok: true,
+    message: owner === "ta"
+      ? "You have this conversation. The assistant will not reply or send reminders until you hand it back."
+      : answering
+        ? "Handed back. The assistant is answering the candidate's last message now."
+        : "Handed back. The assistant will send the next reminder within a day.",
+  };
+}
+
 /** Stop every pending reminder through the same backend mutation as the website. */
 export async function stopCandidateFollowUp(
   user: User,

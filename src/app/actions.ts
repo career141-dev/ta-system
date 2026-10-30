@@ -35,7 +35,7 @@ import { writeCandidateClosing } from "@/lib/candidates/closingWrites";
 import { writeCandidateReview } from "@/lib/candidates/reviewWrites";
 import { writeCandidateCall } from "@/lib/candidates/callWrites";
 import { checkCandidateReferee } from "@/lib/candidates/referenceChecks";
-import { sendCandidateFollowUp, stopCandidateFollowUp } from "@/lib/candidates/followUpWrites";
+import { sendCandidateFollowUp, setCandidateConversationOwner, stopCandidateFollowUp } from "@/lib/candidates/followUpWrites";
 import { rematchWhenRequirementsSettle as rematchShared, startMatching } from "@/lib/openings/matching";
 import { headers } from "next/headers";
 import type { CvMatch, EodEmailCopy, FollowUpCallOutcome, RefereeCall, RefereeCallEmailRow, User, WorkingStage } from "@/data/types";
@@ -403,6 +403,18 @@ export async function sendFollowUpNow(formData: FormData) {
   const channel = raw === "whatsapp" || raw === "email" ? raw : undefined;
   const result = await sendCandidateFollowUp(user, openingId, appId, channel, OPENING_DEPS);
   if (!result.ok) await (result.notice ? note : fail)(result.message);
+  await done(result.message);
+}
+
+/** "Take over" / "Hand back to the assistant" on a candidate's follow-up (30 Oct). */
+export async function setConversationOwner(formData: FormData) {
+  await primeStore({ allApplications: true });
+  const user = await getCurrentUser();
+  const appId = String(formData.get("appId"));
+  const openingId = String(formData.get("openingId"));
+  const owner = formData.get("owner") === "ta" ? "ta" : "assistant";
+  const result = await setCandidateConversationOwner(user, openingId, appId, owner, OPENING_DEPS);
+  if (!result.ok) await fail(result.message);
   await done(result.message);
 }
 
