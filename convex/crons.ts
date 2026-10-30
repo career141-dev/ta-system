@@ -94,7 +94,7 @@ export const evaluateFollowUpStage = internalMutation({
           .withIndex("by_job_stage", (i) =>
             i.eq("jobId", jobId as Id<"jobs">).eq("currentStage", stage as any).gt("_creationTime", after),
           )
-          .filter((q) => q.neq(q.field("flaggedForTaReview"), true))
+          .filter((q) => q.and(q.neq(q.field("flaggedForTaReview"), true), q.eq(q.field("taTookOverAt"), undefined)))
           .take(n);
       },
     );
@@ -153,6 +153,7 @@ export const evaluateFollowUpStage = internalMutation({
 
     for (const app of appsToEvaluate) {
       // 1. Skip if application is flagged for TA review (automated nudging paused)
+      if (typeof app.taTookOverAt === "number") continue; // A person has this conversation (30 Oct).
       if (app.flaggedForTaReview === true) {
         console.log(`[Follow-Up Cron] Application ${app._id} is flagged for TA review (${app.taReviewReason}). Skipping automated nudge.`);
         continue;

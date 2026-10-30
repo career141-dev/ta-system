@@ -123,8 +123,8 @@ export default async function StagePage({
             </div>
             <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
               {opening.autoFollowUp
-                ? "After you send a candidate the first follow-up, WhatsApp and email reminders go out every 24 hours until the details are in or the reminders run out."
-                : "Follow-ups go out only when you press Send on a candidate."}
+                ? "On: when a candidate is shortlisted the first WhatsApp and email go by themselves, then a reminder every 24 hours until the details are in. The assistant answers their replies."
+                : "Off: nothing goes until someone presses Send on a candidate. A TA, TA lead or admin can turn it on."}
             </p>
           </div>
 

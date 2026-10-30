@@ -5,6 +5,130 @@ import { sendMetaFreeText } from "./metaDirectSender";
 import { followUpCancelledReason } from "../lib/graphMail";
 import { REPLY_PAUSE_MS, MAX_BOT_REPLIES_PER_DAY, isEchoOfOurs } from "../lib/followUpWindow";
 import { colomboDayStart } from "../../src/lib/calendar";
+import { assistantQuietReason } from "../lib/assistantControl";
+import { notifyFollowUpTaFor } from "../lib/notifyTa";
+
+/** The candidate's application in Follow-up, else their newest open one. */
+async function conversationApp(ctx: any, candidateId: any) {
+  const apps = await ctx.db
+    .query("applications")
+    .withIndex("by_candidateId", (q: any) => q.eq("candidateId", candidateId))
+    .collect();
+  const open = apps.filter((a: any) => a.currentStage !== "rejected" && a.currentStage !== "placed");
+  return open.find((a: any) => isFollowUpStage(a.currentStage)) ?? open[open.length - 1] ?? null;
+}
+
+async function seenMessage(ctx: any, messageId?: string): Promise<boolean> {
+  if (!messageId) return false;
+  return !!(await ctx.db
+    .query("communications")
+    .withIndex("by_externalMessageId", (q: any) => q.eq("externalMessageId", messageId))
+    .first());
+}
+
+export const VOICE_NOTE_REPLY = "Thank you! I can't listen to voice notes here - could you type your answer, please? A consultant will also listen to your message.";
+
+/**
+ * A voice note (30 Oct). The assistant cannot hear it: it was dropped without
+ * a word, so a candidate who answered by voice heard nothing back. Now it is
+ * recorded, the TA is told, and — unless a person has the conversation, or we
+ * already asked within the hour — the candidate is asked to type instead.
+ */
+export const recordVoiceNote = internalMutation({
+  args: { senderPhone: v.string(), messageId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const candidate = await findCandidateByPhone(ctx, args.senderPhone);
+    if (!candidate) return { handled: false };
+    const app = await conversationApp(ctx, candidate._id);
+    if (!app) return { handled: false };
+    if (await seenMessage(ctx, args.messageId)) return { handled: true };
+    const now = Date.now();
+    await ctx.db.insert("communications", {
+      candidateId: candidate._id,
+      applicationId: app._id,
+      jobId: app.jobId,
+      direction: "inbound",
+      channel: "whatsapp",
+      body: "[Voice note]",
+      deliveryStatus: "read",
+      sentAt: now,
+      stoppedSequence: false,
+      ...(args.messageId ? { externalMessageId: args.messageId } : {}),
+    });
+    await ctx.db.patch(app._id, { lastCandidateReplyAt: now });
+    if (!isFollowUpStage(app.currentStage)) return { handled: true };
+    await notifyFollowUpTaFor(ctx, app._id, `${candidate.fullName ?? "A candidate"} sent a voice note`, "Listen to it in WhatsApp; the assistant cannot hear voice notes.");
+    if (assistantQuietReason(app)) return { handled: true };
+    const lastOurs = await ctx.db
+      .query("communications")
+      .withIndex("by_candidate_time", (q: any) => q.eq("candidateId", candidate._id).gte("sentAt", now - 60 * 60_000))
+      .filter((q: any) => q.and(q.eq(q.field("direction"), "outbound"), q.eq(q.field("body"), VOICE_NOTE_REPLY)))
+      .first();
+    if (lastOurs) return { handled: true };
+    const commId = await ctx.db.insert("communications", {
+      candidateId: candidate._id,
+      applicationId: app._id,
+      jobId: app.jobId,
+      direction: "outbound",
+      channel: "whatsapp",
+      body: VOICE_NOTE_REPLY,
+      deliveryStatus: "sent",
+      sentAt: now,
+      senderAgent: "system",
+      stoppedSequence: false,
+    });
+    await ctx.scheduler.runAfter(0, internal.communications.whatsappOutbound.sendWhatsApp, {
+      communicationId: commId,
+      candidateId: candidate._id,
+      jobId: app.jobId,
+      body: VOICE_NOTE_REPLY,
+      isReplyToCandidate: true,
+    });
+    return { handled: true };
+  },
+});
+
+/**
+ * A TA replied from the WhatsApp Business app on their phone (Meta's
+ * smb_message_echoes, 30 Oct). Recorded as the TA's words, so the assistant
+ * reads them after a hand-back, and the conversation is taken over: the
+ * assistant stops talking over a person. Never answered — it is not the
+ * candidate.
+ */
+export const recordTaPhoneMessage = internalMutation({
+  args: { toPhone: v.string(), text: v.string(), messageId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    if (!args.text.trim()) return { recorded: false };
+    const candidate = await findCandidateByPhone(ctx, args.toPhone.replace(/[^0-9]/g, ""));
+    if (!candidate) return { recorded: false };
+    const app = await conversationApp(ctx, candidate._id);
+    if (!app) return { recorded: false };
+    if (await seenMessage(ctx, args.messageId)) return { recorded: false };
+    await ctx.db.insert("communications", {
+      candidateId: candidate._id,
+      applicationId: app._id,
+      jobId: app.jobId,
+      direction: "outbound",
+      channel: "whatsapp",
+      body: args.text,
+      deliveryStatus: "sent",
+      sentAt: Date.now(),
+      senderAgent: "ta",
+      stoppedSequence: false,
+      ...(args.messageId ? { externalMessageId: args.messageId } : {}),
+    });
+    if (isFollowUpStage(app.currentStage) && typeof app.taTookOverAt !== "number") {
+      await ctx.db.patch(app._id, {
+        taTookOverAt: Date.now(),
+        taTookOverVia: "phone",
+        nextFollowUpScheduledAt: undefined,
+        nextFollowUpMessage: undefined,
+      });
+      console.log(`[recordTaPhoneMessage] A TA replied from the phone; the assistant stops for application ${app._id}.`);
+    }
+    return { recorded: true };
+  },
+});
 import { isFollowUpStage } from "../ta/stages";
 
 /**

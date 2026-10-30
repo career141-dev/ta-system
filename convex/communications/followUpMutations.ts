@@ -1,5 +1,6 @@
 import { internalMutation } from "../_generated/server";
 import { v } from "convex/values";
+import { notifyFollowUpTaFor } from "../lib/notifyTa";
 import { adjustJobStageStat } from "../jobs/stats";
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 
@@ -211,6 +212,11 @@ export const resetToNewCvs = internalMutation({
   },
 });
 
+export const notifyFollowUpTa = internalMutation({
+  args: { applicationId: v.id("applications"), title: v.string(), body: v.string() },
+  handler: async (ctx, args) => notifyFollowUpTaFor(ctx, args.applicationId, args.title, args.body),
+});
+
 export const flagForTaReview = internalMutation({
   args: {
     applicationId: v.id("applications"),
@@ -239,6 +245,7 @@ export const flagForTaReview = internalMutation({
       });
     }
 
+    await notifyFollowUpTaFor(ctx, args.applicationId, "A candidate needs you", args.reason);
     console.log(`[Follow-Up] Application ${args.applicationId} flagged for TA review (${args.reason}). Automated follow-up paused.`);
   },
 });

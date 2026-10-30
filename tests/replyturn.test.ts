@@ -244,3 +244,34 @@ test("quoted-thread cutting and auto-reply spotting", () => {
   assert.ok(isAutomaticReply("Re: role", "This is an automatic reply. I am away."));
   assert.ok(!isAutomaticReply("Re: role", "I'm on leave until Monday, will send my CV then"));
 });
+
+// ── A person has the conversation (30 Oct) ──────────────────────────────────
+
+test("taken over by a TA: the details are saved, nothing is said, the TA is told", async () => {
+  const w = world();
+  w.app.taTookOverAt = Date.now() - 60_000;
+  model = { ...empty, intent: "provided_partial", expectedSalary: 200000, nextActionMessage: "Thanks! Could you share your notice period?" };
+  await turn(w, "expected 200k");
+  assert.equal(w.candidate.expectedSalary, 200000, "what the candidate sent must still be saved");
+  assert.equal(w.reply(), undefined, "the assistant talked over the TA");
+  assert.ok(w.called("notifyFollowUpTa"), "the TA was not told the candidate wrote");
+  assert.ok(!w.called("scheduleDynamicFollowUp") && !w.called("clearPendingFollowUp"), "the assistant scheduled a reminder while the TA has it");
+});
+
+test("flagged 'Needs you': the assistant waits for the TA instead of answering again", async () => {
+  const w = world();
+  Object.assign(w.app, { flaggedForTaReview: true, taReviewReason: "Candidate asked to speak to a consultant" });
+  model = { ...empty, intent: "asked_question", nextActionMessage: "A consultant will call you." };
+  await turn(w, "when will they call?");
+  assert.equal(w.reply(), undefined);
+  assert.ok(w.called("notifyFollowUpTa"));
+});
+
+test("an upset candidate gets one calm line and goes to a TA", async () => {
+  const w = world();
+  model = { ...empty, intent: "upset", nextActionMessage: "Sorry about that, Kamal. A consultant will contact you personally." };
+  await turn(w, "why do you keep messaging me, this is ridiculous");
+  assert.equal(w.reply(), "Sorry about that, Kamal. A consultant will contact you personally.");
+  assert.equal(w.app.flaggedForTaReview, true);
+  assert.equal(w.app.nextFollowUpScheduledAt, undefined, "a reminder was left for an upset candidate");
+});

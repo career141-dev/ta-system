@@ -22,10 +22,12 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { outreachLive } from "../lib/outreachSafety";
 import { Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, isDeskWideUser, WORKS_THE_DESK } from "./guard";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "../pipeline/followUpHelper";
 import { toTaStage } from "./stages";
 import { autoFollowUpPatch, justSent, questionLabels, sameRoundAs } from "../lib/followUpScope";
+import { internal } from "../_generated/api";
+import { MAX_WHATSAPP_NUDGE_HOURS } from "../lib/followUpWindow";
 
 /**
  * Send the next follow-up for one candidate: the Day 0 outreach if nothing has
@@ -160,7 +162,13 @@ export const setAuto = internalMutation({
     const jobId = args.openingId as Id<"jobs">;
     const job = await ctx.db.get(jobId);
     if (!job) throw new Error("Opening not found");
-    await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
+    // Admin, director, TA lead and ops on any opening; a TA on their own
+    // (30 Oct). The page offered every TA lead the button — the same rule,
+    // src/lib/auth.ts opening.manage — but a lead not on the opening's team
+    // was refused here with "You are not assigned to this opening".
+    if (!isDeskWideUser(user)) {
+      await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
+    }
 
     await ctx.db.patch(jobId, {
       ...autoFollowUpPatch(args.enabled),
@@ -169,6 +177,68 @@ export const setAuto = internalMutation({
       updatedAt: new Date().toISOString(),
     });
     return { ok: true, enabled: args.enabled, maxAttempts: job.maxFollowUpAttempts ?? 3 };
+  },
+});
+
+/**
+ * Take over the conversation (30 Oct): the assistant stops answering and the
+ * reminders stop; anything still queued is cancelled. The candidate's replies
+ * are still read into the record, and the TA is told when they write.
+ */
+export const takeOver = internalMutation({
+  args: { actorId: v.string(), applicationId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const appId = args.applicationId as Id<"applications">;
+    const app = await ctx.db.get(appId);
+    if (!app) throw new Error("That application no longer exists.");
+    await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    assertNotAnotherTasCandidate(user, app);
+    await stopFollowUpSequenceForApp(ctx, appId);
+    await ctx.db.patch(appId, { taTookOverAt: Date.now(), taTookOverBy: user._id, taTookOverVia: "button" });
+    return { ok: true };
+  },
+});
+
+/**
+ * Give the conversation back to the assistant (30 Oct). If the candidate's
+ * last WhatsApp is still unanswered it answers now — reading what the TA
+ * said, labelled as theirs — otherwise the next reminder is scheduled
+ * inside WhatsApp's free window. Also clears a "Needs you" flag.
+ */
+export const handBack = internalMutation({
+  args: { actorId: v.string(), applicationId: v.string() },
+  handler: async (ctx, args) => {
+    const user = await requireActor(ctx, args.actorId);
+    const appId = args.applicationId as Id<"applications">;
+    const app = await ctx.db.get(appId);
+    if (!app) throw new Error("That application no longer exists.");
+    await assertJobAccess(ctx, user, app.jobId, WORKS_THE_DESK);
+    assertNotAnotherTasCandidate(user, app);
+    await ctx.db.patch(appId, {
+      taTookOverAt: undefined,
+      taTookOverBy: undefined,
+      taTookOverVia: undefined,
+      flaggedForTaReview: false,
+      taReviewReason: undefined,
+    });
+    const taStage = toTaStage(app.currentStage);
+    if (taStage !== "ai_follow_up" && taStage !== "ta_follow_up") return { ok: true, answering: false };
+    const last = await ctx.db
+      .query("communications")
+      .withIndex("by_applicationId", (q) => q.eq("applicationId", appId))
+      .order("desc")
+      .first();
+    if (last?.direction === "inbound" && last.channel === "whatsapp") {
+      await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.answerWhatsAppTurn, {
+        candidateId: app.candidateId,
+        applicationId: appId,
+        inboundAt: Number(last.sentAt),
+      });
+      return { ok: true, answering: true };
+    }
+    await ctx.db.patch(appId, { nextFollowUpScheduledAt: Date.now() + MAX_WHATSAPP_NUDGE_HOURS * 60 * 60 * 1000 });
+    return { ok: true, answering: false };
   },
 });
 
