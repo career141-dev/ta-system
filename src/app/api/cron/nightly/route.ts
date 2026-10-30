@@ -12,14 +12,14 @@ import { nightly } from "@/lib/dbMatch";
 export const maxDuration = 800;
 
 export async function POST(req: Request) {
-  // Load the store before reading it — this route has no page to do it first.
-  await primeStore({ allApplications: true });
   const secret = (process.env.C141_CRON_SECRET ?? "").trim();
   if (!secret) return new Response("Not configured", { status: 404 });
   const sent = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "");
   const a = Buffer.from(sent);
   const b = Buffer.from(secret);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return new Response("Forbidden", { status: 403 });
+  // Load the store only for a caller who passed the secret — it reads every application.
+  await primeStore({ allApplications: true });
   const result = await nightly();
   return Response.json(result);
 }

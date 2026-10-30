@@ -39,7 +39,7 @@ The shared actions module includes `addCandidateToJob`; destination shortlisting
 5. `emailEod` (same file): requires >=1 CV or `activityOnly` ("Include at least one CV or send an activity summary."); rows renumbered `no = i+1` in sent order (Director replies number against this order); builds each CV attachment (see Attachments); Excel workbook; `eodEmailHtml(...)`; builds `DailyEmailSnapshot`; calls `ta/dailyEmails:begin` (durable reservation); then action `ta/eodMail:send`.
 6. `begin` (internalMutation) sets status `sending`, `startedAt`, stores `snapshot`, inserts/patches the `dailyEmails` row, inserts `taWorkdayMail` receipt (`status:"sending"`, links `receiptId`). Guards - see table below.
 7. `ta/eodMail:send` (`"use node"` internalAction) -> `sendFollowUpMail` (convex/lib/graphMail.ts) with `attachmentMode:"draft"`, `testInbox:"EOD_TEST_EMAIL"`, `keepInternalInTest:"career141.com"`, `fallbackFrom` = `MS_SENDER_EMAIL` || `OUTBOUND_EMAIL_SENDER` || `job@career141.com`. Then calls `ta/dailyEmails:result` (and `ta/workdays:mailResult` for the receipt).
-8. `result`: only acts if status is still `sending`. Sets `accepted` / `failed` / `uncertain`, merges `delivered` ({from,to,cc} actually used) into the snapshot, then for `accepted` runs `finalizeDailyEmail`, then `refreshWorkdayChecks`.
+8. `result`: only acts if status is still `sending` or `uncertain` (a sweep may have flagged a slow send; the action's real answer wins). Sets `accepted` / `failed` / `uncertain`, merges `delivered` ({from,to,cc} actually used) into the snapshot, then for `accepted` runs `finalizeDailyEmail`, then `refreshWorkdayChecks`.
 9. `finalizeDailyEmail` (convex/lib/dailyEmail.ts, idempotent via `finalizedAt`): original -> inserts `reviewRounds` row (`kind:"director"`, `token:"C141-MAIL-<emailId>"`, `dispatch:"sent"`, `status:"awaiting"`, `setNumber` = min of apps' `setNumber`, `sentTo` = first To, `researchLink`, `trackedAt`); correction -> pushes `at` onto the original round's `revisedAt` (no new round); patches email `finalizedAt`, `expiresAt = at + 31 days`, `roundId`; extends each saved attachment's `expiresAt` (never shortens); patches receipt `accepted/finalizedAt`; for an **original EOD** with a receipt calls `autoCompleteWorkday(ctx, workdayId)` (src: convex/ta/workdays.ts; closes the workday when every required location has an accepted original EOD).
 10. Back in `sendDailyEmail`: `saveEodEdits(rows, baseRows, ids)` writes the TA's edited designation/company/salaries/notice/notes to the candidate via `eodDetailChanges` (see below), `afterBackendWrite`, then redirects to `/openings/<id>/eod?[location=][mail=][sent=<id>&]msg=...`. If the email was sent but a later step throws, the message is "Email sent and recorded. Reload to see its saved copy." and the TA is never invited to retry. `?sent=` makes the page render `EodDraftCleanup` to clear browser drafts - only if the server confirms that id is the user's accepted+finalized email.
 
@@ -282,8 +282,8 @@ Short hashes from `git log`; dates are commit dates.
 - 2026-10-23 f3d57d6 - EOD can be sent without CVs (activity-only); c28e1b1 - referee calls section in the email (`refereeCalls` on snapshot, `eodEmailHtml`).
 
 <!-- skill-meta
-verified-commit: 83c80ee
-verified-hash: ca82dc9e46d25731f5938f9950ab840447849c73
+verified-commit: 822cd28
+verified-hash: a02fc3d3f423fca908bb1f6115cc38dba4efa9a2
 verified-date: 2026-10-30
 sources:
   src/app/openings/[id]/eod/page.tsx
