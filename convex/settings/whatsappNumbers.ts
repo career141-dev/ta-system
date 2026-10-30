@@ -1,5 +1,7 @@
 import { v } from "convex/values";
-import { internalQuery, internalMutation } from "../_generated/server";
+import { internalAction, internalQuery, internalMutation } from "../_generated/server";
+import { internal } from "../_generated/api";
+import { numberReadiness, type MetaNumberState } from "../lib/senderRouting";
 
 export const list = internalQuery({
   args: {},
@@ -79,3 +81,77 @@ export const removeNumberByPattern = internalMutation({
   },
 });
 
+
+/** Settings → WhatsApp numbers: every sending number, with its TA and readiness. */
+export const listForSettings = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query("whatsappNumbers").collect();
+    return await Promise.all(
+      rows.map(async (n) => ({
+        id: n._id,
+        name: n.name,
+        phone: n.phone,
+        phoneId: n.whatchimpPhoneId,
+        wabaId: n.wabaId ?? null,
+        taName: n.userId ? ((await ctx.db.get(n.userId))?.fullName ?? null) : null,
+        ready: n.ready ?? null,
+        readyNote: n.readyNote ?? null,
+        checkedAt: n.checkedAt ?? null,
+      })),
+    );
+  },
+});
+
+export const getNumber = internalQuery({
+  args: { id: v.id("whatsappNumbers") },
+  handler: async (ctx, args) => await ctx.db.get(args.id),
+});
+
+export const setReadiness = internalMutation({
+  args: { id: v.id("whatsappNumbers"), ready: v.boolean(), note: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { ready: args.ready, readyNote: args.note, checkedAt: Date.now() });
+  },
+});
+
+/**
+ * "Check with Meta" (30 Oct): a TA's number sends their candidates' messages
+ * only after Meta confirms it is on the Cloud API, both templates are approved
+ * in its WhatsApp account, and its replies are sent to us. Reads only — nothing
+ * is sent to anyone.
+ */
+export const checkWithMeta = internalAction({
+  args: { id: v.id("whatsappNumbers") },
+  handler: async (ctx, args): Promise<{ ok: boolean; message: string }> => {
+    const token = process.env.META_ACCESS_TOKEN;
+    if (!token) return { ok: false, message: "Not checked — META_ACCESS_TOKEN is not set on this deployment." };
+    const row = await ctx.runQuery(internal.settings.whatsappNumbers.getNumber, { id: args.id });
+    if (!row) return { ok: false, message: "That number is no longer listed." };
+    if (!row.wabaId) return { ok: false, message: `Not checked — ${row.name}'s WhatsApp account ID is missing.` };
+
+    // Each part is the answer, or Meta's error as text for the note.
+    const get = async (path: string): Promise<any> => {
+      try {
+        const r = await fetch(`https://graph.facebook.com/v19.0/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+        const body = await r.json().catch(() => ({}));
+        return r.ok ? body : String(body?.error?.message ?? `HTTP ${r.status}`).slice(0, 160);
+      } catch (e: any) {
+        return String(e?.message ?? e).slice(0, 160);
+      }
+    };
+    const [phone, templates, apps] = await Promise.all([
+      get(`${row.whatchimpPhoneId}?fields=status,platform_type,display_phone_number`),
+      get(`${row.wabaId}/message_templates?fields=name,status&limit=200`),
+      get(`${row.wabaId}/subscribed_apps`),
+    ]);
+    const state: MetaNumberState = {
+      phone,
+      templates: typeof templates === "string" ? templates : templates.data ?? [],
+      subscribedApps: typeof apps === "string" ? apps : apps.data ?? [],
+    };
+    const { ready, note } = numberReadiness(row.phone, state);
+    await ctx.runMutation(internal.settings.whatsappNumbers.setReadiness, { id: args.id, ready, note });
+    return { ok: ready, message: `${row.name} (${row.phone}) — ${note}` };
+  },
+});

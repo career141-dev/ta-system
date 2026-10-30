@@ -958,14 +958,9 @@ RULES — follow these strictly:
 
 /** Helper — resolves the correct Meta phone number ID and sends a free-text reply. */
 async function sendReply(ctx: any, phone: string, jobId: any, message: string) {
-  const outboundNumber = await ctx.runQuery(internal.communications.whatsappOutbound.getJobOutboundWhatsAppNumber, { jobId });
-  let phoneNumberId = process.env.META_PHONE_NUMBER_ID || "965783109962872";
-  if (outboundNumber) {
-    const fetchedId = await ctx.runQuery(internal.communications.whatsappOutbound.getMetaPhoneNumberId, {
-      targetWhatsAppNumber: outboundNumber,
-    });
-    if (fetchedId) phoneNumberId = fetchedId;
-  }
+  const phoneNumberId =
+    (await ctx.runQuery(internal.communications.whatsappOutbound.senderPhoneId, { jobId })) ??
+    (process.env.META_PHONE_NUMBER_ID || "965783109962872");
   const metaAccessToken = process.env.META_ACCESS_TOKEN || "";
   await sendMetaFreeText(phoneNumberId, phone, message, metaAccessToken, ctx)
     .then((r: any) => { if (!r.success) console.error("[PreApp Chat] Meta send failed:", r.error); })

@@ -8,17 +8,20 @@ import { setMailboxEnabled, syncMailboxNow } from "@/app/actions";
 import { SubmitButton } from "@/components/Submit";
 import { AutoRefresh } from "./AutoRefresh";
 import { FollowUpDemo } from "./FollowUpDemo";
+import { WhatsAppNumbers, type NumberRow } from "./WhatsAppNumbers";
+import { convexQuery } from "@/lib/convexServer";
 import { safeErrorMessage } from "@/lib/userError";
 
 /**
  * Settings — the admin panel's switches for the platform's background work.
  *
  * Mailboxes lists the inboxes the TA System reads; Follow-up demo sends sample
- * messages. Admins only (user.manage), the same as People and roles.
+ * messages; WhatsApp numbers shows which line each TA's candidates hear from. Admins only (user.manage), the same as People and roles.
  */
 const TABS = [
   { id: "mailboxes", label: "Mailboxes" },
   { id: "demo", label: "Follow-up demo" },
+  { id: "numbers", label: "WhatsApp numbers" },
 ] as const;
 
 const OUTCOME: Record<NonNullable<MailIntakeStatus["recent"][number]["outcome"]>, { label: string; tone: string }> = {
@@ -61,6 +64,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
     }
   }
   const openings = new Map(repo.openings().map((o) => [o.id, o]));
+
+  let numbers: NumberRow[] | null = null;
+  let numbersProblem: string | null = null;
+  if (active === "numbers" && isConvex()) {
+    try {
+      numbers = await convexQuery<NumberRow[]>("settings/whatsappNumbers:listForSettings");
+    } catch (e) {
+      numbersProblem = safeErrorMessage(e, "The WhatsApp numbers could not be read. Try again.");
+    }
+  }
 
   const mailboxCard = (m: MailIntakeStatus["mailboxes"][number]) => (
     <div key={m.mailbox} className="rounded-2xl border border-rule bg-surface p-5">
@@ -177,6 +190,22 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
             mailbox instead, and the answer says so.
           </p>
           <FollowUpDemo />
+        </section>
+      )}
+
+      {active === "numbers" && (
+        <section className="mt-6 max-w-[960px]">
+          <h2 className="text-[16px] font-semibold">WhatsApp numbers</h2>
+          <p className="mb-5 mt-1 text-[12.5px] leading-relaxed text-ink-soft">
+            A TA&rsquo;s own number sends their candidates&rsquo; follow-ups once Meta confirms it is connected, both templates
+            are approved in its WhatsApp account, and replies reach us. Until then, or if Meta refuses it, the main line
+            (+94 74 219 7476) sends. Checking only reads from Meta; nothing is sent.
+          </p>
+          {numbersProblem || !numbers ? (
+            <p className="text-[13px] text-danger">{numbersProblem ?? "WhatsApp numbers need the Convex backend."}</p>
+          ) : (
+            <WhatsAppNumbers rows={numbers} />
+          )}
         </section>
       )}
 

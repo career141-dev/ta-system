@@ -130,6 +130,7 @@ export const recordTaPhoneMessage = internalMutation({
   },
 });
 import { isFollowUpStage } from "../ta/stages";
+import { isNumberLevelError, pickSender } from "../lib/senderRouting";
 
 /**
  * The Meta `phone_number_id` for the line an opening sends from.
@@ -222,27 +223,54 @@ export const getJobWhatsAppChannel = internalQuery({
   }
 });
 
-export const getJobOutboundWhatsAppNumber = internalQuery({
-  args: { jobId: v.id("jobs") },
+/**
+ * The Meta phone_number_id a message about this opening goes from, or null for
+ * the main line. The rules are lib/senderRouting `pickSender`: the opening's
+ * typed number, then the candidate's TA's own number once it is ready, then the
+ * opening's WhatsApp channel (30 Oct). Every outbound sender asks here, so they
+ * all switch together.
+ */
+export const senderPhoneId = internalQuery({
+  args: { jobId: v.id("jobs"), applicationId: v.optional(v.id("applications")) },
   handler: async (ctx, args) => {
     const job = await ctx.db.get(args.jobId);
     if (!job) return null;
+    const app = args.applicationId ? await ctx.db.get(args.applicationId) : null;
 
-    // 1. Prioritize explicit TA Outreach Number configured on the Job
-    if (job.outreachWhatsAppNumber) {
-      return job.outreachWhatsAppNumber;
-    }
-
-    // 2. Fallback to inbound channel configuration for backward compatibility
     const channels = await ctx.db
       .query("jobChannels")
       .withIndex("by_job", (q: any) => q.eq("jobId", args.jobId))
       .filter((q: any) => q.eq(q.field("channelType"), "whatsapp"))
       .collect();
+    const channel = channels.find((ch: any) => ch.isEnabled && ch.whatsappNumber);
 
-    const activeChannel = channels.find((ch: any) => ch.isEnabled && ch.whatsappNumber);
-    return activeChannel ? activeChannel.whatsappNumber : null;
-  }
+    const rows = await ctx.db.query("whatsappNumbers").collect();
+    const picked = pickSender({
+      override: job.outreachWhatsAppNumber,
+      ownerTaId: app?.ownerTaId,
+      assignedTaIds: job.assignedTaIds,
+      channelNumber: channel?.whatsappNumber,
+      numbers: rows.map((n) => ({ phone: n.phone, phoneId: n.whatchimpPhoneId, userId: n.userId, ready: n.ready })),
+    });
+    if (!picked && (job.outreachWhatsAppNumber || channel?.whatsappNumber)) {
+      console.warn(
+        `[WhatsApp Outbound] The opening is set to send from ${job.outreachWhatsAppNumber || channel?.whatsappNumber}, ` +
+          `but that number is not in whatsappNumbers or not ready. Sending from the main line.`,
+      );
+    }
+    return picked?.phoneId ?? null;
+  },
+});
+
+/** A TA number Meta refused to send from: off until "Check with Meta" passes again. */
+export const markNumberNotReady = internalMutation({
+  args: { phoneId: v.string(), reason: v.string() },
+  handler: async (ctx, args) => {
+    const row = (await ctx.db.query("whatsappNumbers").collect()).find((n) => n.whatchimpPhoneId === args.phoneId);
+    if (!row || row.userId === undefined) return;
+    await ctx.db.patch(row._id, { ready: false, readyNote: `Not ready: ${args.reason}`, checkedAt: Date.now() });
+    console.warn(`[WhatsApp Outbound] ${row.name}'s number ${row.phone} switched off: ${args.reason}`);
+  },
 });
 
 /*
@@ -465,19 +493,14 @@ export const sendWhatsApp = internalAction({
         return;
       }
 
-      // Fetch job's designated outbound TA number (or fallback to default)
-      const outboundNumber = await ctx.runQuery(internal.communications.whatsappOutbound.getJobOutboundWhatsAppNumber, { jobId: args.jobId });
-      let phoneId = process.env.META_PHONE_NUMBER_ID || "965783109962872";
-
-      if (outboundNumber) {
-        const fetchedId = await ctx.runQuery(internal.communications.whatsappOutbound.getMetaPhoneNumberId, {
-          targetWhatsAppNumber: outboundNumber,
-        });
-        if (fetchedId) {
-          phoneId = fetchedId;
-          console.log(`[WhatsApp Outbound] Using TA assigned number: ${outboundNumber} (ID: ${phoneId})`);
-        }
-      }
+      // The candidate's TA's own number once it is ready, else the main line (lib/senderRouting).
+      const mainPhoneId = process.env.META_PHONE_NUMBER_ID || "965783109962872";
+      const phoneId =
+        (await ctx.runQuery(internal.communications.whatsappOutbound.senderPhoneId, {
+          jobId: args.jobId,
+          applicationId: commRecord?.applicationId,
+        })) ?? mainPhoneId;
+      if (phoneId !== mainPhoneId) console.log(`[WhatsApp Outbound] Sending from TA number ID ${phoneId}`);
 
       const cleanPhone = targetPhone.replace(/[^0-9]/g, "");
       const isSessionOpen = activeInboundSession;
@@ -508,6 +531,13 @@ export const sendWhatsApp = internalAction({
       console.log(`[WhatsApp Outbound] Sending message to +${cleanPhone}${logNote} via Meta Cloud API`);
 
       const result = await sendMetaFreeText(phoneId, cleanPhone, args.body, metaAccessToken, ctx);
+      // A TA number Meta will not send from is switched off, so the next message goes from the main line.
+      if (!result.success && phoneId !== mainPhoneId && isNumberLevelError(result.error ?? "")) {
+        await ctx.runMutation(internal.communications.whatsappOutbound.markNumberNotReady, {
+          phoneId,
+          reason: (result.error ?? "").slice(0, 300),
+        });
+      }
 
       if (result.success) {
         await ctx.runMutation(internal.communications.whatsappOutbound.updateStatus, {
