@@ -22,7 +22,7 @@ import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import { outreachLive } from "../lib/outreachSafety";
 import { Id } from "../_generated/dataModel";
-import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, WORKS_THE_DESK } from "./guard";
+import { requireActor, assertJobAccess, assertNotAnotherTasCandidate, isDeskWideUser, WORKS_THE_DESK } from "./guard";
 import { initiateFollowUpOutreach, stopFollowUpSequenceForApp } from "../pipeline/followUpHelper";
 import { toTaStage } from "./stages";
 import { autoFollowUpPatch, justSent, questionLabels, sameRoundAs } from "../lib/followUpScope";
@@ -162,7 +162,13 @@ export const setAuto = internalMutation({
     const jobId = args.openingId as Id<"jobs">;
     const job = await ctx.db.get(jobId);
     if (!job) throw new Error("Opening not found");
-    await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
+    // Admin, director, TA lead and ops on any opening; a TA on their own
+    // (30 Oct). The page offered every TA lead the button — the same rule,
+    // src/lib/auth.ts opening.manage — but a lead not on the opening's team
+    // was refused here with "You are not assigned to this opening".
+    if (!isDeskWideUser(user)) {
+      await assertJobAccess(ctx, user, jobId, ["primary_recruiter", "supporting_recruiter", "director"]);
+    }
 
     await ctx.db.patch(jobId, {
       ...autoFollowUpPatch(args.enabled),

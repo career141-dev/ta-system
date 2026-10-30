@@ -123,7 +123,7 @@ Staging/quiet registry: with `C141_DISABLE_CRONS=true` the whole `crons` registr
 
 ### Flow F: the automatic switch
 
-UI toggle "Automatic follow-up" on both follow-up stage pages -> `setOpeningAutoFollowUp` (needs `opening.manage`) -> `backend.setAutoFollowUp` -> `ta/followUp:setAuto` -> `jobs.patch(autoFollowUpPatch(enabled))`:
+UI toggle "Automatic follow-up" on both follow-up stage pages -> `setOpeningAutoFollowUp` (needs `opening.manage`: desk-wide = admin, director, ta_lead, ops; or a recruiter on the opening) -> `backend.setAutoFollowUp` -> `ta/followUp:setAuto` (since 30 Oct the same rule: `isDeskWideUser` skips `assertJobAccess`, so a TA lead not on the opening's team is no longer refused) -> `jobs.patch(autoFollowUpPatch(enabled))`. The switch starts off on a new opening; the owner's rule (30 Oct) is that a TA, TA lead or admin turns it on once per opening, after which Day 0 goes at shortlist with no Send:
 - ON: `agent3Enabled:true, enableWhatsAppFollowUp:true, enableEmailFollowUp:true, followUpStartsOnSend:true`.
 - OFF: `agent3Enabled:false, enableWhatsAppFollowUp:false, enableEmailFollowUp:false` (must clear the channels too; the helper reads them `!== false`). `followUpStartsOnSend` is left true.
 - Also copies `followUpQuestions` labels into `customFollowUpQuestions` and bumps `updatedAt`. New-opening form checkbox `autoFollowUp` (`CaptureForm`) -> `ta/openings` create applies `autoFollowUpPatch(true)`.
@@ -320,10 +320,11 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-10-29 One complete rule (`followUpBlockers`, `ta/stages.ts`) for the bot, sweep, stage helper, Day 0 and logged call; current salary not required (owner). The helper moves through the state machine, so the move is logged and the sequence stops.
 - 2026-10-30 WhatsApp assistant paced like a person: 30 s pause and one reply per burst (`answerWhatsAppTurn`), duplicates by Meta message id, echo of our own last message ignored, 8 replies per candidate per day then a TA flag, no reminders 20:00-08:00 Colombo. One complete rule (`followUpBlockers`) moved here from the 29 Oct branch.
 - 2026-10-30 Take over / hand back (`ta/followUp:takeOver`, `handBack`, `taTookOverAt`): the assistant stays quiet but keeps saving details and notifies the TA; a TA's reply from the WhatsApp app takes over automatically (`message_echoes`); history labels the TA's words; `upset` intent; voice notes answered with a request to type.
+- 2026-10-30 Any TA lead (desk-wide roles) can switch automatic follow-up on for any opening, as the page already offered; panel text now says Day 0 goes at shortlist when on.
 
 <!-- skill-meta
-verified-commit: 83c80ee4
-verified-hash: c01c1276ad0ccc4dcd413a424b67a6682f5bf3a8
+verified-commit: 13f4b8d2
+verified-hash: 05f1f9ebf7cde4ff1f7ed6a24f0e410a20527ee0
 verified-date: 2026-10-30
 sources:
   tests/addToAssignedJob.test.ts

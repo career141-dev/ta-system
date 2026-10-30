@@ -38,3 +38,10 @@ test("every path honours a take-over", () => {
   assert.ok(followUp.includes("export const takeOver") && followUp.includes("export const handBack"));
   assert.ok(read("src/components/LiveFollowUp.tsx").includes("Hand back to the assistant"));
 });
+
+test("a TA on the opening, any TA lead, and an admin can switch automatic follow-up on", () => {
+  const followUp = read("convex/ta/followUp.ts");
+  const setAuto = followUp.slice(followUp.indexOf("export const setAuto"), followUp.indexOf("export const stop"));
+  assert.ok(/if \(!isDeskWideUser\(user\)\) \{\s*await assertJobAccess/.test(setAuto), "a lead not on the opening's team is refused");
+  assert.ok(read("src/lib/auth.ts").includes('const DESK_WIDE: Role[] = ["admin", "director", "ta_lead", "ops"];'), "the page and the backend no longer agree on who is desk-wide");
+});
