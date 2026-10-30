@@ -126,7 +126,7 @@ Staging/quiet registry: with `C141_DISABLE_CRONS=true` the whole `crons` registr
 UI toggle "Automatic follow-up" on both follow-up stage pages -> `setOpeningAutoFollowUp` (needs `opening.manage`) -> `backend.setAutoFollowUp` -> `ta/followUp:setAuto` -> `jobs.patch(autoFollowUpPatch(enabled))`:
 - ON: `agent3Enabled:true, enableWhatsAppFollowUp:true, enableEmailFollowUp:true, followUpStartsOnSend:true`.
 - OFF: `agent3Enabled:false, enableWhatsAppFollowUp:false, enableEmailFollowUp:false` (must clear the channels too; the helper reads them `!== false`). `followUpStartsOnSend` is left true.
-- Also copies `followUpQuestions` labels into `customFollowUpQuestions` and bumps `updatedAt`. New-opening form checkbox `autoFollowUp` (`CaptureForm`) -> `ta/openings` create applies `autoFollowUpPatch(true)`.
+- Also copies `followUpQuestions` labels into `customFollowUpQuestions` and bumps `updatedAt`. New-opening form checkbox `autoFollowUp` (`CaptureForm`, ticked by default since 30 Oct) -> `ta/openings` create applies `autoFollowUpPatch(true)` unless `autoFollowUp === false` (an omitted value, e.g. from the mobile API, means on). Existing open openings: `admin/autoFollowUpOn3010:run` (dry run lists the open openings that are off, paged 25; `{dryRun:false, openingIds}` switches those on). It sends nothing itself: Day 0 goes when a candidate next enters Follow-up; people already waiting with no first message stay untouched by the sweep (`awaitingFirstSend`).
 - `ta/model/projections.ts` exposes `autoFollowUp = followUpOn(job)`; so a CV-pipeline job with its own flags set also reads as "on".
 - Max attempts (`maxFollowUpAttempts`) and max days (`maxFollowUpDays`) have no TA UI; TA openings use the default 3 attempts, no day limit.
 
@@ -320,10 +320,11 @@ Repo hard rules that apply: never run `convex deploy|run|import|env set` against
 - 2026-10-29 One complete rule (`followUpBlockers`, `ta/stages.ts`) for the bot, sweep, stage helper, Day 0 and logged call; current salary not required (owner). The helper moves through the state machine, so the move is logged and the sequence stops.
 - 2026-10-30 WhatsApp assistant paced like a person: 30 s pause and one reply per burst (`answerWhatsAppTurn`), duplicates by Meta message id, echo of our own last message ignored, 8 replies per candidate per day then a TA flag, no reminders 20:00-08:00 Colombo. One complete rule (`followUpBlockers`) moved here from the 29 Oct branch.
 - 2026-10-30 Take over / hand back (`ta/followUp:takeOver`, `handBack`, `taTookOverAt`): the assistant stays quiet but keeps saving details and notifies the TA; a TA's reply from the WhatsApp app takes over automatically (`message_echoes`); history labels the TA's words; `upset` intent; voice notes answered with a request to type.
+- 2026-10-30 Automatic follow-up on by default for new openings (owner: TAs should not have to press Send); migration `admin/autoFollowUpOn3010` for open ones.
 
 <!-- skill-meta
-verified-commit: 83c80ee4
-verified-hash: c01c1276ad0ccc4dcd413a424b67a6682f5bf3a8
+verified-commit: a35bb0f7
+verified-hash: 6857bc4cb2e5e9363a0b5f4aa7645cf573f29f5c
 verified-date: 2026-10-30
 sources:
   tests/addToAssignedJob.test.ts

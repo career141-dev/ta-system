@@ -1528,7 +1528,8 @@ const rawRepo = {
         jobOrderNumber: `JO-2026-${String(n + 100).padStart(3, "0")}`,
         jdMarkdown: input.jdMarkdown,
         followUpQuestions: [],
-        autoFollowUp: input.autoFollowUp ?? false,
+        // On unless asked off, as on the backend (30 Oct).
+        autoFollowUp: input.autoFollowUp ?? true,
         jdStatus: "pending_ta_approval",
         jdApprovedBy: null,
         jdApprovedAt: null,
