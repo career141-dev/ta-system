@@ -382,6 +382,7 @@ export function EodComposer({
   ccName,
   ccEmail,
   trackedAt,
+  forDate,
   fixedCc,
   canAddRecipients,
   rows: initialRows,
@@ -429,6 +430,8 @@ export function EodComposer({
   ccEmail: string;
   /** The TA's shortlist-replies inbox. Copied in, and on the reply-to. */
   trackedAt: string | null;
+  /** A missed end of day: the Colombo day it is for. Sent late, without Today's Checks. */
+  forDate?: string;
   /** Always copied on the Director's email; the TA cannot take these off. */
   fixedCc: string[];
   /** The Director's email lets the TA add more To and Cc addresses. */
@@ -467,14 +470,14 @@ export function EodComposer({
   const [outroText, setOutroText] = useState(savedFields.outroText ?? (resend ? resend.outroText : defaultOutro));
   // Reuse today's shared workday confirmation. Editing the link clears it;
   // an older local draft cannot confer confirmation.
-  const research = useChatgptResearch(openingId, savedFields.chatgptLink ?? resend?.researchLink ?? "", needsResearchLink && !dailyParentId);
+  const research = useChatgptResearch(openingId, savedFields.chatgptLink ?? resend?.researchLink ?? "", needsResearchLink && !dailyParentId && !forDate);
   const researchLink = research.link;
   const researchConfirmed = research.confirmed;
-  const [jobBlocked, setJobBlocked] = useState(needsResearchLink && !midday && !dailyParentId);
+  const [jobBlocked, setJobBlocked] = useState(needsResearchLink && !midday && !dailyParentId && !forDate);
   const [researchTouched, setResearchTouched] = useState(false);
   const researchCheck = validateResearchLink(researchLink);
   const [researchExcused, setResearchExcused] = useState(false);
-  const researchRequired = needsResearchLink && (midday || !(researchExcused && !researchLink.trim()));
+  const researchRequired = needsResearchLink && (midday || !!forDate || !(researchExcused && !researchLink.trim()));
   const researchBlocked = research.saving || (researchRequired && (!researchCheck.ok || !researchConfirmed));
   const [shortlistDraft, setShortlistDraft] = useState<Record<string, CandidateDraft>>(() => candidateDraftsFromFields(initialRows, savedFields));
   // Added recipients are chips, like skills on LinkedIn: type the address, pick
@@ -1171,7 +1174,7 @@ export function EodComposer({
         );
       })()}
 
-      {needsResearchLink && !midday && !dailyParentId && <EodJobChecks jobId={openingId} locationScoped={allowActivityOnly} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
+      {needsResearchLink && !midday && !dailyParentId && !forDate && <EodJobChecks jobId={openingId} locationScoped={allowActivityOnly} linkConfirmed={researchCheck.ok && researchConfirmed} revised={!!resend} onBlocked={setJobBlocked} onResearchSaved={useSavedResearch} onResearchExcused={setResearchExcused}
         extraReasons={[
           ...(nobodyOnTo ? [{ key: "recipient", message: "Add a valid email address on the To line." }] : []),
           ...(researchBlocked ? [{ key: "chatgpt", message: "Add a valid ChatGPT share link and confirm it, or submit a reason in Today’s Checks." }] : []),
@@ -1214,6 +1217,7 @@ export function EodComposer({
         <input type="hidden" name="submissionType" value={submissionType} />
         {dailyDraft && <input type="hidden" name="dailyDraftId" value={dailyDraft.id} />}
         {dailyParentId && <input type="hidden" name="dailyParentId" value={dailyParentId} />}
+        {forDate && <input type="hidden" name="forDate" value={forDate} />}
         {!resend && kind === "director" && initialRows.length === 0 && <input type="hidden" name="activityOnly" value="yes" />}
         <input type="hidden" name="openingId" value={openingId} />
         <input type="hidden" name="workLocationId" value={workLocationId ?? ""} />
@@ -1244,7 +1248,7 @@ export function EodComposer({
           pendingLabel={kind === "director" ? "Sending… this can take a minute" : "Recording…"}
           className="rounded-full bg-brand px-6 py-2.5 text-[13px] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-35 shadow-sm"
         >
-          {resend ? "Send again as REVISED" : kind === "director" ? initialRows.length === 0 ? "Send activity email" : "Send email" : "Record that it went to the client"}
+          {resend ? "Send again as REVISED" : forDate ? `Send ${new Date(`${forDate}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })} end of day` : kind === "director" ? initialRows.length === 0 ? "Send activity email" : "Send email" : "Record that it went to the client"}
         </SubmitButton>
         {kind === "director" && (
           <span className="text-[11.5px] text-ink-faint">

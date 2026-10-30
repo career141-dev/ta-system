@@ -6,6 +6,7 @@ import type { Application, Candidate, Id, User } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
 import { isEodCandidateEligible, type EodEligibility } from "./eodEligibility";
 import { inWorkLocation } from "./workLocations";
+import { workdayDate } from "./workday";
 
 /**
  * The end-of-day email — spec §10.
@@ -42,7 +43,7 @@ export function shortlistRows(
   openingId: Id,
   taId: Id | null,
   kind: "director" | "client" = "director",
-  eligibility?: Pick<EodEligibility, "workType" | "sessionStart">,
+  eligibility?: Pick<EodEligibility, "workType" | "sessionStart" | "day">,
   workLocationId?: string,
 ): ShortlistRow[] {
   // Who is waiting to be sent: people at the stage BEFORE this reviewer's
@@ -70,7 +71,8 @@ export function shortlistRows(
           isAddOn: a.isAddOn,
           lastStageChangedAt: a.lastStageChangedAt,
         },
-        { taId, ...eligibility },
+        // Today's email carries today's candidates; older unsent days are a missed end of day.
+        { taId, day: workdayDate(Date.now()), ...eligibility },
       );
     })
     // The client's copy is the Director's decision, not the TA's, so it is not
@@ -155,7 +157,7 @@ export function sentToDirectorToday(openingId: Id, taId: Id, since: number, work
       .filter((r) => r.kind === "director" && r.sentBy === taId && r.sentAt >= since && !r.recoveryReopenedAt)
       .flatMap((r) => r.applicationIds),
   );
-  for (const r of shortlistRows(openingId, taId, "director", undefined, workLocationId)) ids.add(r.applicationId);
+  for (const r of shortlistRows(openingId, taId, "director", { workType: "100%" }, workLocationId)) ids.add(r.applicationId);
   return [...ids].flatMap((id) => {
     const a = repo.application(id);
     return a && a.openingId === openingId && inWorkLocation(a, workLocationId) ? [a] : [];
@@ -185,16 +187,20 @@ export function sentToDirectorToday(openingId: Id, taId: Id, since: number, work
  *             until the desk asked for the CVs they brought (28 Sep).
  *   L         headhunted through Excel Tables.
  */
-export function effortRow(openingId: Id, ta: User, date = new Date(), workLocationId?: string): EffortRow {
+export function effortRow(openingId: Id, ta: User, date = new Date(), workLocationId?: string, onlyIds?: Id[]): EffortRow {
   // Today in Colombo, whatever the server's clock is set to.
   const since = colomboDayStart(date.getTime());
+  // A missed day counts that day only, and exactly the people in its email.
+  const until = onlyIds ? since + 86400000 : Infinity;
   const vault = repo.linkVault(openingId).filter(r => inWorkLocation(r, workLocationId));
-  const day = sentToDirectorToday(openingId, ta.id, since, workLocationId);
+  const day = onlyIds
+    ? onlyIds.flatMap((id) => repo.application(id) ?? [])
+    : sentToDirectorToday(openingId, ta.id, since, workLocationId);
   const scouted = vault.filter(
     (v) =>
-      (v.addedBy === ta.id && v.createdAt >= since) ||
-      (v.addedBy === ta.id && (v.outcomeAt ?? 0) >= since) ||
-      v.conversationLog.some((l) => l.by === ta.id && l.at >= since),
+      (v.addedBy === ta.id && v.createdAt >= since && v.createdAt < until) ||
+      (v.addedBy === ta.id && (v.outcomeAt ?? 0) >= since && (v.outcomeAt ?? 0) < until) ||
+      v.conversationLog.some((l) => l.by === ta.id && l.at >= since && l.at < until),
   ).length;
   const headhunted = headhuntedCandidates(vault);
   const count: Record<EffortBucket, number> = { backUp: 0, addOns: 0, scoop: 0, da: 0, post: 0, l: 0 };

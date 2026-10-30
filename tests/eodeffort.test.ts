@@ -144,7 +144,7 @@ repo.reset();
   eq("another TA's email: theirs", dayTotal(effortRow(o.id, ta)), 0);
   // Put in Director Review without an email (Excel Tables' Add to pipeline):
   // waiting in tonight's table, so counted — and once it goes, still once.
-  edit((raw) => Object.assign(raw.applications.find((a: { id: string }) => a.id === a3), { stage: "director_review", ownerTaId: ta.id }));
+  edit((raw) => Object.assign(raw.applications.find((a: { id: string }) => a.id === a3), { stage: "director_review", ownerTaId: ta.id, lastStageChangedAt: Date.now() }));
   eq("waiting in tonight's email: counted", dayTotal(effortRow(o.id, ta)), 1);
   send(o.id, ta, [a3, a4]);
   eq("after it goes: counted once, beside the others sent", dayTotal(effortRow(o.id, ta)), 2);

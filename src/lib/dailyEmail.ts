@@ -2,6 +2,8 @@ import type { RefereeCallEmailRow } from "@/data/types";
 import type { EffortRow, ShortlistRow } from "./eod-format";
 import type { WorkType } from "./workday";
 
+/** How many past days an unsent end of day can still be sent late. */
+export const MISSED_EOD_DAYS = 7;
 export const EMAIL_RETENTION_MS = 31 * 86400000;
 export interface SavedEmailAttachment { id: string; name: string; applicationId: string }
 
@@ -42,6 +44,7 @@ export interface DailyEmail {
   applicationIds: string[];
   parentId?: string;
   recoveryReopenedAt?: number;
+  forDate?: string;
   roundId?: string;
   legacyCopyId?: string;
   snapshot?: DailyEmailSnapshot;

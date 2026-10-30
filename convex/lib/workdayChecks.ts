@@ -42,7 +42,7 @@ export async function requiredChecks(ctx: QueryCtx | MutationCtx, day: Doc<"taWo
     ownerTaId: a.ownerTaId,
     isAddOn: a.isAddOn,
     lastStageChangedAt: a.lastStageChangedAt,
-  }, { taId: day.userId, workType: entry.workType, sessionStart: since }));
+  }, { taId: day.userId, workType: entry.workType, sessionStart: since, day: day.date }));
   const ready = (await Promise.all(inDirectorReview.map(async app => {
     const candidate = await ctx.db.get(app.candidateId);
     return app.cvFileId || app.cvFileName || candidate?.cvUploadId || candidate?.cvFileName ? app : null;

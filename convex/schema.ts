@@ -33,6 +33,8 @@ export default defineSchema({
     snapshot: v.optional(v.any()), trackedAt: v.optional(v.string()),
     reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
     recoveryReopenedAt: v.optional(v.number()),
+    /** The Colombo day a late (missed) end of day is for; absent on every other email. */
+    forDate: v.optional(v.string()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
     .index("by_job", ["jobId"]).index("by_job_date", ["jobId", "date"]).index("by_expires", ["expiresAt"])
     .index("by_user_accepted", ["userId", "acceptedAt"]).index("by_status", ["status", "startedAt"]),

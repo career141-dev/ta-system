@@ -6,7 +6,7 @@ import { mapUser } from "../../src/data/convex/map";
 import { workdayDate } from "../../src/lib/workday";
 import { isEodCandidateEligible } from "../../src/lib/eodEligibility";
 import { workSessionStart } from "../../src/lib/workdayRequirements";
-import { dailySendProblem, sameCandidateList, EMAIL_RETENTION_MS, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
+import { dailySendProblem, sameCandidateList, EMAIL_RETENTION_MS, MISSED_EOD_DAYS, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
 import { validateResearchLink, checkResearchSubmission } from "../../src/lib/eod-format";
 import { dailyEmailsFor, finalizeDailyEmail, middayRequired } from "../lib/dailyEmail";
 import { requiredChecks } from "../lib/workdayChecks";
@@ -130,6 +130,7 @@ export const begin = internalMutation({
   args: { actorId: v.string(), jobId: v.id("jobs"), submissionType,
     workLocationId: v.optional(v.string()),
     draftId: v.optional(v.id("dailyEmails")), revision: v.optional(v.number()), parentId: v.optional(v.id("dailyEmails")),
+    forDate: v.optional(v.string()),
     applicationIds: v.array(v.id("applications")), snapshot: v.any(), confirmed: v.boolean(), previewConfirmed: v.optional(v.boolean()), trackedAt: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const user = await access(ctx, args.actorId, args.jobId);
@@ -142,7 +143,13 @@ export const begin = internalMutation({
     const locationId = parent ? parent.workLocationId : location?.id;
     if (parent && args.workLocationId !== parent.workLocationId) throw new Error("A correction must keep its original work location.");
     if (parent && !args.previewConfirmed) throw new Error("Review and confirm the revised email preview before sending.");
-    const day = parent ? null : await workday(ctx, user, args.jobId);
+    // A missed end of day (30 Oct): a past day's candidates sent today. Like a correction it needs no
+    // workday and no Today's Checks — those belong to a day that is over — but it keeps the link tick.
+    const late = args.forDate;
+    if (late && (parent || args.submissionType !== "eod" || !args.applicationIds.length || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(late)
+      || late >= workdayDate(Date.now()) || late < workdayDate(Date.now() - MISSED_EOD_DAYS * 86400000)))
+      throw new Error("That end of day can no longer be sent late.");
+    const day = parent || late ? null : await workday(ctx, user, args.jobId);
     const workEntry = day?.jobs.find(j => j.jobId === args.jobId);
     if (workEntry && location) {
       if (workEntry.workLocationIds?.length && !workEntry.workLocationIds.includes(location.id)) throw new Error("This location was added after today's work started. Its daily emails begin tomorrow.");
@@ -150,13 +157,14 @@ export const begin = internalMutation({
     }
     const setup = day && args.submissionType === "eod" ? await requiredChecks(ctx, day, day.jobs.find(j => j.jobId === args.jobId)!) : null;
     const date = workdayDate(Date.now());
-    const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, date)).filter(e => inWorkLocation(e, locationId ?? ""));
+    // A late email sent today must not count as today's own end of day.
+    const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, date)).filter(e => inWorkLocation(e, locationId ?? "") && !e.forDate);
     // Pending sends on older dates also hold the opening until reconciled — this TA's own: with
     // two TAs on one job, Priya's stuck email blocked Sameera's EOD with no email of his (28 Oct).
     const all = await ctx.db.query("dailyEmails").withIndex("by_user_job_date", q => q.eq("userId", user._id).eq("jobId", args.jobId)).collect();
     // An email from before the job had locations holds only a job without them.
     if (all.some(e => (e.workLocationId ? e.workLocationId === locationId : !locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("Your earlier email on this location is still sending or needs reconciliation. Ask your TA Lead to check it in Today's Checks before you send again.");
-    const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent);
+    const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent || !!late);
     if (problem) throw new Error(problem);
     const snapshot = args.snapshot as DailyEmailSnapshot;
     for (const id of snapshot.workbookLinkIds ?? []) {
@@ -198,7 +206,7 @@ export const begin = internalMutation({
               ownerTaId: a.ownerTaId,
               isAddOn: a.isAddOn,
               lastStageChangedAt: a.lastStageChangedAt,
-            }, { taId: worker(user) ? user._id : null, workType: currentWorkType, sessionStart })
+            }, { taId: worker(user) ? user._id : null, workType: currentWorkType, sessionStart, day: late ?? date })
           : a.currentStage === "second_shortlist" && (!worker(user) || a.ownerTaId === user._id)
       ));
       if (!sameCandidateList(args.applicationIds, eligible.map(a => a._id))) throw new Error("The candidate list changed. Reload, review the updated list and send again.");
@@ -223,6 +231,7 @@ export const begin = internalMutation({
     const id = draft ? draft._id : await ctx.db.insert("dailyEmails", { jobId: args.jobId, userId: user._id, date: parent?.date ?? date,
       workLocationId: locationId, workLocationName: parent?.workLocationName ?? location?.name,
       submissionType: "eod", number: 1, revision: 0, fields: {}, createdAt: now,
+      ...(late ?? parent?.forDate ? { forDate: late ?? parent!.forDate } : {}),
       ...(parent ? { parentId: parent.parentId ?? parent._id } : {}), ...payload });
     if (draft) await ctx.db.patch(id, { ...payload, revision: draft.revision + 1 });
     if (day) {
@@ -283,5 +292,31 @@ export const enableRequirement = internalMutation({
     const requiredFrom = existing?.requiredFrom ?? workdayDate(Date.now() + 86400000);
     if (!args.dryRun && !existing) await ctx.db.insert("dailyEmailPolicy", { key: "midday", requiredFrom });
     return { dryRun: args.dryRun, requiredFrom };
+  },
+});
+
+/**
+ * Past days (up to MISSED_EOD_DAYS back) with Director Review candidates this TA never sent, newest first. Read when
+ * the end-of-day page opens, never on a send: begin only checks the one day it is sending.
+ */
+export const missedDays = internalQuery({
+  args: { actorId: v.string(), jobId: v.id("jobs"), workLocationId: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    const user = await access(ctx, args.actorId, args.jobId);
+    if (!worker(user)) return [];
+    const today = workdayDate(Date.now());
+    const first = workdayDate(Date.now() - MISSED_EOD_DAYS * 86400000);
+    const sent = new Set((await ctx.db.query("reviewRounds").withIndex("by_opening", q => q.eq("openingId", args.jobId)).collect())
+      .filter(r => r.kind === "director" && !r.recoveryReopenedAt).flatMap(r => r.applicationIds as string[]));
+    for (const e of await ctx.db.query("dailyEmails").withIndex("by_user_job_date", q => q.eq("userId", user._id).eq("jobId", args.jobId)).collect())
+      if (e.status === "accepted" && !e.recoveryReopenedAt) for (const id of e.applicationIds) sent.add(id);
+    const waiting = await ctx.db.query("applications").withIndex("by_job_stage", q => q.eq("jobId", args.jobId).eq("currentStage", "second_shortlist")).collect();
+    const days = new Map<string, number>();
+    for (const a of waiting) {
+      const day = workdayDate(a.lastStageChangedAt);
+      if (a.ownerTaId === user._id && !sent.has(a._id) && inWorkLocation(a, args.workLocationId ?? "") && day >= first && day < today)
+        days.set(day, (days.get(day) ?? 0) + 1);
+    }
+    return [...days].map(([date, count]) => ({ date, count })).sort((a, b) => b.date.localeCompare(a.date));
   },
 });
