@@ -154,7 +154,7 @@ export const begin = internalMutation({
     // Pending sends on older dates also hold the opening until reconciled — this TA's own: with
     // two TAs on one job, Priya's stuck email blocked Sameera's EOD with no email of his (28 Oct).
     const all = (await ctx.db.query("dailyEmails").withIndex("by_job", q => q.eq("jobId", args.jobId)).collect()).filter(e => e.userId === user._id);
-    if (all.some(e => (!e.workLocationId || e.workLocationId === locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("An email on this location is still sending or needs reconciliation.");
+    if (all.some(e => (!e.workLocationId || e.workLocationId === locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("Your earlier email on this location is still sending or needs reconciliation. Ask your TA Lead to check it in Today's Checks before you send again.");
     const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent);
     if (problem) throw new Error(problem);
     const snapshot = args.snapshot as DailyEmailSnapshot;

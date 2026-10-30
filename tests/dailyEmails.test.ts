@@ -5,7 +5,7 @@ import { dailySendProblem, sameCandidateList } from "../src/lib/dailyEmail";
 import { workdayDate } from "../src/lib/workday";
 import { requiredChecks } from "../convex/lib/workdayChecks";
 import { matchReviewReply } from "../src/lib/routing";
-import { normalizeRetention, purgeExpired } from "../convex/ta/eodCopies";
+import { flagStuckSends, normalizeRetention, purgeExpired } from "../convex/ta/eodCopies";
 import { assign as assignLocation } from "../convex/ta/workLocations";
 import { emailPreflight } from "../convex/ta/workdays";
 
@@ -32,6 +32,7 @@ const db = {
         const builder = { eq: (key: string, value: unknown) => { predicates.push(r => r[key] === value); return builder; },
           gte: (key: string, value: number) => { predicates.push(r => r[key] >= value); return builder; },
           gt: (key: string, value: number) => { predicates.push(r => r[key] > value); return builder; },
+          lt: (key: string, value: number) => { predicates.push(r => r[key] < value); return builder; },
           lte: (key: string, value: number) => { predicates.push(r => r[key] <= value); return builder; } };
         apply(builder); return query;
       },
@@ -200,6 +201,12 @@ try {
   await assert.rejects(() => begin(["m-eod"], undefined, { workLocationId: "mumbai", snapshot: { ...snapshot(["m-eod"]), workbookLinkIds: ["delhi-link"] } }), /workbook row changed location/);
   const mEod = await begin(["m-eod"], undefined, { workLocationId: "mumbai" });
   await assert.rejects(() => begin(["m-eod"], undefined, { workLocationId: "mumbai" }), /reconciliation|still sending/);
+  // A send whose result never came back is flagged for the Lead instead of blocking silently (29 Oct).
+  now += 16 * 60000;
+  await (flagStuckSends as any)._handler(ctx, {});
+  assert.equal((await db.get(mEod.id))!.status, "uncertain", "A send stuck in sending is flagged uncertain");
+  assert.equal((await db.get((await db.get(mEod.id))!.receiptId))!.status, "uncertain", "Its receipt follows");
+  now -= 16 * 60000;
   const dEod = await begin(["d-eod"], undefined, { workLocationId: "delhi" });
   await run("result", { id: dEod.id, status: "accepted" });
   assert.equal((await db.get("day"))!.finishedAt, undefined, "Delhi sent; attendance remains open for Mumbai");

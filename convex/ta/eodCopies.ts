@@ -16,8 +16,28 @@ import { v } from "convex/values";
 import { EMAIL_RETENTION_MS, type DailyEmailSnapshot } from "../../src/lib/dailyEmail";
 import { eodEmailHtml } from "../../src/lib/eod-format";
 import { workdayDate } from "../../src/lib/workday";
+import { refreshWorkdayChecks } from "./workdays";
 
 const BATCH = 200;
+// A send whose result never came back (the action died) sat in "sending" for days and blocked its
+// sender on that opening with no one told (Sameera 29 Oct, Priya 23 Oct). Past this it is "uncertain":
+// the TA Lead sees it in Today's Checks and reconciles it. Never retried or resent from here.
+// Longer than the send action can run (Convex actions stop at 10 minutes), so a live send is never flagged.
+const STUCK_SENDING_MS = 15 * 60000;
+
+/** Flag sends that never got a result, in their own small transaction so the purge is unaffected. */
+export const flagStuckSends = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const stuck = await ctx.db.query("dailyEmails").withIndex("by_status", q => q.eq("status", "sending").lt("startedAt", Date.now() - STUCK_SENDING_MS)).take(25);
+    for (const email of stuck) {
+      await ctx.db.patch(email._id, { status: "uncertain" });
+      if (email.receiptId) await ctx.db.patch(email.receiptId, { status: "uncertain" });
+      await refreshWorkdayChecks(ctx, email.jobId, email.userId);
+    }
+    return { flagged: stuck.length };
+  },
+});
 
 /** Delete every copy whose month is over, a batch at a time. */
 export const purgeExpired = internalMutation({

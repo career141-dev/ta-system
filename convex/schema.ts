@@ -35,7 +35,7 @@ export default defineSchema({
     recoveryReopenedAt: v.optional(v.number()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
     .index("by_job", ["jobId"]).index("by_job_date", ["jobId", "date"]).index("by_expires", ["expiresAt"])
-    .index("by_user_accepted", ["userId", "acceptedAt"]),
+    .index("by_user_accepted", ["userId", "acceptedAt"]).index("by_status", ["status", "startedAt"]),
   // Independent copies of sent PDFs. Candidate CV replacement never owns these files.
   dailyEmailAttachments: defineTable({
     userId: v.id("users"), jobId: v.id("jobs"), storageId: v.id("_storage"),

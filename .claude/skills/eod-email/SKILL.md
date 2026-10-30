@@ -54,7 +54,7 @@ The shared actions module includes `addCandidateToJob`; destination shortlisting
 | Correction with different location | "A correction must keep its original work location." |
 | Worker with no active workday containing the job (`workday()`; day matches `closureReason==="eod"` or unfinished) | "Start today's workday and add this opening before sending." |
 | Location added after the workday began (`workEntry.workLocationIds` set and missing it) | "This location was added after today's work started. Its daily emails begin tomorrow." (entries with no `workLocationIds` adopt `activeWorkLocationIds(job)` on first send) |
-| Any of this TA's own `dailyEmails` on the job + location (other TAs' do not block, 28 Oct) in `sending`, `uncertain` or `accepted && !finalizedAt` (any date) | "An email on this location is still sending or needs reconciliation." |
+| Any of this TA's own `dailyEmails` on the job + location (other TAs' do not block, 28 Oct) in `sending`, `uncertain` or `accepted && !finalizedAt` (any date) | "Your earlier email on this opening is still sending or needs reconciliation. Ask your TA Lead..." |
 | `dailySendProblem(emails, type, requireMidday, revised)` | sending/uncertain; original EOD already accepted today; EOD without midday when required |
 | `snapshot.workbookLinkIds` row missing / other opening / other location | "A workbook row changed location. Reload and review the email before sending." |
 | Day finished (`finishedAt`) and entry `100%` without accepted original EOD | "The workday clock has stopped. Change this unfinished position to Follow-up or Add-on before sending." |
@@ -96,6 +96,7 @@ Order of work in `emailEod` matters: CV PDFs and the workbook are built **before
 - Graph failure classification (`ta/eodMail:send`): result `ok:false` -> `uncertain` when the error matches `/could not be reached|returned 5\d\d/i`, else `failed`. A thrown error in the action -> `uncertain` and rethrown. **Uncertain is never retried automatically**; `dailySendProblem` and `begin` block every later send on that location until reconciled. `failed` drafts (midday) can be retried; a failed EOD shows "Return to the composer to retry".
 - `ta/dailyEmails:reconcile` (UI: `DailyEmailView` form -> `reconcileDailyEmail` action): only `admin` or the job's `taLeadId` lead; status must be `sending`/`uncertain`/`accepted` with no `finalizedAt`; reason 1-1000 chars ("Record how you verified the sending mailbox and its message reference."); `sending` needs >=5 min old ("Wait five minutes and check the sending mailbox before reconciling."); `accepted` cannot be turned into failed. "Verified sent" -> `accepted` + `acceptedAt` + `finalizeDailyEmail` (no resend); "Verified not sent" -> `failed`. Patches `reconciledBy`, `reconciliationReason` on email and receipt, then `refreshWorkdayChecks`.
 - Today's Checks also surfaces reconcile (Workday UI; see /workday).
+- Stuck sends (30 Oct): cron `ta-flag-stuck-sends` (every 5 min, `flagStuckSends`, index `dailyEmails.by_status`) turns any `sending` email older than 15 minutes into `uncertain` (and its receipt) so the Lead sees it; before this a dead action left `sending` for days (Sameera 29 Oct, Priya 23 Oct) and blocked that sender. It never resends.
 
 ### Flow E - Retention and purge
 
@@ -281,9 +282,9 @@ Short hashes from `git log`; dates are commit dates.
 - 2026-10-23 f3d57d6 - EOD can be sent without CVs (activity-only); c28e1b1 - referee calls section in the email (`refereeCalls` on snapshot, `eodEmailHtml`).
 
 <!-- skill-meta
-verified-commit: a083b14
-verified-hash: d7b773ee6185779f3a38194109a1c84aa50a3edd
-verified-date: 2026-10-28
+verified-commit: 83c80ee
+verified-hash: ca82dc9e46d25731f5938f9950ab840447849c73
+verified-date: 2026-10-30
 sources:
   src/app/openings/[id]/eod/page.tsx
   src/app/openings/[id]/midday/page.tsx
