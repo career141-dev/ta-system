@@ -108,7 +108,7 @@ export default defineSchema({
     reconciledBy: v.optional(v.id("users")),
     reconciliationReason: v.optional(v.string()),
     recoveryReopenedAt: v.optional(v.number()),
-  }).index("by_workday_job", ["workdayId", "jobId"]),
+  }).index("by_workday_job", ["workdayId", "jobId"]).index("by_status", ["status", "startedAt"]),
   taWorkdayActivity: defineTable({
     workdayId: v.id("taWorkdays"),
     jobId: v.id("jobs"),
