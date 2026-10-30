@@ -44,6 +44,19 @@ const engine = read("src/lib/engineSearch.ts");
 eq("an incomplete answer is not kept in the cache", engine.includes("if (r.incomplete?.length)"), true);
 eq("the results page says part of the search failed", read("src/app/database/results/page.tsx").includes("engine.incomplete?.length"), true);
 
+// Leads' and admins' panel: today's open days, listed as summaries, each
+// day's checklist built only when it is opened.
+const workdays = read("convex/ta/workdays.ts");
+const dash = workdays.slice(workdays.indexOf("export const dashboard"));
+eq("reviewers read today's open days, not every unclosed day",
+  dash.includes('withIndex("by_finished_date", (q) => q.eq("finishedAt", undefined).eq("date", today))'), true);
+eq("a lead's open days are kept to today", dash.includes("d.date === today || paged.has(d._id)"), true);
+eq("a live team day is a summary unless opened",
+  /args\.focusWorkday\s*\?\s*await view\(ctx, scoped, now, true\)\s*:\s*await summaryView\(/.test(dash), true);
+eq("the index exists", read("convex/schema.ts").includes('.index("by_finished_date", ["finishedAt", "date"])'), true);
+eq("the panel builds a team day's checks only while it is open",
+  workday.includes("whileOpen={day.summaryOnly ? () => <TeamDayChecks") && workday.includes("{open === \"yes\" && whileOpen?.()}"), true);
+
 const http = read("convex/http.ts");
 eq("the Graph webhook schedules one read per mailbox", http.includes("scheduleWebhookPoll") && !http.includes("internal.communications.emailAgent.pollEmailInbox,"), true);
 
