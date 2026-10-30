@@ -947,6 +947,7 @@ function addBin(registry: ReturnType<typeof cronJobs>) {
 /** A sent end-of-day email's copies are deleted once their month is over (8 Oct). On both registries, like the Bin. */
 function addEodCopies(registry: ReturnType<typeof cronJobs>) {
   registry.interval("ta-purge-eod-copies", { minutes: 41 }, internal.ta.eodCopies.purgeExpired, {});
+  registry.interval("ta-flag-stuck-sends", { minutes: 5 }, internal.ta.eodCopies.flagStuckSends, {});
   registry.interval("ta-purge-tracking", { minutes: 30 }, makeFunctionReference<"mutation">("ta/tracking:purgeExpired"), {});
 }
 
