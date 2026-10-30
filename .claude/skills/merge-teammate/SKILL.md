@@ -5,8 +5,8 @@ description: Review and merge a teammate's branch or pull request into main for 
 
 # Merge a teammate's work
 
-The owner (Sanjeev) merges; the teammate (Binath, GitHub `HDBinath`) works on
-branches. Nothing here deploys: merging to `main` changes no server. Releasing
+Sanjeev (owner) and Binath (GitHub `HDBinath`) can both merge into `main`; each
+merges the other's reviewed pull request. Nothing here deploys: merging to `main` changes no server. Releasing
 is a separate, approved step (`docs/TEAM-WORKFLOW.md`).
 
 ## 1. See what is new

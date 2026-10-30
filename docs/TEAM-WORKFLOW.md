@@ -7,7 +7,7 @@ AI coding tools is in [`AGENTS.md`](../AGENTS.md).
 | Who | Role |
 |---|---|
 | **Sanjeev** (`sanjeev200009`) | Owner. Reviews and merges into `main`. Approves every release to live. |
-| **Binath** (`HDBinath`) | Developer. Works on branches, opens pull requests, reviews Sanjeev's too. |
+| **Binath** (`HDBinath`) | Developer. Works on branches, opens pull requests, reviews and merges into `main` (GitHub admin on the repo since 30 Oct 2026). |
 
 ## Branches
 
@@ -26,7 +26,7 @@ merged. Everything new goes through short branches and pull requests.
 2. **Pull request** into `main` — CI runs the tests by itself.
 3. **Review** — the *other* person reads every file and runs it if it touches
    candidates, messages or the database.
-4. **Merge** — Sanjeev merges. `main` must always be releasable.
+4. **Merge** — Sanjeev or Binath merges, never their own unreviewed pull request. `main` must always be releasable.
 5. **Staging** — a copy of live that never messages anyone (being rebuilt; until
    then, test locally).
 6. **Release** — `git push origin main:production`, Sanjeev approves in GitHub
@@ -94,7 +94,7 @@ When `main` has moved on, bring it into your branch before asking for review
 - Anything that changes stored data needs a migration function with a dry run.
 - Anything that sends to candidates must respect `OUTREACH_LIVE` and the
   outbound guards (`convex/lib/outreachSafety.ts`, `convex/lib/outboundGuard.ts`).
-- Approve; Sanjeev merges.
+- Approve; either of you merges.
 
 ## Plan 2 — on the server
 
