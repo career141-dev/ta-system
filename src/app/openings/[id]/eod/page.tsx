@@ -441,7 +441,6 @@ export default async function EodPage({
         ccName={kind === "director" ? "" : (lead?.name ?? "")}
         ccEmail={kind === "director" ? "" : (lead?.email ?? "")}
         trackedAt={correction ? null : repo.shortlistInbox()}
-        eodCc={null}
         fixedCc={correction?.snapshot?.cc ?? (kind === "director" ? [...EOD_CC_DEFAULTS] : [])}
         canAddRecipients={kind === "director"}
         rows={composerRows}

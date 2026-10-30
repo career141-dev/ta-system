@@ -161,8 +161,9 @@ export const begin = internalMutation({
     const emails = (await dailyEmailsFor(ctx, user._id, args.jobId, date)).filter(e => inWorkLocation(e, locationId ?? "") && !e.forDate);
     // Pending sends on older dates also hold the opening until reconciled — this TA's own: with
     // two TAs on one job, Priya's stuck email blocked Sameera's EOD with no email of his (28 Oct).
-    const all = (await ctx.db.query("dailyEmails").withIndex("by_job", q => q.eq("jobId", args.jobId)).collect()).filter(e => e.userId === user._id);
-    if (all.some(e => (!e.workLocationId || e.workLocationId === locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("Your earlier email on this location is still sending or needs reconciliation. Ask your TA Lead to check it in Today's Checks before you send again.");
+    const all = await ctx.db.query("dailyEmails").withIndex("by_user_job_date", q => q.eq("userId", user._id).eq("jobId", args.jobId)).collect();
+    // An email from before the job had locations holds only a job without them.
+    if (all.some(e => (e.workLocationId ? e.workLocationId === locationId : !locationId) && (e.status === "sending" || e.status === "uncertain" || e.status === "accepted" && !e.finalizedAt))) throw new Error("Your earlier email on this location is still sending or needs reconciliation. Ask your TA Lead to check it in Today's Checks before you send again.");
     const problem = dailySendProblem(emails, args.submissionType, worker(user) && await middayRequired(ctx, date), !!parent || !!late);
     if (problem) throw new Error(problem);
     const snapshot = args.snapshot as DailyEmailSnapshot;
@@ -272,7 +273,8 @@ export const result = internalMutation({
     delivered: v.optional(v.object({ from: v.string(), to: v.array(v.string()), cc: v.array(v.string()) })) },
   handler: async (ctx, args) => {
     const email = await ctx.db.get(args.id);
-    if (!email || email.status !== "sending") return;
+    // A sweep may have moved a slow send to "uncertain"; the action's real answer still wins.
+    if (!email || (email.status !== "sending" && email.status !== "uncertain")) return;
     const acceptedAt = args.status === "accepted" ? Date.now() : undefined;
     const snapshot = { ...email.snapshot, ...(args.delivered ?? {}) };
     await ctx.db.patch(email._id, { status: args.status, ...(acceptedAt ? { acceptedAt } : {}), snapshot });

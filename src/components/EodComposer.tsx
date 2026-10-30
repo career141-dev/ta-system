@@ -382,7 +382,6 @@ export function EodComposer({
   ccName,
   ccEmail,
   trackedAt,
-  eodCc,
   forDate,
   fixedCc,
   canAddRecipients,
@@ -431,8 +430,6 @@ export function EodComposer({
   ccEmail: string;
   /** The TA's shortlist-replies inbox. Copied in, and on the reply-to. */
   trackedAt: string | null;
-  /** Copied on every end-of-day email (People page). */
-  eodCc: string | null;
   /** A missed end of day: the Colombo day it is for. Sent late, without Today's Checks. */
   forDate?: string;
   /** Always copied on the Director's email; the TA cannot take these off. */
@@ -554,7 +551,7 @@ export function EodComposer({
   };
   const nobodyOnTo = canAddRecipients && (!toEmail || isOff(toEmail)) && extraTo.length === 0;
 
-  const onEmail = [toEmail, ccEmail, eodCc, ...fixedCc, trackedAt]
+  const onEmail = [toEmail, ccEmail, ...fixedCc, trackedAt]
     .filter((a): a is string => !!a && !isOff(a))
     .concat(extraTo, extraCc)
     .map((a) => a.toLowerCase());
@@ -770,7 +767,6 @@ export function EodComposer({
               <span className="w-[42px] shrink-0 pt-1 text-ink-faint">Cc</span>
               <div className="flex flex-wrap gap-1.5">
                 {ccEmail && <RecipientChip label={ccName ? `${ccName} · ${ccEmail}` : ccEmail} />}
-                {eodCc && <RecipientChip label={eodCc} />}
                 {fixedCc
                   .filter((a) => !isOff(a))
                   .map((a) => (
@@ -787,7 +783,7 @@ export function EodComposer({
                 {extraCc.map((a) => (
                   <RecipientChip key={a} label={a} added onRemove={() => removeAddress("cc", a)} />
                 ))}
-                {!ccEmail && !eodCc && fixedCc.every(isOff) && (!trackedAt || isOff(trackedAt)) && extraCc.length === 0 && (
+                {!ccEmail && fixedCc.every(isOff) && (!trackedAt || isOff(trackedAt)) && extraCc.length === 0 && (
                   <span className="pt-0.5 text-[12px] text-ink-faint">Nobody</span>
                 )}
               </div>

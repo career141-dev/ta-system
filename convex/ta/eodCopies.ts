@@ -35,7 +35,13 @@ export const flagStuckSends = internalMutation({
       if (email.receiptId) await ctx.db.patch(email.receiptId, { status: "uncertain" });
       await refreshWorkdayChecks(ctx, email.jobId, email.userId);
     }
-    return { flagged: stuck.length };
+    // Receipts of the older send path have no daily email to flip them.
+    const legacy = await ctx.db.query("taWorkdayMail").withIndex("by_status", q => q.eq("status", "sending").lt("startedAt", Date.now() - STUCK_SENDING_MS)).take(25);
+    for (const receipt of legacy.filter(r => !r.dailyEmailId)) {
+      await ctx.db.patch(receipt._id, { status: "uncertain" });
+      await refreshWorkdayChecks(ctx, receipt.jobId, receipt.userId);
+    }
+    return { flagged: stuck.length + legacy.length };
   },
 });
 
