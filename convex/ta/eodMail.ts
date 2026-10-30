@@ -15,6 +15,7 @@
 
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
+import type { Id } from "../_generated/dataModel";
 import { getGraphToken } from "../lib/graphClient";
 import { sendFollowUpMail, type MailResult } from "../lib/graphMail";
 import { makeFunctionReference } from "convex/server";
@@ -35,6 +36,8 @@ export const send = internalAction({
         base64: v.string(),
       }),
     ),
+    // CVs already saved for this email: read from storage here, not passed as arguments.
+    savedIds: v.optional(v.array(v.id("dailyEmailAttachments"))),
     workdayMailId: v.optional(v.id("taWorkdayMail")),
     dailyEmailId: v.optional(v.id("dailyEmails")),
   },
@@ -45,6 +48,15 @@ export const send = internalAction({
       "job@career141.com";
     let result: MailResult;
     try {
+      const stored = args.savedIds?.length
+        ? await ctx.runQuery(makeFunctionReference<"query">("ta/dailyEmails:storedFiles"), { ids: args.savedIds }) as { name: string; storageId: Id<"_storage"> }[]
+        : [];
+      const files = [];
+      for (const f of stored) {
+        const blob = await ctx.storage.get(f.storageId);
+        if (!blob) throw new Error(`The saved CV ${f.name} is missing from storage.`);
+        files.push({ name: f.name, contentType: "application/pdf", base64: Buffer.from(await blob.arrayBuffer()).toString("base64") });
+      }
       result = await sendFollowUpMail(
         {
           from: args.from,
@@ -55,7 +67,7 @@ export const send = internalAction({
           replyTo: args.replyTo,
           subject: args.subject,
           html: args.html,
-          attachments: args.attachments,
+          attachments: [...files, ...args.attachments],
           // A five-CV set regularly exceeds Graph's one-request sendMail
           // payload. Build a draft, attach every CV separately (using an
           // upload session for a file at least 3 MB), then send the draft.
@@ -67,7 +79,7 @@ export const send = internalAction({
         getGraphToken,
       );
     } catch (error) {
-      if (args.dailyEmailId) await ctx.runMutation(makeFunctionReference<"mutation">("ta/dailyEmails:result"), { id: args.dailyEmailId, status: "uncertain" });
+      if (args.dailyEmailId) await ctx.runMutation(makeFunctionReference<"mutation">("ta/dailyEmails:result"), { id: args.dailyEmailId, status: "uncertain", error: (error as Error).message });
       if (args.workdayMailId)
         await ctx.runMutation(
           makeFunctionReference<"mutation">("ta/workdays:mailResult"),
@@ -78,7 +90,7 @@ export const send = internalAction({
     if (args.dailyEmailId) await ctx.runMutation(makeFunctionReference<"mutation">("ta/dailyEmails:result"), {
       id: args.dailyEmailId,
       status: result.ok ? "accepted" : /could not be reached|returned 5\d\d/i.test(result.error) ? "uncertain" : "failed",
-      ...(result.ok ? { delivered: { from: result.from, to: [result.to, ...(result.alsoTo ?? [])], cc: result.cc } } : {}),
+      ...(result.ok ? { delivered: { from: result.from, to: [result.to, ...(result.alsoTo ?? [])], cc: result.cc } } : { error: result.error }),
     });
     if (args.workdayMailId)
       await ctx.runMutation(

@@ -33,6 +33,8 @@ export default defineSchema({
     snapshot: v.optional(v.any()), trackedAt: v.optional(v.string()),
     reconciledBy: v.optional(v.id("users")), reconciliationReason: v.optional(v.string()),
     recoveryReopenedAt: v.optional(v.number()),
+    /** Why Graph or the sender failed, so a stuck email can be diagnosed without server logs (30 Oct). */
+    sendError: v.optional(v.string()),
     /** The Colombo day a late (missed) end of day is for; absent on every other email. */
     forDate: v.optional(v.string()),
   }).index("by_user_job_date", ["userId", "jobId", "date"])
