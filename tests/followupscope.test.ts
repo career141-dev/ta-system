@@ -65,16 +65,3 @@ eq("nothing to map is empty", answersById([], { a: "b" }), {});
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
-
-// ── On by default (30 Oct): follow-up runs without a TA pressing Send ───────
-import { readFileSync } from "node:fs";
-{
-  const src = (p: string) => readFileSync(p, "utf8");
-  const ok = (label: string, cond: boolean) => {
-    if (!cond) { console.log(`  FAIL ${label}`); process.exitCode = 1; } else console.log(`  ok   ${label}`);
-  };
-  ok("a new opening has automatic follow-up on unless sent as false",
-    src("convex/ta/openings.ts").includes("...(args.autoFollowUp !== false ? autoFollowUpPatch(true) : {})"));
-  ok("the create form's box starts ticked", /name="autoFollowUp" value="on" defaultChecked/.test(src("src/components/CaptureForm.tsx")));
-  ok("the switch-on migration is a dry run unless told otherwise", src("convex/admin/autoFollowUpOn3010.ts").includes("const dryRun = args.dryRun !== false;"));
-}

@@ -362,10 +362,7 @@ export const create = internalMutation({
     /** What the app read out of the notes (salary, locations, must-haves). */
     briefExtracted: v.optional(v.any()),
     priorityTier: v.optional(v.string()),
-    /**
-     * Automatic follow-up (ta/followUp.ts `setAuto`). On unless sent as false
-     * (30 Oct): the owner wants follow-up to run without a TA pressing Send.
-     */
+    /** Automatic follow-up reminders after the TA's first Send (ta/followUp.ts `setAuto`). */
     autoFollowUp: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
@@ -441,7 +438,7 @@ export const create = internalMutation({
       agent5CallScript: "default",
       agent5NoAnswerAction: "notify_ta",
       headhuntingEnabled: false,
-      ...(args.autoFollowUp !== false ? autoFollowUpPatch(true) : {}),
+      ...(args.autoFollowUp ? autoFollowUpPatch(true) : {}),
       createdAt: now,
       updatedAt: now,
     });
