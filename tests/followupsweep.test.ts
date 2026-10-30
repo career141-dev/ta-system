@@ -10,7 +10,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readWindow, parseWindowCursor, nextCreationCursor, type WindowCursor } from "../convex/lib/cronCursor";
-import { directorReviewBlockers, needsReviewDetails } from "../convex/ta/stages";
+import { directorReviewBlockers, followUpBlockers, needsReviewDetails } from "../convex/ta/stages";
 
 const { mapUser } = await import("@/data/convex/map");
 const { isDeskWide } = await import("@/lib/auth");
@@ -73,6 +73,24 @@ eq("missing details are named",
   directorReviewBlockers(flags, { expectedSalary: 1 }), ["a CV", "notice period"]);
 eq("the sweep uses that rule rather than its own", cron.includes("directorReviewBlockers(app, candidate)"), true);
 eq("the sweep no longer patches a stage itself", /currentStage:\s*"/.test(cron), false);
+
+// Every place that decides "complete" uses one rule, and current salary is not
+// part of it (owner, 29 Oct).
+const done = { cvUploadId: "cv1", expectedSalary: 250000, noticePeriodDays: 30 };
+const job = { customFollowUpQuestions: ["Do you have a licence?"] };
+eq("follow-up: no current salary is complete", followUpBlockers({}, done, null), []);
+eq("follow-up: an unanswered job question blocks", followUpBlockers({}, done, job), ["Do you have a licence?"]);
+eq("follow-up: an answered job question does not",
+  followUpBlockers({ customFollowUpAnswers: { "Do you have a licence?": "Yes" } }, done, job), []);
+const helper = read("convex/pipeline/followUpHelper.ts");
+for (const [name, src] of [
+  ["the sweep", cron],
+  ["the stage helper", helper],
+  ["the reply bot", read("convex/communications/inboundExtraction.ts")],
+  ["a TA's logged call", read("convex/applications/applications.ts")],
+] as const) eq(`${name} uses followUpBlockers`, src.includes("followUpBlockers("), true);
+eq("the stage helper moves through the state machine", helper.includes("executeStageTransition(ctx"), true);
+eq("the stage helper no longer patches a stage itself", /currentStage:\s*"second_shortlist"/.test(helper), false);
 eq("nor logs an email as sent that nothing sends", /deliveryStatus:\s*"sent"/.test(cron), false);
 
 // ── Moves the state machine refuses ─────────────────────────────────────────

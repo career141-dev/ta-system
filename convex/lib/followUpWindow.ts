@@ -52,3 +52,55 @@ export function nudgeHoursWithinWindow(
   // message would cost a template and lose its text, so it goes just inside.
   return isWhatsApp ? Math.min(requested, MAX_WHATSAPP_NUDGE_HOURS) : requested;
 }
+
+// ── Pacing: answer like a person, not a machine (30 Oct) ─────────────────────
+
+/**
+ * How long the assistant waits after a WhatsApp message before answering.
+ * People write in bursts — "hi", "salary 120k", "notice 1 month" — and each
+ * line got its own answer. Every message now waits this long; only the last
+ * one of a burst answers, reading them all together.
+ */
+export const REPLY_PAUSE_MS = 30_000;
+
+/** Assistant replies to one candidate in one Colombo day before a TA takes over. */
+export const MAX_BOT_REPLIES_PER_DAY = 8;
+
+const COLOMBO_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** Reminders go out 08:00–20:00 Sri Lanka time, never at night. */
+export function inSendingHours(at: number): boolean {
+  const hour = new Date(at + COLOMBO_OFFSET_MS).getUTCHours();
+  return hour >= 8 && hour < 20;
+}
+
+/**
+ * The candidate's messages that one turn should answer, oldest first: those
+ * after our last WhatsApp to them. Null when a newer message is still
+ * waiting its own pause — that one answers the whole burst instead.
+ *
+ * `recent` is newest first, as read from the index.
+ */
+export function burstToAnswer(
+  recent: { direction: string; channel: string; body?: string | null; sentAt: number | string }[],
+  inboundAt: number,
+): string | null {
+  const whatsapp = recent.filter((m) => m.channel === "whatsapp");
+  const newest = whatsapp.find((m) => m.direction === "inbound");
+  if (newest && Number(newest.sentAt) > inboundAt) return null;
+  const lines: string[] = [];
+  for (const m of whatsapp) {
+    if (m.direction !== "inbound") break;
+    if (m.body?.trim()) lines.unshift(m.body.trim());
+  }
+  return lines.length ? lines.join("\n") : null;
+}
+
+/**
+ * Our own message coming back. The webhook can deliver a copy of what we just
+ * sent (echoes, a second app on the account); answering it starts a loop.
+ */
+export function isEchoOfOurs(text: string, lastOutbound: { body?: string | null; sentAt: number | string } | null, now: number): boolean {
+  if (!lastOutbound?.body) return false;
+  return now - Number(lastOutbound.sentAt) < 10 * 60_000 && lastOutbound.body.trim() === text.trim();
+}

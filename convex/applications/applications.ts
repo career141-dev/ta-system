@@ -7,6 +7,7 @@ import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { adjustJobStageStat } from "../jobs/stats";
 import { adjustGlobalStat } from "../stats/statsHelper";
 import { assertNoPendingVoiceCall } from "../aiCalls/voiceCallGuards";
+import { followUpBlockers } from "../ta/stages";
 export const getApplicationsByCandidateId = internalQuery({
   args: { candidateId: v.id("candidates") },
   handler: async (ctx, args) => {
@@ -622,22 +623,10 @@ export const logManualCall = internalMutation({
 
     const updatedApp = await ctx.db.get(args.applicationId);
     const job = updatedApp?.jobId ? await ctx.db.get(updatedApp.jobId) : null;
-    const customQuestions = job?.customFollowUpQuestions || [];
-    const appAnswers = updatedApp?.customFollowUpAnswers || {};
-    let customQuestionsComplete = true;
-    for (const q of customQuestions) {
-      if (!appAnswers[q]) {
-        customQuestionsComplete = false;
-        break;
-      }
-    }
-
-    const allComplete =
-      updatedApp?.followUpCvReceived === true &&
-      updatedApp?.followUpCurrentSalary === true &&
-      updatedApp?.followUpExpectedSalary === true &&
-      updatedApp?.followUpNoticePeriod === true &&
-      customQuestionsComplete;
+    // The same rule as the bot and the sweep (ta/stages.ts followUpBlockers):
+    // current salary is not required.
+    const allComplete = !!updatedApp &&
+      followUpBlockers(updatedApp, await ctx.db.get(args.candidateId), job).length === 0;
 
     if (args.outcome === "Interested" && allComplete) {
       // All 4 fields captured on the first TA call — skip Follow-up, go straight to 2nd Shortlist
@@ -651,7 +640,7 @@ export const logManualCall = internalMutation({
             stage: "second_shortlist",
             enteredAt: new Date().toISOString(),
             changedBy: "system" as any,
-            note: "All 4 data points collected on first TA call — skipped Follow-up.",
+            note: "Everything needed was collected on the first TA call — skipped Follow-up.",
           },
         ],
       });

@@ -23,7 +23,7 @@ Terminology trap: **Sets** = numbered batches of a TA's shortlisted CVs (`convex
 
 ## Adding a candidate to another job
 
-Candidate rows offer ìAdd to another jobî: `ta/applications:addToAssignedJob` verifies assignments and destination workday, keeps the source application, and claims or advances an early-stage destination to TA Follow-up. A colleagueís destination ownership is retained; later and closed stages are protected, and an existing TA Follow-up is unchanged. The destination stage history names the source job.
+Candidate rows offer ‚ÄúAdd to another job‚Äù: `ta/applications:addToAssignedJob` verifies assignments and destination workday, keeps the source application, and claims or advances an early-stage destination to TA Follow-up. A colleague‚Äôs destination ownership is retained; later and closed stages are protected, and an existing TA Follow-up is unchanged. The destination stage history names the source job.
 
 ## How it works now
 

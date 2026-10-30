@@ -3,13 +3,16 @@ import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod, noticePeriodToDay
 import { syncCandidateOverallStatus } from "../candidates/candidates";
 import { internal } from "../_generated/api";
 import { adjustJobStageStat } from "../jobs/stats";
+import { followUpBlockers } from "../ta/stages";
+import { executeStageTransition } from "./pipelineStateMachine";
 import { buildStructuredEmailHtml, initialReachOutEmail } from "../communications/emailHtml";
 import { resolveRecipient } from "../lib/outreachSafety";
 import { emailFirstDelayMs } from "../lib/templateBudget";
 
 /**
  * Checks per-application follow-up completion flags.
- * If all 4 are true, auto-advances the application to second_shortlist.
+ * When nothing is missing (ta/stages.ts followUpBlockers), auto-advances the
+ * application to second_shortlist.
  *
  * Uses per-application flags (followUpCvReceived etc.) rather than global
  * candidate fields to prevent cross-job contamination in multi-job scenarios.
@@ -62,45 +65,20 @@ export async function checkAndAdvanceFollowUp(
       Object.assign(app, updates); // apply updates locally for the next check
     }
 
-    // Verify custom questions are completed
-    const customQuestions = job.customFollowUpQuestions || [];
-    const customAnswers = app.customFollowUpAnswers || {};
-    let customQuestionsComplete = true;
-    for (const q of customQuestions) {
-      if (!customAnswers[q]) {
-        customQuestionsComplete = false;
-        break;
-      }
-    }
-
-    const allComplete =
-      app.followUpCvReceived === true &&
-      app.followUpCurrentSalary === true &&
-      app.followUpExpectedSalary === true &&
-      app.followUpNoticePeriod === true &&
-      customQuestionsComplete;
-
-    if (allComplete) {
-      const note = isAutoRejected 
-        ? "Candidate provided late response. Reopened to Second Shortlist."
-        : "Auto-advanced from Follow-up: all requirements completed.";
-
-      await ctx.db.patch(app._id, {
-        currentStage: "second_shortlist",
-        taRejectionReason: undefined, // Clear rejection reason if reopening
-        lastStageChangedAt: Date.now(),
-        stageHistory: [
-          ...(app.stageHistory ?? []),
-          {
-            stage: "second_shortlist",
-            enteredAt: new Date().toISOString(),
-            changedBy: "system" as any,
-            note,
-          },
-        ],
+    if (followUpBlockers(app, candidate, job).length === 0) {
+      // Through the state machine, like every other move: patching the stage
+      // here wrote no pipeline event and left the reminders running (29 Oct).
+      await executeStageTransition(ctx, {
+        applicationId: app._id,
+        targetStage: "second_shortlist",
+        actorId: "system",
+        reason: isAutoRejected
+          ? "Candidate provided late response. Reopened to Second Shortlist."
+          : "Auto-advanced from Follow-up: all requirements completed.",
+        bypassRoleCheck: true,
+        skipAutoOutreach: true,
       });
-      await adjustJobStageStat(ctx, app.jobId, app.currentStage, "second_shortlist");
-      await syncCandidateOverallStatus(ctx, candidateId);
+      if (isAutoRejected) await ctx.db.patch(app._id, { taRejectionReason: undefined });
     }
   }
 }
@@ -256,16 +234,8 @@ export async function initiateFollowUpOutreach(
 
   const customQuestions = job.customFollowUpQuestions || [];
   const customAnswers = app.customFollowUpAnswers || {};
-  let customQuestionsComplete = true;
-  for (const q of customQuestions) {
-    if (!customAnswers[q]) {
-      customQuestionsComplete = false;
-      break;
-    }
-  }
-
-  const allComplete = hasCV && hasCurrentSalary && hasExpectedSalary && hasNoticePeriod && customQuestionsComplete;
-  if (allComplete) return; // All data points already gathered, no outreach needed
+  // Current salary is still listed below, but does not keep the chase going.
+  if (followUpBlockers(app, candidate, job).length === 0) return;
   const sameRound = options?.sameRound === true;
 
   const missingFields: string[] = [];

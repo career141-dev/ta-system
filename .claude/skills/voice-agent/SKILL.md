@@ -61,7 +61,7 @@ Entry: `voice-agent/src/index.ts` default export `defineAgent({entry})`, started
 
 `applyCallAnswers` (mutation): the **call** gets everything heard (`currentSalary`, currency, `expectedSalary`, currency, `noticePeriodDays`, `customQuestionAnswers`). **Candidate: blanks only** (a field is filled only when `undefined`; a TA-checked figure is never replaced). **Application**: opening questions that repeat a standard detail are answered from the figures (`standardAnswers`); `customFollowUpAnswers` by label (existing answers win) and `answers` by question id (`answersById`). Then `updateFollowUpFlags` and `checkAndAdvanceFollowUp(ctx, candidateId)`.
 
-Side effect to remember: `checkAndAdvanceFollowUp` (`convex/pipeline/followUpHelper.ts`) moves every application of that candidate that is in Follow-up (`follow_up`/`ta_shortlist`) with all four flags + custom questions complete to `second_shortlist` (note "Auto-advanced from Follow-up: all requirements completed."), and reopens one auto-rejected for the 7-day window. A voice call can therefore change a stage. `interested` is extracted but never stored or used.
+Side effect to remember: `checkAndAdvanceFollowUp` (`convex/pipeline/followUpHelper.ts`) moves every application of that candidate that is in Follow-up (`follow_up`/`ta_shortlist`) with nothing missing by `followUpBlockers` (`ta/stages.ts`: CV, expected salary, notice period, custom questions; current salary not required) to `second_shortlist` through `executeStageTransition` (note "Auto-advanced from Follow-up: all requirements completed."), and reopens one auto-rejected for the 7-day window. A voice call can therefore change a stage. `interested` is extracted but never stored or used.
 
 Question routing (`convex/lib/screeningCall.ts`): `standardFieldOf()` regexes (notice -> `noticePeriodDays`; salary/pay/package/compensation/ctc plus expected-words -> `expectedSalary`, current-words -> `currentSalary`); `allJobQuestions()` merges `followUpQuestions[].label`, `customFollowUpQuestions`, `agent5CustomQuestions` (case-insensitive dedupe); `screeningQuestions()` = the non-standard ones, first 10; `detailsToCollect()` = interest confirm + current + expected + notice + questions, first 15. `callBrief(job)` never names the client: "A client of Career141 [in <industry>]. Do not name or guess the company...", drops JD lines starting Client/Company/Hiring company, replaces the client name with "the client", JD capped at 1,500 chars.
 
@@ -215,9 +215,9 @@ Repo hard rules that apply: never touch the live backend or VPS from a laptop (n
 - 2026-10-05 `cd3cd8d` desk works on phone/tablet (mobile "Voice" tab). 2026-10-20 `c0a68c7` friendly error recovery touched the call panels.
 
 <!-- skill-meta
-verified-commit: d078fcb
-verified-hash: 592efcdb169c3aab683363bd55ca77eb3e645f6b
-verified-date: 2026-10-27
+verified-commit: cfe63488
+verified-hash: 417f9c839915c5e768b2addad6ccc5d0e9c400cf
+verified-date: 2026-10-30
 sources:
   voice-agent/src/index.ts
   voice-agent/src/prompt.ts

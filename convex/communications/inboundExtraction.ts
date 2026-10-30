@@ -6,7 +6,42 @@ import { nudgeHoursWithinWindow } from "../lib/followUpWindow";
 import { hasCurrentSalary, hasExpectedSalary, hasNoticePeriod } from "../lib/answered";
 import { buildStructuredEmailHtml } from "./emailHtml";
 import { isAutomaticReply, latestReplyText } from "../lib/mailParse";
-import { isFollowUpStage } from "../ta/stages";
+import { followUpBlockers, isFollowUpStage } from "../ta/stages";
+import { burstToAnswer } from "../lib/followUpWindow";
+
+/**
+ * One WhatsApp turn, after the candidate's pause (30 Oct). Each message
+ * schedules this; when a newer message is waiting its own pause this one does
+ * nothing, and the last of a burst answers every line since our last message.
+ */
+export const answerWhatsAppTurn = internalAction({
+  args: { candidateId: v.id("candidates"), applicationId: v.id("applications"), inboundAt: v.number() },
+  handler: async (ctx, args) => {
+    const text = await ctx.runQuery(internal.communications.inboundExtraction.whatsAppTurnText, {
+      candidateId: args.candidateId,
+      inboundAt: args.inboundAt,
+    });
+    if (!text) return;
+    await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
+      candidateId: args.candidateId,
+      textBody: text,
+      channel: "whatsapp",
+      applicationId: args.applicationId,
+    });
+  },
+});
+
+export const whatsAppTurnText = internalQuery({
+  args: { candidateId: v.id("candidates"), inboundAt: v.number() },
+  handler: async (ctx, args) => {
+    const recent = await ctx.db
+      .query("communications")
+      .withIndex("by_candidate_time", (q: any) => q.eq("candidateId", args.candidateId))
+      .order("desc")
+      .take(30);
+    return burstToAnswer(recent as any, args.inboundAt);
+  },
+});
 
 export const extractDetailsFromText = internalAction({
   args: {
@@ -492,9 +527,11 @@ If a field is not mentioned, return null for it. Do not invent or infer values.`
           if (!ans[q]) remainingMissing.push(q);
         }
 
-        // Strictly verify that ALL fields AND all custom questions are provided before declaring 100% complete
+        // Complete by the one rule the stage helper and the sweep use
+        // (ta/stages.ts): current salary is still asked for but not required,
+        // so the reply no longer says "still waiting" on that alone (29 Oct).
         const advanced = updatedApp?.currentStage === "second_shortlist";
-        const isCompleted = advanced || (remainingMissing.length === 0);
+        const isCompleted = advanced || followUpBlockers(appRecord, updatedCandidate, job).length === 0;
 
         /*
          * Replies that end the chase (Astra review, 29 Oct). 'not_interested'

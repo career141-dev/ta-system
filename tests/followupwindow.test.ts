@@ -13,6 +13,9 @@ import {
   MAX_WHATSAPP_NUDGE_HOURS,
   SERVICE_WINDOW_HOURS,
   nudgeHoursWithinWindow,
+  burstToAnswer,
+  inSendingHours,
+  isEchoOfOurs,
 } from "../convex/lib/followUpWindow";
 
 test("the WhatsApp default lands inside the free window, not on its edge", () => {
@@ -50,4 +53,44 @@ test("nonsense from the model falls back rather than scheduling in the past", ()
     assert.equal(hours, MAX_WHATSAPP_NUDGE_HOURS, `${String(bad)} should fall back`);
     assert.ok(hours > 0, "a nudge scheduled at or before now fires immediately, forever");
   }
+});
+
+// ── Pacing (30 Oct): one reply to a burst, no night reminders, no echoes ────
+
+const msg = (direction: string, body: string, sentAt: number, channel = "whatsapp") => ({ direction, channel, body, sentAt });
+
+test("a burst of three messages is answered once, reading all three", () => {
+  // Newest first, as the index returns them.
+  const recent = [msg("inbound", "notice 1 month", 300), msg("inbound", "salary 120k", 200), msg("inbound", "hi", 100), msg("outbound", "Hi Nimal, could you share…", 50)];
+  assert.equal(burstToAnswer(recent, 100), null, "the first message's turn leaves it to the last");
+  assert.equal(burstToAnswer(recent, 200), null);
+  assert.equal(burstToAnswer(recent, 300), ["hi", "salary 120k", "notice 1 month"].join("\n"));
+});
+
+test("only what came after our last message is answered again", () => {
+  const recent = [msg("inbound", "ok", 400), msg("outbound", "Thanks, noted.", 350), msg("inbound", "salary 120k", 200)];
+  assert.equal(burstToAnswer(recent, 400), "ok");
+});
+
+test("an email in between does not split a WhatsApp burst", () => {
+  const recent = [msg("inbound", "two", 300), msg("outbound", "email reply", 250, "email"), msg("inbound", "one", 200), msg("outbound", "question", 100)];
+  assert.equal(burstToAnswer(recent, 300), ["one", "two"].join("\n"));
+});
+
+test("reminders go 08:00 to 20:00 Sri Lanka time only", () => {
+  const colombo = (h: number, m = 0) => Date.UTC(2026, 9, 30, h, m) - 5.5 * 3600_000;
+  assert.equal(inSendingHours(colombo(7, 59)), false);
+  assert.equal(inSendingHours(colombo(8, 0)), true);
+  assert.equal(inSendingHours(colombo(19, 59)), true);
+  assert.equal(inSendingHours(colombo(20, 0)), false);
+  assert.equal(inSendingHours(colombo(23, 30)), false);
+});
+
+test("our own message coming back is an echo; the candidate's words are not", () => {
+  const now = 1_000_000;
+  const ours = { body: "Thank you! We have recorded your update.", sentAt: now - 60_000 };
+  assert.equal(isEchoOfOurs("Thank you! We have recorded your update.", ours, now), true);
+  assert.equal(isEchoOfOurs("thank you", ours, now), false);
+  assert.equal(isEchoOfOurs("Thank you! We have recorded your update.", { ...ours, sentAt: now - 60 * 60_000 }, now), false, "an hour later it is the candidate quoting us");
+  assert.equal(isEchoOfOurs("hi", null, now), false);
 });

@@ -3,6 +3,8 @@ import { internalAction, internalMutation, internalQuery } from "../_generated/s
 import { internal } from "../_generated/api";
 import { sendMetaFreeText } from "./metaDirectSender";
 import { followUpCancelledReason } from "../lib/graphMail";
+import { REPLY_PAUSE_MS, MAX_BOT_REPLIES_PER_DAY, isEchoOfOurs } from "../lib/followUpWindow";
+import { colomboDayStart } from "../../src/lib/calendar";
 import { isFollowUpStage } from "../ta/stages";
 
 /**
@@ -458,6 +460,8 @@ export const checkAndRecordFollowUpReply = internalMutation({
   args: {
     senderPhone: v.string(),
     textBody: v.string(),
+    /** Meta's message id ("wamid..."): the same message delivered twice is dropped by it. */
+    messageId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const targetPhone = args.senderPhone;
@@ -500,9 +504,27 @@ export const checkAndRecordFollowUpReply = internalMutation({
 
     if (!activeApp) return { isFollowUpReply: false, candidateId: null, jobId: null };
 
-    // Skip system template echoes (e.g. outbound follow-up template messages echoed back via WhatChimp webhooks)
-    if (args.textBody && args.textBody.startsWith("Hi ") && (args.textBody.includes("We've recorded your update") || args.textBody.includes("still waiting on the following"))) {
-      console.log(`[checkAndRecordFollowUpReply] ECHO GUARD: Skipping outbound template echo message.`);
+    // Meta delivers a message again when our answer was slow; the id is the
+    // same, the text may not be (30 Oct). The text rule below stays for
+    // deliveries without an id.
+    if (args.messageId) {
+      const seen = await ctx.db
+        .query("communications")
+        .withIndex("by_externalMessageId", (q: any) => q.eq("externalMessageId", args.messageId))
+        .first();
+      if (seen) {
+        console.log(`[checkAndRecordFollowUpReply] DEDUPLICATION: message ${args.messageId} was already recorded.`);
+        return { isFollowUpReply: true, candidateId: candidate._id, jobId: activeApp.jobId };
+      }
+    }
+
+    // Our own message coming back is not the candidate's. It was caught only
+    // by two fixed phrases, so any other wording would be answered (30 Oct).
+    if (
+      (args.textBody && args.textBody.startsWith("Hi ") && (args.textBody.includes("We've recorded your update") || args.textBody.includes("still waiting on the following"))) ||
+      isEchoOfOurs(args.textBody, recentOutbound, Date.now())
+    ) {
+      console.log(`[checkAndRecordFollowUpReply] ECHO GUARD: Skipping our own message coming back.`);
       return { isFollowUpReply: false, candidateId: candidate._id, jobId: activeApp.jobId };
     }
 
@@ -515,12 +537,13 @@ export const checkAndRecordFollowUpReply = internalMutation({
       .filter((q: any) => q.and(q.eq(q.field("direction"), "inbound"), q.eq(q.field("channel"), "whatsapp")))
       .first();
 
-    if (recentInbound && Number(recentInbound.sentAt) > thirtySecAgo && recentInbound.body === args.textBody) {
+    if (!args.messageId && recentInbound && Number(recentInbound.sentAt) > thirtySecAgo && recentInbound.body === args.textBody) {
       console.log(`[checkAndRecordFollowUpReply] DEDUPLICATION: Skipping duplicate retried inbound message "${args.textBody}" from candidate ${candidate._id} within 30 seconds.`);
       return { isFollowUpReply: true, candidateId: candidate._id, jobId: activeApp.jobId };
     }
 
     // Insert inbound communication
+    const receivedAt = Date.now();
     await ctx.db.insert("communications", {
       candidateId: candidate._id,
       applicationId: activeApp._id,
@@ -529,8 +552,9 @@ export const checkAndRecordFollowUpReply = internalMutation({
       channel: "whatsapp",
       body: args.textBody,
       deliveryStatus: "read",
-      sentAt: Date.now(),
+      sentAt: receivedAt,
       stoppedSequence: false,
+      ...(args.messageId ? { externalMessageId: args.messageId } : {}),
     });
 
     // Update lastCandidateReplyAt on application
@@ -549,17 +573,17 @@ export const checkAndRecordFollowUpReply = internalMutation({
     } else if (args.textBody && args.textBody.trim()) {
       // Any non-empty text. It skipped two characters and under, so a "no" to
       // "are you open to relocating?" was never read (Astra review, 29 Oct).
-      // Run text extraction in background to parse details
-      await ctx.scheduler.runAfter(0, internal.communications.inboundExtraction.extractDetailsFromText, {
+      // Answered after a short pause, so a burst of messages gets one reply
+      // that reads them all (30 Oct; lib/followUpWindow.ts REPLY_PAUSE_MS).
+      await ctx.scheduler.runAfter(REPLY_PAUSE_MS, internal.communications.inboundExtraction.answerWhatsAppTurn, {
         candidateId: candidate._id,
-        textBody: args.textBody,
-        channel: "whatsapp",
         // The application this reply was matched to, above. Without it the
         // extraction re-guesses from the last outbound on any channel and can
         // land on a different opening.
         applicationId: activeApp._id,
+        inboundAt: receivedAt,
       });
-      console.log(`[checkAndRecordFollowUpReply] Dispatched extractDetailsFromText for candidate ${candidate._id} with text: "${args.textBody.substring(0, 100)}"`);
+      console.log(`[checkAndRecordFollowUpReply] Answer scheduled in ${REPLY_PAUSE_MS / 1000}s for candidate ${candidate._id}: "${args.textBody.substring(0, 100)}"`);
     } else {
       console.warn(`[checkAndRecordFollowUpReply] Skipping AI extraction — text body is empty or trivial: "${args.textBody}"`);
     }
@@ -694,6 +718,24 @@ export const recordLocalWhatsappOutbound = internalMutation({
     body: v.string(),
   },
   handler: async (ctx, args) => {
+    // A daily ceiling on the assistant's own replies (30 Oct). Past it
+    // something is looping or the conversation needs a person: stop, and flag.
+    const today = await ctx.db
+      .query("communications")
+      .withIndex("by_candidate_time", (q: any) => q.eq("candidateId", args.candidateId).gte("sentAt", colomboDayStart(Date.now())))
+      .filter((q: any) => q.and(q.eq(q.field("direction"), "outbound"), q.eq(q.field("channel"), "whatsapp"), q.eq(q.field("senderAgent"), "system")))
+      .take(MAX_BOT_REPLIES_PER_DAY);
+    if (today.length >= MAX_BOT_REPLIES_PER_DAY) {
+      console.warn(`[recordLocalWhatsappOutbound] Daily limit of ${MAX_BOT_REPLIES_PER_DAY} assistant replies reached for candidate ${args.candidateId}. Not sent; flagged for a TA.`);
+      if (args.applicationId) {
+        await ctx.db.patch(args.applicationId, {
+          flaggedForTaReview: true,
+          taReviewReason: `The assistant has already replied ${MAX_BOT_REPLIES_PER_DAY} times today. Please read the chat and reply yourself.`,
+        });
+      }
+      return null;
+    }
+
     // Outbound Deduplication: skip if identical outbound message was recorded within last 30s
     const thirtySecAgo = Date.now() - 30000;
     const recentOutbound = await ctx.db
